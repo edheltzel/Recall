@@ -250,19 +250,21 @@ Without memory:
 For your human to install:
 
 ```bash
-# 1. Clone/download LMF3
-cd ~/Projects/LMF3.x
-bun install && bun run build
+# 1. Clone and build
+git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
+cd ~/Projects/LMF3
+bun install
+npm rebuild better-sqlite3
+bun run build
 sudo npm link
 mem init
 
 # 2. Configure MCP (~/.claude/.mcp.json)
 { "mcpServers": { "memory-larry": { "command": "mem-mcp" }}}
 
-# 3. Install Fabric
-fabric --setup
+# 3. Update CLAUDE.md with memory instructions
 
-# 4. Update CLAUDE.md with memory instructions
+# 4. (Optional) Install Fabric for session capture
 ```
 
 Then you have memory.
