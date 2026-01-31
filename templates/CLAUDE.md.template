@@ -1,0 +1,120 @@
+# CLAUDE.md - Memory-Enabled AI Configuration
+
+Add this section to your `~/.claude/CLAUDE.md` to enable persistent memory.
+
+---
+
+## MEMORY - SQLite + FTS5 (LMF3)
+
+**CRITICAL: Before asking the user to repeat ANYTHING, search first.**
+
+Your entire work history is in `~/.claude/memory.db`.
+
+### MCP Server Tools
+
+When memory-larry MCP is configured, you have access to:
+
+| Tool | Usage |
+|------|-------|
+| `context_for_agent` | **MANDATORY before Task tool.** Hybrid search for agent context |
+| `memory_search` | Keyword search (FTS5) - USE before asking user to repeat |
+| `memory_hybrid_search` | Natural language search (FTS5 + semantic + RRF fusion) |
+| `memory_recall` | Recent LoA entries, decisions, breadcrumbs |
+| `memory_add` | Add decision/learning/breadcrumb during sessions |
+| `loa_show` | View full LoA entry |
+| `memory_stats` | Database statistics |
+
+### LAW: Agent Context
+
+**Before spawning any agent (Task tool), MUST call `context_for_agent` first.**
+
+If it recommends Brave search, call `mcp__brave-search__brave_web_search` and include results in agent prompt.
+
+### CLI Commands
+
+```bash
+# Search (default: hybrid FTS5 + semantic)
+mem "natural language query"      # hybrid search (best results)
+mem "query" -k                    # keyword only (FTS5)
+mem "query" -v                    # vector only (semantic)
+
+# Capture session wisdom
+mem loa write "session title"
+mem loa write "continued work" -c 1  # links to previous LoA
+
+# Shortcut for session end
+mem dump "session title"          # imports + LoA in one command
+
+# View captured knowledge
+mem loa list
+mem loa show 1      # full Fabric extract
+mem loa quote 1     # raw source messages
+
+# Add structured records
+mem add decision "chose X" --why "because Y"
+mem add learning "problem" "solution"
+mem add breadcrumb "context note"
+
+# Stats
+mem stats
+```
+
+### Tables
+
+| Table | Contents |
+|-------|----------|
+| `messages` | Every conversation turn |
+| `loa_entries` | Library of Alexandria (Fabric-extracted wisdom) |
+| `decisions` | Architectural decisions with reasoning |
+| `learnings` | Problems solved, patterns discovered |
+| `breadcrumbs` | Context notes |
+| `telos` | Purpose framework (optional) |
+| `documents` | Standalone knowledge files (optional) |
+
+### Session End Workflow
+
+When the user says `/dump` or `/dump <hint>`:
+1. Generate a descriptive title for the session
+2. Run `mem dump "Your Generated Title"`
+3. Confirm LoA entry was created
+
+This captures all session wisdom before context is lost.
+
+---
+
+## Template Variables
+
+Replace these with your specific values:
+
+- `{{YOUR_NAME}}` - Your human's name
+- `{{AI_NAME}}` - Your AI's name (default: the AI instance name)
+- `{{PROJECT_DIR}}` - Your primary project directory
+
+---
+
+## Optional: Permission to Fail
+
+**Anthropic's #1 fix for hallucinations: Explicitly allow "I don't know" responses.**
+
+You have EXPLICIT PERMISSION to say "I don't know" when:
+- Information isn't in memory or context
+- The answer requires knowledge you don't have
+- Verification isn't possible
+
+**Fabricating an answer is far worse than admitting uncertainty.**
+
+---
+
+## Optional: Stack Preferences
+
+Customize these based on your human's preferences:
+
+```markdown
+- **TypeScript > Python** unless explicitly approved
+- **bun** for JS/TS (not npm/yarn)
+- **Markdown > HTML** for content
+```
+
+---
+
+*This template is part of LMF3 (Larry Memory Framework)*

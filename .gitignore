@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Lock files (keep bun.lock if using bun)
+package-lock.json
+yarn.lock
+
+# Test artifacts
+coverage/
+*.log
+
+# Database (user's data, not repo)
+*.db
+*.db-wal
+*.db-shm

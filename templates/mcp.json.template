@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memory-larry": {
+      "command": "mem-mcp",
+      "args": [],
+      "env": {
+        "MEM_DB_PATH": "~/.claude/memory.db"
+      }
+    }
+  }
+}
