@@ -43,87 +43,79 @@ You: [Calls memory_search]
 
 ---
 
-## Your MCP Tools - Exact Syntax
+## Your MCP Tools
 
-You have these tools available via MCP. Here's the exact calling syntax:
+You have these tools available via MCP. Call them as you would any MCP tool.
 
 ### memory_search
 
 Search past conversations, decisions, and learnings.
 
-```javascript
-memory_search({
-  query: "authentication JWT",     // Required: search terms
-  limit: 10,                       // Optional: max results (default 10)
-  types: ["decisions", "learnings"] // Optional: filter by type
-})
-```
+**Parameters:**
+- `query` (required): Search terms as a string
+- `limit` (optional): Maximum results to return (default: 10)
+- `types` (optional): Filter by record type - array containing any of: "decisions", "learnings", "breadcrumbs", "messages"
 
-**Returns:** Array of matching records with source, timestamp, and content preview.
+**Example:** Search for authentication-related decisions with a limit of 5 results.
+
+**Returns:** Array of matching records with source table, timestamp, and content preview.
 
 ### memory_add
 
 Record a decision, learning, or breadcrumb.
 
-```javascript
-// Record a decision
-memory_add({
-  type: "decision",
-  content: "Use PostgreSQL for the database",
-  detail: "Better JSON support than MySQL, team has experience",
-  project: "myproject"  // Optional: defaults to current project
-})
+**Parameters:**
+- `type` (required): One of "decision", "learning", or "breadcrumb"
+- `content` (required): The main content (what was decided, what was learned, or the note)
+- `detail` (optional): Additional context (reasoning for decisions, solution for learnings)
+- `project` (optional): Project name (defaults to current project)
 
-// Record a learning (problem/solution pair)
-memory_add({
-  type: "learning",
-  content: "Race condition in WebSocket reconnect",
-  detail: "Add mutex lock before reconnect attempt",
-  project: "myproject"
-})
+**Examples:**
 
-// Record a breadcrumb (quick note)
-memory_add({
-  type: "breadcrumb",
-  content: "User prefers tabs over spaces",
-  project: "myproject"
-})
-```
+*Recording a decision:*
+- type: "decision"
+- content: "Use PostgreSQL for the database"
+- detail: "Better JSON support than MySQL, team has experience"
+
+*Recording a learning:*
+- type: "learning"
+- content: "Race condition in WebSocket reconnect"
+- detail: "Add mutex lock before reconnect attempt"
+
+*Recording a breadcrumb:*
+- type: "breadcrumb"
+- content: "User prefers tabs over spaces"
 
 ### context_for_agent
 
-Get relevant context before spawning an agent.
+Get relevant context before spawning an agent via Task tool.
 
-```javascript
-context_for_agent({
-  task_description: "Implement user authentication with JWT",
-  project: "myproject"  // Optional
-})
-```
+**Parameters:**
+- `task_description` (required): Description of what the agent will do
+- `project` (optional): Project name to scope the search
 
 **Returns:**
-- Relevant past decisions and learnings
-- May include `brave_search_recommended: true` if web search would help
-- Context string to include in agent prompt
+- Relevant past decisions and learnings related to the task
+- `brave_search_recommended`: Boolean indicating if web search would help
+- `context`: Formatted string to include in agent prompt
 
 ### memory_recall
 
 Get recent entries for session context.
 
-```javascript
-memory_recall({
-  limit: 5,           // Optional: number of recent entries
-  project: "myproject" // Optional: filter by project
-})
-```
+**Parameters:**
+- `limit` (optional): Number of recent entries (default: 5)
+- `project` (optional): Filter by project name
+
+**Returns:** Recent LoA entries, decisions, and breadcrumbs.
 
 ### memory_stats
 
 Get database statistics.
 
-```javascript
-memory_stats({})
-```
+**Parameters:** None required.
+
+**Returns:** Database size, record counts by table, total records.
 
 ---
 
@@ -135,8 +127,8 @@ memory_stats({})
 START: User mentions past work/decision/discussion
   │
   ├─► Is it about a specific project?
-  │     YES → memory_search({ query: "topic", project: "name" })
-  │     NO  → memory_search({ query: "topic" })
+  │     YES → Call memory_search with query and project parameters
+  │     NO  → Call memory_search with just the query
   │
   └─► Results found?
         YES → Present: "We decided [X] because [Y]. Decision #[N]."
@@ -150,13 +142,13 @@ START: User mentions past work/decision/discussion
 START: About to use Task tool
   │
   ├─► ALWAYS call context_for_agent first
-  │     context_for_agent({ task_description: "what agent will do" })
+  │     with task_description = "what agent will do"
   │
   ├─► Check response for brave_search_recommended
-  │     YES → Call brave_web_search for external info
-  │     NO  → Continue
+  │     TRUE  → Call brave_web_search for external info
+  │     FALSE → Continue
   │
-  └─► Include context in agent prompt
+  └─► Include the returned context in your agent prompt
         "Context from past work: [context_for_agent result]"
 ```
 
@@ -169,11 +161,10 @@ START: A decision was made in conversation
   │     YES → Record it
   │     NO  → Skip (don't clutter memory with trivial choices)
   │
-  └─► memory_add({
-        type: "decision",
-        content: "What was decided",
+  └─► Call memory_add with:
+        type: "decision"
+        content: "What was decided"
         detail: "Why it was decided"
-      })
 ```
 
 ### At session end
@@ -262,6 +253,23 @@ Examples:
 3. Suggest: "You can install Fabric or use --skip-fabric flag"
 4. Offer to record key decisions/learnings manually instead
 ```
+
+### Emergency fallback: Manual capture when dump fails
+
+If `mem dump` fails and Fabric can't be installed right now, don't lose the session's value:
+
+1. Tell user: "Session capture failed. Let me manually preserve the key points."
+2. Review the session and identify the top 3-5 important items:
+   - Decisions that were made
+   - Problems that were solved
+   - Things that were learned
+3. For each important item, call `memory_add`:
+   - type: "decision" or "learning" as appropriate
+   - content: The key point
+   - detail: The reasoning or context
+4. Confirm: "Manually preserved N key points to memory. Full session capture will work once Fabric is installed."
+
+This ensures nothing important is lost, even without Fabric.
 
 ---
 
@@ -367,64 +375,31 @@ What's "meaningful"? If any of these happened:
 
 ### Pattern: "What did we decide about X?"
 
-```javascript
-// 1. Search memory
-memory_search({ query: "X" })
-
-// 2. If found:
-"We decided [decision] because [reasoning]. See Decision #[N]."
-
-// 3. If not found:
-"I don't see a recorded decision about X. Should we make one now?"
-```
+1. Call `memory_search` with query "X"
+2. If results found: "We decided [decision] because [reasoning]. See Decision #[N]."
+3. If no results: "I don't see a recorded decision about X. Should we make one now?"
 
 ### Pattern: "Continue where we left off"
 
-```javascript
-// 1. Get recent context
-memory_recall({ limit: 3, project: "current" })
-
-// 2. Summarize:
-"Last session we worked on [LoA title]. Key points:
- - [point 1]
- - [point 2]
- Should we continue from there?"
-```
+1. Call `memory_recall` with limit 3 and current project
+2. Summarize: "Last session we worked on [LoA title]. Key points were [X, Y, Z]. Should we continue from there?"
 
 ### Pattern: Before spawning an agent
 
-```javascript
-// 1. ALWAYS get context first
-const ctx = context_for_agent({
-  task_description: "what agent will do"
-})
-
-// 2. If brave search recommended:
-if (ctx.brave_search_recommended) {
-  // Fetch external info
-}
-
-// 3. Include in agent prompt:
-`Context from past work: ${ctx.context}
-
- Task: [original task]`
-
-// 4. Then spawn agent with enriched prompt
-```
+1. **ALWAYS** call `context_for_agent` with a description of what the agent will do
+2. Check the response for `brave_search_recommended`
+   - If true: call brave_web_search for external info
+3. Include the returned context in your agent prompt:
+   "Context from past work: [the context string]"
+4. Then spawn the agent with the enriched prompt
 
 ### Pattern: Recording a decision mid-session
 
-```javascript
-// When a decision is reached:
-memory_add({
-  type: "decision",
-  content: "Use Redis for session caching",
-  detail: "Evaluated Redis vs Memcached. Redis chosen for persistence and data structures."
-})
-
-// Confirm to user:
-"Recorded: Decision to use Redis for session caching."
-```
+1. Call `memory_add` with:
+   - type: "decision"
+   - content: "Use Redis for session caching"
+   - detail: "Evaluated Redis vs Memcached. Redis chosen for persistence and data structures."
+2. Confirm to user: "Recorded: Decision to use Redis for session caching."
 
 ---
 
@@ -476,24 +451,19 @@ mem init
 
 ## Verifying Memory Works
 
-If you're unsure memory is working, try:
+If you're unsure memory is working, try these steps:
 
-```javascript
-// 1. Check stats
-memory_stats({})
-// Should return database size and record counts
+1. **Check stats:** Call `memory_stats` - should return database size and record counts
 
-// 2. Add a test record
-memory_add({
-  type: "breadcrumb",
-  content: "Memory system verification test"
-})
-// Should succeed without error
+2. **Add a test record:** Call `memory_add` with:
+   - type: "breadcrumb"
+   - content: "Memory system verification test"
+   - Should succeed without error
 
-// 3. Search for it
-memory_search({ query: "verification test" })
-// Should find the breadcrumb you just added
-```
+3. **Search for it:** Call `memory_search` with query "verification test"
+   - Should find the breadcrumb you just added
+
+If any step fails, tell your human: "Memory system isn't working correctly. Error: [what happened]"
 
 ---
 

@@ -9,7 +9,20 @@
 #   ./install.sh list     # List available backups
 #
 
-set -e
+set -euo pipefail
+
+# Error trap - guide user to restore on failure
+cleanup() {
+    if [[ $? -ne 0 ]]; then
+        echo ""
+        log_error "Installation failed!"
+        if [[ -n "${BACKUP_DIR:-}" ]] && [[ -d "${BACKUP_DIR:-}" ]]; then
+            log_info "Your backup is safe at: $BACKUP_DIR"
+            log_info "To restore: ./install.sh restore"
+        fi
+    fi
+}
+trap cleanup EXIT
 
 # Colors
 RED='\033[0;31m'
@@ -167,6 +180,32 @@ do_restore() {
 
     echo ""
     log_success "Restore complete: $restored file(s) restored"
+
+    # Validate restored files
+    log_info "Validating restored files..."
+    local validation_ok=true
+
+    if [[ -f "$CLAUDE_DIR/.mcp.json" ]]; then
+        if node -e "JSON.parse(require('fs').readFileSync('$CLAUDE_DIR/.mcp.json'))" 2>/dev/null; then
+            log_success "Validated: .mcp.json is valid JSON"
+        else
+            log_error "Restored .mcp.json is NOT valid JSON!"
+            log_warn "You may need to manually fix $CLAUDE_DIR/.mcp.json"
+            validation_ok=false
+        fi
+    fi
+
+    if [[ -f "$CLAUDE_DIR/memory.db" ]]; then
+        if command -v sqlite3 &>/dev/null; then
+            if sqlite3 "$CLAUDE_DIR/memory.db" "PRAGMA integrity_check;" 2>/dev/null | grep -q "ok"; then
+                log_success "Validated: memory.db integrity OK"
+            else
+                log_warn "Could not verify memory.db integrity"
+            fi
+        fi
+    fi
+
+    echo ""
     log_info "If you had MCP changes, restart Claude Code to apply"
     echo ""
     echo "To undo this restore: ./install.sh restore pre_restore_$TIMESTAMP"
@@ -339,25 +378,41 @@ do_install() {
 
     # Step 2: Install dependencies
     log_info "Step 2: Installing dependencies..."
-    bun install --silent
+    if ! bun install; then
+        log_error "Failed to install dependencies"
+        log_info "Try running: bun install (manually to see errors)"
+        exit 1
+    fi
     log_success "Dependencies installed"
     echo ""
 
     # Step 3: Rebuild native modules
     log_info "Step 3: Rebuilding native SQLite module..."
-    npm rebuild better-sqlite3 > /dev/null 2>&1
+    if ! npm rebuild better-sqlite3; then
+        log_error "Failed to rebuild native modules"
+        log_info "Try running: npm rebuild better-sqlite3 (manually)"
+        exit 1
+    fi
     log_success "Native modules rebuilt"
     echo ""
 
     # Step 4: Build
     log_info "Step 4: Building..."
-    bun run build > /dev/null 2>&1
+    if ! bun run build; then
+        log_error "Build failed"
+        log_info "Try running: bun run build (manually to see errors)"
+        exit 1
+    fi
     log_success "Build complete"
     echo ""
 
     # Step 5: Link globally
     log_info "Step 5: Linking globally (requires sudo)..."
-    sudo npm link > /dev/null 2>&1
+    if ! sudo npm link; then
+        log_error "Failed to link globally"
+        log_info "Try running: sudo npm link (manually)"
+        exit 1
+    fi
     log_success "Linked: mem and mem-mcp now available globally"
     echo ""
 

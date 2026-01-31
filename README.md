@@ -134,13 +134,67 @@ Core rules:
 
 1. **Restart Claude Code** to load the MCP server
 2. **Prime your Claude:** Tell it "Read ~/Projects/LMF3/FOR_CLAUDE.md"
-3. **Test it:**
-   ```bash
-   mem add decision "Use LMF3 for memory" --why "Persistent context"
-   mem "LMF3"   # Should find the decision
-   ```
+
+### Verify Installation
+
+**1. Check commands exist:**
+```bash
+which mem        # Should show a path like /usr/local/bin/mem
+which mem-mcp    # Should show a path
+mem --version    # Should show version number
+```
+
+**2. Check database:**
+```bash
+mem stats        # Should show database stats
+```
+
+**3. Check MCP configuration:**
+```bash
+grep "memory-larry" ~/.claude/.mcp.json
+# Should show the memory-larry server config
+```
+
+**4. Test with Claude Code:**
+
+After restarting Claude Code, ask: "Can you call memory_stats for me?"
+
+If Claude sees the tool and returns stats, installation succeeded!
+
+**5. Test memory round-trip:**
+```bash
+mem add decision "Test decision" --why "Verifying LMF3 works"
+mem "Test decision"   # Should find what you just added
+```
+
+**If any step fails, see Troubleshooting below.**
 
 **Done!** Your Claude Code now has persistent memory.
+
+---
+
+## Something Wrong? Restore Here
+
+The installer automatically backs up your files before making any changes.
+
+**To restore:**
+```bash
+cd ~/Projects/LMF3  # or wherever you cloned
+./install.sh restore           # Restore most recent backup
+./install.sh list              # See all available backups
+./install.sh restore TIMESTAMP # Restore specific backup
+```
+
+**When to restore:**
+- Installation failed and Claude Code won't start
+- MCP server isn't connecting after install
+- You want to completely undo the installation
+- Something else broke and you want to go back
+
+**What gets restored:**
+- `.mcp.json` - Your MCP server configuration
+- `CLAUDE.md` - Your Claude instructions
+- `memory.db` - Your memory database (if it existed before install)
 
 ---
 
@@ -340,28 +394,6 @@ cp ~/.claude/memory.db ~/.claude/memory.db.$(date +%Y%m%d)
 
 ---
 
-## Restore / Rollback
-
-If something goes wrong, restore from automatic backup:
-
-```bash
-cd ~/Projects/LMF3
-
-# Restore most recent backup
-./install.sh restore
-
-# List all backups
-./install.sh list
-
-# Restore specific backup
-./install.sh restore 20260131_143022
-```
-
-Backups are stored in `~/.claude/backups/lmf3/` and include:
-- `.mcp.json` - MCP server configuration
-- `CLAUDE.md` - Claude instructions
-- `memory.db` - Memory database (if it existed)
-
 ## Uninstall
 
 ```bash
@@ -377,6 +409,18 @@ rm -rf ~/Projects/LMF3              # Remove source
 # Manually remove "memory-larry" from ~/.claude/.mcp.json
 # Manually remove "## MEMORY" section from ~/.claude/CLAUDE.md
 ```
+
+---
+
+## Security & Privacy
+
+**Local storage only:** All memory is stored locally in `~/.claude/memory.db`. Nothing is sent to external servers.
+
+**Sensitive data:** The memory database contains your conversation history. Treat it like browser history or shell history.
+
+**Backups:** If you back up your home directory, `~/.claude/memory.db` will be included. Exclude it if you don't want conversation history in backups.
+
+**Never share:** Don't share your `memory.db` file - it contains your full conversation history.
 
 ---
 
