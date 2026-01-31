@@ -61,14 +61,33 @@ cat > ~/.claude/.mcp.json << 'EOF'
 EOF
 ```
 
-### 4. Verify
+> **Note:** If you already have `.mcp.json`, merge the `memory-larry` entry into your existing `mcpServers` object.
+
+### 4. Add to CLAUDE.md
+
+Add these instructions to `~/.claude/CLAUDE.md` so Claude knows to use memory:
+
+```markdown
+## MEMORY
+
+Before asking user to repeat anything: search first with `memory_search`.
+Before spawning agents (Task tool): call `context_for_agent`.
+When decisions are made: record with `memory_add`.
+End of session: user says `/dump` → run `mem dump "Session Title"`.
+```
+
+### 5. Verify
 
 ```bash
-mem --version          # Should show 3.x.x
+mem --version          # Should show 3.0.0
 mem stats              # Should show empty database
 mem add decision "Test" --why "Testing"
 mem "Test"             # Should find the decision
 ```
+
+### 6. Restart Claude Code
+
+Restart Claude Code to load the MCP server. You should see `memory-larry` in the MCP servers list.
 
 **Done.** Your Claude Code now has persistent memory.
 
