@@ -456,7 +456,7 @@ do_install() {
 #
 case "${1:-}" in
     restore)
-        do_restore "$2"
+        do_restore "${2:-}"
         ;;
     list)
         list_backups
