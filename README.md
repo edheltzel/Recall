@@ -18,7 +18,8 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # Install Bun
-curl -fsSL https://bun.sh/install | bash
+curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
+bash /tmp/bun-install.sh
 source ~/.bashrc
 ```
 
