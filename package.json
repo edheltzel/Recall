@@ -1,0 +1,45 @@
+{
+  "name": "lmf3",
+  "version": "3.1.0",
+  "description": "Larry Memory Framework - Persistent memory system for Claude Code",
+  "type": "module",
+  "bin": {
+    "mem": "./dist/index.js",
+    "mem-mcp": "./dist/mcp-server.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/mcp-server.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts src/mcp-server.ts --format esm --watch",
+    "test": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.3",
+    "better-sqlite3": "^11.7.0",
+    "commander": "^12.1.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nixfred/LMF3.x"
+  },
+  "keywords": [
+    "claude-code",
+    "ai-memory",
+    "sqlite",
+    "fts5",
+    "mcp"
+  ],
+  "author": "Larry + Fred",
+  "license": "MIT"
+}
