@@ -23,7 +23,50 @@ curl --version    # Any recent version
 
 ## Quick Start
 
-### Step 1: Install Dependencies
+### Option A: Automated Install (Recommended)
+
+The install script automatically backs up your existing files before making any changes.
+
+```bash
+# 1. Install system dependencies first
+sudo apt-get update
+sudo apt-get install -y unzip build-essential git curl
+
+# Install Node.js 22 via NodeSource
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Install Bun
+curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
+bash /tmp/bun-install.sh
+source ~/.bashrc
+
+# 2. Clone and run installer
+git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
+cd ~/Projects/LMF3
+./install.sh
+```
+
+The installer will:
+1. **Backup existing files** (.mcp.json, CLAUDE.md, memory.db) before touching anything
+2. Install dependencies and build
+3. Configure MCP server (merges with existing config if present)
+4. Add MEMORY section to CLAUDE.md
+5. Initialize database
+
+**To restore if something goes wrong:**
+```bash
+./install.sh restore        # Restore most recent backup
+./install.sh list           # List all available backups
+./install.sh restore TIMESTAMP  # Restore specific backup
+```
+
+### Option B: Manual Install
+
+<details>
+<summary>Click to expand manual installation steps</summary>
+
+#### Step 1: Install Dependencies
 
 ```bash
 # Install build tools
@@ -31,61 +74,32 @@ sudo apt-get update
 sudo apt-get install -y unzip build-essential git curl
 
 # Install Node.js 22 via NodeSource
-# (Ubuntu 24.04's apt nodejs/npm packages have dependency conflicts)
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# Install Bun (fast JS runtime)
+# Install Bun
 curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
 bash /tmp/bun-install.sh
 source ~/.bashrc
-
-# Verify
-node --version   # Should show v22.x.x
-bun --version    # Should show 1.x.x
 ```
 
-### Step 2: Clone and Build
-
-Clone to any directory you prefer (we'll use `$LMF3_DIR` to refer to it):
+#### Step 2: Clone and Build
 
 ```bash
-# Clone (change path if desired)
 git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
 cd ~/Projects/LMF3
 
-# Install dependencies
 bun install
-
-# Rebuild native SQLite module for your Node version
-# (Required because bun and node use different module versions)
 npm rebuild better-sqlite3
-
-# Build
 bun run build
-
-# Link globally (makes `mem` and `mem-mcp` available everywhere)
 sudo npm link
-
-# Initialize database
 mem init
 ```
 
-**Verify:**
-```bash
-mem --version    # Should show 3.0.0
-mem stats        # Should show "Total Records: 0"
-which mem-mcp    # Should show /usr/bin/mem-mcp or /usr/local/bin/mem-mcp
-```
-
-### Step 3: Configure MCP Server
-
-Create or update `~/.claude/.mcp.json`:
+#### Step 3: Configure MCP
 
 ```bash
 mkdir -p ~/.claude
-
-# If you DON'T have an existing .mcp.json:
 cat > ~/.claude/.mcp.json << 'EOF'
 {
   "mcpServers": {
@@ -96,20 +110,11 @@ cat > ~/.claude/.mcp.json << 'EOF'
   }
 }
 EOF
-
-# If you DO have an existing .mcp.json, add this to your mcpServers object:
-# "memory-larry": { "command": "mem-mcp", "args": [] }
 ```
 
-**Verify MCP server works:**
-```bash
-echo '{}' | timeout 2 mem-mcp
-# Should print: "Memory Larry MCP server running"
-```
+#### Step 4: Configure CLAUDE.md
 
-### Step 4: Configure CLAUDE.md
-
-Create or edit `~/.claude/CLAUDE.md` and add:
+Add to `~/.claude/CLAUDE.md`:
 
 ```markdown
 ## MEMORY
@@ -121,44 +126,19 @@ Core rules:
 2. Before spawning agents (Task tool) → call `context_for_agent`
 3. When decisions are made → record with `memory_add`
 4. End of session when user says `/dump` → run `mem dump "Descriptive Title"`
-
-Tool syntax:
-- `memory_search({ query: "search terms" })`
-- `memory_add({ type: "decision", content: "what", detail: "why" })`
-- `context_for_agent({ task_description: "what the agent will do" })`
 ```
 
-> **Note:** If `~/.claude/CLAUDE.md` doesn't exist, create it. This file contains persistent instructions for your Claude instance.
+</details>
 
-### Step 5: Restart Claude Code
+### After Install
 
-Exit and restart Claude Code to load the MCP server.
-
-**Verify:** After restart, ask Claude: "What MCP tools do you have access to?"
-
-Claude should list `memory_search`, `memory_add`, `context_for_agent`, etc.
-
-### Step 6: Prime Your Claude
-
-In your first session, tell Claude:
-
-```
-Read ~/Projects/LMF3/FOR_CLAUDE.md - this is your memory system guide.
-```
-
-This teaches Claude the full workflow, patterns, and philosophy.
-
-### Step 7: Test It
-
-```bash
-# Add a test record
-mem add decision "Use LMF3 for memory" --why "Persistent context across sessions"
-
-# Search for it
-mem "LMF3"
-
-# Should find the decision you just added
-```
+1. **Restart Claude Code** to load the MCP server
+2. **Prime your Claude:** Tell it "Read ~/Projects/LMF3/FOR_CLAUDE.md"
+3. **Test it:**
+   ```bash
+   mem add decision "Use LMF3 for memory" --why "Persistent context"
+   mem "LMF3"   # Should find the decision
+   ```
 
 **Done!** Your Claude Code now has persistent memory.
 
@@ -360,20 +340,42 @@ cp ~/.claude/memory.db ~/.claude/memory.db.$(date +%Y%m%d)
 
 ---
 
+## Restore / Rollback
+
+If something goes wrong, restore from automatic backup:
+
+```bash
+cd ~/Projects/LMF3
+
+# Restore most recent backup
+./install.sh restore
+
+# List all backups
+./install.sh list
+
+# Restore specific backup
+./install.sh restore 20260131_143022
+```
+
+Backups are stored in `~/.claude/backups/lmf3/` and include:
+- `.mcp.json` - MCP server configuration
+- `CLAUDE.md` - Claude instructions
+- `memory.db` - Memory database (if it existed)
+
 ## Uninstall
 
 ```bash
-# Remove global commands
+# Option 1: Restore pre-install state
+cd ~/Projects/LMF3
+./install.sh restore   # Restores your original files
+
+# Option 2: Full removal
 sudo npm unlink -g memory-larry
-
-# Remove database (WARNING: deletes all memory)
-rm ~/.claude/memory.db
-
-# Remove MCP config (or just delete the memory-larry entry)
-rm ~/.claude/.mcp.json
-
-# Remove source
-rm -rf ~/Projects/LMF3
+rm ~/.claude/memory.db              # WARNING: deletes all memory
+rm -rf ~/.claude/backups/lmf3       # Remove backups
+rm -rf ~/Projects/LMF3              # Remove source
+# Manually remove "memory-larry" from ~/.claude/.mcp.json
+# Manually remove "## MEMORY" section from ~/.claude/CLAUDE.md
 ```
 
 ---
