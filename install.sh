@@ -60,7 +60,7 @@ create_backup() {
         if [[ -f "$file" ]]; then
             cp "$file" "$BACKUP_DIR/"
             log_success "Backed up: $(basename "$file")"
-            ((backed_up++))
+            backed_up=$((backed_up + 1))
         fi
     done
 
@@ -133,16 +133,26 @@ do_restore() {
     log_info "Backing up current state before restore..."
     local pre_restore_dir="$BACKUP_BASE/pre_restore_$TIMESTAMP"
     mkdir -p "$pre_restore_dir"
+    local pre_backed=0
     for file in "${FILES_TO_BACKUP[@]}"; do
         if [[ -f "$file" ]]; then
             cp "$file" "$pre_restore_dir/"
+            pre_backed=$((pre_backed + 1))
         fi
     done
-    log_success "Current state saved to: pre_restore_$TIMESTAMP"
+    if [[ $pre_backed -gt 0 ]]; then
+        log_success "Current state saved to: pre_restore_$TIMESTAMP ($pre_backed files)"
+    else
+        log_warn "No current files to backup"
+    fi
 
-    # Restore files
+    # Restore files (including hidden files)
     local restored=0
+    shopt -s dotglob  # Include hidden files in glob
     for file in "$restore_dir"/*; do
+        if [[ ! -f "$file" ]]; then
+            continue
+        fi
         local filename=$(basename "$file")
         if [[ "$filename" == "manifest.txt" ]]; then
             continue
@@ -151,8 +161,9 @@ do_restore() {
         local target="$CLAUDE_DIR/$filename"
         cp "$file" "$target"
         log_success "Restored: $filename"
-        ((restored++))
+        restored=$((restored + 1))
     done
+    shopt -u dotglob  # Reset
 
     echo ""
     log_success "Restore complete: $restored file(s) restored"
