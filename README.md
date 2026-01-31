@@ -9,24 +9,32 @@
 ### 1. System Requirements
 
 ```bash
-# Ubuntu/Debian
+# Ubuntu/Debian - install build tools
 sudo apt-get update
-sudo apt-get install -y nodejs npm unzip build-essential git
+sudo apt-get install -y unzip build-essential git curl
+
+# Install Node.js 22 via NodeSource (Ubuntu 24.04's npm package is broken)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
 # Install Bun
-curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
-bash /tmp/bun-install.sh
+curl -fsSL https://bun.sh/install | bash
 source ~/.bashrc
 ```
 
 ### 2. Install LMF3
 
 ```bash
-git clone https://github.com/your-repo/LMF3.x.git ~/Projects/LMF3.x
-cd ~/Projects/LMF3.x
+git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
+cd ~/Projects/LMF3
 
-# Install and build
+# Install dependencies
 bun install
+
+# IMPORTANT: Rebuild native modules for your Node version
+npm rebuild better-sqlite3
+
+# Build
 bun run build
 
 # Link globally
@@ -183,9 +191,9 @@ mem init
 ```
 
 ### "NODE_MODULE_VERSION mismatch"
-Native modules compiled for different Node version:
+Native SQLite module compiled for different Node version. Re-run:
 ```bash
-cd ~/Projects/LMF3.x
+cd ~/Projects/LMF3
 npm rebuild better-sqlite3
 bun run build
 ```

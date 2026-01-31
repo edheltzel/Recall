@@ -15,27 +15,33 @@ Get persistent memory running in 5 minutes.
 ## 1. System Prerequisites
 
 ```bash
-# Ubuntu/Debian
+# Ubuntu/Debian - install build tools
 sudo apt-get update
-sudo apt-get install -y nodejs npm unzip build-essential
+sudo apt-get install -y unzip build-essential git curl
+
+# Install Node.js 22 via NodeSource
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
 # Install Bun
-curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
-bash /tmp/bun-install.sh
+curl -fsSL https://bun.sh/install | bash
 source ~/.bashrc
 ```
 
-## 2. Install LMF3 (2 min)
+## 2. Install LMF3
 
 ```bash
-# Clone or download LMF3
-cd ~/Projects/LMF3.x
+git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
+cd ~/Projects/LMF3
 
-# Install and build
-bun install && bun run build
+# Install dependencies
+bun install
 
-# IMPORTANT: If copied from another machine, rebuild native modules:
-npm rebuild better-sqlite3 && bun run build
+# Rebuild native modules for your Node version
+npm rebuild better-sqlite3
+
+# Build
+bun run build
 
 # Link globally
 sudo npm link
