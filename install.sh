@@ -387,7 +387,7 @@ do_install() {
     echo ""
 
     # Step 3: Build
-    log_info "Step 4: Building..."
+    log_info "Step 3: Building..."
     if ! bun run build; then
         log_error "Build failed"
         log_info "Try running: bun run build (manually to see errors)"
@@ -408,9 +408,11 @@ do_install() {
     log_success "Linked: mem and mem-mcp now available globally"
     echo ""
 
-    # Step 5: Initialize database
+    # Step 5: Initialize database and MEMORY directory
     log_info "Step 5: Initializing database..."
+    mkdir -p "$CLAUDE_DIR/MEMORY"
     mem init
+    log_success "MEMORY directory created at $CLAUDE_DIR/MEMORY"
     echo ""
 
     # Step 6: Configure MCP

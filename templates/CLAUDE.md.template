@@ -12,7 +12,7 @@ Your entire work history is in `~/.claude/memory.db`.
 
 ### MCP Server Tools
 
-When memory-larry MCP is configured, you have access to:
+When lmf-memory MCP is configured, you have access to:
 
 | Tool | Usage |
 |------|-------|
@@ -117,4 +117,4 @@ Customize these based on your human's preferences:
 
 ---
 
-*This template is part of LMF3 (Larry Memory Framework)*
+*This template is part of LMF3 — Persistent Memory for Claude Code*
