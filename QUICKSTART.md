@@ -38,9 +38,6 @@ cd ~/Projects/LMF3
 # Install dependencies
 bun install
 
-# Rebuild native modules for your Node version
-npm rebuild better-sqlite3
-
 # Build
 bun run build
 
@@ -60,7 +57,7 @@ mkdir -p ~/.claude
 cat > ~/.claude/.mcp.json << 'EOF'
 {
   "mcpServers": {
-    "memory-larry": {
+    "lmf-memory": {
       "command": "mem-mcp",
       "args": []
     }

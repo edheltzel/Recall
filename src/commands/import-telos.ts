@@ -1,11 +1,11 @@
-// Import TELOS sections from LARRY.md into the telos table
+// Import TELOS sections from identity file into the telos table
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 
-const TELOS_PATH = join(homedir(), '.claude', 'TELOS', 'LARRY.md');
+const TELOS_PATH = join(homedir(), '.claude', 'TELOS', 'IDENTITY.md');
 
 interface TelosSection {
   code: string;
@@ -103,7 +103,7 @@ function parseTelosFile(filePath: string): TelosSection[] {
           code: 'IDENTITY',
           type: 'identity',
           category: null,
-          title: 'Larry Identity',
+          title: 'Identity',
           parentCode: null
         };
       }

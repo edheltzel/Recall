@@ -1,441 +1,301 @@
-# Larry Memory Framework 3.x (LMF3)
+# LMF3 — Persistent Memory for Claude Code
 
-**Persistent memory for Claude Code.** Your AI remembers everything across sessions.
+**LMF3** gives Claude Code persistent memory across sessions. Every conversation is automatically extracted, indexed, and searchable — so your AI assistant remembers what you've worked on together.
 
 ---
 
-## Before You Start
+## What LMF3 Does
 
-**Verify prerequisites:**
+Without LMF3, every Claude Code session starts from zero. With LMF3:
 
+- **Session Extraction** — When a session ends, the conversation is automatically extracted into structured summaries (ideas, decisions, errors fixed, insights)
+- **Full-Text Search** — Search all past conversations via `mem search "kubernetes migration"` or the MCP `memory_search` tool
+- **Hybrid Search** — Combines keyword (FTS5) and semantic (vector embeddings) search with Reciprocal Rank Fusion
+- **Library of Alexandria (LoA)** — Curated knowledge entries with Fabric extract_wisdom analysis
+- **Decision Tracking** — Record and search architectural decisions with reasoning
+- **Learning Capture** — Record problems solved and patterns discovered
+- **Breadcrumbs** — Drop contextual notes for future sessions
+- **MCP Server** — Claude Code can search memory, add records, and prepare context for spawned agents — all via MCP tools
+- **Batch Extraction** — Cron job catches any sessions that slipped through the cracks
+
+## What Users Can Expect
+
+After installation, LMF3 runs silently in the background:
+
+1. **You work normally** with Claude Code on your projects
+2. **Sessions auto-extract** — when you end a session, the conversation is parsed and stored
+3. **Next session** — Claude Code has MCP tools (`memory_search`, `memory_recall`, etc.) to find relevant past context
+4. **Over time** — your memory database grows, making Claude increasingly effective at your specific projects and patterns
+
+The `mem` CLI lets you interact with memory directly:
 ```bash
-node --version    # Need 18+ (22 recommended)
-git --version     # Any recent version
-curl --version    # Any recent version
+mem search "auth flow"          # Search all memory
+mem recent                      # Recent activity
+mem stats                       # Database statistics
+mem loa list                    # Browse curated knowledge
+mem dump "Session title"        # Manually capture current session
 ```
 
-**System requirements:**
-- Ubuntu/Debian Linux (tested on 24.04)
-- 500MB disk space
-- sudo access for global install
+---
+
+## Prerequisites
+
+Install these **before** running `install.sh`. Each is required unless marked optional.
+
+### 1. Ubuntu / Debian Linux
+
+LMF3 is tested on Ubuntu 22.04+ and Debian 12+. Other Linux distros should work but are untested.
+
+### 2. Bun (JavaScript runtime)
+
+LMF3 uses Bun for TypeScript execution and `bun:sqlite` for the database.
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+- **Source:** [https://bun.sh](https://bun.sh)
+- **Minimum version:** 1.0+
+- **Why:** Fast TypeScript execution, built-in SQLite driver, no native module compilation needed
+
+### 3. Node.js and npm
+
+Required for global linking (`npm link`) so `mem` and `mem-mcp` are on your PATH.
+
+```bash
+# Ubuntu/Debian
+sudo apt install nodejs npm
+
+# Or use nvm (recommended):
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
+nvm install --lts
+```
+
+- **Source:** [https://nodejs.org](https://nodejs.org) or [https://github.com/nvm-sh/nvm](https://github.com/nvm-sh/nvm)
+- **Minimum version:** Node 18+
+
+### 4. Claude Code (Anthropic CLI)
+
+LMF3 is an extension for Claude Code. You need a working Claude Code installation.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+- **Source:** [https://docs.anthropic.com/en/docs/claude-code](https://docs.anthropic.com/en/docs/claude-code)
+- **Required:** Active Anthropic API subscription or Claude Pro/Max plan
+
+### 5. Anthropic API Key
+
+The session extraction hook uses Claude Haiku to parse conversations. Set this in your shell profile:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+- **Get yours:** [https://console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
+- **Cost:** Extraction uses `claude-3-5-haiku` — typically < $0.01 per session extraction
+- **Note:** If you use Claude Code with a Pro/Max plan, you still need a separate API key for the extraction hook (it runs outside Claude Code's session)
+
+### 6. Fabric (Optional but Recommended)
+
+Fabric provides the `extract_wisdom` pattern used for rich session analysis. LMF3 falls back to an inline prompt if Fabric isn't available, but Fabric extractions are higher quality.
+
+```bash
+go install github.com/danielmiessler/fabric@latest
+fabric --setup
+```
+
+- **Source:** [https://github.com/danielmiessler/fabric](https://github.com/danielmiessler/fabric)
+- **Requires:** Go 1.22+ — [https://go.dev/doc/install](https://go.dev/doc/install)
+- **After install:** Run `fabric --setup` to configure your API keys and download patterns
+
+### 7. Ollama (Optional — for Semantic Search)
+
+Vector embeddings enable semantic search (find related content even when keywords don't match). Without Ollama, LMF3 uses keyword search only — still very capable.
+
+```bash
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull nomic-embed-text
+```
+
+- **Source:** [https://ollama.ai](https://ollama.ai)
+- **Model:** `nomic-embed-text` (768-dimension embeddings, ~270MB)
+- **Note:** Set `OLLAMA_URL` env var if Ollama runs on a different host (default: `http://localhost:11434`)
 
 ---
 
-## Quick Start
-
-### Option A: Automated Install (Recommended)
-
-The install script automatically backs up your existing files before making any changes.
+## Installation
 
 ```bash
-# 1. Install system dependencies first
-sudo apt-get update
-sudo apt-get install -y unzip build-essential git curl
-
-# Install Node.js 22 via NodeSource
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Install Bun
-curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
-bash /tmp/bun-install.sh
-source ~/.bashrc
-
-# 2. Clone and run installer
 git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
 cd ~/Projects/LMF3
 ./install.sh
 ```
 
 The installer will:
-1. **Backup existing files** (.mcp.json, CLAUDE.md, memory.db) before touching anything
-2. Install dependencies and build
-3. Configure MCP server (merges with existing config if present)
-4. Add MEMORY section to CLAUDE.md
-5. Initialize database
+1. Back up any existing Claude Code config files
+2. Install dependencies via `bun install`
+3. Build TypeScript source
+4. Link `mem` and `mem-mcp` globally
+5. Initialize the SQLite database at `~/.claude/memory.db`
+6. Configure the MCP server in `~/.claude/.mcp.json`
+7. Add a MEMORY section to `~/.claude/CLAUDE.md`
 
-**To restore if something goes wrong:**
-```bash
-./install.sh restore        # Restore most recent backup
-./install.sh list           # List all available backups
-./install.sh restore TIMESTAMP  # Restore specific backup
-```
+**After install:** Restart Claude Code to load the MCP server.
 
-### Option B: Manual Install
+### Setting Up Session Extraction
 
-<details>
-<summary>Click to expand manual installation steps</summary>
+To enable automatic session extraction (the core value of LMF3), add the SessionExtract hook:
 
-#### Step 1: Install Dependencies
+1. Copy the hooks to your Claude hooks directory:
+   ```bash
+   mkdir -p ~/.claude/hooks
+   cp hooks/SessionExtract.ts ~/.claude/hooks/FabricExtract.hook.ts
+   cp hooks/BatchExtract.ts ~/.claude/hooks/BatchExtract.ts
+   ```
 
-```bash
-# Install build tools
-sudo apt-get update
-sudo apt-get install -y unzip build-essential git curl
+2. Register the SessionEnd hook in `~/.claude/settings.json`:
+   ```json
+   {
+     "hooks": {
+       "Stop": [
+         {
+           "matcher": "",
+           "hooks": [
+             {
+               "type": "command",
+               "command": "bun run ~/.claude/hooks/FabricExtract.hook.ts"
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
 
-# Install Node.js 22 via NodeSource
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Install Bun
-curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
-bash /tmp/bun-install.sh
-source ~/.bashrc
-```
-
-#### Step 2: Clone and Build
-
-```bash
-git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
-cd ~/Projects/LMF3
-
-bun install
-npm rebuild better-sqlite3
-bun run build
-sudo npm link
-mem init
-```
-
-#### Step 3: Configure MCP
-
-```bash
-mkdir -p ~/.claude
-cat > ~/.claude/.mcp.json << 'EOF'
-{
-  "mcpServers": {
-    "memory-larry": {
-      "command": "mem-mcp",
-      "args": []
-    }
-  }
-}
-EOF
-```
-
-#### Step 4: Configure CLAUDE.md
-
-Add to `~/.claude/CLAUDE.md`:
-
-```markdown
-## MEMORY
-
-You have persistent memory via LMF3. **Read the full guide:** ~/Projects/LMF3/FOR_CLAUDE.md
-
-Core rules:
-1. Before asking user to repeat anything → search first with `memory_search`
-2. Before spawning agents (Task tool) → call `context_for_agent`
-3. When decisions are made → record with `memory_add`
-4. End of session when user says `/dump` → run `mem dump "Descriptive Title"`
-```
-
-</details>
-
-### After Install
-
-1. **Restart Claude Code** to load the MCP server
-2. **Prime your Claude:** Tell it "Read ~/Projects/LMF3/FOR_CLAUDE.md"
-
-### Verify Installation
-
-**1. Check commands exist:**
-```bash
-which mem        # Should show a path like /usr/local/bin/mem
-which mem-mcp    # Should show a path
-mem --version    # Should show version number
-```
-
-**2. Check database:**
-```bash
-mem stats        # Should show database stats
-```
-
-**3. Check MCP configuration:**
-```bash
-grep "memory-larry" ~/.claude/.mcp.json
-# Should show the memory-larry server config
-```
-
-**4. Test with Claude Code:**
-
-After restarting Claude Code, ask: "Can you call memory_stats for me?"
-
-If Claude sees the tool and returns stats, installation succeeded!
-
-**5. Test memory round-trip:**
-```bash
-mem add decision "Test decision" --why "Verifying LMF3 works"
-mem "Test decision"   # Should find what you just added
-```
-
-**If any step fails, see Troubleshooting below.**
-
-**Done!** Your Claude Code now has persistent memory.
+3. (Optional) Set up cron for batch extraction of missed sessions:
+   ```bash
+   crontab -e
+   # Add this line (runs every 30 minutes):
+   */30 * * * * cd ~/.claude && ~/.bun/bin/bun run hooks/BatchExtract.ts --limit 20 >> /tmp/lmf3-batch.log 2>&1
+   ```
 
 ---
 
-## Something Wrong? Restore Here
-
-The installer automatically backs up your files before making any changes.
-
-**To restore:**
-```bash
-cd ~/Projects/LMF3  # or wherever you cloned
-./install.sh restore           # Restore most recent backup
-./install.sh list              # See all available backups
-./install.sh restore TIMESTAMP # Restore specific backup
-```
-
-**When to restore:**
-- Installation failed and Claude Code won't start
-- MCP server isn't connecting after install
-- You want to completely undo the installation
-- Something else broke and you want to go back
-
-**What gets restored:**
-- `.mcp.json` - Your MCP server configuration
-- `CLAUDE.md` - Your Claude instructions
-- `memory.db` - Your memory database (if it existed before install)
-
----
-
-## What You Get
-
-| Without LMF3 | With LMF3 |
-|--------------|-----------|
-| Claude forgets everything between sessions | Claude remembers all conversations |
-| Re-debate settled decisions every time | Instant recall of past decisions |
-| Lose context constantly | Searchable knowledge base |
-| Agents work blind | Agents get relevant project history |
-
----
-
-## File Structure After Install
+## Architecture
 
 ```
-~/Projects/LMF3/          # (or wherever you cloned)
-├── dist/                 # Built JavaScript
-├── src/                  # Source TypeScript
-├── FOR_CLAUDE.md         # Guide for Claude to read
-└── package.json
-
 ~/.claude/
-├── memory.db             # SQLite database (all memory stored here)
-├── .mcp.json             # MCP server configuration
-├── CLAUDE.md             # Your instructions to Claude
-└── projects/             # Claude Code session files
-    └── */*.jsonl         # Raw conversation logs
+├── memory.db                          # SQLite database (FTS5 + WAL mode)
+├── MEMORY/
+│   ├── DISTILLED.md                   # All extracted session summaries
+│   ├── HOT_RECALL.md                  # Last 10 sessions (fast context)
+│   ├── SESSION_INDEX.json             # Searchable session lookup
+│   ├── DECISIONS.log                  # Architectural decisions
+│   ├── ERROR_PATTERNS.json            # Known error/fix pairs
+│   └── .extraction_tracker.json       # Per-file extraction state
+├── hooks/
+│   ├── FabricExtract.hook.ts          # SessionEnd extraction hook
+│   └── BatchExtract.ts               # Cron batch extractor
+└── .mcp.json                          # MCP server config
 ```
+
+### Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `sessions` | Claude Code session metadata |
+| `messages` | Conversation turns (user + assistant) |
+| `loa_entries` | Library of Alexandria curated knowledge |
+| `decisions` | Architectural decisions with reasoning |
+| `learnings` | Problems solved and patterns discovered |
+| `breadcrumbs` | Contextual notes and references |
+| `telos` | Purpose framework entries (optional) |
+| `documents` | Imported standalone documents |
+| `embeddings` | Vector embeddings for semantic search |
+
+All text tables have FTS5 full-text search indexes with automatic sync triggers.
 
 ---
 
-## Core Commands (CLI)
+## MCP Tools
+
+When Claude Code connects to the LMF MCP server, these tools become available:
+
+| Tool | Purpose |
+|------|---------|
+| `memory_search` | FTS5 keyword search across all memory |
+| `memory_hybrid_search` | Combined keyword + semantic search with RRF |
+| `memory_recall` | Recent context (LoA entries, decisions, breadcrumbs) |
+| `loa_show` | Full Library of Alexandria entry |
+| `memory_add` | Add decision, learning, or breadcrumb |
+| `memory_stats` | Database statistics |
+| `context_for_agent` | Prepare memory context before spawning agents |
+
+---
+
+## CLI Reference
 
 ```bash
-# Search memory
-mem "your query"                    # Hybrid search (keyword + semantic)
-mem "query" -k                      # Keyword only (faster)
-
-# Add records
-mem add decision "X" --why "Y"      # Record a decision with reasoning
-mem add learning "problem" "fix"    # Record a problem/solution pair
-mem add breadcrumb "note"           # Quick context note
-
-# View records
-mem stats                           # Database overview
-mem recent decisions                # Recent decisions
-mem show decisions 1                # Full details of decision #1
-
-# Session capture (requires Fabric - see below)
-mem dump "Session Title"            # Capture session + extract wisdom
+mem init                        # Initialize database
+mem search <query>              # Full-text search
+mem hybrid <query>              # Hybrid keyword + semantic search
+mem semantic <query>            # Semantic-only search
+mem recent [table]              # Recent records
+mem show <table> <id>           # Show full record
+mem stats                       # Database statistics
+mem add decision <text>         # Record a decision
+mem add learning <prob> <sol>   # Record a learning
+mem add breadcrumb <text>       # Drop a breadcrumb
+mem loa write <title>           # Create LoA entry
+mem loa list                    # List LoA entries
+mem loa show <id>               # Show full LoA entry
+mem dump <title>                # Flush session + create LoA
+mem docs import                 # Import standalone documents
+mem telos import                # Import TELOS framework entries
+mem embed backfill              # Generate vector embeddings
 ```
 
 ---
 
-## MCP Tools (For Claude)
+## Updating
 
-When Claude Code runs, these tools are available via MCP:
-
-| Tool | Purpose | When to Use |
-|------|---------|-------------|
-| `memory_search` | Search past conversations, decisions, learnings | Before asking user to repeat anything |
-| `memory_add` | Record decision, learning, or breadcrumb | When important decisions are made |
-| `context_for_agent` | Get relevant history for agent tasks | Before EVERY Task tool call |
-| `memory_recall` | Get recent entries | At session start for context |
-| `memory_stats` | Database statistics | When curious about memory size |
-
-### Critical Rule
-
-**Before spawning any agent via Task tool, call `context_for_agent` first.**
-
-This ensures agents have relevant history and don't duplicate past work.
-
----
-
-## Session Capture with Fabric
-
-**Fabric is required for full session capture.** Without it, you can still search and add records, but `mem dump` won't work.
-
-### Install Fabric
-
-```bash
-# See https://github.com/danielmiessler/fabric for current install method
-# After install, run setup:
-fabric --setup
-```
-
-### How Session Capture Works
-
-When user says `/dump` at session end:
-
-1. Claude generates a descriptive title
-2. Runs `mem dump "Title"`
-3. LMF3 imports all conversation turns to database
-4. Fabric's `extract_wisdom` pattern extracts key insights
-5. Creates a Library of Alexandria (LoA) entry
-6. Optionally auto-embeds for semantic search
-
-**Without Fabric:** Use `mem dump --skip-fabric "Title"` to import messages without wisdom extraction.
-
----
-
-## Optional: Semantic Search
-
-Add vector embeddings for conceptual/semantic search:
-
-```bash
-# Install Ollama with embedding model
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull nomic-embed-text
-
-# Backfill embeddings for existing records
-mem embed backfill -t decisions
-mem embed backfill -t loa
-```
-
----
-
-## Troubleshooting
-
-### Error: `command not found: mem`
-
-The npm link didn't work. Try:
-```bash
-cd ~/Projects/LMF3  # or wherever you cloned
-sudo npm link
-which mem  # Should show a path
-```
-
-### Error: `NODE_MODULE_VERSION mismatch`
-
-```
-Error: The module was compiled against a different Node.js version
-```
-
-Native SQLite module needs rebuild:
 ```bash
 cd ~/Projects/LMF3
-npm rebuild better-sqlite3
+git pull
+bun install
 bun run build
+sudo npm link
 ```
 
-### Error: MCP server not connecting
+Your database and memory files are preserved across updates.
 
-After restart, Claude doesn't see memory tools.
+---
 
-1. Check config exists: `cat ~/.claude/.mcp.json`
-2. Check server path: `which mem-mcp`
-3. Test server: `echo '{}' | timeout 2 mem-mcp`
-4. Check for JSON syntax errors in `.mcp.json`
-5. Fully quit and restart Claude Code (not just new session)
-
-### Error: `Database not found`
+## Backup & Restore
 
 ```bash
-mem init
+./install.sh list              # List available backups
+./install.sh restore           # Restore most recent backup
+./install.sh restore 20260219  # Restore specific backup
 ```
 
-### Error: `Empty content rejected`
-
-Intentional validation - you tried to add a record with empty content.
-
-### Error: `No session files found` (mem dump)
-
-No Claude Code sessions exist yet, or you're not in a Claude Code project directory.
+The installer automatically backs up existing files before any changes.
 
 ---
 
-## Daily Workflow
+## Environment Variables
 
-**Session Start:**
-- Memory is automatically available via MCP
-- Claude can call `memory_recall` for recent context
-
-**During Session:**
-- Claude searches memory before asking you to repeat things
-- Claude records decisions with `memory_add`
-- Claude calls `context_for_agent` before spawning agents
-
-**Session End:**
-- You say `/dump` or "let's capture this session"
-- Claude generates a title and runs `mem dump "Title"`
-- Session wisdom is preserved for future sessions
-
----
-
-## Backup
-
-```bash
-# Simple backup
-cp ~/.claude/memory.db ~/.claude/memory.db.backup
-
-# With timestamp
-cp ~/.claude/memory.db ~/.claude/memory.db.$(date +%Y%m%d)
-```
-
----
-
-## Uninstall
-
-```bash
-# Option 1: Restore pre-install state
-cd ~/Projects/LMF3
-./install.sh restore   # Restores your original files
-
-# Option 2: Full removal
-sudo npm unlink -g memory-larry
-rm ~/.claude/memory.db              # WARNING: deletes all memory
-rm -rf ~/.claude/backups/lmf3       # Remove backups
-rm -rf ~/Projects/LMF3              # Remove source
-# Manually remove "memory-larry" from ~/.claude/.mcp.json
-# Manually remove "## MEMORY" section from ~/.claude/CLAUDE.md
-```
-
----
-
-## Security & Privacy
-
-**Local storage only:** All memory is stored locally in `~/.claude/memory.db`. Nothing is sent to external servers.
-
-**Sensitive data:** The memory database contains your conversation history. Treat it like browser history or shell history.
-
-**Backups:** If you back up your home directory, `~/.claude/memory.db` will be included. Exclude it if you don't want conversation history in backups.
-
-**Never share:** Don't share your `memory.db` file - it contains your full conversation history.
-
----
-
-## Philosophy
-
-> **Get smarter over time, not just within sessions.**
-
-Every decision recorded = one less debate repeated.
-Every learning captured = one less mistake repeated.
-Every breadcrumb saved = context that survives.
-
-This is institutional knowledge for AI.
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ANTHROPIC_API_KEY` | (required) | API key for Haiku extraction |
+| `MEM_DB_PATH` | `~/.claude/memory.db` | Database location |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server for embeddings |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
 
 ---
 
 ## License
 
-MIT License | Built by Larry (Claude) + Fred "Spike" Nix
+MIT

@@ -1,4 +1,4 @@
-// Project detection for Memory Larry 3.0
+// Project detection for LMF 4.0
 
 import { execSync } from 'child_process';
 import { basename, isAbsolute, resolve } from 'path';
@@ -68,7 +68,7 @@ export function detectProject(cwd?: string): string | undefined {
 }
 
 /**
- * Extract project name from a path like "-home-pi-Projects-MEMORY-LARRY-3-0"
+ * Extract project name from an encoded path like "-home-user-Projects-my-app"
  */
 export function extractProjectFromPath(path: string): string {
   // Handle Claude Code's path format: -home-pi-Projects-foo-bar

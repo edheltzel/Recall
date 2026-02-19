@@ -1,7 +1,7 @@
-// Embedding generation for Memory Larry 3.0
-// Uses Ollama on nano (Jetson with CUDA) for nomic-embed-text
+// Embedding generation for LMF 4.0
+// Uses Ollama for nomic-embed-text embeddings
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://nano:11434';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
 const EMBEDDING_DIMENSIONS = 768;
 

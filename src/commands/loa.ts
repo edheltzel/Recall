@@ -61,7 +61,7 @@ function runFabricExtract(content: string): string {
   try {
     // Pass content to fabric via stdin
     // Use streaming for faster response, haiku for speed
-    const result = execSync('fabric --pattern extract_wisdom --stream -m claude-3-5-haiku-latest', {
+    const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
       input: content,
       encoding: 'utf-8',
       maxBuffer: MAX_FABRIC_INPUT_BYTES, // 50MB buffer

@@ -1,4 +1,4 @@
-// Core types for Memory Larry 3.0
+// Core types for LMF 4.0
 
 export interface Session {
   id?: number;

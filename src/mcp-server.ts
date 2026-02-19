@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Memory Larry 3.0 - MCP Server
+// LMF 4.0 - MCP Server
 // Exposes memory as first-class tools for Claude Code
 
 import { appendFileSync, existsSync as fsExistsSync, mkdirSync } from 'fs';
@@ -188,14 +188,14 @@ if (!existsSync(dbPath)) {
 }
 
 const server = new McpServer({
-  name: 'memory-larry',
-  version: '3.0.0'
+  name: 'lmf-memory',
+  version: '4.0.0'
 });
 
 // Tool: memory_search - Full-text search across all memory
 server.tool(
   'memory_search',
-  'Search Larry\'s memory using FTS5 full-text search. Use this BEFORE asking the user to repeat anything. Searches across messages, LoA entries, decisions, learnings, and breadcrumbs.',
+  'Search memory using FTS5 full-text search. Use this BEFORE asking the user to repeat anything. Searches across messages, LoA entries, decisions, learnings, and breadcrumbs.',
   {
     query: z.string().describe('Search query (keywords, phrases). FTS5 supports AND, OR, NOT, prefix*, "exact phrase"'),
     project: z.string().optional().describe('Filter by project name'),
@@ -436,14 +436,14 @@ server.tool(
 // Tool: memory_stats - Database statistics
 server.tool(
   'memory_stats',
-  'Get Memory Larry database statistics.',
+  'Get LMF database statistics.',
   {},
   async () => {
     try {
       const stats = getStats();
       const sizeMB = (stats.db_size_bytes / 1024 / 1024).toFixed(2);
 
-      const output = `## Memory Larry 3.0 Stats
+      const output = `## LMF 4.0 Stats
 
 | Metric | Count |
 |--------|-------|
@@ -588,7 +588,7 @@ function detectBraveNeed(task: string, localResultCount: number): { recommend: b
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Memory Larry MCP server running');
+  console.error('LMF MCP server running');
 }
 
 main().catch(console.error);

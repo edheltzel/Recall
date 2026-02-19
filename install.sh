@@ -281,30 +281,30 @@ configure_mcp() {
     mkdir -p "$CLAUDE_DIR"
 
     if [[ -f "$mcp_file" ]]; then
-        # Check if memory-larry already configured
-        if grep -q "memory-larry" "$mcp_file"; then
-            log_success "MCP already configured for memory-larry"
+        # Check if lmf-memory already configured
+        if grep -q "lmf-memory" "$mcp_file"; then
+            log_success "MCP already configured for lmf-memory"
             return
         fi
 
         # Need to merge into existing config
-        log_info "Merging memory-larry into existing MCP config..."
+        log_info "Merging lmf-memory into existing MCP config..."
 
         # Use node to safely merge JSON
         node -e "
             const fs = require('fs');
             const config = JSON.parse(fs.readFileSync('$mcp_file', 'utf8'));
             config.mcpServers = config.mcpServers || {};
-            config.mcpServers['memory-larry'] = { command: 'mem-mcp', args: [] };
+            config.mcpServers['lmf-memory'] = { command: 'mem-mcp', args: [] };
             fs.writeFileSync('$mcp_file', JSON.stringify(config, null, 2));
         "
-        log_success "Merged memory-larry into existing MCP config"
+        log_success "Merged lmf-memory into existing MCP config"
     else
         # Create fresh config
         cat > "$mcp_file" << 'EOF'
 {
   "mcpServers": {
-    "memory-larry": {
+    "lmf-memory": {
       "command": "mem-mcp",
       "args": []
     }
@@ -362,7 +362,7 @@ do_install() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║                    LMF3 INSTALLER                            ║"
-    echo "║         Larry Memory Framework for Claude Code               ║"
+    echo "║         LMF - Persistent Memory for Claude Code               ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
 
@@ -386,17 +386,7 @@ do_install() {
     log_success "Dependencies installed"
     echo ""
 
-    # Step 3: Rebuild native modules
-    log_info "Step 3: Rebuilding native SQLite module..."
-    if ! npm rebuild better-sqlite3; then
-        log_error "Failed to rebuild native modules"
-        log_info "Try running: npm rebuild better-sqlite3 (manually)"
-        exit 1
-    fi
-    log_success "Native modules rebuilt"
-    echo ""
-
-    # Step 4: Build
+    # Step 3: Build
     log_info "Step 4: Building..."
     if ! bun run build; then
         log_error "Build failed"
@@ -406,28 +396,30 @@ do_install() {
     log_success "Build complete"
     echo ""
 
-    # Step 5: Link globally
-    log_info "Step 5: Linking globally (requires sudo)..."
-    if ! sudo npm link; then
-        log_error "Failed to link globally"
-        log_info "Try running: sudo npm link (manually)"
-        exit 1
+    # Step 4: Link globally
+    log_info "Step 4: Linking globally..."
+    if ! bun link; then
+        log_warn "bun link failed, trying npm link (may need sudo)..."
+        if ! sudo npm link; then
+            log_error "Failed to link globally"
+            exit 1
+        fi
     fi
     log_success "Linked: mem and mem-mcp now available globally"
     echo ""
 
-    # Step 6: Initialize database
-    log_info "Step 6: Initializing database..."
+    # Step 5: Initialize database
+    log_info "Step 5: Initializing database..."
     mem init
     echo ""
 
-    # Step 7: Configure MCP
-    log_info "Step 7: Configuring MCP server..."
+    # Step 6: Configure MCP
+    log_info "Step 6: Configuring MCP server..."
     configure_mcp
     echo ""
 
-    # Step 8: Configure CLAUDE.md
-    log_info "Step 8: Configuring CLAUDE.md..."
+    # Step 7: Configure CLAUDE.md
+    log_info "Step 7: Configuring CLAUDE.md..."
     configure_claude_md
     echo ""
 

@@ -10,7 +10,7 @@ export function runStats(): void {
   const sizeKb = (stats.db_size_bytes / 1024).toFixed(1);
   const sizeMb = (stats.db_size_bytes / (1024 * 1024)).toFixed(2);
 
-  console.log('Memory Larry 3.0 Statistics');
+  console.log('LMF 4.0 Statistics');
   console.log('===========================\n');
 
   console.log(`Database: ${dbPath}`);
