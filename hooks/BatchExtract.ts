@@ -16,13 +16,14 @@
  * See install instructions in the cron setup section below.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 
 const CLAUDE_DIR = join(process.env.HOME!, '.claude');
 const PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
 const MEMORY_DIR = join(CLAUDE_DIR, 'MEMORY');
+mkdirSync(MEMORY_DIR, { recursive: true });
 const TRACKER_PATH = join(MEMORY_DIR, '.extraction_tracker.json');
 const FABRIC_EXTRACT = join(CLAUDE_DIR, 'hooks', 'FabricExtract.hook.ts');
 const LOG_PATH = join(MEMORY_DIR, 'batch_extract.log');

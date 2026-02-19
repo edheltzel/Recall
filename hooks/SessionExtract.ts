@@ -27,13 +27,14 @@
  * - Runs asynchronously via self-spawn, non-blocking
  */
 
-import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { execSync, spawn } from 'child_process';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
 const MEMORY_DIR = join(process.env.HOME!, '.claude', 'MEMORY');
+mkdirSync(MEMORY_DIR, { recursive: true });
 const DISTILLED_PATH = join(MEMORY_DIR, 'DISTILLED.md');
 const HOT_RECALL_PATH = join(MEMORY_DIR, 'HOT_RECALL.md');
 const SESSION_INDEX_PATH = join(MEMORY_DIR, 'SESSION_INDEX.json');
