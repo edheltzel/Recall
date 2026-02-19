@@ -1,6 +1,6 @@
-// Database connection management for Memory Larry 3.0
+// Database connection management for LMF 4.0
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
@@ -8,14 +8,14 @@ import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_
 
 const DEFAULT_DB_PATH = join(homedir(), '.claude', 'memory.db');
 
-let db: Database.Database | null = null;
+let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
 
 export function getDbPath(): string {
   return process.env.MEM_DB_PATH || DEFAULT_DB_PATH;
 }
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   // Fast path: already initialized
   if (db) {
     return db;
@@ -25,7 +25,7 @@ export function getDb(): Database.Database {
   if (dbInitializing) {
     // Spin-wait (safe in Node.js single-threaded context)
     while (dbInitializing && !db) {
-      // In practice this should never spin because better-sqlite3 is synchronous
+      // In practice this should never spin because bun:sqlite is synchronous
     }
     if (db) return db;
   }
@@ -46,8 +46,8 @@ export function getDb(): Database.Database {
     }
 
     db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA foreign_keys = ON');
 
     return db;
   } finally {
@@ -67,8 +67,8 @@ export function initDb(): { created: boolean; path: string } {
   const alreadyExists = existsSync(dbPath);
 
   db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
 
   // Run schema creation (exec handles multiple statements)
   db.exec(CREATE_TABLES);

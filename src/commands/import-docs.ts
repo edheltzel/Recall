@@ -18,39 +18,19 @@ interface DocFile {
   fileModifiedAt: Date;
 }
 
-// Define valuable document sources
+// Define document sources to import
+// Users can customize this list to match their setup
 const DOCUMENT_SOURCES: { pattern: string; type: DocFile['type']; minSize?: number }[] = [
-  // Memory directory files
-  { pattern: 'MEMORY/DIARY.md', type: 'diary' },
-  { pattern: 'MEMORY/LARRY.md', type: 'memory' },
-  { pattern: 'MEMORY/JR.md', type: 'reference' },
+  // Memory directory files (created by LMF3 extraction pipeline)
+  { pattern: 'MEMORY/DISTILLED.md', type: 'memory' },
   { pattern: 'MEMORY/DECISIONS.log', type: 'memory' },
   { pattern: 'MEMORY/REJECTIONS.log', type: 'memory' },
-  { pattern: 'MEMORY/CAPABILITIES_REFERENCE.md', type: 'reference' },
-  { pattern: 'MEMORY/SKILL_TRIGGERS.md', type: 'reference' },
-  { pattern: 'MEMORY/OUTSTANDING_TOPICS.md', type: 'memory' },
-  { pattern: 'MEMORY/MEMORY_IMPROVEMENTS.md', type: 'memory' },
-  { pattern: 'MEMORY/THE-ALGORITHM-HABIT.md', type: 'reference' },
-  { pattern: 'MEMORY/SOULTOOLS.md', type: 'reference' },
-  { pattern: 'MEMORY/COMMIT_FORMAT.md', type: 'reference' },
-  { pattern: 'MEMORY/BLOCKED_PACKS.md', type: 'reference' },
-  { pattern: 'MEMORY/HISTORY.md', type: 'memory' },
-  { pattern: 'MEMORY/SKILL_PARITY_PLAN.md', type: 'plan' },
-
-  // Reference files
-  { pattern: 'reference/DANIELS_HUMAN3.0.md', type: 'reference' },
-  { pattern: 'reference/personnel.md', type: 'reference' },
-  { pattern: 'reference/ollama-integration-plan.md', type: 'plan' },
-  { pattern: 'reference/routing.md', type: 'reference' },
-
-  // Root level important files
-  { pattern: 'ENTERPRISE_LARRY_MEMORY.md', type: 'enterprise' },
-  { pattern: 'EXTERNAL_HEALTHCHECK_gemini_2026-01-25.md', type: 'reference' },
+  { pattern: 'MEMORY/HOT_RECALL.md', type: 'memory' },
 
   // Plans
   { pattern: 'plans/*.md', type: 'plan' },
 
-  // Wisdom extracts
+  // Wisdom extracts (from Fabric extract_wisdom)
   { pattern: 'History/wisdom/**/*_wisdom.md', type: 'wisdom' },
 ];
 
@@ -294,7 +274,7 @@ export function runDocsList(): void {
     ORDER BY type, title
   `).all() as { id: number; path: string; title: string; type: string; size_bytes: number; created_at: string }[];
 
-  console.log(`Documents in Memory Larry (${docs.length} total):\n`);
+  console.log(`Documents in LMF (${docs.length} total):\n`);
 
   let currentType = '';
   for (const doc of docs) {

@@ -1,4 +1,4 @@
-// Core memory operations for Memory Larry 3.0
+// Core memory operations for LMF 4.0
 
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
@@ -10,17 +10,17 @@ export function createSession(session: Omit<Session, 'id'>): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO sessions (session_id, started_at, ended_at, summary, project, cwd, git_branch, model)
-    VALUES (@session_id, @started_at, @ended_at, @summary, @project, @cwd, @git_branch, @model)
+    VALUES ($session_id, $started_at, $ended_at, $summary, $project, $cwd, $git_branch, $model)
   `);
   const result = stmt.run({
-    session_id: session.session_id,
-    started_at: session.started_at,
-    ended_at: session.ended_at || null,
-    summary: session.summary || null,
-    project: session.project || null,
-    cwd: session.cwd || null,
-    git_branch: session.git_branch || null,
-    model: session.model || null
+    $session_id: session.session_id,
+    $started_at: session.started_at,
+    $ended_at: session.ended_at || null,
+    $summary: session.summary || null,
+    $project: session.project || null,
+    $cwd: session.cwd || null,
+    $git_branch: session.git_branch || null,
+    $model: session.model || null
   });
   return result.lastInsertRowid as number;
 }
@@ -48,14 +48,14 @@ export function addMessage(message: Omit<Message, 'id'>): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO messages (session_id, timestamp, role, content, project)
-    VALUES (@session_id, @timestamp, @role, @content, @project)
+    VALUES ($session_id, $timestamp, $role, $content, $project)
   `);
   const result = stmt.run({
-    session_id: message.session_id,
-    timestamp: message.timestamp,
-    role: message.role,
-    content: message.content,
-    project: message.project || null
+    $session_id: message.session_id,
+    $timestamp: message.timestamp,
+    $role: message.role,
+    $content: message.content,
+    $project: message.project || null
   });
   return result.lastInsertRowid as number;
 }
@@ -64,18 +64,18 @@ export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO messages (session_id, timestamp, role, content, project)
-    VALUES (@session_id, @timestamp, @role, @content, @project)
+    VALUES ($session_id, $timestamp, $role, $content, $project)
   `);
 
   const insertMany = db.transaction((msgs: Omit<Message, 'id'>[]) => {
     let count = 0;
     for (const msg of msgs) {
       stmt.run({
-        session_id: msg.session_id,
-        timestamp: msg.timestamp,
-        role: msg.role,
-        content: msg.content,
-        project: msg.project || null
+        $session_id: msg.session_id,
+        $timestamp: msg.timestamp,
+        $role: msg.role,
+        $content: msg.content,
+        $project: msg.project || null
       });
       count++;
     }
@@ -91,16 +91,16 @@ export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): numb
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status)
-    VALUES (@session_id, @category, @project, @decision, @reasoning, @alternatives, @status)
+    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status)
   `);
   const result = stmt.run({
-    session_id: decision.session_id || null,
-    category: decision.category || null,
-    project: decision.project || null,
-    decision: decision.decision,
-    reasoning: decision.reasoning || null,
-    alternatives: decision.alternatives || null,
-    status: decision.status || 'active'
+    $session_id: decision.session_id || null,
+    $category: decision.category || null,
+    $project: decision.project || null,
+    $decision: decision.decision,
+    $reasoning: decision.reasoning || null,
+    $alternatives: decision.alternatives || null,
+    $status: decision.status || 'active'
   });
   return result.lastInsertRowid as number;
 }
@@ -116,16 +116,16 @@ export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): numb
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags)
-    VALUES (@session_id, @category, @project, @problem, @solution, @prevention, @tags)
+    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags)
   `);
   const result = stmt.run({
-    session_id: learning.session_id || null,
-    category: learning.category || null,
-    project: learning.project || null,
-    problem: learning.problem,
-    solution: learning.solution || null,
-    prevention: learning.prevention || null,
-    tags: learning.tags || null
+    $session_id: learning.session_id || null,
+    $category: learning.category || null,
+    $project: learning.project || null,
+    $problem: learning.problem,
+    $solution: learning.solution || null,
+    $prevention: learning.prevention || null,
+    $tags: learning.tags || null
   });
   return result.lastInsertRowid as number;
 }
@@ -141,15 +141,15 @@ export function addBreadcrumb(breadcrumb: Omit<Breadcrumb, 'id' | 'created_at'>)
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at)
-    VALUES (@session_id, @content, @category, @project, @importance, @expires_at)
+    VALUES ($session_id, $content, $category, $project, $importance, $expires_at)
   `);
   const result = stmt.run({
-    session_id: breadcrumb.session_id || null,
-    content: breadcrumb.content,
-    category: breadcrumb.category || null,
-    project: breadcrumb.project || null,
-    importance: breadcrumb.importance ?? 5,
-    expires_at: breadcrumb.expires_at || null
+    $session_id: breadcrumb.session_id || null,
+    $content: breadcrumb.content,
+    $category: breadcrumb.category || null,
+    $project: breadcrumb.project || null,
+    $importance: breadcrumb.importance ?? 5,
+    $expires_at: breadcrumb.expires_at || null
   });
   return result.lastInsertRowid as number;
 }
@@ -324,19 +324,19 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count)
-    VALUES (@title, @description, @fabric_extract, @message_range_start, @message_range_end, @parent_loa_id, @session_id, @project, @tags, @message_count)
+    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count)
   `);
   const result = stmt.run({
-    title: entry.title,
-    description: entry.description || null,
-    fabric_extract: entry.fabric_extract,
-    message_range_start: entry.message_range_start || null,
-    message_range_end: entry.message_range_end || null,
-    parent_loa_id: entry.parent_loa_id || null,
-    session_id: entry.session_id || null,
-    project: entry.project || null,
-    tags: entry.tags || null,
-    message_count: entry.message_count || null
+    $title: entry.title,
+    $description: entry.description || null,
+    $fabric_extract: entry.fabric_extract,
+    $message_range_start: entry.message_range_start || null,
+    $message_range_end: entry.message_range_end || null,
+    $parent_loa_id: entry.parent_loa_id || null,
+    $session_id: entry.session_id || null,
+    $project: entry.project || null,
+    $tags: entry.tags || null,
+    $message_count: entry.message_count || null
   });
   return result.lastInsertRowid as number;
 }

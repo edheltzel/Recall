@@ -233,7 +233,7 @@ function runFabricExtract(content: string): string {
   }
 
   try {
-    const result = execSync('fabric --pattern extract_wisdom --stream -m claude-3-5-haiku-latest', {
+    const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
       input: content,
       encoding: 'utf-8',
       maxBuffer: MAX_FABRIC_INPUT_BYTES, // 50MB buffer

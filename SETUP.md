@@ -17,7 +17,7 @@ sudo apt-get install -y nodejs npm unzip build-essential git
 **Required:**
 1. **Node.js 18+** - For building and running
 2. **Bun** (preferred) or npm - Package management
-3. **build-essential** - For compiling native SQLite bindings
+3. **Claude Code** - The Anthropic CLI that LMF3 extends
 
 **Optional (for LoA wisdom extraction):**
 4. **Fabric CLI** - For `mem loa write` and `mem dump` commands
@@ -33,17 +33,12 @@ source ~/.bashrc
 ### Install LMF3
 
 ```bash
-cd ~/Projects/LMF3.x
+cd ~/Projects/LMF3
 
 # Install dependencies
 bun install
 
 # Build
-bun run build
-
-# IMPORTANT: If you copied this repo from another machine,
-# rebuild native modules for your Node version:
-npm rebuild better-sqlite3
 bun run build
 
 # Link CLI globally
@@ -68,7 +63,7 @@ Create or update `~/.claude/.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "memory-larry": {
+    "lmf-memory": {
       "command": "mem-mcp",
       "args": []
     }
@@ -305,7 +300,7 @@ memory_add(
 
 TELOS structures your AI's purpose and goals.
 
-#### Import from LARRY.md
+#### Import from Identity Document
 
 If you have a structured purpose document:
 
@@ -375,7 +370,7 @@ mem docs show 1
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MEM_DB_PATH` | `~/.claude/memory.db` | Database location |
-| `OLLAMA_URL` | `http://nano:11434` | Ollama server for embeddings |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server for embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model |
 
 ---
@@ -402,19 +397,6 @@ mem export > memory-export.json
 mem init
 ```
 
-### "NODE_MODULE_VERSION mismatch" / "was compiled against a different Node.js version"
-
-This happens when:
-- You copied node_modules from another machine
-- You upgraded Node.js
-
-**Fix:**
-```bash
-cd ~/Projects/LMF3.x
-npm rebuild better-sqlite3
-bun run build  # Rebuild after native module fix
-```
-
 ### "Bun install fails - unzip required"
 ```bash
 sudo apt-get install -y unzip
@@ -435,19 +417,12 @@ fabric --setup
 echo "test" | fabric --pattern extract_wisdom
 ```
 
-### "better-sqlite3 binding issues"
-After Node version changes:
-```bash
-npm rebuild better-sqlite3
-bun run build
-```
-
 ### "MCP server not connecting"
 1. Check `~/.claude/.mcp.json` syntax:
 ```json
 {
   "mcpServers": {
-    "memory-larry": {
+    "lmf-memory": {
       "command": "mem-mcp",
       "args": []
     }
@@ -488,7 +463,7 @@ which bun
 bun --version
 
 # 3. LMF3 built
-ls ~/Projects/LMF3.x/dist/  # Should have .js files
+ls ~/Projects/LMF3/dist/  # Should have .js files
 
 # 4. CLI linked
 which mem mem-mcp

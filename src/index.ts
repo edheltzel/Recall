@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Memory Larry 3.0 - Enterprise AI Memory System
+// LMF 4.0 - Persistent AI Memory System
 // CLI entry point
 
 import { Command } from 'commander';
@@ -23,8 +23,8 @@ const program = new Command();
 
 program
   .name('mem')
-  .description('Memory Larry 3.0 - Enterprise AI Memory System')
-  .version('3.0.0');
+  .description('LMF 4.0 - Persistent AI Memory System')
+  .version('4.0.0');
 
 // mem init
 program
@@ -225,7 +225,7 @@ const telosCmd = program
 
 telosCmd
   .command('import')
-  .description('Import TELOS sections from LARRY.md')
+  .description('Import TELOS sections from identity document')
   .option('--dry-run', 'Preview what would be imported')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-y, --yes', 'Confirm import')
