@@ -8,7 +8,7 @@
     "mem-mcp": "./dist/mcp-server.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/mcp-server.ts --format esm --dts --clean --external bun:sqlite",
+    "build": "tsup src/index.ts src/mcp-server.ts --format esm --dts --clean --external bun:sqlite && sed -i '1s|#!/usr/bin/env node|#!/usr/bin/env bun|' dist/index.js dist/mcp-server.js",
     "dev": "tsup src/index.ts src/mcp-server.ts --format esm --watch --external bun:sqlite",
     "test": "vitest",
     "lint": "tsc --noEmit"
