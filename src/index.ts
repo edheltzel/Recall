@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-// LMF 4.0 - Persistent AI Memory System
+// LMF - Persistent AI Memory System
 // CLI entry point
 
 import { Command } from 'commander';
+import { VERSION, DISPLAY_NAME } from './version.js';
 import { runInit } from './commands/init.js';
 import { runAddBreadcrumb, runAddDecision, runAddLearning } from './commands/add.js';
 import { runSearch } from './commands/search.js';
@@ -23,8 +24,8 @@ const program = new Command();
 
 program
   .name('mem')
-  .description('LMF 4.0 - Persistent AI Memory System')
-  .version('4.0.0');
+  .description(`${DISPLAY_NAME} - Persistent AI Memory System`)
+  .version(VERSION);
 
 // mem init
 program

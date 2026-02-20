@@ -1,4 +1,4 @@
-// Database connection management for LMF 4.0
+// Database connection management for LMF
 
 import { Database } from 'bun:sqlite';
 import { homedir } from 'os';

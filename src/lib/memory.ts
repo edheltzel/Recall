@@ -1,4 +1,4 @@
-// Core memory operations for LMF 4.0
+// Core memory operations for LMF
 
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';

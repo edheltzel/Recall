@@ -2,6 +2,7 @@
 
 import { getStats } from '../lib/memory.js';
 import { getDbPath } from '../db/connection.js';
+import { DISPLAY_NAME } from '../version.js';
 
 export function runStats(): void {
   const stats = getStats();
@@ -10,7 +11,7 @@ export function runStats(): void {
   const sizeKb = (stats.db_size_bytes / 1024).toFixed(1);
   const sizeMb = (stats.db_size_bytes / (1024 * 1024)).toFixed(2);
 
-  console.log('LMF 4.0 Statistics');
+  console.log(`${DISPLAY_NAME} Statistics`);
   console.log('===========================\n');
 
   console.log(`Database: ${dbPath}`);
