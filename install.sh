@@ -271,39 +271,68 @@ check_prerequisites() {
     fi
 
     log_success "Prerequisites OK (node, bun, npm)"
+
+    # Warn if cloned to a temporary directory (bun link will break on reboot)
+    local install_dir="$(pwd)"
+    if [[ "$install_dir" == /tmp/* ]] || [[ "$install_dir" == /var/tmp/* ]]; then
+        echo ""
+        log_warn "LMF3 is in a temporary directory ($install_dir)!"
+        log_warn "bun link creates symlinks back here — if this directory"
+        log_warn "is cleaned (e.g. on reboot), 'mem' commands will break."
+        log_warn "Recommended: clone to ~/Projects/LMF3 instead."
+        echo ""
+    fi
+
+    # Warn about ANTHROPIC_API_KEY for session extraction
+    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        echo ""
+        log_warn "ANTHROPIC_API_KEY is not set."
+        log_warn "Session extraction hooks need this to analyze conversations."
+        log_warn "Core memory (search, add, stats) works without it."
+        log_warn "Set it: echo 'export ANTHROPIC_API_KEY=\"sk-ant-...\"' >> ~/.bashrc"
+        echo ""
+    fi
 }
 
 #
 # CONFIGURE MCP
 #
 configure_mcp() {
-    local mcp_file="$CLAUDE_DIR/.mcp.json"
     local mem_mcp_path="$HOME/.bun/bin/mem-mcp"
 
     mkdir -p "$CLAUDE_DIR"
 
-    if [[ -f "$mcp_file" ]]; then
-        # Check if lmf-memory already configured
-        if grep -q "lmf-memory" "$mcp_file"; then
+    # Check if already registered via claude mcp list
+    if command -v claude &> /dev/null; then
+        if claude mcp list 2>/dev/null | grep -q "lmf-memory"; then
             log_success "MCP already configured for lmf-memory"
             return
         fi
 
-        # Need to merge into existing config
-        log_info "Merging lmf-memory into existing MCP config..."
-
-        # Use node to safely merge JSON (full path for reliability)
-        node -e "
-            const fs = require('fs');
-            const config = JSON.parse(fs.readFileSync('$mcp_file', 'utf8'));
-            config.mcpServers = config.mcpServers || {};
-            config.mcpServers['lmf-memory'] = { command: '$mem_mcp_path', args: [] };
-            fs.writeFileSync('$mcp_file', JSON.stringify(config, null, 2));
-        "
-        log_success "Merged lmf-memory into existing MCP config"
+        # Register via Claude Code CLI (writes to ~/.claude.json correctly)
+        log_info "Registering lmf-memory MCP server..."
+        if claude mcp add -s user lmf-memory "$mem_mcp_path" 2>/dev/null; then
+            log_success "Registered lmf-memory MCP server via Claude Code CLI"
+        else
+            log_warn "claude mcp add failed — writing fallback .mcp.json"
+            _write_mcp_json "$mem_mcp_path"
+        fi
     else
-        # Create fresh config (use full path so MCP works regardless of PATH)
-        cat > "$mcp_file" << MCPEOF
+        # Claude Code not installed yet — write .mcp.json as fallback
+        log_warn "Claude Code CLI not found — writing .mcp.json (run 'claude mcp add -s user lmf-memory $mem_mcp_path' after installing Claude Code)"
+        _write_mcp_json "$mem_mcp_path"
+    fi
+}
+
+_write_mcp_json() {
+    local mem_mcp_path="$1"
+    local mcp_file="$CLAUDE_DIR/.mcp.json"
+
+    if [[ -f "$mcp_file" ]] && grep -q "lmf-memory" "$mcp_file"; then
+        return
+    fi
+
+    cat > "$mcp_file" << MCPEOF
 {
   "mcpServers": {
     "lmf-memory": {
@@ -313,8 +342,6 @@ configure_mcp() {
   }
 }
 MCPEOF
-        log_success "Created MCP config"
-    fi
 }
 
 #
