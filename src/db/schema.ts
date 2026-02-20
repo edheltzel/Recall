@@ -1,4 +1,4 @@
-// Database schema for LMF 4.0
+// Database schema for LMF
 
 export const SCHEMA_VERSION = 2; // Bumped for vector search
 

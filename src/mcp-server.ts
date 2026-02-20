@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-// LMF 4.0 - MCP Server
+// LMF - MCP Server
 // Exposes memory as first-class tools for Claude Code
 
 import { appendFileSync, existsSync as fsExistsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { VERSION } from './version.js';
 
 /**
  * Memory usage logging for metrics and enforcement tracking
@@ -189,7 +190,7 @@ if (!existsSync(dbPath)) {
 
 const server = new McpServer({
   name: 'lmf-memory',
-  version: '4.0.0'
+  version: VERSION
 });
 
 // Tool: memory_search - Full-text search across all memory
@@ -443,7 +444,7 @@ server.tool(
       const stats = getStats();
       const sizeMB = (stats.db_size_bytes / 1024 / 1024).toFixed(2);
 
-      const output = `## LMF 4.0 Stats
+      const output = `## LMF ${VERSION} Stats
 
 | Metric | Count |
 |--------|-------|

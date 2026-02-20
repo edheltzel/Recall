@@ -1,4 +1,4 @@
-// Project detection for LMF 4.0
+// Project detection for LMF
 
 import { execSync } from 'child_process';
 import { basename, isAbsolute, resolve } from 'path';

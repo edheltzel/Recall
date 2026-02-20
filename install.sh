@@ -278,6 +278,7 @@ check_prerequisites() {
 #
 configure_mcp() {
     local mcp_file="$CLAUDE_DIR/.mcp.json"
+    local mem_mcp_path="$HOME/.bun/bin/mem-mcp"
 
     mkdir -p "$CLAUDE_DIR"
 
@@ -291,27 +292,27 @@ configure_mcp() {
         # Need to merge into existing config
         log_info "Merging lmf-memory into existing MCP config..."
 
-        # Use node to safely merge JSON
+        # Use node to safely merge JSON (full path for reliability)
         node -e "
             const fs = require('fs');
             const config = JSON.parse(fs.readFileSync('$mcp_file', 'utf8'));
             config.mcpServers = config.mcpServers || {};
-            config.mcpServers['lmf-memory'] = { command: 'mem-mcp', args: [] };
+            config.mcpServers['lmf-memory'] = { command: '$mem_mcp_path', args: [] };
             fs.writeFileSync('$mcp_file', JSON.stringify(config, null, 2));
         "
         log_success "Merged lmf-memory into existing MCP config"
     else
-        # Create fresh config
-        cat > "$mcp_file" << 'EOF'
+        # Create fresh config (use full path so MCP works regardless of PATH)
+        cat > "$mcp_file" << MCPEOF
 {
   "mcpServers": {
     "lmf-memory": {
-      "command": "mem-mcp",
+      "command": "$mem_mcp_path",
       "args": []
     }
   }
 }
-EOF
+MCPEOF
         log_success "Created MCP config"
     fi
 }
