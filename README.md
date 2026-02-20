@@ -78,19 +78,7 @@ npm install -g @anthropic-ai/claude-code
 - **Source:** [https://docs.anthropic.com/en/docs/claude-code](https://docs.anthropic.com/en/docs/claude-code)
 - **Required:** Active Anthropic API subscription or Claude Pro/Max plan
 
-### 5. Anthropic API Key
-
-The session extraction hook uses Claude Haiku to parse conversations. Set this in your shell profile:
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-- **Get yours:** [https://console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
-- **Cost:** Extraction uses `claude-haiku-4-5` — typically < $0.01 per session extraction
-- **Note:** If you use Claude Code with a Pro/Max plan, you still need a separate API key for the extraction hook (it runs outside Claude Code's session)
-
-### 6. Fabric (Optional but Recommended)
+### 5. Fabric (Optional but Recommended)
 
 Fabric provides the `extract_wisdom` pattern used for rich LoA (Library of Alexandria) entries. LMF3 falls back to an inline prompt if Fabric isn't available, but Fabric extractions are higher quality.
 
@@ -412,7 +400,6 @@ cp ~/.claude/memory.db ~/.claude/memory.db.backup
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ANTHROPIC_API_KEY` | (required) | API key for Haiku-based session extraction |
 | `MEM_DB_PATH` | `~/.claude/memory.db` | Database file location |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model for vector embeddings (768-dim) |
@@ -462,7 +449,7 @@ echo "test" | fabric --pattern extract_wisdom
 2. Check hook file exists: `ls ~/.claude/hooks/SessionExtract.ts`
 3. Check bun is accessible: `~/.bun/bin/bun --version`
 4. Check extraction log: `cat ~/.claude/MEMORY/EXTRACT_LOG.txt`
-5. Check API key is set: `echo $ANTHROPIC_API_KEY`
+5. Check claude CLI is available: `which claude`
 
 ### "Embedding service unavailable"
 Embeddings are optional. Hybrid search falls back to FTS5-only automatically.

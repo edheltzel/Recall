@@ -20,7 +20,7 @@
  * FLOW:
  * 1. Get current session's conversation JSONL
  * 2. Extract just the message content (skip metadata)
- * 3. Extract via Anthropic API (claude-haiku-4-5) with fabric pattern (fallback: Ollama local LLM)
+ * 3. Extract via claude CLI using Claude Code's auth (fallback: Ollama local LLM)
  * 4. Parse output and update all 6 memory files
  *
  * PERFORMANCE:
@@ -47,9 +47,8 @@ const DEDUP_PATH = join(MEMORY_DIR, '.last_extracted_hash');
 
 const HOT_RECALL_MAX_SESSIONS = 10;
 
-// Anthropic API (primary extraction)
-const ANTHROPIC_MODEL = "claude-haiku-4-5-20241022";
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+// Claude CLI extraction (uses Claude Code's existing auth — no API key needed)
+const CLAUDE_CLI_MODEL = "haiku";
 const EXTRACT_PATTERN_PATH = join(MEMORY_DIR, 'extract_prompt.md');
 
 // Local Ollama LLM fallback (configure OLLAMA_URL env var or defaults to localhost)
@@ -607,18 +606,22 @@ function extractWithOllama(messages: string): string | null {
 }
 
 /**
- * Get Anthropic API key from environment or .bashrc
+ * Find the claude CLI binary
  */
-function getAnthropicApiKey(): string | null {
-  // Check environment first
-  if (process.env.ANTHROPIC_API_KEY) {
-    return process.env.ANTHROPIC_API_KEY;
+function findClaudeCli(): string | null {
+  const candidates = [
+    '/usr/local/bin/claude',
+    '/usr/bin/claude',
+    join(process.env.HOME!, '.npm-global', 'bin', 'claude'),
+    join(process.env.HOME!, '.local', 'bin', 'claude'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
   }
-  // Fall back to parsing .bashrc (key may be commented out with ### or exported)
+  // Try PATH lookup
   try {
-    const bashrc = readFileSync(join(process.env.HOME!, '.bashrc'), 'utf-8');
-    const match = bashrc.match(/^(?:###)?export\s+ANTHROPIC_API_KEY=(sk-ant-[^\s\n]+)/m);
-    if (match) return match[1];
+    const which = execSync('which claude 2>/dev/null', { encoding: 'utf-8' }).trim();
+    if (which) return which;
   } catch {}
   return null;
 }
@@ -657,13 +660,14 @@ Extract ONLY what actually happened. Follow this format EXACTLY:
 }
 
 /**
- * Extract using Anthropic's Claude API (primary method)
- * Uses claude-haiku-4-5 for cost-effective, high-quality extraction
+ * Extract using the claude CLI (primary method)
+ * Uses Claude Code's existing authentication — no separate API key needed.
+ * Calls `claude -p --model haiku` with the extraction prompt piped via stdin.
  */
-async function extractWithAnthropic(messages: string): Promise<string | null> {
-  const apiKey = getAnthropicApiKey();
-  if (!apiKey) {
-    console.error("[FabricExtract] No ANTHROPIC_API_KEY found (checked env and .bashrc)");
+async function extractWithClaude(messages: string): Promise<string | null> {
+  const claudePath = findClaudeCli();
+  if (!claudePath) {
+    console.error("[FabricExtract] claude CLI not found in PATH");
     return null;
   }
 
@@ -676,44 +680,29 @@ async function extractWithAnthropic(messages: string): Promise<string | null> {
     ? messages.slice(-maxChars)
     : messages;
 
+  const userMessage = `${systemPrompt}\n\n---\n\nExtract the key information from this AI coding session transcript:\n\n${truncated}`;
+
   try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: `Extract the key information from this AI coding session transcript:\n\n${truncated}`
-          }
-        ]
-      })
-    });
+    const result = execSync(
+      `"${claudePath}" -p --model ${CLAUDE_CLI_MODEL} --output-format text`,
+      {
+        input: userMessage,
+        encoding: 'utf-8',
+        timeout: 300000, // 5 minute timeout
+        maxBuffer: 10 * 1024 * 1024,
+      }
+    );
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`[FabricExtract] Anthropic API error ${response.status}: ${errText.slice(0, 200)}`);
-      return null;
+    const text = result?.trim();
+    if (text && text.length > 50) {
+      console.error(`[FabricExtract] Claude CLI extraction successful (model=${CLAUDE_CLI_MODEL}, ${text.length} chars)`);
+      logExtract(`Claude CLI extraction successful: model=${CLAUDE_CLI_MODEL}, output_chars=${text.length}`);
+      return text;
     }
-
-    const data = await response.json() as any;
-    const text = data?.content?.[0]?.text;
-    if (text && text.trim().length > 50) {
-      console.error(`[FabricExtract] Anthropic extraction successful (${ANTHROPIC_MODEL}, ${data.usage?.input_tokens || '?'} in / ${data.usage?.output_tokens || '?'} out)`);
-      logExtract(`Anthropic extraction successful: model=${ANTHROPIC_MODEL}, input_tokens=${data.usage?.input_tokens || '?'}, output_tokens=${data.usage?.output_tokens || '?'}`);
-      return text.trim();
-    }
-    console.error("[FabricExtract] Anthropic returned empty/short response");
+    console.error("[FabricExtract] Claude CLI returned empty/short response");
     return null;
   } catch (error: any) {
-    console.error(`[FabricExtract] Anthropic extraction failed: ${error.message}`);
+    console.error(`[FabricExtract] Claude CLI extraction failed: ${error.message}`);
     return null;
   }
 }
@@ -722,7 +711,10 @@ async function extractWithAnthropic(messages: string): Promise<string | null> {
  * Chunked extraction for large files (>120K chars of messages)
  * Splits messages into chunks, extracts each, then meta-extracts a final summary
  */
-async function extractWithAnthropicChunked(messages: string): Promise<string | null> {
+async function extractWithClaudeChunked(messages: string): Promise<string | null> {
+  const claudePath = findClaudeCli();
+  if (!claudePath) return null;
+
   const CHUNK_SIZE = 80000; // ~20K tokens per chunk, well within limits
   const chunks: string[] = [];
 
@@ -745,7 +737,7 @@ async function extractWithAnthropicChunked(messages: string): Promise<string | n
   const partials: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     console.error(`[FabricExtract] CHUNKED: Extracting chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
-    const result = await extractWithAnthropic(chunks[i]);
+    const result = await extractWithClaude(chunks[i]);
     if (result) {
       partials.push(`--- Chunk ${i + 1}/${chunks.length} ---\n${result}`);
     }
@@ -763,8 +755,6 @@ async function extractWithAnthropicChunked(messages: string): Promise<string | n
   // Meta-extract: merge partial extractions into final summary
   console.error(`[FabricExtract] CHUNKED: Meta-extracting ${partials.length} partial results`);
   const mergePrompt = partials.join('\n\n');
-  const apiKey = getAnthropicApiKey();
-  if (!apiKey) return partials.map(p => p.replace(/^--- Chunk \d+\/\d+ ---\n/, '')).join('\n\n');
 
   const systemPrompt = `You are merging multiple partial session extractions into one coherent summary. Combine all findings, deduplicate, and output in this exact format:
 
@@ -786,32 +776,24 @@ async function extractWithAnthropicChunked(messages: string): Promise<string | n
 ## SESSION CONTEXT
 [One comprehensive sentence about the full session's impact]`;
 
-  try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: [{
-          role: 'user',
-          content: `Merge these ${partials.length} partial extractions into one comprehensive summary:\n\n${mergePrompt}`
-        }]
-      })
-    });
+  const userMessage = `${systemPrompt}\n\n---\n\nMerge these ${partials.length} partial extractions into one comprehensive summary:\n\n${mergePrompt}`;
 
-    if (!response.ok) return partials.map(p => p.replace(/^--- Chunk \d+\/\d+ ---\n/, '')).join('\n\n');
-    const data = await response.json() as any;
-    const text = data?.content?.[0]?.text;
-    if (text && text.trim().length > 50) {
+  try {
+    const result = execSync(
+      `"${claudePath}" -p --model ${CLAUDE_CLI_MODEL} --output-format text`,
+      {
+        input: userMessage,
+        encoding: 'utf-8',
+        timeout: 300000,
+        maxBuffer: 10 * 1024 * 1024,
+      }
+    );
+
+    const text = result?.trim();
+    if (text && text.length > 50) {
       console.error(`[FabricExtract] CHUNKED: Meta-extraction successful`);
-      logExtract(`CHUNKED: Meta-extraction successful, ${data.usage?.input_tokens || '?'} in / ${data.usage?.output_tokens || '?'} out`);
-      return text.trim();
+      logExtract(`CHUNKED: Meta-extraction successful, output_chars=${text.length}`);
+      return text;
     }
   } catch (err: any) {
     console.error(`[FabricExtract] CHUNKED: Meta-extraction failed: ${err.message}`);
@@ -844,25 +826,25 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
 
     let extracted: string = "";
 
-    // Attempt 1: Anthropic API (high quality, follows instructions reliably)
+    // Attempt 1: Claude CLI (uses Claude Code's existing auth — no API key needed)
     // Use chunked extraction for large files (>120K chars)
     if (messages.length > 120000) {
       console.error(`[FabricExtract] Large file (${messages.length} chars), using chunked extraction...`);
-      const chunkedResult = await extractWithAnthropicChunked(messages);
+      const chunkedResult = await extractWithClaudeChunked(messages);
       if (chunkedResult) {
         extracted = chunkedResult;
       }
     } else {
-      console.error("[FabricExtract] Trying Anthropic API extraction...");
-      const anthropicResult = await extractWithAnthropic(messages);
-      if (anthropicResult) {
-        extracted = anthropicResult;
+      console.error("[FabricExtract] Trying Claude CLI extraction...");
+      const claudeResult = await extractWithClaude(messages);
+      if (claudeResult) {
+        extracted = claudeResult;
       }
     }
 
     // Attempt 2: Local Ollama LLM fallback (free, lower quality)
     if (!extracted) {
-      console.error("[FabricExtract] Anthropic failed, trying local Ollama LLM fallback...");
+      console.error("[FabricExtract] Claude CLI failed, trying local Ollama LLM fallback...");
       const ollamaResult = extractWithOllama(messages);
       if (ollamaResult) {
         extracted = ollamaResult;
