@@ -6,7 +6,7 @@ import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 
-const PAI_DIR = process.env.PAI_DIR || join(homedir(), '.claude');
+const LMF_BASE_DIR = process.env.LMF_BASE_DIR || join(homedir(), '.claude');
 
 interface DocFile {
   path: string;
@@ -113,7 +113,7 @@ function collectDocuments(): DocFile[] {
   const seen = new Set<string>();
 
   for (const source of DOCUMENT_SOURCES) {
-    const files = findFiles(PAI_DIR, source.pattern);
+    const files = findFiles(LMF_BASE_DIR, source.pattern);
 
     for (const filePath of files) {
       if (seen.has(filePath)) continue;
@@ -126,7 +126,7 @@ function collectDocuments(): DocFile[] {
         if (stats.size < minSize) continue;
 
         const content = readFileSync(filePath, 'utf-8');
-        const relativePath = filePath.replace(PAI_DIR + '/', '');
+        const relativePath = filePath.replace(LMF_BASE_DIR + '/', '');
 
         docs.push({
           path: relativePath,

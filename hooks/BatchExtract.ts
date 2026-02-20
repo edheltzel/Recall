@@ -159,10 +159,13 @@ function findCandidates(
  * Reverses the encoding: -home-user-Projects-my-project -> /home/user/Projects/my_project
  */
 function projectDirToCwd(projectDir: string): string {
-  // Remove leading dash, replace dashes with slashes
-  // But we need to be careful: double dashes in the original become single dashes
-  // The encoding is: path separators (/) become dashes, dots become dashes
-  // We'll use a simpler approach: just use the home directory as fallback
+  // Reverse Claude Code's path encoding: -home-user-Projects-foo → /home/user/Projects/foo
+  // The encoding converts / and _ to -, with a leading -
+  const decoded = '/' + projectDir.replace(/^-/, '').replace(/-/g, '/');
+  if (existsSync(decoded)) {
+    return decoded;
+  }
+  // Fallback if decoded path doesn't exist
   return process.env.HOME || '/tmp';
 }
 

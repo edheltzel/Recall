@@ -41,6 +41,7 @@ BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 FILES_TO_BACKUP=(
     "$CLAUDE_DIR/.mcp.json"
     "$CLAUDE_DIR/CLAUDE.md"
+    "$CLAUDE_DIR/settings.json"
     "$CLAUDE_DIR/memory.db"
 )
 
@@ -316,6 +317,84 @@ EOF
 }
 
 #
+# CONFIGURE HOOKS
+#
+configure_hooks() {
+    local hooks_dir="$CLAUDE_DIR/hooks"
+    local settings_file="$CLAUDE_DIR/settings.json"
+    local src_dir="$(pwd)/hooks"
+
+    mkdir -p "$hooks_dir"
+
+    # Copy hook files
+    if [[ -f "$src_dir/SessionExtract.ts" ]]; then
+        cp "$src_dir/SessionExtract.ts" "$hooks_dir/SessionExtract.ts"
+        log_success "Copied SessionExtract.ts to $hooks_dir"
+    else
+        log_warn "SessionExtract.ts not found in $src_dir — skipping hook setup"
+        return
+    fi
+
+    if [[ -f "$src_dir/BatchExtract.ts" ]]; then
+        cp "$src_dir/BatchExtract.ts" "$hooks_dir/BatchExtract.ts"
+        log_success "Copied BatchExtract.ts to $hooks_dir"
+    fi
+
+    # Register hook in settings.json
+    if [[ -f "$settings_file" ]]; then
+        if grep -q "SessionExtract" "$settings_file"; then
+            log_success "SessionExtract hook already registered in settings.json"
+            return
+        fi
+    fi
+
+    # Create or merge settings.json with hook registration
+    local bun_path="$HOME/.bun/bin/bun"
+    local hook_cmd="$bun_path run $hooks_dir/SessionExtract.ts"
+
+    if [[ -f "$settings_file" ]]; then
+        # Merge into existing settings using node
+        node -e "
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('$settings_file', 'utf8'));
+            config.hooks = config.hooks || {};
+            config.hooks.Stop = config.hooks.Stop || [];
+            const exists = config.hooks.Stop.some(e =>
+                e.hooks && e.hooks.some(h => h.command && h.command.includes('SessionExtract'))
+            );
+            if (!exists) {
+                config.hooks.Stop.push({
+                    matcher: '',
+                    hooks: [{ type: 'command', command: '$hook_cmd' }]
+                });
+            }
+            fs.writeFileSync('$settings_file', JSON.stringify(config, null, 2));
+        "
+        log_success "Registered SessionExtract hook in existing settings.json"
+    else
+        # Create new settings.json
+        cat > "$settings_file" << HOOKEOF
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hook_cmd"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKEOF
+        log_success "Created settings.json with SessionExtract hook"
+    fi
+}
+
+#
 # CONFIGURE CLAUDE.md
 #
 configure_claude_md() {
@@ -324,7 +403,7 @@ configure_claude_md() {
 
     local memory_section="## MEMORY
 
-You have persistent memory via LMF3. **Read the full guide:** $lmf3_dir/FOR_CLAUDE.md
+You have persistent memory via LMF3. **Read the full guide:** $CLAUDE_DIR/LMF3_GUIDE.md
 
 Core rules:
 1. Before asking user to repeat anything → search first with \`memory_search\`
@@ -420,8 +499,19 @@ do_install() {
     configure_mcp
     echo ""
 
-    # Step 7: Configure CLAUDE.md
-    log_info "Step 7: Configuring CLAUDE.md..."
+    # Step 7: Configure session extraction hooks
+    log_info "Step 7: Setting up session extraction hooks..."
+    configure_hooks
+    echo ""
+
+    # Step 8: Copy FOR_CLAUDE.md guide to stable location
+    log_info "Step 8: Installing Claude guide..."
+    cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/LMF3_GUIDE.md"
+    log_success "Installed LMF3 guide at $CLAUDE_DIR/LMF3_GUIDE.md"
+    echo ""
+
+    # Step 9: Configure CLAUDE.md
+    log_info "Step 9: Configuring CLAUDE.md..."
     configure_claude_md
     echo ""
 
@@ -436,12 +526,12 @@ do_install() {
     echo "To restore:      ./install.sh restore"
     echo ""
     echo "Next steps:"
-    echo "  1. Restart Claude Code to load MCP server"
-    echo "  2. Tell Claude: \"Read $(pwd)/FOR_CLAUDE.md\""
-    echo "  3. Test: mem stats"
-    echo ""
-    echo "(Optional) Install Fabric for session capture:"
-    echo "  https://github.com/danielmiessler/fabric"
+    echo "  1. Restart Claude Code to load MCP server and hooks"
+    echo "  2. Test: mem stats"
+    echo "  3. (Optional) Install Fabric for richer session extraction:"
+    echo "     https://github.com/danielmiessler/fabric"
+    echo "  4. (Optional) Set up cron for batch extraction of missed sessions:"
+    echo "     */30 * * * * $HOME/.bun/bin/bun run $CLAUDE_DIR/hooks/BatchExtract.ts --limit 20 >> /tmp/lmf3-batch.log 2>&1"
     echo ""
 }
 

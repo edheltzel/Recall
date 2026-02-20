@@ -20,7 +20,7 @@
  * FLOW:
  * 1. Get current session's conversation JSONL
  * 2. Extract just the message content (skip metadata)
- * 3. Extract via Anthropic API (claude-3-5-haiku) with fabric pattern (fallback: nano local LLM)
+ * 3. Extract via Anthropic API (claude-haiku-4-5) with fabric pattern (fallback: Ollama local LLM)
  * 4. Parse output and update all 6 memory files
  *
  * PERFORMANCE:
@@ -48,7 +48,7 @@ const DEDUP_PATH = join(MEMORY_DIR, '.last_extracted_hash');
 const HOT_RECALL_MAX_SESSIONS = 10;
 
 // Anthropic API (primary extraction)
-const ANTHROPIC_MODEL = "claude-3-5-haiku-20241022";
+const ANTHROPIC_MODEL = "claude-haiku-4-5-20241022";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const EXTRACT_PATTERN_PATH = join(MEMORY_DIR, 'extract_prompt.md');
 
@@ -658,7 +658,7 @@ Extract ONLY what actually happened. Follow this format EXACTLY:
 
 /**
  * Extract using Anthropic's Claude API (primary method)
- * Uses claude-3-5-haiku for cost-effective, high-quality extraction
+ * Uses claude-haiku-4-5 for cost-effective, high-quality extraction
  */
 async function extractWithAnthropic(messages: string): Promise<string | null> {
   const apiKey = getAnthropicApiKey();
@@ -1054,7 +1054,8 @@ async function main() {
 
     // Spawn self in background with --extract flag.
     // This way: session exits immediately AND all memory files get updated.
-    const child = spawn('bun', ['run', import.meta.path, '--extract', conversationPath, cwd], {
+    const bunPath = `${process.env.HOME}/.bun/bin/bun`;
+    const child = spawn(bunPath, ['run', import.meta.path, '--extract', conversationPath, cwd], {
       detached: true,
       stdio: 'ignore',
     });

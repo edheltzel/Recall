@@ -165,7 +165,7 @@ function parseTelosFile(filePath: string): TelosSection[] {
           parentCode: null
         };
       } else {
-        // Numbered sections like "1. PF (pi_forever)"
+        // Numbered sections like "1. My Project (MP)"
         const numberedMatch = headerText.match(/^(\d+)\.\s*(.+)$/);
         if (numberedMatch && currentType) {
           const num = numberedMatch[1];
