@@ -284,13 +284,12 @@ check_prerequisites() {
         echo ""
     fi
 
-    # Warn about ANTHROPIC_API_KEY for session extraction
-    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    # Verify claude CLI is available (used for session extraction)
+    if ! command -v claude &> /dev/null; then
         echo ""
-        log_warn "ANTHROPIC_API_KEY is not set."
-        log_warn "Session extraction hooks need this to analyze conversations."
-        log_warn "Core memory (search, add, stats) works without it."
-        log_warn "Set it: echo 'export ANTHROPIC_API_KEY=\"sk-ant-...\"' >> ~/.bashrc"
+        log_warn "Claude Code CLI not found."
+        log_warn "Session extraction uses 'claude -p' for parsing conversations."
+        log_warn "Install it: sudo npm install -g @anthropic-ai/claude-code"
         echo ""
     fi
 }

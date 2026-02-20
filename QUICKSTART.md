@@ -35,18 +35,7 @@ source ~/.bashrc
 sudo npm install -g @anthropic-ai/claude-code
 ```
 
-## 3. Set Anthropic API Key
-
-The extraction hook needs an API key to parse sessions:
-
-```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Get yours at: https://console.anthropic.com/settings/keys
-
-## 4. Install LMF3
+## 3. Install LMF3
 
 ```bash
 git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
@@ -56,13 +45,13 @@ cd ~/Projects/LMF3
 
 The installer handles everything: dependencies, build, database, MCP config, CLAUDE.md, and session extraction hooks.
 
-## 5. Restart Claude Code
+## 4. Restart Claude Code
 
 ```bash
 # Restart Claude Code to load the MCP server and hooks
 ```
 
-## 6. (Optional) Install Fabric
+## 5. (Optional) Install Fabric
 
 Fabric provides richer session analysis. Core memory works without it.
 
