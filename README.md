@@ -94,7 +94,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 - **Get yours:** [https://console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
-- **Cost:** Extraction uses `claude-3-5-haiku` — typically < $0.01 per session extraction
+- **Cost:** Extraction uses `claude-haiku-4-5` — typically < $0.01 per session extraction
 - **Note:** If you use Claude Code with a Pro/Max plan, you still need a separate API key for the extraction hook (it runs outside Claude Code's session)
 
 ### 6. Fabric (Optional but Recommended)
@@ -140,46 +140,26 @@ The installer will:
 4. Link `mem` and `mem-mcp` globally
 5. Initialize the SQLite database at `~/.claude/memory.db`
 6. Configure the MCP server in `~/.claude/.mcp.json`
-7. Add a MEMORY section to `~/.claude/CLAUDE.md`
+7. Set up session extraction hooks in `~/.claude/hooks/` and `~/.claude/settings.json`
+8. Copy the Claude guide to `~/.claude/LMF3_GUIDE.md`
+9. Add a MEMORY section to `~/.claude/CLAUDE.md`
 
 **After install:** Restart Claude Code to load the MCP server.
 
-### Setting Up Session Extraction
+### Session Extraction (Automatic)
 
-To enable automatic session extraction (the core value of LMF3), add the SessionExtract hook:
+The installer automatically sets up session extraction:
+- Copies `SessionExtract.ts` and `BatchExtract.ts` to `~/.claude/hooks/`
+- Registers the Stop hook in `~/.claude/settings.json`
 
-1. Copy the hooks to your Claude hooks directory:
-   ```bash
-   mkdir -p ~/.claude/hooks
-   cp hooks/SessionExtract.ts ~/.claude/hooks/FabricExtract.hook.ts
-   cp hooks/BatchExtract.ts ~/.claude/hooks/BatchExtract.ts
-   ```
+After installation, every session end triggers automatic extraction.
 
-2. Register the SessionEnd hook in `~/.claude/settings.json`:
-   ```json
-   {
-     "hooks": {
-       "Stop": [
-         {
-           "matcher": "",
-           "hooks": [
-             {
-               "type": "command",
-               "command": "bun run ~/.claude/hooks/FabricExtract.hook.ts"
-             }
-           ]
-         }
-       ]
-     }
-   }
-   ```
-
-3. (Optional) Set up cron for batch extraction of missed sessions:
-   ```bash
-   crontab -e
-   # Add this line (runs every 30 minutes):
-   */30 * * * * cd ~/.claude && ~/.bun/bin/bun run hooks/BatchExtract.ts --limit 20 >> /tmp/lmf3-batch.log 2>&1
-   ```
+**(Optional)** Set up cron for batch extraction of missed sessions:
+```bash
+crontab -e
+# Add this line (runs every 30 minutes):
+*/30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/BatchExtract.ts --limit 20 >> /tmp/lmf3-batch.log 2>&1
+```
 
 ---
 
@@ -293,6 +273,7 @@ The installer automatically backs up existing files before any changes.
 | `MEM_DB_PATH` | `~/.claude/memory.db` | Database location |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server for embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama embedding model |
+| `LMF3_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for extraction fallback (when Anthropic API unavailable) |
 
 ---
 

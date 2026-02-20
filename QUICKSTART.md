@@ -29,53 +29,42 @@ bash /tmp/bun-install.sh
 source ~/.bashrc
 ```
 
-## 2. Install LMF3
-
-```bash
-git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
-cd ~/Projects/LMF3
-
-# Install dependencies
-bun install
-
-# Build
-bun run build
-
-# Link globally
-sudo npm link
-
-# Initialize database
-mem init
-```
-
-## 3. Configure MCP (1 min)
-
-Create `~/.claude/.mcp.json`:
-
-```bash
-mkdir -p ~/.claude
-cat > ~/.claude/.mcp.json << 'EOF'
-{
-  "mcpServers": {
-    "lmf-memory": {
-      "command": "mem-mcp",
-      "args": []
-    }
-  }
-}
-EOF
-```
-
-## 4. Install Claude Code (if not installed)
+## 2. Install Claude Code (if not installed)
 
 ```bash
 sudo npm install -g @anthropic-ai/claude-code
 ```
 
-## 5. (Optional) Install Fabric
+## 3. Set Anthropic API Key
 
-Fabric is only needed for `mem dump` and `mem loa write` commands.
-Core memory features work without it.
+The extraction hook needs an API key to parse sessions:
+
+```bash
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Get yours at: https://console.anthropic.com/settings/keys
+
+## 4. Install LMF3
+
+```bash
+git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
+cd ~/Projects/LMF3
+./install.sh
+```
+
+The installer handles everything: dependencies, build, database, MCP config, CLAUDE.md, and session extraction hooks.
+
+## 5. Restart Claude Code
+
+```bash
+# Restart Claude Code to load the MCP server and hooks
+```
+
+## 6. (Optional) Install Fabric
+
+Fabric provides richer session analysis. Core memory works without it.
 
 ```bash
 # See https://github.com/danielmiessler/fabric for current install method
@@ -83,28 +72,16 @@ Core memory features work without it.
 fabric --setup
 ```
 
-## 6. Add to CLAUDE.md (1 min)
-
-Add to `~/.claude/CLAUDE.md`:
-
-```markdown
-## MEMORY
-
-Before asking user to repeat: search first with `memory_search`.
-Before spawning agents: call `context_for_agent`.
-End of session: run `mem dump "Session Title"`.
-```
-
 ---
 
 ## Done! Try it:
 
 ```bash
-# Search your memory
-mem "test query"
-
 # Check stats
 mem stats
+
+# Search your memory
+mem search "test query"
 
 # End of session capture
 mem dump "First Test Session"
@@ -116,9 +93,9 @@ mem dump "First Test Session"
 
 | Action | Command |
 |--------|---------|
-| Search | `mem "query"` |
+| Search | `mem search "query"` or `mem "query"` |
 | End session | `mem dump "title"` |
 | Add decision | `mem add decision "X" --why "Y"` |
 | View recent | `mem loa list` |
 
-See `SETUP.md` for complete guide.
+See `SETUP.md` for the complete guide with all memory techniques.
