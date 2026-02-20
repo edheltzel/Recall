@@ -25,7 +25,8 @@ const program = new Command();
 program
   .name('mem')
   .description(`${DISPLAY_NAME} - Persistent AI Memory System`)
-  .version(VERSION);
+  .version(VERSION)
+  .enablePositionalOptions();
 
 // mem init
 program

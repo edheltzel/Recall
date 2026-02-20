@@ -40,6 +40,7 @@ BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 # Files we might modify
 FILES_TO_BACKUP=(
     "$CLAUDE_DIR/.mcp.json"
+    "$HOME/.claude.json"
     "$CLAUDE_DIR/CLAUDE.md"
     "$CLAUDE_DIR/settings.json"
     "$CLAUDE_DIR/memory.db"
@@ -123,9 +124,9 @@ do_restore() {
     fi
 
     echo ""
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                    LMF3 RESTORE                              ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║                       LMF3 RESTORE                       ║"
+    echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
     log_info "Restoring from backup: $target_backup"
     echo ""
@@ -368,6 +369,14 @@ configure_hooks() {
         log_success "Copied BatchExtract.ts to $hooks_dir"
     fi
 
+    # Copy extraction prompt template
+    local memory_dir="$CLAUDE_DIR/MEMORY"
+    mkdir -p "$memory_dir"
+    if [[ -f "$src_dir/extract_prompt.md" ]]; then
+        cp "$src_dir/extract_prompt.md" "$memory_dir/extract_prompt.md"
+        log_success "Copied extraction prompt template to $memory_dir"
+    fi
+
     # Register hook in settings.json
     if [[ -f "$settings_file" ]]; then
         if grep -q "SessionExtract" "$settings_file"; then
@@ -467,10 +476,10 @@ Tool syntax:
 #
 do_install() {
     echo ""
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                    LMF3 INSTALLER                            ║"
-    echo "║         LMF - Persistent Memory for Claude Code               ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║                      LMF3 INSTALLER                      ║"
+    echo "║         LMF - Persistent Memory for Claude Code          ║"
+    echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
 
     # Step 0: Check prerequisites
@@ -544,9 +553,9 @@ do_install() {
     echo ""
 
     # Done!
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                 INSTALLATION COMPLETE                        ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║                  INSTALLATION COMPLETE                   ║"
+    echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
     log_success "LMF3 installed successfully!"
     echo ""
