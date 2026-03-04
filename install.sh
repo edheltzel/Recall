@@ -33,7 +33,7 @@ NC='\033[0m' # No Color
 
 # Paths
 CLAUDE_DIR="$HOME/.claude"
-BACKUP_BASE="$CLAUDE_DIR/backups/lmf3"
+BACKUP_BASE="$CLAUDE_DIR/backups/recall"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 
@@ -304,22 +304,22 @@ configure_mcp() {
 
     # Check if already registered via claude mcp list
     if command -v claude &> /dev/null; then
-        if claude mcp list 2>/dev/null | grep -q "lmf-memory"; then
-            log_success "MCP already configured for lmf-memory"
+        if claude mcp list 2>/dev/null | grep -q "recall-memory"; then
+            log_success "MCP already configured for recall-memory"
             return
         fi
 
         # Register via Claude Code CLI (writes to ~/.claude.json correctly)
-        log_info "Registering lmf-memory MCP server..."
-        if claude mcp add -s user lmf-memory "$mem_mcp_path" 2>/dev/null; then
-            log_success "Registered lmf-memory MCP server via Claude Code CLI"
+        log_info "Registering recall-memory MCP server..."
+        if claude mcp add -s user recall-memory "$mem_mcp_path" 2>/dev/null; then
+            log_success "Registered recall-memory MCP server via Claude Code CLI"
         else
             log_warn "claude mcp add failed — writing fallback .mcp.json"
             _write_mcp_json "$mem_mcp_path"
         fi
     else
         # Claude Code not installed yet — write .mcp.json as fallback
-        log_warn "Claude Code CLI not found — writing .mcp.json (run 'claude mcp add -s user lmf-memory $mem_mcp_path' after installing Claude Code)"
+        log_warn "Claude Code CLI not found — writing .mcp.json (run 'claude mcp add -s user recall-memory $mem_mcp_path' after installing Claude Code)"
         _write_mcp_json "$mem_mcp_path"
     fi
 }
@@ -328,14 +328,14 @@ _write_mcp_json() {
     local mem_mcp_path="$1"
     local mcp_file="$CLAUDE_DIR/.mcp.json"
 
-    if [[ -f "$mcp_file" ]] && grep -q "lmf-memory" "$mcp_file"; then
+    if [[ -f "$mcp_file" ]] && grep -q "recall-memory" "$mcp_file"; then
         return
     fi
 
     cat > "$mcp_file" << MCPEOF
 {
   "mcpServers": {
-    "lmf-memory": {
+    "recall-memory": {
       "command": "$mem_mcp_path",
       "args": []
     }
@@ -435,7 +435,7 @@ HOOKEOF
 #
 configure_claude_md() {
     local claude_md="$CLAUDE_DIR/CLAUDE.md"
-    local lmf3_dir="$(pwd)"
+    local recall_dir="$(pwd)"
 
     local memory_section="## MEMORY
 
@@ -477,7 +477,7 @@ do_install() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════╗"
     echo "║                      Recall INSTALLER                      ║"
-    echo "║         LMF - Persistent Memory for Claude Code          ║"
+    echo "║         RECALL - Persistent Memory for Claude Code          ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
 
@@ -567,7 +567,7 @@ do_install() {
     echo "  3. (Optional) Install Fabric for richer session extraction:"
     echo "     https://github.com/danielmiessler/fabric"
     echo "  4. (Optional) Set up cron for batch extraction of missed sessions:"
-    echo "     */30 * * * * $HOME/.bun/bin/bun run $CLAUDE_DIR/hooks/BatchExtract.ts --limit 20 >> /tmp/lmf3-batch.log 2>&1"
+    echo "     */30 * * * * $HOME/.bun/bin/bun run $CLAUDE_DIR/hooks/BatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1"
     echo ""
 }
 

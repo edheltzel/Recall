@@ -145,7 +145,7 @@ If Haiku is unavailable, it falls back to a local Ollama model (configurable via
 ```bash
 crontab -e
 # Add this line (runs every 30 minutes):
-*/30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/BatchExtract.ts --limit 20 >> /tmp/lmf3-batch.log 2>&1
+*/30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/BatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1
 ```
 
 ---
@@ -170,7 +170,7 @@ crontab -e
 │   ├── SessionExtract.ts              # SessionEnd extraction hook
 │   └── BatchExtract.ts                # Cron batch extractor
 ├── settings.json                      # Hook registration (Stop → SessionExtract)
-└── .mcp.json                          # MCP server config (lmf-memory)
+└── .mcp.json                          # MCP server config (recall-memory)
 ```
 
 ### Database Tables
@@ -225,7 +225,7 @@ The hook self-spawns in background so the session exits immediately (non-blockin
 
 ## MCP Tools
 
-When Claude Code connects to the LMF MCP server, these tools become available:
+When Claude Code connects to the RECALL MCP server, these tools become available:
 
 ### memory_search
 FTS5 keyword search across all memory tables. **Use before asking the user to repeat anything.**
@@ -387,7 +387,7 @@ cp hooks/BatchExtract.ts ~/.claude/hooks/
 ./install.sh restore 20260219  # Restore specific backup
 ```
 
-The installer automatically backs up existing files before any changes. Backups are stored at `~/.claude/backups/lmf3/`.
+The installer automatically backs up existing files before any changes. Backups are stored at `~/.claude/backups/recall/`.
 
 Manual backup:
 ```bash
@@ -404,7 +404,7 @@ cp ~/.claude/memory.db ~/.claude/memory.db.backup
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model for vector embeddings (768-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for extraction fallback (when Anthropic API unavailable) |
-| `LMF_BASE_DIR` | `~/.claude` | Base directory for document imports |
+| `RECALL_BASE_DIR` | `~/.claude` | Base directory for document imports |
 
 ---
 
@@ -433,7 +433,7 @@ echo "test" | fabric --pattern extract_wisdom
 ```json
 {
   "mcpServers": {
-    "lmf-memory": {
+    "recall-memory": {
       "command": "mem-mcp",
       "args": []
     }
@@ -473,7 +473,7 @@ which mem mem-mcp
 ls -la ~/.claude/memory.db
 
 # 4. MCP configured
-cat ~/.claude/.mcp.json | grep lmf-memory
+cat ~/.claude/.mcp.json | grep recall-memory
 
 # 5. Hook registered
 grep SessionExtract ~/.claude/settings.json

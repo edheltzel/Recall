@@ -6,7 +6,7 @@ import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 
-const LMF_BASE_DIR = process.env.LMF_BASE_DIR || join(homedir(), '.claude');
+const RECALL_BASE_DIR = process.env.RECALL_BASE_DIR || join(homedir(), '.claude');
 
 interface DocFile {
   path: string;
@@ -113,7 +113,7 @@ function collectDocuments(): DocFile[] {
   const seen = new Set<string>();
 
   for (const source of DOCUMENT_SOURCES) {
-    const files = findFiles(LMF_BASE_DIR, source.pattern);
+    const files = findFiles(RECALL_BASE_DIR, source.pattern);
 
     for (const filePath of files) {
       if (seen.has(filePath)) continue;
@@ -126,7 +126,7 @@ function collectDocuments(): DocFile[] {
         if (stats.size < minSize) continue;
 
         const content = readFileSync(filePath, 'utf-8');
-        const relativePath = filePath.replace(LMF_BASE_DIR + '/', '');
+        const relativePath = filePath.replace(RECALL_BASE_DIR + '/', '');
 
         docs.push({
           path: relativePath,
@@ -274,7 +274,7 @@ export function runDocsList(): void {
     ORDER BY type, title
   `).all() as { id: number; path: string; title: string; type: string; size_bytes: number; created_at: string }[];
 
-  console.log(`Documents in LMF (${docs.length} total):\n`);
+  console.log(`Documents in RECALL (${docs.length} total):\n`);
 
   let currentType = '';
   for (const doc of docs) {

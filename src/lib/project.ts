@@ -1,4 +1,4 @@
-// Project detection for LMF
+// Project detection for RECALL
 
 import { execSync } from 'child_process';
 import { basename, isAbsolute, resolve } from 'path';

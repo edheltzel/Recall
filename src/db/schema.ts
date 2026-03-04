@@ -1,4 +1,4 @@
-// Database schema for LMF
+// Database schema for RECALL
 
 export const SCHEMA_VERSION = 2; // Bumped for vector search
 
