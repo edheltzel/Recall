@@ -1,12 +1,12 @@
 # For You, Claude Code Instance
 
-This document explains the LMF3 memory system installed on this machine. Read this to understand how to use persistent memory effectively.
+This document explains the Recall memory system installed on this machine. Read this to understand how to use persistent memory effectively.
 
 ---
 
-## What Is LMF3?
+## What Is Recall?
 
-LMF3 is a persistent memory framework. It gives you:
+Recall is a persistent memory framework. It gives you:
 
 1. **Searchable history** of all past conversations via MCP tools and CLI
 2. **Automatic extraction** — sessions are parsed into structured summaries when they end

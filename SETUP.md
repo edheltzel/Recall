@@ -1,4 +1,4 @@
-# LMF3 Complete Setup Guide
+# Recall Complete Setup Guide
 
 This guide teaches your Claude Code instance **all memory techniques** for persistent knowledge across sessions.
 
@@ -17,7 +17,7 @@ sudo apt-get install -y nodejs npm unzip build-essential git
 **Required:**
 1. **Node.js 18+** - For building and running
 2. **Bun** (preferred) or npm - Package management
-3. **Claude Code** - The Anthropic CLI that LMF3 extends
+3. **Claude Code** - The Anthropic CLI that Recall extends
 
 **Optional (for LoA wisdom extraction):**
 4. **Fabric CLI** - For `mem loa write` and `mem dump` commands
@@ -30,10 +30,10 @@ bash /tmp/bun-install.sh
 source ~/.bashrc
 ```
 
-### Install LMF3
+### Install Recall
 
 ```bash
-cd ~/Projects/LMF3
+cd ~/Projects/Recall
 
 # Install dependencies
 bun install
@@ -96,7 +96,7 @@ This reads `~/.claude/projects/*/*.jsonl` files and extracts:
 - All user/assistant message turns
 - Project name from directory structure
 
-**When to use:** After installing LMF3 to backfill history.
+**When to use:** After installing Recall to backfill history.
 
 ---
 
@@ -462,8 +462,8 @@ node --version  # Should be 18+
 which bun
 bun --version
 
-# 3. LMF3 built
-ls ~/Projects/LMF3/dist/  # Should have .js files
+# 3. Recall built
+ls ~/Projects/Recall/dist/  # Should have .js files
 
 # 4. CLI linked
 which mem mem-mcp

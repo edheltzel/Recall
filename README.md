@@ -1,12 +1,12 @@
-# LMF3 — Persistent Memory for Claude Code
+# Recall — Persistent Memory for Claude Code
 
-**LMF3** gives Claude Code persistent memory across sessions. Every conversation is automatically extracted, indexed, and searchable — so your AI assistant remembers what you've worked on together.
+**Recall** gives Claude Code persistent memory across sessions. Every conversation is automatically extracted, indexed, and searchable — so your AI assistant remembers what you've worked on together.
 
 ---
 
-## What LMF3 Does
+## What Recall Does
 
-Without LMF3, every Claude Code session starts from zero. With LMF3:
+Without Recall, every Claude Code session starts from zero. With Recall:
 
 - **Session Extraction** — When a session ends, the conversation is automatically extracted into structured summaries (ideas, decisions, errors fixed, insights)
 - **Full-Text Search** — Search all past conversations via `mem search "kubernetes migration"` or the MCP `memory_search` tool
@@ -20,7 +20,7 @@ Without LMF3, every Claude Code session starts from zero. With LMF3:
 
 ## How It Works
 
-After installation, LMF3 runs silently in the background:
+After installation, Recall runs silently in the background:
 
 1. **You work normally** with Claude Code on your projects
 2. **Sessions auto-extract** — when you end a session, the `SessionExtract` hook parses the conversation via Claude Haiku and stores structured summaries in `~/.claude/MEMORY/`
@@ -36,11 +36,11 @@ Install these **before** running `install.sh`. Each is required unless marked op
 
 ### 1. Ubuntu / Debian Linux
 
-LMF3 is tested on Ubuntu 22.04+ and Debian 12+. Other Linux distros should work but are untested.
+Recall is tested on Ubuntu 22.04+ and Debian 12+. Other Linux distros should work but are untested.
 
 ### 2. Bun (JavaScript runtime)
 
-LMF3 uses Bun for TypeScript execution and `bun:sqlite` for the database.
+Recall uses Bun for TypeScript execution and `bun:sqlite` for the database.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
@@ -69,7 +69,7 @@ nvm install --lts
 
 ### 4. Claude Code (Anthropic CLI)
 
-LMF3 is an extension for Claude Code. You need a working Claude Code installation.
+Recall is an extension for Claude Code. You need a working Claude Code installation.
 
 ```bash
 npm install -g @anthropic-ai/claude-code
@@ -80,7 +80,7 @@ npm install -g @anthropic-ai/claude-code
 
 ### 5. Fabric (Optional but Recommended)
 
-Fabric provides the `extract_wisdom` pattern used for rich LoA (Library of Alexandria) entries. LMF3 falls back to an inline prompt if Fabric isn't available, but Fabric extractions are higher quality.
+Fabric provides the `extract_wisdom` pattern used for rich LoA (Library of Alexandria) entries. Recall falls back to an inline prompt if Fabric isn't available, but Fabric extractions are higher quality.
 
 ```bash
 go install github.com/danielmiessler/fabric@latest
@@ -93,7 +93,7 @@ fabric --setup
 
 ### 7. Ollama (Optional — for Semantic Search)
 
-Vector embeddings enable semantic search (find related content even when keywords don't match). Without Ollama, LMF3 uses keyword search only — still very capable.
+Vector embeddings enable semantic search (find related content even when keywords don't match). Without Ollama, Recall uses keyword search only — still very capable.
 
 ```bash
 curl -fsSL https://ollama.ai/install.sh | sh
@@ -109,8 +109,8 @@ ollama pull nomic-embed-text
 ## Installation
 
 ```bash
-git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
-cd ~/Projects/LMF3
+git clone https://github.com/nixfred/Recall.git ~/Projects/Recall
+cd ~/Projects/Recall
 ./install.sh
 ```
 
@@ -122,7 +122,7 @@ The installer will:
 5. Initialize the SQLite database at `~/.claude/memory.db`
 6. Configure the MCP server in `~/.claude/.mcp.json`
 7. Set up session extraction hooks in `~/.claude/hooks/` and register in `~/.claude/settings.json`
-8. Copy the Claude guide to `~/.claude/LMF3_GUIDE.md`
+8. Copy the Claude guide to `~/.claude/Recall_GUIDE.md`
 9. Add a MEMORY section to `~/.claude/CLAUDE.md`
 
 **After install:** Restart Claude Code to load the MCP server and hooks.
@@ -139,7 +139,7 @@ After installation, every session end triggers automatic extraction. The hook:
 3. Appends results to 6 memory files in `~/.claude/MEMORY/`
 4. Tracks extraction state to prevent duplicates
 
-If Haiku is unavailable, it falls back to a local Ollama model (configurable via `LMF3_OLLAMA_MODEL`).
+If Haiku is unavailable, it falls back to a local Ollama model (configurable via `Recall_OLLAMA_MODEL`).
 
 **(Optional)** Set up cron for batch extraction of missed sessions:
 ```bash
@@ -157,7 +157,7 @@ crontab -e
 ```
 ~/.claude/
 ├── memory.db                          # SQLite database (FTS5 + WAL mode)
-├── LMF3_GUIDE.md                      # Guide for the Claude Code instance
+├── Recall_GUIDE.md                      # Guide for the Claude Code instance
 ├── MEMORY/
 │   ├── DISTILLED.md                   # All extracted session summaries (full archive)
 │   ├── HOT_RECALL.md                  # Last 10 sessions (fast context loading)
@@ -191,7 +191,7 @@ All FTS5-indexed tables have automatic sync triggers (INSERT/UPDATE/DELETE → F
 
 ### Search Architecture
 
-LMF3 supports three search modes:
+Recall supports three search modes:
 
 | Mode | Command | MCP Tool | How It Works |
 |------|---------|----------|-------------|
@@ -364,7 +364,7 @@ This imports the session's messages and creates a curated LoA entry with Fabric 
 ## Updating
 
 ```bash
-cd ~/Projects/LMF3
+cd ~/Projects/Recall
 git pull
 bun install
 bun run build
@@ -403,7 +403,7 @@ cp ~/.claude/memory.db ~/.claude/memory.db.backup
 | `MEM_DB_PATH` | `~/.claude/memory.db` | Database file location |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model for vector embeddings (768-dim) |
-| `LMF3_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for extraction fallback (when Anthropic API unavailable) |
+| `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for extraction fallback (when Anthropic API unavailable) |
 | `LMF_BASE_DIR` | `~/.claude` | Base directory for document imports |
 
 ---

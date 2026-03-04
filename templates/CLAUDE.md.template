@@ -4,7 +4,7 @@ Add this section to your `~/.claude/CLAUDE.md` to enable persistent memory.
 
 ---
 
-## MEMORY - SQLite + FTS5 (LMF3)
+## MEMORY - SQLite + FTS5 (Recall)
 
 **CRITICAL: Before asking the user to repeat ANYTHING, search first.**
 
@@ -117,4 +117,4 @@ Customize these based on your human's preferences:
 
 ---
 
-*This template is part of LMF3 — Persistent Memory for Claude Code*
+*This template is part of Recall — Persistent Memory for Claude Code*

@@ -21,7 +21,7 @@ interface DocFile {
 // Define document sources to import
 // Users can customize this list to match their setup
 const DOCUMENT_SOURCES: { pattern: string; type: DocFile['type']; minSize?: number }[] = [
-  // Memory directory files (created by LMF3 extraction pipeline)
+  // Memory directory files (created by Recall extraction pipeline)
   { pattern: 'MEMORY/DISTILLED.md', type: 'memory' },
   { pattern: 'MEMORY/DECISIONS.log', type: 'memory' },
   { pattern: 'MEMORY/REJECTIONS.log', type: 'memory' },
