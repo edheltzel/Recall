@@ -27,5 +27,5 @@ Follow this format EXACTLY:
 ## ACTIONABLE ITEMS
 - [Concrete next step or follow-up action]
 
-## LARRY CONTEXT
+## ATLAS CONTEXT
 [One sentence about how this session relates to the overall project or infrastructure. Include project names, file paths, or tool names mentioned.]

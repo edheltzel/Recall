@@ -9,18 +9,19 @@ This guide teaches your Claude Code instance **all memory techniques** for persi
 ### Prerequisites
 
 **System packages (Ubuntu/Debian):**
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y nodejs npm unzip build-essential git
 ```
 
 **Required:**
+
 1. **Node.js 18+** - For building and running
 2. **Bun** (preferred) or npm - Package management
 3. **Claude Code** - The Anthropic CLI that Recall extends
 
-**Optional (for LoA wisdom extraction):**
-4. **Fabric CLI** - For `mem loa write` and `mem dump` commands
+**Optional (for LoA wisdom extraction):** 4. **Fabric CLI** - For `mem loa write` and `mem dump` commands
 
 ### Install Bun
 
@@ -63,7 +64,7 @@ Create or update `~/.claude/.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "lmf-memory": {
+    "recall-memory": {
       "command": "mem-mcp",
       "args": []
     }
@@ -92,6 +93,7 @@ mem import --yes -v
 ```
 
 This reads `~/.claude/projects/*/*.jsonl` files and extracts:
+
 - Session metadata (ID, timestamps, project)
 - All user/assistant message turns
 - Project name from directory structure
@@ -107,6 +109,7 @@ This reads `~/.claude/projects/*/*.jsonl` files and extracts:
 #### What Makes LoA Special
 
 Raw transcripts are noise. LoA entries contain:
+
 1. **Fabric extraction**: The `extract_wisdom` pattern distills insights, ideas, learnings
 2. **Message lineage**: Links to source messages for auditability
 3. **Continuation chains**: Can link related sessions via `parent_loa_id`
@@ -150,6 +153,7 @@ mem dump "Session Title"
 ```
 
 This:
+
 1. Finds the current session JSONL file
 2. Imports all messages to database
 3. Runs Fabric `extract_wisdom`
@@ -207,6 +211,7 @@ mem "error" -p infrastructure
 ```
 
 FTS5 supports:
+
 - `AND`, `OR`, `NOT` operators
 - Prefix matching: `auth*`
 - Exact phrases: `"vpn config"`
@@ -254,6 +259,7 @@ context_for_agent(
 ```
 
 Returns:
+
 - Relevant memory matches (hybrid search)
 - Recent LoA entries
 - Active decisions
@@ -367,11 +373,11 @@ mem docs show 1
 
 ## Part 4: Environment Variables
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `MEM_DB_PATH` | `~/.claude/memory.db` | Database location |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server for embeddings |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model |
+| Variable          | Default                  | Purpose                      |
+| ----------------- | ------------------------ | ---------------------------- |
+| `MEM_DB_PATH`     | `~/.claude/memory.db`    | Database location            |
+| `OLLAMA_URL`      | `http://localhost:11434` | Ollama server for embeddings |
+| `EMBEDDING_MODEL` | `nomic-embed-text`       | Embedding model              |
 
 ---
 
@@ -379,7 +385,7 @@ mem docs show 1
 
 ```bash
 # With restic (recommended)
-restic backup ~/.claude/memory.db --tag "lmf3"
+restic backup ~/.claude/memory.db --tag "recall"
 
 # Simple copy
 cp ~/.claude/memory.db ~/.claude/memory.db.backup
@@ -393,11 +399,13 @@ mem export > memory-export.json
 ## Part 6: Troubleshooting
 
 ### "Database not found"
+
 ```bash
 mem init
 ```
 
 ### "Bun install fails - unzip required"
+
 ```bash
 sudo apt-get install -y unzip
 ```
@@ -408,6 +416,7 @@ Fabric is **OPTIONAL** - only needed for `mem loa write` and `mem dump`.
 Core functionality (search, add, MCP) works without it.
 
 If you want Fabric:
+
 ```bash
 # Check Fabric project for current install method:
 # https://github.com/danielmiessler/fabric
@@ -418,25 +427,30 @@ echo "test" | fabric --pattern extract_wisdom
 ```
 
 ### "MCP server not connecting"
+
 1. Check `~/.claude/.mcp.json` syntax:
+
 ```json
 {
   "mcpServers": {
-    "lmf-memory": {
+    "recall-memory": {
       "command": "mem-mcp",
       "args": []
     }
   }
 }
 ```
+
 2. Verify `mem-mcp` is in PATH: `which mem-mcp`
 3. Test manually: `mem-mcp` (should hang waiting for stdin)
 4. Restart Claude Code
 
 ### "Embedding service unavailable"
+
 Embeddings are optional. Hybrid search falls back to FTS5-only.
 
 To enable:
+
 ```bash
 # Install Ollama
 curl -fsSL https://ollama.com/install.sh -o /tmp/ollama.sh
@@ -505,4 +519,4 @@ mem embed backfill -t loa      # Generate embeddings
 
 ---
 
-*You now have all the memory techniques. Use them consistently.*
+_You now have all the memory techniques. Use them consistently._

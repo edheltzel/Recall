@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// LMF - Persistent AI Memory System
+// RECALL - Persistent AI Memory System
 // CLI entry point
 
 import { Command } from 'commander';

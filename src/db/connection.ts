@@ -1,4 +1,4 @@
-// Database connection management for LMF
+// Database connection management for RECALL	
 
 import { Database } from 'bun:sqlite';
 import { homedir } from 'os';

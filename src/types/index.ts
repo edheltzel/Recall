@@ -1,4 +1,4 @@
-// Core types for LMF
+// Core types for RECALL
 
 export interface Session {
   id?: number;

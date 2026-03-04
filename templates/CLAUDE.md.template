@@ -12,7 +12,7 @@ Your entire work history is in `~/.claude/memory.db`.
 
 ### MCP Server Tools
 
-When lmf-memory MCP is configured, you have access to:
+When recall-memory MCP is configured, you have access to:
 
 | Tool | Usage |
 |------|-------|

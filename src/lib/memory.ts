@@ -1,4 +1,4 @@
-// Core memory operations for LMF
+// Core memory operations for RECALL
 
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';

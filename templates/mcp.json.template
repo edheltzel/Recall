@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "lmf-memory": {
+    "recall-memory": {
       "command": "mem-mcp",
       "args": []
     }

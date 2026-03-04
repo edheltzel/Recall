@@ -14,9 +14,10 @@ Recall is a persistent memory framework. It gives you:
 
 ## Your MCP Tools
 
-These tools are available via the `lmf-memory` MCP server:
+These tools are available via the `recall-memory` MCP server:
 
 ### memory_search
+
 Search all memory with FTS5 full-text search. **Use this BEFORE asking the user to repeat anything.**
 
 ```
@@ -24,6 +25,7 @@ memory_search({ query: "kubernetes auth", project: "my-app" })
 ```
 
 ### memory_hybrid_search
+
 Combines keyword (FTS5) and semantic (embedding) search. Best for natural language queries.
 
 ```
@@ -31,6 +33,7 @@ memory_hybrid_search({ query: "how did we handle rate limiting" })
 ```
 
 ### memory_recall
+
 Get recent context — LoA entries, decisions, breadcrumbs. Good for session start.
 
 ```
@@ -38,6 +41,7 @@ memory_recall({ limit: 5, project: "my-app" })
 ```
 
 ### memory_add
+
 Record structured information during sessions:
 
 ```
@@ -47,6 +51,7 @@ memory_add({ type: "breadcrumb", content: "Auth refactor in progress, do not tou
 ```
 
 ### context_for_agent
+
 Before spawning agents via the Task tool, call this to prepare memory context:
 
 ```
@@ -54,9 +59,11 @@ context_for_agent({ agent_task: "Refactor the auth middleware", project: "my-app
 ```
 
 ### memory_stats
+
 Get database statistics (record counts, database size).
 
 ### loa_show
+
 Show a full Library of Alexandria entry with its extracted wisdom.
 
 ## The CLI
@@ -93,6 +100,7 @@ A cron job (`BatchExtract.ts`) runs every 30 minutes to catch any sessions that 
 ## Database Location
 
 The SQLite database is at `~/.claude/memory.db` (or wherever `MEM_DB_PATH` points). It uses:
+
 - **WAL mode** for concurrent reads
 - **FTS5** indexes on all text tables
 - **Vector embeddings** (optional, requires Ollama) for semantic search

@@ -1,4 +1,4 @@
-// Embedding generation for LMF
+// Embedding generation for RECALL
 // Uses Ollama for nomic-embed-text embeddings
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';

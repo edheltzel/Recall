@@ -1,7 +1,7 @@
 {
 	"name": "recall",
 	"version": "4.1.0",
-	"description": "Recall - Persistent memory system for coding agents",
+	"description": "RECALL - Persistent memory system for coding agents",
 	"type": "module",
 	"bin": {
 		"mem": "./dist/index.js",
