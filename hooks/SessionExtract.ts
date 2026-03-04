@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * SessionExtract.ts - Extract Context for Future Sessions (LMF3)
+ * SessionExtract.ts - Extract Context for Future Sessions (Recall)
  *
  * PURPOSE:
  * Extracts structured context from Claude Code session transcripts using
@@ -53,7 +53,7 @@ const EXTRACT_PATTERN_PATH = join(MEMORY_DIR, 'extract_prompt.md');
 
 // Local Ollama LLM fallback (configure OLLAMA_URL env var or defaults to localhost)
 const LOCAL_OLLAMA_URL = `${process.env.OLLAMA_URL || "http://localhost:11434"}/api/generate`;
-const LOCAL_OLLAMA_MODEL = process.env.LMF3_OLLAMA_MODEL || "qwen2.5:3b";
+const LOCAL_OLLAMA_MODEL = process.env.Recall_OLLAMA_MODEL || "qwen2.5:3b";
 
 interface SessionIndexEntry {
   sessionId: string;

@@ -1,4 +1,4 @@
-# LMF3 Quickstart (5 Minutes)
+# Recall Quickstart (5 Minutes)
 
 Get persistent memory running in 5 minutes.
 
@@ -35,11 +35,11 @@ source ~/.bashrc
 sudo npm install -g @anthropic-ai/claude-code
 ```
 
-## 3. Install LMF3
+## 3. Install Recall
 
 ```bash
-git clone https://github.com/nixfred/LMF3.git ~/Projects/LMF3
-cd ~/Projects/LMF3
+git clone https://github.com/nixfred/Recall.git ~/Projects/Recall
+cd ~/Projects/Recall
 ./install.sh
 ```
 

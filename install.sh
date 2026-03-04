@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# LMF3 Install Script
+# Recall Install Script
 # Backs up existing files before ANY changes, supports restore
 #
 # Usage:
@@ -80,7 +80,7 @@ create_backup() {
     done
 
     # Save backup manifest
-    echo "LMF3 Backup Manifest" > "$BACKUP_DIR/manifest.txt"
+    echo "Recall Backup Manifest" > "$BACKUP_DIR/manifest.txt"
     echo "====================" >> "$BACKUP_DIR/manifest.txt"
     echo "Timestamp: $TIMESTAMP" >> "$BACKUP_DIR/manifest.txt"
     echo "Date: $(date)" >> "$BACKUP_DIR/manifest.txt"
@@ -125,7 +125,7 @@ do_restore() {
 
     echo ""
     echo "╔══════════════════════════════════════════════════════════╗"
-    echo "║                       LMF3 RESTORE                       ║"
+    echo "║                       Recall RESTORE                       ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
     log_info "Restoring from backup: $target_backup"
@@ -223,7 +223,7 @@ list_backups() {
     fi
 
     echo ""
-    echo "Available LMF3 backups:"
+    echo "Available Recall backups:"
     echo "======================="
 
     for dir in "$BACKUP_BASE"/*/; do
@@ -277,10 +277,10 @@ check_prerequisites() {
     local install_dir="$(pwd)"
     if [[ "$install_dir" == /tmp/* ]] || [[ "$install_dir" == /var/tmp/* ]]; then
         echo ""
-        log_warn "LMF3 is in a temporary directory ($install_dir)!"
+        log_warn "Recall is in a temporary directory ($install_dir)!"
         log_warn "bun link creates symlinks back here — if this directory"
         log_warn "is cleaned (e.g. on reboot), 'mem' commands will break."
-        log_warn "Recommended: clone to ~/Projects/LMF3 instead."
+        log_warn "Recommended: clone to ~/Projects/Recall instead."
         echo ""
     fi
 
@@ -439,7 +439,7 @@ configure_claude_md() {
 
     local memory_section="## MEMORY
 
-You have persistent memory via LMF3. **Read the full guide:** $CLAUDE_DIR/LMF3_GUIDE.md
+You have persistent memory via Recall. **Read the full guide:** $CLAUDE_DIR/Recall_GUIDE.md
 
 Core rules:
 1. Before asking user to repeat anything → search first with \`memory_search\`
@@ -476,7 +476,7 @@ Tool syntax:
 do_install() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════╗"
-    echo "║                      LMF3 INSTALLER                      ║"
+    echo "║                      Recall INSTALLER                      ║"
     echo "║         LMF - Persistent Memory for Claude Code          ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
@@ -542,8 +542,8 @@ do_install() {
 
     # Step 8: Copy FOR_CLAUDE.md guide to stable location
     log_info "Step 8: Installing Claude guide..."
-    cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/LMF3_GUIDE.md"
-    log_success "Installed LMF3 guide at $CLAUDE_DIR/LMF3_GUIDE.md"
+    cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/Recall_GUIDE.md"
+    log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
     echo ""
 
     # Step 9: Configure CLAUDE.md
@@ -556,7 +556,7 @@ do_install() {
     echo "║                  INSTALLATION COMPLETE                   ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
-    log_success "LMF3 installed successfully!"
+    log_success "Recall installed successfully!"
     echo ""
     echo "Backup location: $BACKUP_DIR"
     echo "To restore:      ./install.sh restore"
@@ -582,10 +582,10 @@ case "${1:-}" in
         list_backups
         ;;
     help|--help|-h)
-        echo "LMF3 Install Script"
+        echo "Recall Install Script"
         echo ""
         echo "Usage:"
-        echo "  ./install.sh          Install LMF3 (creates backup first)"
+        echo "  ./install.sh          Install Recall (creates backup first)"
         echo "  ./install.sh restore  Restore from most recent backup"
         echo "  ./install.sh restore TIMESTAMP  Restore specific backup"
         echo "  ./install.sh list     List available backups"
