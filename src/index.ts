@@ -18,6 +18,7 @@ import { runImportLegacy } from './commands/import-legacy.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
+import { runDoctor } from './commands/doctor.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -397,6 +398,15 @@ program
     closeDb();
   });
 
+// mem doctor - Run health checks on all memory subsystems
+program
+  .command('doctor')
+  .description('Run health checks on all memory subsystems')
+  .action(async () => {
+    await runDoctor();
+    closeDb();
+  });
+
 // Default command: mem <query> → hybrid search (Phase 3: best of both worlds)
 program
   .arguments('[query]')
@@ -406,7 +416,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {
