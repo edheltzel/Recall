@@ -690,6 +690,7 @@ async function extractWithClaude(messages: string): Promise<string | null> {
         encoding: 'utf-8',
         timeout: 300000, // 5 minute timeout
         maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, CLAUDECODE: '' },
       }
     );
 
@@ -786,6 +787,7 @@ async function extractWithClaudeChunked(messages: string): Promise<string | null
         encoding: 'utf-8',
         timeout: 300000,
         maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, CLAUDECODE: '' },
       }
     );
 
@@ -1040,6 +1042,7 @@ async function main() {
     const child = spawn(bunPath, ['run', import.meta.path, '--extract', conversationPath, cwd], {
       detached: true,
       stdio: 'ignore',
+      env: { ...process.env, CLAUDECODE: '' },
     });
     child.unref();
 
