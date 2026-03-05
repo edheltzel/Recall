@@ -614,6 +614,7 @@ function findClaudeCli(): string | null {
     '/usr/bin/claude',
     join(process.env.HOME!, '.npm-global', 'bin', 'claude'),
     join(process.env.HOME!, '.local', 'bin', 'claude'),
+    join(process.env.HOME!, '.bun', 'bin', 'claude'),
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
