@@ -37,6 +37,13 @@ BACKUP_BASE="$CLAUDE_DIR/backups/recall"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 
+# Detect OS once at script init (used by check_prerequisites, do_install)
+case "$(uname -s)" in
+    Darwin) RECALL_OS="macos" ;;
+    Linux)  RECALL_OS="linux" ;;
+    *)      RECALL_OS="unknown" ;;
+esac
+
 # Files we might modify
 FILES_TO_BACKUP=(
     "$CLAUDE_DIR/.mcp.json"
@@ -173,9 +180,15 @@ do_restore() {
             continue
         fi
 
-        local target="$CLAUDE_DIR/$filename"
+        # .claude.json lives in $HOME, not $CLAUDE_DIR
+        local target
+        if [[ "$filename" == ".claude.json" ]]; then
+            target="$HOME/.claude.json"
+        else
+            target="$CLAUDE_DIR/$filename"
+        fi
         cp "$file" "$target"
-        log_success "Restored: $filename"
+        log_success "Restored: $filename → $target"
         restored=$((restored + 1))
     done
     shopt -u dotglob  # Reset
@@ -188,7 +201,7 @@ do_restore() {
     local validation_ok=true
 
     if [[ -f "$CLAUDE_DIR/.mcp.json" ]]; then
-        if node -e "JSON.parse(require('fs').readFileSync('$CLAUDE_DIR/.mcp.json'))" 2>/dev/null; then
+        if MCP_FILE="$CLAUDE_DIR/.mcp.json" bun -e 'JSON.parse(require("fs").readFileSync(process.env.MCP_FILE))' 2>/dev/null; then
             log_success "Validated: .mcp.json is valid JSON"
         else
             log_error "Restored .mcp.json is NOT valid JSON!"
@@ -267,11 +280,29 @@ check_prerequisites() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing prerequisites: ${missing[*]}"
         echo ""
-        echo "Please install the missing tools first. See README.md Step 1."
+        if [[ "$RECALL_OS" == "macos" ]]; then
+            echo "Install on macOS:"
+            for dep in "${missing[@]}"; do
+                case "$dep" in
+                    node|npm) echo "  brew install node" ;;
+                    bun) echo "  brew install oven-sh/bun/bun" ;;
+                esac
+            done
+        elif [[ "$RECALL_OS" == "linux" ]]; then
+            echo "Install on Linux:"
+            for dep in "${missing[@]}"; do
+                case "$dep" in
+                    node|npm) echo "  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs" ;;
+                    bun) echo "  curl -fsSL https://bun.sh/install | bash && source ~/.bashrc" ;;
+                esac
+            done
+        else
+            echo "Please install the missing tools first. See README.md."
+        fi
         exit 1
     fi
 
-    log_success "Prerequisites OK (node, bun, npm)"
+    log_success "Prerequisites OK (node, bun, npm) on $RECALL_OS"
 
     # Warn if cloned to a temporary directory (bun link will break on reboot)
     local install_dir="$(pwd)"
@@ -280,7 +311,7 @@ check_prerequisites() {
         log_warn "Recall is in a temporary directory ($install_dir)!"
         log_warn "bun link creates symlinks back here — if this directory"
         log_warn "is cleaned (e.g. on reboot), 'mem' commands will break."
-        log_warn "Recommended: clone to ~/Projects/Recall instead."
+        log_warn "Recommended: clone to a permanent directory instead."
         echo ""
     fi
 
@@ -289,7 +320,11 @@ check_prerequisites() {
         echo ""
         log_warn "Claude Code CLI not found."
         log_warn "Session extraction uses 'claude -p' for parsing conversations."
-        log_warn "Install it: sudo npm install -g @anthropic-ai/claude-code"
+        if [[ "$RECALL_OS" == "macos" ]]; then
+            log_warn "Install it: npm install -g @anthropic-ai/claude-code"
+        else
+            log_warn "Install it: sudo npm install -g @anthropic-ai/claude-code"
+        fi
         echo ""
     fi
 }
@@ -298,7 +333,8 @@ check_prerequisites() {
 # CONFIGURE MCP
 #
 configure_mcp() {
-    local mem_mcp_path="$HOME/.bun/bin/mem-mcp"
+    local mem_mcp_path
+    mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
 
     mkdir -p "$CLAUDE_DIR"
 
@@ -309,39 +345,41 @@ configure_mcp() {
             return
         fi
 
-        # Register via Claude Code CLI (writes to ~/.claude.json correctly)
+        # Register via Claude Code CLI (user scope = available in all projects)
         log_info "Registering recall-memory MCP server..."
-        if claude mcp add -s user recall-memory "$mem_mcp_path" 2>/dev/null; then
+        if claude mcp add --transport stdio --scope user recall-memory -- "$mem_mcp_path" 2>/dev/null; then
             log_success "Registered recall-memory MCP server via Claude Code CLI"
         else
-            log_warn "claude mcp add failed — writing fallback .mcp.json"
-            _write_mcp_json "$mem_mcp_path"
+            log_warn "claude mcp add failed — adding to settings.json directly"
+            _write_mcp_settings "$mem_mcp_path"
         fi
     else
-        # Claude Code not installed yet — write .mcp.json as fallback
-        log_warn "Claude Code CLI not found — writing .mcp.json (run 'claude mcp add -s user recall-memory $mem_mcp_path' after installing Claude Code)"
-        _write_mcp_json "$mem_mcp_path"
+        # Claude Code not installed yet — write to settings.json (user scope) as fallback
+        log_warn "Claude Code CLI not found — adding recall-memory to settings.json directly"
+        _write_mcp_settings "$mem_mcp_path"
     fi
 }
 
-_write_mcp_json() {
+_write_mcp_settings() {
     local mem_mcp_path="$1"
-    local mcp_file="$CLAUDE_DIR/.mcp.json"
+    local settings_file="$CLAUDE_DIR/settings.json"
 
-    if [[ -f "$mcp_file" ]] && grep -q "recall-memory" "$mcp_file"; then
+    # Check if already registered
+    if [[ -f "$settings_file" ]] && grep -q "recall-memory" "$settings_file"; then
+        log_success "recall-memory already in settings.json"
         return
     fi
 
-    cat > "$mcp_file" << MCPEOF
-{
-  "mcpServers": {
-    "recall-memory": {
-      "command": "$mem_mcp_path",
-      "args": []
-    }
-  }
-}
-MCPEOF
+    # Merge into existing settings.json (or create new) using bun — no shell interpolation
+    SETTINGS_FILE="$settings_file" MCP_PATH="$mem_mcp_path" bun -e '
+        const fs = require("fs");
+        let config = {};
+        try { config = JSON.parse(fs.readFileSync(process.env.SETTINGS_FILE, "utf8")); } catch {}
+        config.mcpServers = config.mcpServers || {};
+        config.mcpServers["recall-memory"] = { command: process.env.MCP_PATH, args: [] };
+        fs.writeFileSync(process.env.SETTINGS_FILE, JSON.stringify(config, null, 2));
+    '
+    log_success "Added recall-memory to settings.json mcpServers"
 }
 
 #
@@ -384,50 +422,32 @@ configure_hooks() {
         fi
     fi
 
-    # Create or merge settings.json with hook registration
-    local bun_path="$HOME/.bun/bin/bun"
+    # Build hook command — resolve bun path dynamically
+    local bun_path
+    bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
     local hook_cmd="$bun_path run $hooks_dir/SessionExtract.ts"
 
-    if [[ -f "$settings_file" ]]; then
-        # Merge into existing settings using node
-        node -e "
-            const fs = require('fs');
-            const config = JSON.parse(fs.readFileSync('$settings_file', 'utf8'));
-            config.hooks = config.hooks || {};
-            config.hooks.Stop = config.hooks.Stop || [];
-            const exists = config.hooks.Stop.some(e =>
-                e.hooks && e.hooks.some(h => h.command && h.command.includes('SessionExtract'))
-            );
-            if (!exists) {
-                config.hooks.Stop.push({
-                    matcher: '',
-                    hooks: [{ type: 'command', command: '$hook_cmd' }]
-                });
-            }
-            fs.writeFileSync('$settings_file', JSON.stringify(config, null, 2));
-        "
-        log_success "Registered SessionExtract hook in existing settings.json"
-    else
-        # Create new settings.json
-        cat > "$settings_file" << HOOKEOF
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$hook_cmd"
-          }
-        ]
-      }
-    ]
-  }
-}
-HOOKEOF
-        log_success "Created settings.json with SessionExtract hook"
-    fi
+    # Merge or create settings.json using bun with env vars (no shell interpolation in JS)
+    SETTINGS_FILE="$settings_file" HOOK_CMD="$hook_cmd" bun -e '
+        const fs = require("fs");
+        const settingsFile = process.env.SETTINGS_FILE;
+        const hookCmd = process.env.HOOK_CMD;
+        let config = {};
+        try { config = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch {}
+        config.hooks = config.hooks || {};
+        config.hooks.Stop = config.hooks.Stop || [];
+        const exists = config.hooks.Stop.some(e =>
+            e.hooks && e.hooks.some(h => h.command && h.command.includes("SessionExtract"))
+        );
+        if (!exists) {
+            config.hooks.Stop.push({
+                matcher: "",
+                hooks: [{ type: "command", command: hookCmd }]
+            });
+        }
+        fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
+    '
+    log_success "Registered SessionExtract hook in settings.json"
 }
 
 #
@@ -514,9 +534,16 @@ do_install() {
     # Step 4: Link globally
     log_info "Step 4: Linking globally..."
     if ! bun link; then
-        log_warn "bun link failed, trying npm link (may need sudo)..."
-        if ! sudo npm link; then
+        log_warn "bun link failed, trying npm link..."
+        local npm_link_ok=false
+        if [[ "$RECALL_OS" == "linux" ]]; then
+            sudo npm link && npm_link_ok=true
+        else
+            npm link && npm_link_ok=true
+        fi
+        if [[ "$npm_link_ok" != "true" ]]; then
             log_error "Failed to link globally"
+            [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
             exit 1
         fi
     fi
@@ -526,7 +553,16 @@ do_install() {
     # Step 5: Initialize database and MEMORY directory
     log_info "Step 5: Initializing database..."
     mkdir -p "$CLAUDE_DIR/MEMORY"
-    mem init
+    # Use absolute path — bun link may not be in PATH yet for this shell session
+    local mem_bin="$HOME/.bun/bin/mem"
+    if [[ ! -x "$mem_bin" ]]; then
+        mem_bin="$(which mem 2>/dev/null || echo "")"
+    fi
+    if [[ -z "$mem_bin" ]]; then
+        log_error "mem binary not found after linking. Check that ~/.bun/bin is in your PATH."
+        exit 1
+    fi
+    "$mem_bin" init
     log_success "MEMORY directory created at $CLAUDE_DIR/MEMORY"
     echo ""
 

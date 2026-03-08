@@ -4,7 +4,7 @@
  *
  * Scans all ~/.claude/projects/ directories for JSONL conversation files,
  * identifies those not yet extracted (or significantly grown), and runs
- * the FabricExtract pipeline on each.
+ * the SessionExtract pipeline on each.
  *
  * Usage:
  *   bun run BatchExtract.ts              # Extract up to 10 un-extracted sessions
@@ -25,8 +25,25 @@ const PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
 const MEMORY_DIR = join(CLAUDE_DIR, 'MEMORY');
 mkdirSync(MEMORY_DIR, { recursive: true });
 const TRACKER_PATH = join(MEMORY_DIR, '.extraction_tracker.json');
-const FABRIC_EXTRACT = join(CLAUDE_DIR, 'hooks', 'FabricExtract.hook.ts');
+const SESSION_EXTRACT = join(CLAUDE_DIR, 'hooks', 'SessionExtract.ts');
 const LOG_PATH = join(MEMORY_DIR, 'batch_extract.log');
+
+/**
+ * Resolve bun path dynamically — don't assume ~/.bun/bin
+ * Cached at module level so we don't re-stat on every extraction.
+ */
+const BUN_PATH = (() => {
+  const candidates = [
+    process.argv[0],
+    join(process.env.HOME!, '.bun', 'bin', 'bun'),
+    '/opt/homebrew/bin/bun',
+    '/usr/local/bin/bun',
+  ];
+  for (const c of candidates) {
+    try { if (existsSync(c)) return c; } catch {}
+  }
+  return 'bun';
+})();
 
 const MIN_FILE_SIZE = 2000;  // Skip tiny sessions (<2KB = likely just greetings)
 const GROWTH_THRESHOLD = 0.5; // Re-extract if file grew >50%
@@ -170,13 +187,13 @@ function projectDirToCwd(projectDir: string): string {
 }
 
 /**
- * Run extraction on a single file using FabricExtract's --reextract mode
+ * Run extraction on a single file using SessionExtract's --reextract mode
  * Returns true only if extraction actually succeeded (quality gate passed)
  */
 function extractFile(convPath: string, cwd: string): boolean {
   try {
     const result = execSync(
-      `${process.env.HOME}/.bun/bin/bun run ${FABRIC_EXTRACT} --reextract "${convPath}" "${cwd}" 2>&1`,
+      `${BUN_PATH} run ${SESSION_EXTRACT} --reextract "${convPath}" "${cwd}" 2>&1`,
       {
         encoding: 'utf-8',
         timeout: 120000, // 2 minute timeout per extraction
@@ -191,7 +208,7 @@ function extractFile(convPath: string, cwd: string): boolean {
     }
     return true;
   } catch (err: any) {
-    // execSync throws on non-zero exit, but FabricExtract exits 0 even on failure
+    // execSync throws on non-zero exit, but SessionExtract exits 0 even on failure
     // Check stderr/stdout for quality gate failure
     const output = err.stdout || err.stderr || err.message || '';
     if (output.includes('QUALITY GATE FAILED') || output.includes('All extraction methods failed')) {
@@ -244,7 +261,7 @@ async function main() {
 
     if (success) {
       extracted++;
-      // FabricExtract's markAsExtracted already updates the tracker on success
+      // SessionExtract's markAsExtracted already updates the tracker on success
       // But we also update here in case it didn't (belt and suspenders)
       tracker[candidate.path] = {
         size: candidate.size,

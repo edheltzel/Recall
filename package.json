@@ -8,7 +8,7 @@
 		"mem-mcp": "./dist/mcp-server.js"
 	},
 	"scripts": {
-		"build": "tsup src/index.ts src/mcp-server.ts --format esm --dts --clean --external bun:sqlite && sed -i '1s|#!/usr/bin/env node|#!/usr/bin/env bun|' dist/index.js dist/mcp-server.js",
+		"build": "tsup src/index.ts src/mcp-server.ts --format esm --dts --clean --external bun:sqlite && bun -e \"const fs=require('fs');['dist/index.js','dist/mcp-server.js'].forEach(f=>{const c=fs.readFileSync(f,'utf8');if(!c.startsWith('#!/usr/bin/env node'))throw new Error(f+' missing expected shebang');fs.writeFileSync(f,c.replace('#!/usr/bin/env node','#!/usr/bin/env bun'))})\"",
 		"dev": "tsup src/index.ts src/mcp-server.ts --format esm --watch --external bun:sqlite",
 		"test": "bun test",
 		"lint": "tsc --noEmit"
