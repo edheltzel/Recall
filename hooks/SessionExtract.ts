@@ -973,7 +973,7 @@ if (process.argv.includes('--reextract')) {
       process.exit(1);
     });
   } else {
-    console.error('Usage: bun run FabricExtract.hook.ts --reextract <conversation.jsonl> [cwd]');
+    console.error('Usage: bun run SessionExtract.ts --reextract <conversation.jsonl> [cwd]');
     process.exit(1);
   }
 // If called with --extract flag, run extraction directly (background mode)
@@ -998,13 +998,14 @@ if (process.argv.includes('--reextract')) {
 
 async function main() {
   try {
-    // Read input from stdin with timeout (200ms max to prevent hanging)
+    // Read input from stdin with timeout (5s max to prevent hanging)
+    // 200ms was too aggressive — bun startup on slow systems (CI, Docker, Rosetta) can exceed it
     let input = '';
     const decoder = new TextDecoder();
     const reader = Bun.stdin.stream().getReader();
 
     const timeoutPromise = new Promise<void>((resolve) => {
-      setTimeout(() => resolve(), 200);
+      setTimeout(() => resolve(), 5000);
     });
 
     const readPromise = (async () => {
@@ -1039,7 +1040,19 @@ async function main() {
 
     // Spawn self in background with --extract flag.
     // This way: session exits immediately AND all memory files get updated.
-    const bunPath = `${process.env.HOME}/.bun/bin/bun`;
+    // Resolve bun dynamically — don't assume ~/.bun/bin (could be Homebrew, nix, etc.)
+    const bunPath = (() => {
+      const candidates = [
+        process.argv[0], // the bun that's running us right now
+        `${process.env.HOME}/.bun/bin/bun`,
+        '/opt/homebrew/bin/bun',
+        '/usr/local/bin/bun',
+      ];
+      for (const c of candidates) {
+        try { if (require('fs').existsSync(c)) return c; } catch {}
+      }
+      return 'bun'; // fallback to PATH lookup
+    })();
     const child = spawn(bunPath, ['run', import.meta.path, '--extract', conversationPath, cwd], {
       detached: true,
       stdio: 'ignore',
