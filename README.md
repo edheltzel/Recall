@@ -8,6 +8,20 @@ Recall gives Claude Code persistent memory across sessions. Conversations are au
 
 ---
 
+## For AI Agents
+
+If you're an AI agent reading this repository, here's where to look:
+
+| What you need | Where to find it |
+|---------------|-----------------|
+| **Using Recall** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](FOR_CLAUDE.md) — installed as `~/.claude/Recall_GUIDE.md` |
+| **Developing Recall** (build, test, conventions, project structure) | [`CLAUDE.md`](CLAUDE.md) |
+| **Architecture & usage details** | This file — sections below |
+
+Start with `FOR_CLAUDE.md` if you need to **use** memory. Start with `CLAUDE.md` if you need to **modify** the codebase.
+
+---
+
 ## What Recall Does
 
 Without Recall, every Claude Code session starts from zero. With Recall:
@@ -124,7 +138,7 @@ cd Recall
 ```
 
 The installer auto-detects your OS (macOS or Linux) and will:
-1. Back up any existing Claude Code config files (`.mcp.json`, `CLAUDE.md`, `settings.json`, `memory.db`)
+1. Back up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `memory.db`)
 2. Install dependencies via `bun install`
 3. Build TypeScript source via `tsup`
 4. Link `mem` and `mem-mcp` globally via `bun link`
@@ -338,6 +352,7 @@ loa_show({ id: 1 })
 │   ├── DECISIONS.log                  # Architectural decisions (deduplicated)
 │   ├── REJECTIONS.log                 # Things to avoid
 │   ├── ERROR_PATTERNS.json            # Known error/fix pairs
+│   ├── extract_prompt.md              # Extraction prompt template (used by hooks)
 │   ├── EXTRACT_LOG.txt                # Extraction run log (checked by mem doctor)
 │   └── .extraction_tracker.json       # Per-file extraction state (dedup + retry)
 ├── hooks/
@@ -409,9 +424,14 @@ The hook self-spawns in background so the session exits immediately (non-blockin
 
 ```bash
 # SEARCH
-mem "query"                    # Hybrid search
-mem "query" -k                 # Keyword only
-mem "query" -v                 # Vector only
+mem "query"                    # Hybrid search (keyword + semantic, default)
+mem "query" -k                 # Keyword only (FTS5)
+mem "query" -v                 # Vector only (semantic, requires Ollama)
+mem search "query"             # FTS5 search with options
+mem search "query" -t decisions  # Search specific table
+mem search "query" -p myproject  # Filter by project
+mem semantic "query"           # Semantic search (explicit)
+mem hybrid "query"             # Hybrid search (explicit)
 
 # CAPTURE
 mem dump "title"               # Session → LoA (end of session)
@@ -421,9 +441,9 @@ mem add learning "P" "S"       # Problem → Solution
 mem add breadcrumb "note"      # Quick note
 
 # VIEW
-mem loa list                   # Recent LoA
+mem loa list                   # Recent LoA entries
 mem loa show 1                 # Full Fabric extract
-mem loa quote 1                # Raw messages
+mem loa quote 1                # Raw source messages
 mem recent                     # Recent records across all tables
 mem recent decisions           # Recent decisions only
 mem show decisions 5           # Show full decision #5
@@ -431,8 +451,12 @@ mem stats                      # Database stats
 mem doctor                     # Health check all subsystems
 
 # IMPORT
-mem import --yes               # Import sessions
-mem embed backfill -t loa      # Generate embeddings
+mem import --yes               # Import sessions from ~/.claude/projects/
+mem import-legacy --yes        # Import DISTILLED.md extracts as LoA entries
+mem docs import --yes          # Import standalone markdown documents
+mem telos import --yes         # Import TELOS framework entries
+mem embed backfill -t loa      # Generate embeddings for LoA entries
+mem embed stats                # Check embedding service status
 mem init                       # Initialize database (safe to re-run)
 ```
 
