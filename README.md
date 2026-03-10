@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="Recall — Persistent Memory for Claude Code" width="100%">
+</p>
+
 # Recall — Persistent Memory for Claude Code
 
 Recall gives Claude Code persistent memory across sessions. Conversations are automatically extracted, indexed, and searchable.
