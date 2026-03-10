@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-let _version = "4.1.0"; // fallback
+let _version = "0.4.1"; // fallback
 
 try {
 	const __dirname = dirname(fileURLToPath(import.meta.url));
