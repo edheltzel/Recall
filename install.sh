@@ -532,8 +532,9 @@ detect_platforms() {
 #
 configure_opencode_mcp() {
     local config="$OPENCODE_CONFIG_DIR/opencode.json"
-    local mem_mcp_path
+    local mem_mcp_path bun_path
     mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+    bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
 
     # Resolve absolute DB path (no tilde — env vars don't expand ~)
     local db_path_abs
@@ -549,6 +550,7 @@ configure_opencode_mcp() {
 
     # JSONC-safe merge: strip comments before parsing
     INSTALL_MCP_PATH="$mem_mcp_path" \
+    BUN_PATH="$bun_path" \
     DB_PATH_ABS="$db_path_abs" \
     CONFIG_PATH="$config" \
     bun -e '
@@ -566,7 +568,7 @@ configure_opencode_mcp() {
         existing.mcp = existing.mcp || {};
         existing.mcp["recall-memory"] = {
             type: "local",
-            command: ["bun", "run", process.env.INSTALL_MCP_PATH],
+            command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
             enabled: true,
             environment: {
                 MEM_DB_PATH: process.env.DB_PATH_ABS
