@@ -951,8 +951,140 @@ function logExtract(message: string): void {
   }
 }
 
+/**
+ * Extract and append from a pre-formatted markdown transcript (OpenCode sessions).
+ * Skips JSONL parsing — reads markdown content directly and feeds it to the LLM.
+ */
+async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<void> {
+  try {
+    if (!existsSync(mdPath)) {
+      logExtract(`REEXTRACT-MD: File not found: ${mdPath}`);
+      return;
+    }
+
+    const convHash = mdPath;
+    if (wasAlreadyExtracted(convHash)) {
+      console.error('[FabricExtract] Already extracted this markdown, skipping');
+      return;
+    }
+
+    const messages = readFileSync(mdPath, 'utf-8');
+
+    if (messages.length < 500) {
+      console.error('[FabricExtract] Markdown too short, skipping extraction');
+      return;
+    }
+
+    let extracted: string = "";
+
+    // Use chunked extraction for large files, same as JSONL path
+    if (messages.length > 120000) {
+      console.error(`[FabricExtract] Large markdown (${messages.length} chars), using chunked extraction...`);
+      const chunkedResult = await extractWithClaudeChunked(messages);
+      if (chunkedResult) extracted = chunkedResult;
+    } else {
+      console.error("[FabricExtract] Trying Claude CLI extraction for markdown...");
+      const claudeResult = await extractWithClaude(messages);
+      if (claudeResult) extracted = claudeResult;
+    }
+
+    // Fallback to Ollama
+    if (!extracted) {
+      console.error("[FabricExtract] Claude CLI failed, trying local Ollama LLM fallback...");
+      const ollamaResult = extractWithOllama(messages);
+      if (ollamaResult) extracted = ollamaResult;
+    }
+
+    if (!extracted) {
+      console.error("[FabricExtract] All extraction methods failed for markdown");
+      logExtract("FAILURE: All extraction methods failed (markdown)");
+      markAsFailed(convHash);
+      return;
+    }
+
+    // Quality gate
+    if (!extracted.includes('ONE SENTENCE SUMMARY') && !extracted.includes('MAIN IDEAS')) {
+      console.error("[FabricExtract] QUALITY GATE FAILED: extraction missing required sections.");
+      logExtract("QUALITY GATE FAILED (markdown): missing required sections");
+      markAsFailed(convHash);
+      return;
+    }
+    logExtract("QUALITY GATE PASSED (markdown)");
+
+    // Metadata — use filename as session ID, 'opencode' as project label
+    const timestamp = new Date().toISOString().split('T')[0];
+    const fileName = mdPath.split('/').pop() || 'unknown';
+    const sessionId = fileName.replace('.md', '');
+    // cwd is either a platform name ('opencode', 'pi') from BatchExtract,
+    // or a real path from --reextract-md CLI usage.
+    const isRealPath = cwd.includes('/');
+    const platform = isRealPath ? cwd.split('/').pop() || 'unknown' : cwd;
+    const sessionLabel = `${platform}/${sessionId}`;
+
+    // 1. Append to DISTILLED.md
+    const header = `\n---\n## Extracted: ${timestamp} | ${sessionLabel} (${sessionId})\n\n`;
+    appendFileSync(DISTILLED_PATH, header + extracted.trim() + '\n', 'utf-8');
+    console.error(`[FabricExtract] Appended markdown extraction to DISTILLED.md`);
+
+    // 2. Update HOT_RECALL.md
+    updateHotRecall(extracted, sessionLabel, timestamp);
+
+    // 3. Update SESSION_INDEX.json
+    const topics = extractTopics(extracted);
+    const summaryMatch = extracted.match(/##\s*ONE\s*SENTENCE\s*SUMMARY\s*\n+(.+)/);
+    const summary = summaryMatch ? summaryMatch[1].trim() : `${sessionLabel} session`;
+
+    updateSessionIndex({
+      sessionId,
+      project: sessionLabel,
+      date: timestamp,
+      timestamp: Date.now(),
+      topics,
+      summary,
+      file: mdPath
+    });
+
+    // 4. Append to DECISIONS.log, REJECTIONS.log, ERROR_PATTERNS.json
+    appendDecisions(extracted, sessionLabel, timestamp);
+    appendRejections(extracted, sessionLabel, timestamp);
+    appendErrors(extracted, sessionLabel, timestamp);
+
+    // 5. Mark as extracted
+    markAsExtracted(convHash);
+
+    logExtract(`SUCCESS (markdown): All memory files updated for ${sessionLabel} (${sessionId})`);
+
+  } catch (error: any) {
+    console.error(`[FabricExtract] Markdown extraction failed: ${error.message}`);
+    logExtract(`FAILURE (markdown): ${error.message}`);
+  }
+}
+
+// If called with --reextract-md flag, extract from a markdown file (OpenCode sessions)
+if (process.argv.includes('--reextract-md')) {
+  const idx = process.argv.indexOf('--reextract-md');
+  const mdPath = process.argv[idx + 1];
+  const cwd = process.argv[idx + 2] || process.cwd();
+  if (mdPath) {
+    logExtract(`REEXTRACT-MD: Forcing re-extraction of markdown ${mdPath}`);
+    try {
+      const tracker = loadExtractionTracker();
+      delete tracker[mdPath];
+      saveExtractionTracker(tracker);
+    } catch {}
+    extractAndAppendMarkdown(mdPath, cwd).then(() => {
+      logExtract(`REEXTRACT-MD: Complete`);
+      process.exit(0);
+    }).catch((err) => {
+      logExtract(`REEXTRACT-MD: Failed: ${err}`);
+      process.exit(1);
+    });
+  } else {
+    console.error('Usage: bun run SessionExtract.ts --reextract-md <session.md> [cwd]');
+    process.exit(1);
+  }
 // If called with --reextract flag, force re-extraction bypassing dedup
-if (process.argv.includes('--reextract')) {
+} else if (process.argv.includes('--reextract')) {
   const idx = process.argv.indexOf('--reextract');
   const convPath = process.argv[idx + 1];
   const cwd = process.argv[idx + 2] || process.cwd();
