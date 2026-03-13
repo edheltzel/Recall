@@ -70,7 +70,7 @@ If `mem` is unavailable or times out (5s limit), the hook skips silently.
 | `~/.pi/agent/extensions/recall-extract.ts` | Session extraction hook |
 | `~/.pi/agent/extensions/recall-compaction.ts` | Memory injection hook |
 | `~/.pi/agent/mcp.json` | MCP server registration |
-| `~/.pi/agent/Recall_GUIDE.md` | Agent guide (installed from `FOR_CLAUDE.md` with Pi-specific tool names) |
+| `~/.pi/agent/Recall_GUIDE.md` | Agent guide (installed from `FOR_PI.md` with Pi-specific tool names) |
 | `~/.pi/agent/AGENTS.md` | Pi agent config snippet enabling recall-memory tools |
 | `~/.claude/MEMORY/pi-sessions/` | Drop directory for extracted session markdown |
 | `~/.claude/memory.db` | Shared SQLite DB (same as Claude Code and OpenCode) |
