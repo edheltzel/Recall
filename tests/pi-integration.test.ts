@@ -68,6 +68,46 @@ describe('tree JSONL linearization', () => {
     const result = linearizeSession(jsonlPath);
     expect(result).toContain('Valid message');
   });
+
+  test('handles array content blocks (Claude-style structured content)', () => {
+    const entries = [
+      { id: "1", parentId: null, type: "message", message: { role: "user", content: [{ type: "text", text: "Hello, how does FTS5 search work in SQLite?" }] } },
+      { id: "2", parentId: "1", type: "message", message: { role: "assistant", content: [{ type: "text", text: "FTS5 is a full-text search extension for SQLite that supports efficient keyword queries." }, { type: "text", text: "It uses inverted indexes to speed up search." }] } },
+    ];
+    const jsonlPath = join(tempDir, 'array-content.jsonl');
+    writeFileSync(jsonlPath, entries.map(e => JSON.stringify(e)).join('\n'));
+    const result = linearizeSession(jsonlPath);
+    expect(result).toContain('FTS5');
+    expect(result).toContain('inverted indexes');
+    expect(result).not.toContain('"type"');
+  });
+
+  test('skips messages with 10 or fewer characters', () => {
+    const entries = [
+      { id: "1", parentId: null, type: "message", message: { role: "user", content: "short" } },
+      { id: "2", parentId: "1", type: "message", message: { role: "assistant", content: "This is a sufficiently long response that should appear in the output transcript." } },
+    ];
+    const jsonlPath = join(tempDir, 'short-msg.jsonl');
+    writeFileSync(jsonlPath, entries.map(e => JSON.stringify(e)).join('\n'));
+    const result = linearizeSession(jsonlPath);
+    expect(result).not.toContain('short');
+    expect(result).toContain('sufficiently long');
+  });
+
+  test('truncates messages to 4000 characters', () => {
+    const longText = 'a'.repeat(5000);
+    const entries = [
+      { id: "1", parentId: null, type: "message", message: { role: "user", content: longText } },
+    ];
+    const jsonlPath = join(tempDir, 'long-msg.jsonl');
+    writeFileSync(jsonlPath, entries.map(e => JSON.stringify(e)).join('\n'));
+    const result = linearizeSession(jsonlPath);
+    // Format is "[USER]: " (8 chars) + up to 4000 chars of content
+    const prefix = '[USER]: ';
+    expect(result.startsWith(prefix)).toBe(true);
+    const contentPart = result.slice(prefix.length);
+    expect(contentPart.length).toBe(4000);
+  });
 });
 
 // ─── BatchExtract Pi Session Scanning ───
