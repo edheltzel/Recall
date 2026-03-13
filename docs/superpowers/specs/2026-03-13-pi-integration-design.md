@@ -52,6 +52,31 @@ Pi's `pi.registerTool()` API would let us register Recall tools natively without
 
 The alternative (native `pi.registerTool()`) was considered and rejected in favor of consistency.
 
+## New Files
+
+```
+atlas-recall/
+├── pi/                              # NEW — Pi adapter
+│   ├── recall-extract.ts            # Extension: session_shutdown → linearize → drop dir
+│   └── recall-compaction.ts         # Extension: before_agent_start → sysprompt injection
+├── FOR_PI.md                        # NEW — Agent guide for Pi
+├── hooks/
+│   └── BatchExtract.ts              # MODIFIED — scan ~/.claude/MEMORY/pi-sessions/
+├── install.sh                       # MODIFIED — detect Pi, configure adapter, install extensions
+└── docs/
+    └── PI_INTEGRATION.md            # NEW — Architecture doc (like OPENCODE_INTEGRATION.md)
+```
+
+**Unchanged:** `src/`, `hooks/SessionExtract.ts`, `src/mcp-server.ts`, `src/db/schema.ts`. The `source` column in schema v3 already accepts arbitrary text values (no CHECK constraint).
+
+## Database: Source Tagging
+
+Pi sessions extracted via `BatchExtract` are tagged `source: 'pi'` in the `sessions` table. The `source` column (`TEXT DEFAULT 'claude-code'`) has no CHECK constraint, so `'pi'` is valid without a schema migration.
+
+The source value is set by `SessionExtract.ts`'s `extractAndAppendMarkdown()` function. Currently it labels all markdown extractions as `opencode/<dirname>`. For Pi, the `project` field passed by `BatchExtract.findPiSessions()` is `'pi'` — the session label in `extractAndAppendMarkdown()` will use this to distinguish Pi sessions from OpenCode sessions.
+
+**Note:** `extractAndAppendMarkdown()` currently hardcodes `sessionLabel = "opencode/${dirName}"`. This needs a small change to derive the label from the `project` field passed by BatchExtract (e.g., `pi/${dirName}` for Pi sessions, `opencode/${dirName}` for OpenCode sessions). This is a one-line change in `SessionExtract.ts` during Phase 1.
+
 ## Component Details
 
 ### 1. MCP Registration (`~/.pi/agent/mcp.json`)
@@ -147,8 +172,31 @@ export default function (pi: any) {
 
   pi.on("session_shutdown", async (_event: any, ctx: any) => {
     try {
-      // Get session file path from ctx.sessionManager
-      const sessionPath = ctx?.sessionManager?.currentSessionPath
+      // Get session file path — try ctx.sessionManager first, fallback to scanning
+      let sessionPath = ctx?.sessionManager?.currentSessionPath
+        || ctx?.sessionManager?.currentSession?.path
+
+      // Fallback: scan Pi's sessions directory for most recently modified .jsonl
+      if (!sessionPath || !existsSync(sessionPath)) {
+        const piSessionsDir = join(homedir(), ".pi", "agent", "sessions")
+        if (existsSync(piSessionsDir)) {
+          const { readdirSync, statSync } = require("fs")
+          let latest = { path: "", mtime: 0 }
+          for (const dir of readdirSync(piSessionsDir)) {
+            const subdir = join(piSessionsDir, dir)
+            try {
+              for (const f of readdirSync(subdir)) {
+                if (!f.endsWith(".jsonl")) continue
+                const full = join(subdir, f)
+                const mt = statSync(full).mtimeMs
+                if (mt > latest.mtime) latest = { path: full, mtime: mt }
+              }
+            } catch {}
+          }
+          if (latest.path) sessionPath = latest.path
+        }
+      }
+
       if (!sessionPath || !existsSync(sessionPath)) return
       if (tracker.has(sessionPath)) return
 
@@ -218,6 +266,11 @@ export default function (pi: any) {
 - 5-second timeout on `mem` CLI prevents blocking Pi's agent loop
 - Compaction doesn't need special handling — MCP tools remain available through the adapter regardless of compaction state
 
+**API verification:**
+- `before_agent_start` hook and `{ systemPrompt }` return value are **verified** from Pi's official extensions docs (`github.com/badlogic/pi-mono/packages/coding-agent/docs/extensions.md`). The handler receives `(event, ctx)` where `event.systemPrompt` is the current system prompt. Returning `{ systemPrompt: "..." }` replaces it for that turn only. Returning `{ message: { customType, content } }` injects a persistent message. Both verified with code examples in the docs.
+- `session_shutdown` hook is **verified** from the same docs — fires on exit (Ctrl+C, Ctrl+D, SIGTERM), receives `(_event, ctx)`.
+- `ctx.sessionManager` property access patterns are **unverified** — flagged in Open Questions with a fallback implementation.
+
 ### 4. Agent Instructions
 
 **`FOR_PI.md`** — Full Recall guide for Pi agents. Installed to `~/.pi/agent/Recall_GUIDE.md`.
@@ -261,13 +314,14 @@ detect_platforms() {
 }
 
 # MCP adapter dependency
+# pi install is idempotent (like npm install) — safe to run unconditionally
 install_pi_adapter() {
-    if ! pi list 2>/dev/null | grep -q "pi-mcp-adapter"; then
-        log_info "Installing pi-mcp-adapter..."
-        pi install npm:pi-mcp-adapter
-        log_success "Installed pi-mcp-adapter"
+    log_info "Ensuring pi-mcp-adapter is installed..."
+    if pi install npm:pi-mcp-adapter 2>/dev/null; then
+        log_success "pi-mcp-adapter ready"
     else
-        log_success "pi-mcp-adapter already installed"
+        log_warn "Could not install pi-mcp-adapter automatically"
+        log_warn "Install manually: pi install npm:pi-mcp-adapter"
     fi
 }
 
@@ -365,6 +419,8 @@ const conversations = [...claudeConversations, ...opencodeConversations, ...piSe
 
 Pi sessions use the same `--reextract-md` path as OpenCode sessions — no changes to `extractFile()` needed.
 
+**Implementation note:** The log line at BatchExtract.ts:272 (`Found ${claudeConversations.length} Claude Code JSONL + ${opencodeConversations.length} OpenCode markdown files`) must also be updated to include the Pi session count.
+
 ## Implementation Phases
 
 ### Phase 1: Core Integration
@@ -398,7 +454,8 @@ With `pi-mcp-adapter`'s default `"server"` prefix mode, tools are named identica
 
 ## Open Questions
 
-1. **`ctx.sessionManager.currentSessionPath`** — Does this property exist? Need to verify against Pi's source. Fallback: scan `~/.pi/agent/sessions/` for most recently modified file.
-2. **Pi session v3 message structure** — The `message.role` and `message.content` fields need verification against actual Pi JSONL output. Tree walking logic depends on this.
-3. **`pi-mcp-adapter` env var interpolation** — Does `${VAR}` in the config work, or do we need literal absolute paths? Docs suggest `${VAR}` syntax works.
-4. **`pi install` in non-interactive context** — Does the installer's `pi install npm:pi-mcp-adapter` work when called from a bash script, or does it require an interactive session?
+1. **`ctx.sessionManager.currentSessionPath`** — Does this property exist? Need to verify against Pi's source. **Mitigation:** Fallback implementation scans `~/.pi/agent/sessions/` for most recently modified JSONL file (already in the code).
+2. **Pi session v3 message structure** — The `message.role` and `message.content` fields need verification against actual Pi JSONL output. Tree walking logic depends on this. **Mitigation:** Implementation will test with a real Pi session file during Phase 2.
+3. **`pi-mcp-adapter` env var interpolation** — Does `${VAR}` in the config work, or do we need literal absolute paths? Docs suggest `${VAR}` syntax works. **Mitigation:** Installer uses literal absolute paths resolved at install time regardless (safe default).
+4. **`pi install` in non-interactive context** — Does the installer's `pi install npm:pi-mcp-adapter` work when called from a bash script, or does it require an interactive session? **Mitigation:** Wrapped in `if/else` with a manual install fallback message.
+5. **`pi install` idempotency** — Assumed idempotent based on npm conventions. If it errors on re-install, the installer's error handling (`2>/dev/null` + fallback warning) absorbs it gracefully.
