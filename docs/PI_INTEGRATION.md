@@ -45,7 +45,7 @@ The extraction logic lives in `~/.pi/agent/extensions/recall-extract.ts`, which 
 
 ### Deduplication
 
-A JSON tracker at `~/.claude/MEMORY/pi-sessions/.extracted.json` records processed session IDs. It persists across extension restarts to avoid re-extracting sessions.
+A JSON tracker at `~/.claude/MEMORY/pi-sessions/.extraction_tracker.json` records processed session IDs. It persists across extension restarts to avoid re-extracting sessions.
 
 ## Memory Injection
 

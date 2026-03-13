@@ -14,6 +14,7 @@ export default function (pi: any) {
     try {
       const cwd = ctx?.cwd || ""
       const projectName = cwd.split("/").pop() || ""
+      if (!projectName) return
 
       const context = execFileSync("mem", [
         "search", projectName, "--limit", "5"
