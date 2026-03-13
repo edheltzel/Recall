@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { Database } from 'bun:sqlite';
 import { execFileSync } from 'child_process';
-import { SCHEMA_VERSION, MIGRATE_V2_TO_V3, CREATE_TABLES } from '../src/db/schema';
+import { MIGRATE_V2_TO_V3, CREATE_TABLES } from '../src/db/schema';
 import { linearizeSession } from '../pi/recall-extract';
 
 // ─── Schema v3 Migration Tests ───
