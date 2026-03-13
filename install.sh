@@ -44,6 +44,15 @@ case "$(uname -s)" in
     *)      RECALL_OS="unknown" ;;
 esac
 
+# OpenCode paths
+OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+OPENCODE_DETECTED=false
+CLAUDE_CODE_DETECTED=false
+
+# Pi paths
+PI_DETECTED=false
+PI_CONFIG_DIR="$HOME/.pi/agent"
+
 # Files we might modify
 FILES_TO_BACKUP=(
     "$CLAUDE_DIR/.mcp.json"
@@ -51,6 +60,9 @@ FILES_TO_BACKUP=(
     "$CLAUDE_DIR/CLAUDE.md"
     "$CLAUDE_DIR/settings.json"
     "$CLAUDE_DIR/memory.db"
+    "$OPENCODE_CONFIG_DIR/opencode.json"
+    "$PI_CONFIG_DIR/mcp.json"
+    "$PI_CONFIG_DIR/AGENTS.md"
 )
 
 log_info() {
@@ -491,19 +503,262 @@ Tool syntax:
 }
 
 #
+# DETECT PLATFORMS
+#
+detect_platforms() {
+    if [[ -d "$HOME/.claude" ]] || command -v claude &>/dev/null; then
+        CLAUDE_CODE_DETECTED=true
+        log_success "Detected: Claude Code"
+    fi
+
+    if command -v opencode &>/dev/null; then
+        OPENCODE_DETECTED=true
+        log_success "Detected: OpenCode"
+    fi
+
+    if command -v pi &>/dev/null; then
+        PI_DETECTED=true
+        log_success "Detected: Pi"
+    fi
+
+    if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] && [[ "$OPENCODE_DETECTED" == "false" ]] && [[ "$PI_DETECTED" == "false" ]]; then
+        log_warn "No coding agents detected (Claude Code, OpenCode, Pi)"
+        log_info "Recall will install core tools. Configure MCP manually later."
+    fi
+}
+
+#
+# CONFIGURE OPENCODE MCP
+#
+configure_opencode_mcp() {
+    local config="$OPENCODE_CONFIG_DIR/opencode.json"
+    local mem_mcp_path
+    mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+
+    # Resolve absolute DB path (no tilde — env vars don't expand ~)
+    local db_path_abs
+    db_path_abs="$(eval echo "${MEM_DB_PATH:-$HOME/.claude/memory.db}")"
+
+    mkdir -p "$OPENCODE_CONFIG_DIR"
+
+    # Check if already registered
+    if [[ -f "$config" ]] && grep -q "recall-memory" "$config"; then
+        log_success "recall-memory already registered in opencode.json"
+        return
+    fi
+
+    # JSONC-safe merge: strip comments before parsing
+    INSTALL_MCP_PATH="$mem_mcp_path" \
+    DB_PATH_ABS="$db_path_abs" \
+    CONFIG_PATH="$config" \
+    bun -e '
+        const fs = require("fs");
+        const path = process.env.CONFIG_PATH;
+
+        let raw = "{}";
+        if (fs.existsSync(path)) {
+            raw = fs.readFileSync(path, "utf-8")
+                .replace(/\/\/.*$/gm, "")
+                .replace(/\/\*[\s\S]*?\*\//g, "");
+        }
+
+        const existing = JSON.parse(raw);
+        existing.mcp = existing.mcp || {};
+        existing.mcp["recall-memory"] = {
+            type: "local",
+            command: ["bun", "run", process.env.INSTALL_MCP_PATH],
+            enabled: true,
+            environment: {
+                MEM_DB_PATH: process.env.DB_PATH_ABS
+            }
+        };
+        fs.writeFileSync(path, JSON.stringify(existing, null, 2));
+    '
+    log_success "Registered recall-memory MCP server in opencode.json"
+}
+
+#
+# INSTALL OPENCODE PLUGINS
+#
+install_opencode_plugins() {
+    local plugin_dir="$OPENCODE_CONFIG_DIR/plugins"
+    local src_dir="$(pwd)/opencode"
+
+    mkdir -p "$plugin_dir"
+
+    if [[ -f "$src_dir/recall-extract.ts" ]]; then
+        cp "$src_dir/recall-extract.ts" "$plugin_dir/"
+        log_success "Installed recall-extract.ts plugin"
+    fi
+
+    if [[ -f "$src_dir/recall-compaction.ts" ]]; then
+        cp "$src_dir/recall-compaction.ts" "$plugin_dir/"
+        log_success "Installed recall-compaction.ts plugin"
+    fi
+}
+
+#
+# INSTALL OPENCODE AGENT
+#
+install_opencode_agent() {
+    local agent_dir="$OPENCODE_CONFIG_DIR/agents"
+    local src_dir="$(pwd)/opencode"
+
+    mkdir -p "$agent_dir"
+
+    if [[ -f "$src_dir/recall-memory.md" ]]; then
+        cp "$src_dir/recall-memory.md" "$agent_dir/"
+        log_success "Installed recall-memory agent definition"
+    fi
+}
+
+#
+# INSTALL OPENCODE GUIDE
+#
+install_opencode_guide() {
+    if [[ -f "$(pwd)/FOR_OPENCODE.md" ]]; then
+        cp "$(pwd)/FOR_OPENCODE.md" "$OPENCODE_CONFIG_DIR/Recall_GUIDE.md"
+        log_success "Installed Recall guide for OpenCode"
+    fi
+}
+
+#
+# INSTALL PI MCP ADAPTER
+#
+install_pi_adapter() {
+    log_info "Ensuring pi-mcp-adapter is installed..."
+    if pi install npm:pi-mcp-adapter 2>/dev/null; then
+        log_success "pi-mcp-adapter ready"
+    else
+        log_warn "Could not install pi-mcp-adapter automatically"
+        log_warn "Install manually: pi install npm:pi-mcp-adapter"
+    fi
+}
+
+#
+# CONFIGURE PI MCP
+#
+configure_pi_mcp() {
+    local config="$PI_CONFIG_DIR/mcp.json"
+    local db_path_abs
+    db_path_abs="$(eval echo "${MEM_DB_PATH:-$HOME/.claude/memory.db}")"
+    local mem_mcp_path
+    mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+
+    mkdir -p "$PI_CONFIG_DIR"
+
+    # Check if already registered
+    if [[ -f "$config" ]] && grep -q "recall-memory" "$config"; then
+        log_success "recall-memory already registered in Pi mcp.json"
+        return
+    fi
+
+    # JSONC-safe merge (same pattern as OpenCode)
+    MCP_CONFIG_PATH="$config" \
+    DB_PATH_ABS="$db_path_abs" \
+    MEM_MCP_PATH="$mem_mcp_path" \
+    bun -e '
+        const fs = require("fs");
+        const path = process.env.MCP_CONFIG_PATH;
+
+        let raw = "{}";
+        if (fs.existsSync(path)) {
+            raw = fs.readFileSync(path, "utf-8")
+                .replace(/\/\/.*$/gm, "")
+                .replace(/\/\*[\s\S]*?\*\//g, "");
+        }
+
+        const existing = JSON.parse(raw);
+        existing.mcpServers = existing.mcpServers || {};
+        existing.mcpServers["recall-memory"] = {
+            command: process.env.MEM_MCP_PATH,
+            args: [],
+            lifecycle: "lazy",
+            environment: {
+                MEM_DB_PATH: process.env.DB_PATH_ABS
+            }
+        };
+        fs.writeFileSync(path, JSON.stringify(existing, null, 2));
+    '
+    log_success "Registered recall-memory in Pi mcp.json"
+}
+
+#
+# INSTALL PI EXTENSIONS
+#
+install_pi_extensions() {
+    local ext_dir="$PI_CONFIG_DIR/extensions"
+    local src_dir="$(pwd)/pi"
+
+    mkdir -p "$ext_dir"
+
+    if [[ -f "$src_dir/recall-extract.ts" ]]; then
+        cp "$src_dir/recall-extract.ts" "$ext_dir/"
+        log_success "Installed recall-extract.ts Pi extension"
+    fi
+
+    if [[ -f "$src_dir/recall-compaction.ts" ]]; then
+        cp "$src_dir/recall-compaction.ts" "$ext_dir/"
+        log_success "Installed recall-compaction.ts Pi extension"
+    fi
+}
+
+#
+# INSTALL PI GUIDE + AGENTS.MD
+#
+install_pi_guide() {
+    mkdir -p "$PI_CONFIG_DIR"
+
+    # Copy guide
+    if [[ -f "$(pwd)/FOR_PI.md" ]]; then
+        cp "$(pwd)/FOR_PI.md" "$PI_CONFIG_DIR/Recall_GUIDE.md"
+        log_success "Installed Recall guide for Pi"
+    fi
+
+    # Append MEMORY section to AGENTS.md (Pi auto-loads this file)
+    local agents_md="$PI_CONFIG_DIR/AGENTS.md"
+
+    if [[ -f "$agents_md" ]] && grep -q "## MEMORY" "$agents_md"; then
+        log_success "AGENTS.md already has MEMORY section"
+        return
+    fi
+
+    local memory_section="
+## MEMORY
+
+You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Recall_GUIDE.md
+
+Core rules:
+1. Before asking user to repeat anything → search first with \`recall-memory_memory_search\`
+2. When decisions are made → record with \`recall-memory_memory_add\`
+3. End of session when user says \`/dump\` → run \`mem dump \"Descriptive Title\"\`
+
+Tool syntax:
+- \`recall-memory_memory_search({ query: \"search terms\" })\`
+- \`recall-memory_memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })\`
+- \`recall-memory_context_for_agent({ task_description: \"what the agent will do\" })\`"
+
+    echo "$memory_section" >> "$agents_md"
+    log_success "Added MEMORY section to AGENTS.md"
+}
+
+#
 # MAIN INSTALL
 #
 do_install() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════╗"
     echo "║                      Recall INSTALLER                      ║"
-    echo "║         RECALL - Persistent Memory for Claude Code          ║"
+    echo "║      RECALL - Persistent Memory for Coding Agents           ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
 
-    # Step 0: Check prerequisites
+    # Step 0: Check prerequisites and detect platforms
     log_info "Checking prerequisites..."
     check_prerequisites
+    echo ""
+    log_info "Detecting platforms..."
+    detect_platforms
     echo ""
 
     # Step 1: BACKUP FIRST (before touching anything)
@@ -587,6 +842,28 @@ do_install() {
     configure_claude_md
     echo ""
 
+    # Step 10: Configure OpenCode (if detected)
+    if [[ "$OPENCODE_DETECTED" == "true" ]]; then
+        echo ""
+        log_info "Step 10: Configuring OpenCode integration..."
+        configure_opencode_mcp
+        install_opencode_plugins
+        install_opencode_agent
+        install_opencode_guide
+        echo ""
+    fi
+
+    # Step 11: Configure Pi (if detected)
+    if [[ "$PI_DETECTED" == "true" ]]; then
+        echo ""
+        log_info "Step 11: Configuring Pi integration..."
+        install_pi_adapter
+        configure_pi_mcp
+        install_pi_extensions
+        install_pi_guide
+        echo ""
+    fi
+
     # Done!
     echo "╔══════════════════════════════════════════════════════════╗"
     echo "║                  INSTALLATION COMPLETE                   ║"
@@ -597,8 +874,27 @@ do_install() {
     echo "Backup location: $BACKUP_DIR"
     echo "To restore:      ./install.sh restore"
     echo ""
+    echo "Platforms configured:"
+    if [[ "$CLAUDE_CODE_DETECTED" == "true" ]]; then
+        echo "  ✓ Claude Code (MCP + hooks + CLAUDE.md)"
+    fi
+    if [[ "$OPENCODE_DETECTED" == "true" ]]; then
+        echo "  ✓ OpenCode (MCP + plugins + agent)"
+    fi
+    if [[ "$PI_DETECTED" == "true" ]]; then
+        echo "  ✓ Pi (MCP via adapter + extensions + AGENTS.md)"
+    fi
+    echo ""
     echo "Next steps:"
-    echo "  1. Restart Claude Code to load MCP server and hooks"
+    if [[ "$CLAUDE_CODE_DETECTED" == "true" ]]; then
+        echo "  1. Restart Claude Code to load MCP server and hooks"
+    fi
+    if [[ "$OPENCODE_DETECTED" == "true" ]]; then
+        echo "  1. Restart OpenCode to load MCP server and plugins"
+    fi
+    if [[ "$PI_DETECTED" == "true" ]]; then
+        echo "  1. Restart Pi to load MCP adapter and extensions"
+    fi
     echo "  2. Test: mem stats"
     echo "  3. (Optional) Install Fabric for richer session extraction:"
     echo "     https://github.com/danielmiessler/fabric"
