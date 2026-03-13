@@ -58,6 +58,14 @@ Get database statistics (record counts, database size).
 
 Show a full Library of Alexandria entry with its extracted wisdom.
 
+### recall-memory_context_for_agent
+
+Get context to pass to a subagent before delegating tasks:
+
+```
+recall-memory_context_for_agent({ task_description: "implement the auth middleware" })
+```
+
 ## The CLI
 
 You can also use the `mem` CLI directly via shell commands:
@@ -72,7 +80,8 @@ mem loa list                        # Browse curated knowledge
 
 1. **Search before asking** — Before asking the user to repeat information, search memory first
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
-3. **Capture sessions** — At the end of a session, run `mem dump "Descriptive Title"` via a slash command to persist the conversation
+3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
+4. **Capture sessions** — At the end of a session, run `mem dump "Descriptive Title"` via a slash command to persist the conversation
 
 ## How Extraction Works
 
