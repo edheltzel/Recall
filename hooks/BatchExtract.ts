@@ -220,8 +220,8 @@ function projectDirToCwd(projectDir: string): string {
  * Run extraction on a single file using SessionExtract's --reextract mode
  * Returns true only if extraction actually succeeded (quality gate passed)
  *
- * Handles both JSONL (Claude Code) and markdown (OpenCode) files.
- * For markdown files from OpenCode, passes the content directly as a
+ * Handles both JSONL (Claude Code) and markdown (OpenCode/Pi) files.
+ * For markdown files, passes the content directly as a
  * pre-formatted transcript using --reextract-md flag.
  */
 function extractFile(convPath: string, cwd: string): boolean {

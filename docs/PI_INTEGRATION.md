@@ -106,7 +106,7 @@ call `recall-memory_context_for_agent`.
 
 ## Database
 
-Pi shares `~/.claude/memory.db` with Claude Code and OpenCode. WAL mode handles concurrent access. Sessions extracted from Pi are tagged `source: 'pi'` in the sessions table.
+Pi shares `~/.claude/memory.db` with Claude Code and OpenCode. WAL mode handles concurrent access. Pi session extractions go through the same markdown pipeline as OpenCode — they appear in flat memory files (DISTILLED.md, SESSION_INDEX.json, DECISIONS.log, etc.), labeled `pi/<sessionId>`. They do not insert into the SQLite `sessions` table with a `source` field (that column is only populated via `mem import` or `mem dump`, not the drop-dir extraction pipeline).
 
 No schema changes beyond what OpenCode already added (the `source` column in schema v3).
 

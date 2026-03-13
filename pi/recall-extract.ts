@@ -30,7 +30,7 @@ function extractTextFromContent(content: any): string {
       }
       // Skip thinking blocks, tool_use, tool_result — noise for memory
     }
-    return parts.join("\n")
+    return parts.length === 1 ? parts[0] : parts.join("\n")
   }
   if (content?.text) {
     return content.text
@@ -40,6 +40,9 @@ function extractTextFromContent(content: any): string {
 
 const DROP_DIR = join(homedir(), ".claude", "MEMORY", "pi-sessions")
 const TRACKER_PATH = join(DROP_DIR, ".extraction_tracker.json")
+const MIN_MESSAGE_LENGTH = 10
+const MAX_MESSAGE_LENGTH = 4000
+const MIN_SESSION_LENGTH = 500
 
 function loadTracker(): Set<string> {
   try {
@@ -87,8 +90,8 @@ export function linearizeSession(jsonlPath: string): string {
     if (active.type === "message" && active.message) {
       const role = active.message.role?.toUpperCase() || "UNKNOWN"
       const text = extractTextFromContent(active.message.content)
-      if (text && text.length > 10) {
-        const truncated = text.length > 4000 ? text.slice(0, 4000) + '...[truncated]' : text
+      if (text && text.length > MIN_MESSAGE_LENGTH) {
+        const truncated = text.length > MAX_MESSAGE_LENGTH ? text.slice(0, MAX_MESSAGE_LENGTH) + '...[truncated]' : text
         transcript.push(`[${role}]: ${truncated}`)
       }
     }
@@ -101,7 +104,7 @@ export default function (pi: any) {
   mkdirSync(DROP_DIR, { recursive: true })
   const tracker = loadTracker()
 
-  pi.on("session_shutdown", async (_event: any, ctx: any) => {
+  pi.on("session_shutdown", (_event: any, ctx: any) => {
     try {
       // Get session file path — try ctx.sessionManager first, fallback to scanning
       let sessionPath = ctx?.sessionManager?.currentSessionPath
@@ -130,11 +133,11 @@ export default function (pi: any) {
       if (!sessionPath || !existsSync(sessionPath)) return
       if (tracker.has(sessionPath)) return
 
+      const markdown = linearizeSession(sessionPath)
+      if (markdown.length < MIN_SESSION_LENGTH) return // Skip trivial sessions
+
       tracker.add(sessionPath)
       saveTracker(tracker)
-
-      const markdown = linearizeSession(sessionPath)
-      if (markdown.length < 500) return // Skip trivial sessions
 
       const fileName = sessionPath.split("/").pop()?.replace(".jsonl", ".md") || "session.md"
       writeFileSync(join(DROP_DIR, fileName), markdown, "utf-8")
