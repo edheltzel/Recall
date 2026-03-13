@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
-import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_VECTOR_TABLES, SCHEMA_VERSION } from './schema.js';
+import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_VECTOR_TABLES, SCHEMA_VERSION, MIGRATE_V2_TO_V3 } from './schema.js';
 
 const DEFAULT_DB_PATH = join(homedir(), '.claude', 'memory.db');
 
@@ -76,6 +76,23 @@ export function initDb(): { created: boolean; path: string } {
   db.exec(CREATE_FTS);
   db.exec(CREATE_FTS_TRIGGERS);
   db.exec(CREATE_VECTOR_TABLES);
+
+  // Run migrations for existing databases
+  try {
+    const currentVersion = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('version') as { value: string } | undefined;
+    const ver = currentVersion ? parseInt(currentVersion.value, 10) : 0;
+
+    if (ver < 3) {
+      // v2 → v3: add source column for multi-platform support (Claude Code + OpenCode)
+      try {
+        db.exec(MIGRATE_V2_TO_V3);
+      } catch {
+        // Column may already exist if schema was created fresh with v3
+      }
+    }
+  } catch {
+    // schema_meta may not exist yet on brand new databases — that's fine
+  }
 
   // Set schema version
   db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run('version', String(SCHEMA_VERSION));

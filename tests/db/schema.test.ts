@@ -12,8 +12,8 @@ afterAll(() => {
 });
 
 describe('SCHEMA_VERSION', () => {
-  test('equals 2', () => {
-    expect(SCHEMA_VERSION).toBe(2);
+  test('equals 3', () => {
+    expect(SCHEMA_VERSION).toBe(3);
   });
 });
 
