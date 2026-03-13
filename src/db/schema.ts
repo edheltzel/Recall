@@ -1,9 +1,9 @@
 // Database schema for RECALL
 
-export const SCHEMA_VERSION = 2; // Bumped for vector search
+export const SCHEMA_VERSION = 3; // Bumped for multi-platform source tracking
 
 export const CREATE_TABLES = `
--- Sessions table: tracks Claude Code sessions
+-- Sessions table: tracks coding agent sessions (Claude Code, OpenCode, etc.)
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT UNIQUE NOT NULL,
@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   project TEXT,
   cwd TEXT,
   git_branch TEXT,
-  model TEXT
+  model TEXT,
+  source TEXT DEFAULT 'claude-code'
 );
 
 -- Messages table: conversation turns (user/assistant)
@@ -341,3 +342,8 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
 
 // Note: sqlite-vec virtual tables are created dynamically after loading the extension
 // They use: CREATE VIRTUAL TABLE vec_xxx USING vec0(embedding float[768]);
+
+// Migration: v2 → v3 (add source column for multi-platform support)
+export const MIGRATE_V2_TO_V3 = `
+ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code';
+`;
