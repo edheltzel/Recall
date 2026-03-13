@@ -16,6 +16,9 @@ export default function (pi: any) {
       const projectName = cwd.split("/").pop() || ""
       if (!projectName) return
 
+      // execFileSync blocks the event loop, but the 5-second timeout caps the
+      // worst-case delay. Pi's before_agent_start hook must return synchronously,
+      // so async execFile is not viable here without Pi's explicit async support.
       const context = execFileSync("mem", [
         "search", projectName, "--limit", "5"
       ], { encoding: "utf-8", timeout: 5000 })

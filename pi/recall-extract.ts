@@ -14,6 +14,30 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSy
 import { join } from "path"
 import { homedir } from "os"
 
+/**
+ * Extract plain text from a message content value.
+ * Handles string content, Claude-style content block arrays, and objects with a text property.
+ */
+function extractTextFromContent(content: any): string {
+  if (typeof content === "string") {
+    return content
+  }
+  if (Array.isArray(content)) {
+    const parts: string[] = []
+    for (const block of content) {
+      if (block.type === "text" && block.text) {
+        parts.push(block.text)
+      }
+      // Skip thinking blocks, tool_use, tool_result — noise for memory
+    }
+    return parts.join("\n")
+  }
+  if (content?.text) {
+    return content.text
+  }
+  return ""
+}
+
 const DROP_DIR = join(homedir(), ".claude", "MEMORY", "pi-sessions")
 const TRACKER_PATH = join(DROP_DIR, ".extraction_tracker.json")
 
@@ -61,9 +85,7 @@ export function linearizeSession(jsonlPath: string): string {
     const active = children[children.length - 1]
     if (active.type === "message" && active.message) {
       const role = active.message.role?.toUpperCase() || "UNKNOWN"
-      const text = typeof active.message.content === "string"
-        ? active.message.content
-        : JSON.stringify(active.message.content)
+      const text = extractTextFromContent(active.message.content)
       if (text && text.length > 10) {
         transcript.push(`[${role}]: ${text.slice(0, 4000)}`)
       }

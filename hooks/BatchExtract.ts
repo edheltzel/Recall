@@ -260,7 +260,7 @@ function projectDirToCwd(projectDir: string): string {
  */
 function extractFile(convPath: string, cwd: string): boolean {
   const isMarkdown = convPath.endsWith('.md');
-  // OpenCode markdown files: pass directly with --reextract-md flag
+  // OpenCode/Pi markdown files: pass directly with --reextract-md flag
   // Claude Code JSONL files: use existing --reextract flag
   const flag = isMarkdown ? '--reextract-md' : '--reextract';
 
