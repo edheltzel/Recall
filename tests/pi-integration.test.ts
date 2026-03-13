@@ -102,11 +102,12 @@ describe('tree JSONL linearization', () => {
     const jsonlPath = join(tempDir, 'long-msg.jsonl');
     writeFileSync(jsonlPath, entries.map(e => JSON.stringify(e)).join('\n'));
     const result = linearizeSession(jsonlPath);
-    // Format is "[USER]: " (8 chars) + up to 4000 chars of content
+    // Format is "[USER]: " (8 chars) + 4000 chars + "...[truncated]"
     const prefix = '[USER]: ';
     expect(result.startsWith(prefix)).toBe(true);
+    expect(result).toContain('...[truncated]');
     const contentPart = result.slice(prefix.length);
-    expect(contentPart.length).toBe(4000);
+    expect(contentPart.length).toBe(4000 + '...[truncated]'.length);
   });
 });
 

@@ -130,56 +130,22 @@ function findAllConversations(): { path: string; size: number; project: string; 
 }
 
 /**
- * Find OpenCode session markdown files dropped by the recall-extract plugin
+ * Find markdown session files in a drop directory for a given platform
  */
-function findOpenCodeSessions(): { path: string; size: number; project: string; mtime: number }[] {
+function findMarkdownSessions(dir: string, project: string): { path: string; size: number; project: string; mtime: number }[] {
   const sessions: { path: string; size: number; project: string; mtime: number }[] = [];
 
-  if (!existsSync(OPENCODE_DROP_DIR)) return sessions;
+  if (!existsSync(dir)) return sessions;
 
   try {
-    const files = readdirSync(OPENCODE_DROP_DIR)
+    const files = readdirSync(dir)
       .filter(f => f.endsWith('.md') && !f.startsWith('.'));
 
     for (const file of files) {
-      const fullPath = join(OPENCODE_DROP_DIR, file);
+      const fullPath = join(dir, file);
       try {
         const stat = statSync(fullPath);
-        sessions.push({
-          path: fullPath,
-          size: stat.size,
-          project: 'opencode',
-          mtime: stat.mtimeMs
-        });
-      } catch {}
-    }
-  } catch {}
-
-  return sessions;
-}
-
-/**
- * Find Pi session markdown files dropped by the recall-extract extension
- */
-function findPiSessions(): { path: string; size: number; project: string; mtime: number }[] {
-  const sessions: { path: string; size: number; project: string; mtime: number }[] = [];
-
-  if (!existsSync(PI_DROP_DIR)) return sessions;
-
-  try {
-    const files = readdirSync(PI_DROP_DIR)
-      .filter(f => f.endsWith('.md') && !f.startsWith('.'));
-
-    for (const file of files) {
-      const fullPath = join(PI_DROP_DIR, file);
-      try {
-        const stat = statSync(fullPath);
-        sessions.push({
-          path: fullPath,
-          size: stat.size,
-          project: 'pi',
-          mtime: stat.mtimeMs
-        });
+        sessions.push({ path: fullPath, size: stat.size, project, mtime: stat.mtimeMs });
       } catch {}
     }
   } catch {}
@@ -299,8 +265,8 @@ async function main() {
 
   const tracker = loadTracker();
   const claudeConversations = findAllConversations();
-  const opencodeConversations = findOpenCodeSessions();
-  const piConversations = findPiSessions();
+  const opencodeConversations = findMarkdownSessions(OPENCODE_DROP_DIR, 'opencode');
+  const piConversations = findMarkdownSessions(PI_DROP_DIR, 'pi');
   const conversations = [...claudeConversations, ...opencodeConversations, ...piConversations];
   log(`Found ${claudeConversations.length} Claude Code JSONL + ${opencodeConversations.length} OpenCode + ${piConversations.length} Pi markdown files`);
 
