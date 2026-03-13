@@ -740,6 +740,10 @@ Tool syntax:
 - \`recall-memory_memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })\`
 - \`recall-memory_context_for_agent({ task_description: \"what the agent will do\" })\`"
 
+    # Ensure trailing newline before appending
+    if [[ -f "$agents_md" ]] && [[ -s "$agents_md" ]] && [[ "$(tail -c 1 "$agents_md" | wc -l)" -eq 0 ]]; then
+        echo "" >> "$agents_md"
+    fi
     echo "$memory_section" >> "$agents_md"
     log_success "Added MEMORY section to AGENTS.md"
 }
@@ -888,19 +892,25 @@ do_install() {
     fi
     echo ""
     echo "Next steps:"
+    local step=1
     if [[ "$CLAUDE_CODE_DETECTED" == "true" ]]; then
-        echo "  1. Restart Claude Code to load MCP server and hooks"
+        echo "  $step. Restart Claude Code to load MCP server and hooks"
+        step=$((step + 1))
     fi
     if [[ "$OPENCODE_DETECTED" == "true" ]]; then
-        echo "  1. Restart OpenCode to load MCP server and plugins"
+        echo "  $step. Restart OpenCode to load MCP server and plugins"
+        step=$((step + 1))
     fi
     if [[ "$PI_DETECTED" == "true" ]]; then
-        echo "  1. Restart Pi to load MCP adapter and extensions"
+        echo "  $step. Restart Pi to load MCP adapter and extensions"
+        step=$((step + 1))
     fi
-    echo "  2. Test: mem stats"
-    echo "  3. (Optional) Install Fabric for richer session extraction:"
+    echo "  $step. Test: mem stats"
+    step=$((step + 1))
+    echo "  $step. (Optional) Install Fabric for richer session extraction:"
     echo "     https://github.com/danielmiessler/fabric"
-    echo "  4. (Optional) Set up cron for batch extraction of missed sessions:"
+    step=$((step + 1))
+    echo "  $step. (Optional) Set up cron for batch extraction of missed sessions:"
     echo "     */30 * * * * $HOME/.bun/bin/bun run $CLAUDE_DIR/hooks/BatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1"
     echo ""
 }

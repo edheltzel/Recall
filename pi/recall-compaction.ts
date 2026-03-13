@@ -10,7 +10,7 @@
 import { execFileSync } from "child_process"
 
 export default function (pi: any) {
-  pi.on("before_agent_start", async (event: any, ctx: any) => {
+  pi.on("before_agent_start", (event: any, ctx: any) => {
     try {
       const cwd = ctx?.cwd || ""
       const projectName = cwd.split("/").pop() || ""

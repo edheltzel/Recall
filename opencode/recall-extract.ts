@@ -30,7 +30,9 @@ function loadTracker(): Set<string> {
 
 /** Save dedup tracker to disk */
 function saveTracker(tracker: Set<string>): void {
-  writeFileSync(TRACKER_PATH, JSON.stringify([...tracker]))
+  try {
+    writeFileSync(TRACKER_PATH, JSON.stringify([...tracker]))
+  } catch { /* disk write failed — session may re-export next idle */ }
 }
 
 export const RecallExtract: Plugin = async ({ $ }) => {
