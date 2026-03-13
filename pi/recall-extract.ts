@@ -79,21 +79,21 @@ export function linearizeSession(jsonlPath: string): string {
   // Walk active branch (last child at each level = most recent)
   const transcript: string[] = []
 
-  function walkBranch(parentId: string | null) {
-    const children = childrenOf.get(parentId) || []
-    if (children.length === 0) return
+  let currentParent: string | null = null
+  while (true) {
+    const children = childrenOf.get(currentParent) || []
+    if (children.length === 0) break
     const active = children[children.length - 1]
     if (active.type === "message" && active.message) {
       const role = active.message.role?.toUpperCase() || "UNKNOWN"
       const text = extractTextFromContent(active.message.content)
       if (text && text.length > 10) {
-        transcript.push(`[${role}]: ${text.slice(0, 4000)}`)
+        const truncated = text.length > 4000 ? text.slice(0, 4000) + '...[truncated]' : text
+        transcript.push(`[${role}]: ${truncated}`)
       }
     }
-    walkBranch(active.id)
+    currentParent = active.id
   }
-
-  walkBranch(null)
   return transcript.join("\n\n")
 }
 
