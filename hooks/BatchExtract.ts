@@ -28,6 +28,12 @@ const TRACKER_PATH = join(MEMORY_DIR, '.extraction_tracker.json');
 const SESSION_EXTRACT = join(CLAUDE_DIR, 'hooks', 'SessionExtract.ts');
 const LOG_PATH = join(MEMORY_DIR, 'batch_extract.log');
 
+// OpenCode drop directory — plugin exports markdown sessions here
+const OPENCODE_DROP_DIR = join(MEMORY_DIR, 'opencode-sessions');
+
+// Pi drop directory — extension exports linearized markdown sessions here
+const PI_DROP_DIR = join(MEMORY_DIR, 'pi-sessions');
+
 /**
  * Resolve bun path dynamically — don't assume ~/.bun/bin
  * Cached at module level so we don't re-stat on every extraction.
@@ -124,6 +130,64 @@ function findAllConversations(): { path: string; size: number; project: string; 
 }
 
 /**
+ * Find OpenCode session markdown files dropped by the recall-extract plugin
+ */
+function findOpenCodeSessions(): { path: string; size: number; project: string; mtime: number }[] {
+  const sessions: { path: string; size: number; project: string; mtime: number }[] = [];
+
+  if (!existsSync(OPENCODE_DROP_DIR)) return sessions;
+
+  try {
+    const files = readdirSync(OPENCODE_DROP_DIR)
+      .filter(f => f.endsWith('.md') && !f.startsWith('.'));
+
+    for (const file of files) {
+      const fullPath = join(OPENCODE_DROP_DIR, file);
+      try {
+        const stat = statSync(fullPath);
+        sessions.push({
+          path: fullPath,
+          size: stat.size,
+          project: 'opencode',
+          mtime: stat.mtimeMs
+        });
+      } catch {}
+    }
+  } catch {}
+
+  return sessions;
+}
+
+/**
+ * Find Pi session markdown files dropped by the recall-extract extension
+ */
+function findPiSessions(): { path: string; size: number; project: string; mtime: number }[] {
+  const sessions: { path: string; size: number; project: string; mtime: number }[] = [];
+
+  if (!existsSync(PI_DROP_DIR)) return sessions;
+
+  try {
+    const files = readdirSync(PI_DROP_DIR)
+      .filter(f => f.endsWith('.md') && !f.startsWith('.'));
+
+    for (const file of files) {
+      const fullPath = join(PI_DROP_DIR, file);
+      try {
+        const stat = statSync(fullPath);
+        sessions.push({
+          path: fullPath,
+          size: stat.size,
+          project: 'pi',
+          mtime: stat.mtimeMs
+        });
+      } catch {}
+    }
+  } catch {}
+
+  return sessions;
+}
+
+/**
  * Determine which conversations need extraction
  */
 function findCandidates(
@@ -189,11 +253,20 @@ function projectDirToCwd(projectDir: string): string {
 /**
  * Run extraction on a single file using SessionExtract's --reextract mode
  * Returns true only if extraction actually succeeded (quality gate passed)
+ *
+ * Handles both JSONL (Claude Code) and markdown (OpenCode) files.
+ * For markdown files from OpenCode, passes the content directly as a
+ * pre-formatted transcript using --reextract-md flag.
  */
 function extractFile(convPath: string, cwd: string): boolean {
+  const isMarkdown = convPath.endsWith('.md');
+  // OpenCode markdown files: pass directly with --reextract-md flag
+  // Claude Code JSONL files: use existing --reextract flag
+  const flag = isMarkdown ? '--reextract-md' : '--reextract';
+
   try {
     const result = execSync(
-      `${BUN_PATH} run ${SESSION_EXTRACT} --reextract "${convPath}" "${cwd}" 2>&1`,
+      `${BUN_PATH} run ${SESSION_EXTRACT} ${flag} "${convPath}" "${cwd}" 2>&1`,
       {
         encoding: 'utf-8',
         timeout: 120000, // 2 minute timeout per extraction
@@ -225,8 +298,11 @@ async function main() {
   log(`=== BatchExtract starting (limit=${limit === Infinity ? 'unlimited' : limit}, dry-run=${dryRun}) ===`);
 
   const tracker = loadTracker();
-  const conversations = findAllConversations();
-  log(`Found ${conversations.length} total JSONL files across ${new Set(conversations.map(c => c.project)).size} projects`);
+  const claudeConversations = findAllConversations();
+  const opencodeConversations = findOpenCodeSessions();
+  const piConversations = findPiSessions();
+  const conversations = [...claudeConversations, ...opencodeConversations, ...piConversations];
+  log(`Found ${claudeConversations.length} Claude Code JSONL + ${opencodeConversations.length} OpenCode + ${piConversations.length} Pi markdown files`);
 
   const candidates = findCandidates(conversations, tracker);
   log(`${candidates.length} files need extraction (${conversations.length - candidates.length} already up-to-date)`);
@@ -256,7 +332,10 @@ async function main() {
     const sizeKB = Math.round(candidate.size / 1024);
     log(`Extracting: ${candidate.project} | ${sizeKB}KB | ${candidate.reason}`);
 
-    const cwd = projectDirToCwd(candidate.project);
+    // For markdown sessions (OpenCode/Pi), project is a platform name ('opencode', 'pi').
+    // projectDirToCwd only works for Claude Code's encoded paths — skip it for platforms.
+    const isMarkdown = candidate.path.endsWith('.md');
+    const cwd = isMarkdown ? candidate.project : projectDirToCwd(candidate.project);
     const success = extractFile(candidate.path, cwd);
 
     if (success) {
