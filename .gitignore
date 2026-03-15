@@ -29,3 +29,6 @@ coverage/
 *.db-wal
 *.db-shm
 MEMORY/
+
+# Worktrees
+.worktrees/
