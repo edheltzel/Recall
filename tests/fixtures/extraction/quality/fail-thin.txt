@@ -1,0 +1,2 @@
+Session was about fixing a bug.
+The user asked to fix something and it was fixed.

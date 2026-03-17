@@ -7,7 +7,8 @@ describe("VERSION", () => {
 	});
 
 	test("equals the current package.json version", () => {
-		expect(VERSION).toBe("0.4.1");
+		const pkg = require("../package.json");
+		expect(VERSION).toBe(pkg.version);
 	});
 });
 
