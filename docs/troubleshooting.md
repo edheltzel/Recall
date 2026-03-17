@@ -30,7 +30,7 @@ Then re-run `./install.sh`.
 
 ### "Fabric extraction failed"
 
-Fabric is optional — only needed for `mem loa write` and `mem dump`. Core functionality (search, add, MCP tools) works without it.
+Fabric is optional — only needed for `mem loa write` and `mem dump`. Core functionality (search, add, MCP tools) works without it. 
 
 Verify Fabric works:
 
