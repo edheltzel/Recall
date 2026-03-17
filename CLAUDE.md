@@ -66,10 +66,29 @@ tests/
   helpers/setup.ts     # Test harness
   mcp-server.test.ts   # MCP server tests
   version.test.ts      # Version tests
+docs/
+  installation.md      # Prerequisites, install, verify, session extraction, env vars
+  cli-reference.md     # Full CLI reference organized by category
+  mcp-tools.md         # MCP tool reference with parameters and examples
+  architecture.md      # File layout, database tables, search, extraction pipeline
+  slash-commands.md     # /recall:* command reference
+  troubleshooting.md   # Common issues and fixes (start with mem doctor)
+  upgrading.md         # Update, backup/restore, migration system
 FOR_CLAUDE.md          # Guide for Claude Code instances (copied to ~/.claude/Recall_GUIDE.md)
 install.sh             # Installer with backup/restore, OS detection, MCP + hook registration
 tsconfig.json          # TypeScript config
 ```
+
+## Plans Directory (MANDATORY)
+
+**All plans, specs, and design documents MUST be stored in `.atlas-plans/` at the project root.** This applies to every agent, skill, plugin, and extension — no exceptions.
+
+- Claude Code `EnterPlanMode` plans → `.atlas-plans/`
+- Superpowers plugin plans and specs → `.atlas-plans/plans/` and `.atlas-plans/specs/`
+- Any skill or extension that generates planning artifacts → `.atlas-plans/`
+- Handoff documents → `.atlas-plans/`
+
+**Never store plans in `docs/`.** The `docs/` directory is exclusively for user-facing published documentation.
 
 ## Key Conventions
 

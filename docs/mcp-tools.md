@@ -1,0 +1,174 @@
+# MCP Tools
+
+[Back to README](../README.md)
+
+All 7 tools available when Claude Code connects to the Recall MCP server (`recall-memory`).
+
+---
+
+## memory_search
+
+FTS5 keyword search across all memory tables. Use before asking the user to repeat anything.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| query | string | yes | — | Search query. FTS5 supports `AND`, `OR`, `NOT`, `prefix*`, `"exact phrase"` |
+| project | string | no | — | Filter results to a specific project name |
+| table | string | no | — | Restrict search to one table: `messages`, `loa`, `decisions`, `learnings`, `breadcrumbs` |
+| limit | number | no | 10 | Maximum number of results to return |
+
+**Returns:** Array of matching records with table name, id, content, project, and snippet highlighting.
+
+```js
+memory_search({ query: "kubernetes auth", project: "my-app", table: "decisions", limit: 10 })
+```
+
+---
+
+## memory_hybrid_search
+
+Combined keyword + semantic search using Reciprocal Rank Fusion. Best for natural language queries. Falls back to keyword-only search if embeddings are unavailable.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| query | string | yes | — | Natural language search query |
+| project | string | no | — | Filter results to a specific project name |
+| limit | number | no | 10 | Maximum number of results to return |
+
+**Returns:** Array of matching records ranked by fused keyword and semantic relevance scores.
+
+```js
+memory_hybrid_search({ query: "how did we handle rate limiting", project: "my-app" })
+```
+
+---
+
+## memory_recall
+
+Get recent context — LoA entries, decisions, and breadcrumbs. Good for orienting at the start of a session.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| limit | number | no | 5 | Number of recent entries to return per category |
+| project | string | no | — | Filter results to a specific project name |
+
+**Returns:** Recent records grouped by category: Library of Alexandria entries, decisions, and breadcrumbs.
+
+```js
+memory_recall({ limit: 5, project: "my-app" })
+```
+
+---
+
+## context_for_agent
+
+Call this before spawning any agent via the Task tool. Uses hybrid search to find relevant memory context for the planned task, so the agent starts with relevant background.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| agent_task | string | yes | — | The task or prompt you plan to give the agent |
+| project | string | no | — | Current project name for filtering |
+
+**Returns:** Formatted context block containing relevant decisions, learnings, and breadcrumbs matched to the task description.
+
+```js
+context_for_agent({ agent_task: "Refactor the auth middleware", project: "my-app" })
+```
+
+---
+
+## memory_add
+
+Add structured records during a session. Use this to capture decisions, learnings, and work-in-progress breadcrumbs as they happen.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| type | string | yes | — | Record type: `"decision"`, `"learning"`, or `"breadcrumb"` |
+| content | string | yes | — | Main content |
+| detail | string | no | — | Additional detail — reasoning for decisions, solution steps for learnings |
+| project | string | no | — | Project name |
+| tags | string | no | — | Comma-separated tags (applies to learnings) |
+
+**Returns:** Confirmation with the new record's id and table.
+
+```js
+memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and JSONB indexing" })
+memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail: "Not :param like better-sqlite3", tags: "bun,sqlite" })
+memory_add({ type: "breadcrumb", content: "Auth refactor in progress — do not touch middleware until complete" })
+```
+
+---
+
+## memory_stats
+
+Get database statistics including record counts per table and total database size. No parameters.
+
+**Returns:** Record counts for each table (`messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`, `docs`) and total database size on disk.
+
+```js
+memory_stats()
+```
+
+---
+
+## loa_show
+
+Show a full Library of Alexandria entry with its Fabric `extract_wisdom` content. LoA entries are curated knowledge summaries extracted from session conversations.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| id | number | yes | — | LoA entry ID (use `memory_search` or `memory_recall` to find IDs) |
+
+**Returns:** Full LoA record including title, summary, insights, quotes, and any Fabric-extracted wisdom.
+
+```js
+loa_show({ id: 1 })
+```
+
+---
+
+## memory_dump
+
+Flush the current conversation session into SQLite. Extracts messages, decisions, and learnings from the session transcript and persists them to the database. Use when the user says `/dump`.
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| title | string | yes | — | Descriptive title for this session dump |
+| project | string | no | — | Override the auto-detected project name |
+| skip_fabric | boolean | no | true | Skip Fabric processing (faster; uses a basic summary instead of `extract_wisdom`) |
+
+**Returns:** Summary of records imported: message count, decisions, learnings, and breadcrumbs extracted from the session.
+
+```js
+memory_dump({ title: "Auth middleware refactor — JWT validation approach", project: "my-app" })
+```
+
+---
+
+## When to Use Each Tool
+
+| Scenario | Tool |
+|----------|------|
+| Starting a new session | `memory_recall` |
+| User asks about past work | `memory_search` or `memory_hybrid_search` |
+| Before spawning a sub-agent | `context_for_agent` |
+| Recording an architectural decision | `memory_add` with `type: "decision"` |
+| Capturing a technical insight | `memory_add` with `type: "learning"` |
+| Marking work-in-progress state | `memory_add` with `type: "breadcrumb"` |
+| End of session | `memory_dump` |
+| Viewing curated knowledge | `loa_show` |
+| Quick database health check | `memory_stats` |

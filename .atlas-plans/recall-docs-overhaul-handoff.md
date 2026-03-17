@@ -23,6 +23,15 @@
 
 ## What Needs To Be Done Next
 
+### Phase Dependencies
+- **Phase 1 → Phase 2** (sequential): README rewrite links to docs/ files that must exist first
+- **Phase 3** can start after Phase 1 (diagrams go in docs/ files)
+- **Phase 4** is fully independent (VHS recordings — can run in parallel)
+- **Phase 5** must be last (cross-references depend on all other content)
+
+### Minimum Viable Deliverable
+Phases 1-2 are the minimum shippable unit — new README + docs/ structure. Phases 3-5 are high-value polish that can ship incrementally.
+
 ### Phase 1: Create `docs/` files (7 new files)
 Move content from README.md into:
 - `docs/installation.md` — includes the "junior dev onboarding" install walkthrough
@@ -50,11 +59,12 @@ Update CLAUDE.md, FOR_CLAUDE.md, internal links
 
 ## Key Context for Next Session
 
-- **Current README:** 584 lines, 35 sections — all in one file
+- **Current README:** ~584 lines as of 2026-03-17 (verify with `wc -l README.md`), 35 sections — all in one file
 - **Target README:** ~150-200 lines, focused on value proposition
 - **docs/ already has:** `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`, `superpowers/` (specs/plans)
-- **VHS install:** Already installed (Ed confirmed 2026-03-17)
-- **Version:** v0.5.0 (docs-only changes would be v0.5.1 patch)
+- **VHS install:** Should be installed — verify with `which vhs` before Phase 4
+- **Version:** v0.5.0 (verify: `grep version package.json`; docs-only changes would be v0.5.1 patch)
+- **Git state:** `install.sh` has uncommitted modifications — review with `git diff install.sh` before starting; commit or stash first
 
 ---
 
