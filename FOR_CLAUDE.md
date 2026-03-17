@@ -58,6 +58,20 @@ Before spawning agents via the Task tool, call this to prepare memory context:
 context_for_agent({ agent_task: "Refactor the auth middleware", project: "my-app" })
 ```
 
+### memory_dump
+
+Dump the current session into SQLite mid-conversation. Messages become immediately searchable. Works across Claude Code, OpenCode, and Pi.
+
+```
+memory_dump({ title: "Working on auth refactor", skip_fabric: true })
+```
+
+- `title` (required): Descriptive title for this session
+- `project` (optional): Override project name
+- `skip_fabric` (optional, default: true): Skip Fabric extraction for speed
+
+After dumping, open a new session and use `memory_search` to query the dumped conversation.
+
 ### memory_stats
 
 Get database statistics (record counts, database size).
@@ -65,6 +79,20 @@ Get database statistics (record counts, database size).
 ### loa_show
 
 Show a full Library of Alexandria entry with its extracted wisdom.
+
+## Slash Commands
+
+These slash commands are available in any Claude Code session:
+
+| Command | What it does |
+|---------|-------------|
+| `/recall:dump <title>` | Flush session to DB + capture LoA entry. Run at end of every session. |
+| `/recall:search <query>` | FTS5 search across all memory. Example: `/recall:search kubernetes auth` |
+| `/recall:recent [table]` | Recent records. Example: `/recall:recent decisions` |
+| `/recall:stats` | Database statistics at a glance |
+| `/recall:add` | Add a record. Example: `/recall:add breadcrumb "Auth refactor in progress"` |
+| `/recall:doctor` | Health check all subsystems |
+| `/recall:loa` | Browse Library of Alexandria entries |
 
 ## The CLI
 
@@ -82,7 +110,7 @@ mem dump "Session title"            # Capture current session
 1. **Search before asking** — Before asking the user to repeat information, search memory first
 2. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 3. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
-4. **Session capture** — When the user says `/dump`, run `mem dump "Descriptive Title"` to capture the session
+4. **Session capture** — When the user says `/dump` or `/recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
 
 ## How Extraction Works
 

@@ -47,6 +47,15 @@ src/
     project.ts         # Project path utilities
   types/
     index.ts           # Shared TypeScript types
+commands/
+  recall/              # Slash commands (installed to ~/.claude/commands/recall/)
+    dump.md            #   /recall:dump — session flush + LoA capture
+    search.md          #   /recall:search — FTS5 search
+    recent.md          #   /recall:recent — recent records
+    stats.md           #   /recall:stats — database statistics
+    add.md             #   /recall:add — add breadcrumb/decision/learning
+    doctor.md          #   /recall:doctor — health checks
+    loa.md             #   /recall:loa — Library of Alexandria browser
 hooks/
   SessionExtract.ts    # Stop hook — extracts sessions via Claude Haiku on exit
   BatchExtract.ts      # Cron job — batch extracts missed sessions

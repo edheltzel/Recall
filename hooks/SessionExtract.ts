@@ -27,7 +27,7 @@
  * - Runs asynchronously via self-spawn, non-blocking
  */
 
-import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, unlinkSync, openSync, closeSync } from 'fs';
 import { join } from 'path';
 import { execSync, spawn } from 'child_process';
 
@@ -44,8 +44,56 @@ const ERRORS_PATH = join(MEMORY_DIR, 'ERROR_PATTERNS.json');
 const PROJECTS_DIR = join(process.env.HOME!, '.claude', 'projects');
 const SESSION_FOLDERS_DIR = join(process.env.HOME!, '.claude', 'sessions');
 const DEDUP_PATH = join(MEMORY_DIR, '.last_extracted_hash');
-
 const HOT_RECALL_MAX_SESSIONS = 10;
+
+// Lock file for preventing concurrent extraction of the same conversation
+const EXTRACT_LOCK_DIR = join(MEMORY_DIR, '.extract_locks');
+mkdirSync(EXTRACT_LOCK_DIR, { recursive: true });
+
+/**
+ * Try to acquire an exclusive lock for extracting a specific conversation.
+ * Uses O_CREAT|O_EXCL (wx flag) for atomic file creation — only one process wins.
+ * Returns true if lock acquired, false if another process holds it.
+ */
+function tryAcquireExtractLock(convPath: string): boolean {
+  const lockName = convPath.replace(/[^a-zA-Z0-9]/g, '_') + '.lock';
+  const lockPath = join(EXTRACT_LOCK_DIR, lockName);
+  try {
+    // O_CREAT|O_EXCL — fails atomically if file already exists
+    const fd = openSync(lockPath, 'wx');
+    closeSync(fd);
+    writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n${convPath}`);
+    return true;
+  } catch (err: any) {
+    if (err.code === 'EEXIST') {
+      // Lock file exists — check if it's stale (older than 10 minutes)
+      try {
+        const lockAge = Date.now() - statSync(lockPath).mtimeMs;
+        if (lockAge > 600_000) {
+          // Stale lock — remove and retry once
+          unlinkSync(lockPath);
+          try {
+            const fd = openSync(lockPath, 'wx');
+            closeSync(fd);
+            writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n${convPath}`);
+            return true;
+          } catch { return false; }
+        }
+      } catch {}
+      return false;
+    }
+    return false; // Other error — don't extract
+  }
+}
+
+/**
+ * Release the extraction lock for a conversation.
+ */
+function releaseExtractLock(convPath: string): void {
+  const lockName = convPath.replace(/[^a-zA-Z0-9]/g, '_') + '.lock';
+  const lockPath = join(EXTRACT_LOCK_DIR, lockName);
+  try { unlinkSync(lockPath); } catch {}
+}
 
 // Claude CLI extraction (uses Claude Code's existing auth — no API key needed)
 const CLAUDE_CLI_MODEL = "haiku";
@@ -252,6 +300,7 @@ function markAsExtracted(convPath: string): void {
     };
     saveExtractionTracker(tracker);
   } catch {}
+  releaseExtractLock(convPath);
 }
 
 /**
@@ -269,6 +318,7 @@ function markAsFailed(convPath: string): void {
     };
     saveExtractionTracker(tracker);
   } catch {}
+  releaseExtractLock(convPath);
 }
 
 // Legacy compat — getConversationHash now just returns path (used by --reextract)
@@ -685,7 +735,7 @@ async function extractWithClaude(messages: string): Promise<string | null> {
 
   try {
     const result = execSync(
-      `"${claudePath}" -p --model ${CLAUDE_CLI_MODEL} --output-format text`,
+      `"${claudePath}" -p --model ${CLAUDE_CLI_MODEL} --output-format text --setting-sources ""`,
       {
         input: userMessage,
         encoding: 'utf-8',
@@ -782,7 +832,7 @@ async function extractWithClaudeChunked(messages: string): Promise<string | null
 
   try {
     const result = execSync(
-      `"${claudePath}" -p --model ${CLAUDE_CLI_MODEL} --output-format text`,
+      `"${claudePath}" -p --model ${CLAUDE_CLI_MODEL} --output-format text --setting-sources ""`,
       {
         input: userMessage,
         encoding: 'utf-8',
@@ -1167,6 +1217,18 @@ async function main() {
     const conversationPath = findCurrentConversation(cwd);
     if (!conversationPath) {
       logExtract(`NO_CONVERSATION: ${cwd}`);
+      process.exit(0);
+    }
+
+    // Early dedup check in parent — prevents spawning duplicate children
+    if (wasAlreadyExtracted(conversationPath)) {
+      logExtract(`DEDUP_PARENT: ${conversationPath} already extracted, skipping spawn`);
+      process.exit(0);
+    }
+
+    // Atomic lock — prevents concurrent extraction of the same conversation
+    if (!tryAcquireExtractLock(conversationPath)) {
+      logExtract(`LOCK_BUSY: ${conversationPath} extraction already in progress, skipping`);
       process.exit(0);
     }
 

@@ -22,6 +22,10 @@ You have access to persistent memory via the recall-memory MCP server.
 4. **Recall recent context** — At session start or when context is needed:
    - `recall-memory_memory_recall` for recent entries across all categories
 
+5. **Session capture** — When the user says `/dump`, capture the session:
+   - `recall-memory_memory_dump` with a descriptive title
+   - Messages become immediately searchable from any new session
+
 ## Available Tools
 
 | Tool | Purpose |
@@ -32,4 +36,5 @@ You have access to persistent memory via the recall-memory MCP server.
 | `recall-memory_memory_add` | Record decisions, learnings, or breadcrumbs |
 | `recall-memory_context_for_agent` | Prepare context before spawning subagents |
 | `recall-memory_memory_stats` | Database statistics |
+| `recall-memory_memory_dump` | Dump current session to SQLite (mid-session) |
 | `recall-memory_loa_show` | View full Library of Alexandria entry |

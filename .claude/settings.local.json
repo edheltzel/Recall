@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__recall-memory__memory_add"
+    ]
+  }
+}
