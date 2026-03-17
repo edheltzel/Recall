@@ -53,7 +53,7 @@ Update CLAUDE.md, FOR_CLAUDE.md, internal links
 - **Current README:** 584 lines, 35 sections — all in one file
 - **Target README:** ~150-200 lines, focused on value proposition
 - **docs/ already has:** `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`, `superpowers/` (specs/plans)
-- **VHS install:** `brew install vhs` (requires ttyd + ffmpeg, bundled)
+- **VHS install:** Already installed (Ed confirmed 2026-03-17)
 - **Version:** v0.5.0 (docs-only changes would be v0.5.1 patch)
 
 ---
