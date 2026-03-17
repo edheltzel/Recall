@@ -1,43 +1,34 @@
 // mem dump command - Flush current session to DB + capture LoA
+// Core functions are exported for use by the MCP server's memory_dump tool.
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { getDb } from '../db/connection.js';
-import { createSession, sessionExists, addMessagesBatch, createLoaEntry, getLastLoaEntry } from '../lib/memory.js';
+import { createSession, sessionExists, addMessagesBatch, createLoaEntry } from '../lib/memory.js';
 import { extractProjectFromPath } from '../lib/project.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import type { Message } from '../types/index.js';
 
-/**
- * Auto-embed a new LoA entry for semantic search (Phase 3)
- */
-async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: string): Promise<void> {
-  try {
-    const serviceStatus = await checkEmbeddingService();
-    if (!serviceStatus.available) {
-      console.log(`  ⚠ Embedding skipped (service unavailable)`);
-      return;
-    }
-
-    const content = `${title}\n\n${fabricExtract}`;
-    const result = await embed(content);
-    const blob = embeddingToBlob(result.embedding);
-
-    const db = getDb();
-    db.prepare(`
-      INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('loa_entries', id, result.model, result.dimensions, blob);
-
-    console.log(`  ✓ Auto-embedded for semantic search (${result.dimensions}d)`);
-  } catch (err) {
-    console.log(`  ⚠ Embedding failed: ${err instanceof Error ? err.message : err}`);
-  }
-}
+// ============ Constants ============
 
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
+const OPENCODE_DROP_DIR = join(homedir(), '.claude', 'MEMORY', 'opencode-sessions');
+const PI_DROP_DIR = join(homedir(), '.claude', 'MEMORY', 'pi-sessions');
+const MAX_FABRIC_INPUT_BYTES = 50 * 1024 * 1024;
+
+// ============ Types ============
+
+export type SessionSource = 'claude' | 'opencode' | 'pi';
+
+export interface ParsedSession {
+  source: SessionSource;
+  sessionId: string;
+  project: string;
+  messages: Omit<Message, 'id'>[];
+  filePath: string;
+}
 
 interface DumpOptions {
   project?: string;
@@ -47,13 +38,13 @@ interface DumpOptions {
   skipFabric?: boolean;
 }
 
+// ============ Session Finding ============
+
 /**
- * Find the most recently modified JSONL file (likely the current session)
+ * Find the most recently modified JSONL file (Claude Code sessions)
  */
 function findCurrentSessionFile(): string | null {
-  if (!existsSync(CLAUDE_PROJECTS_DIR)) {
-    return null;
-  }
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return null;
 
   let mostRecentFile: string | null = null;
   let mostRecentTime = 0;
@@ -64,7 +55,6 @@ function findCurrentSessionFile(): string | null {
 
   for (const projectDir of projectDirs) {
     const projectPath = join(CLAUDE_PROJECTS_DIR, projectDir);
-
     const jsonlFiles = readdirSync(projectPath, { withFileTypes: true })
       .filter(f => f.isFile() && f.name.endsWith('.jsonl'))
       .map(f => join(projectPath, f.name));
@@ -82,12 +72,35 @@ function findCurrentSessionFile(): string | null {
 }
 
 /**
- * Parse a session JSONL file
+ * Find the most recently modified markdown drop file in a directory
+ */
+function findLatestDropFile(dropDir: string): string | null {
+  if (!existsSync(dropDir)) return null;
+
+  let latest: string | null = null;
+  let latestTime = 0;
+
+  for (const f of readdirSync(dropDir)) {
+    if (!f.endsWith('.md') || f.startsWith('.')) continue;
+    const full = join(dropDir, f);
+    const mt = statSync(full).mtimeMs;
+    if (mt > latestTime) {
+      latestTime = mt;
+      latest = full;
+    }
+  }
+
+  return latest;
+}
+
+// ============ Session Parsing ============
+
+/**
+ * Parse a Claude Code JSONL session file
  */
 function parseSessionFile(filePath: string): { sessionId: string; project: string; messages: Omit<Message, 'id'>[] } | null {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
-
   if (lines.length === 0) return null;
 
   const messages: Omit<Message, 'id'>[] = [];
@@ -97,21 +110,11 @@ function parseSessionFile(filePath: string): { sessionId: string; project: strin
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line);
+      if (parsed.type !== 'user' && parsed.type !== 'assistant') continue;
+      if (!sessionId && parsed.sessionId) sessionId = parsed.sessionId;
 
-      // Skip non-message types
-      if (parsed.type !== 'user' && parsed.type !== 'assistant') {
-        continue;
-      }
-
-      // Extract session metadata
-      if (!sessionId && parsed.sessionId) {
-        sessionId = parsed.sessionId;
-      }
-
-      // Extract message content
       if (parsed.message?.content) {
         let msgContent: string;
-
         if (typeof parsed.message.content === 'string') {
           msgContent = parsed.message.content;
         } else if (Array.isArray(parsed.message.content)) {
@@ -138,78 +141,214 @@ function parseSessionFile(filePath: string): { sessionId: string; project: strin
     }
   }
 
-  // Derive project from path
   const projectDir = basename(dirname(filePath));
   project = extractProjectFromPath(projectDir);
-
-  // Update project in all messages
   for (const msg of messages) {
     msg.project = project;
   }
 
-  if (!sessionId) {
-    sessionId = basename(filePath, '.jsonl');
-  }
+  if (!sessionId) sessionId = basename(filePath, '.jsonl');
 
   return { sessionId, project, messages };
 }
 
 /**
- * Recursively delete LoA entries and their children
- * Prevents FK constraint violations from parent_loa_id references
+ * Parse a markdown drop file (OpenCode or Pi format) into messages.
+ * Supports [ROLE]: content and ## Role heading formats.
  */
+export function parseMarkdownDrop(filePath: string): { sessionId: string; messages: Omit<Message, 'id'>[] } | null {
+  const content = readFileSync(filePath, 'utf-8');
+  if (!content.trim()) return null;
+
+  const sessionId = basename(filePath, '.md');
+  const messages: Omit<Message, 'id'>[] = [];
+
+  // Split on role markers: [USER]: or [ASSISTANT]:, optionally with timestamps
+  const rolePattern = /\[(USER|ASSISTANT)(?:\s+[\d:]+)?\]:\s*/gi;
+  const parts: Array<{ role: 'user' | 'assistant'; startIdx: number }> = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = rolePattern.exec(content)) !== null) {
+    parts.push({
+      role: match[1].toLowerCase() as 'user' | 'assistant',
+      startIdx: match.index + match[0].length
+    });
+  }
+
+  // Fallback: try markdown heading format (## User / ## Assistant)
+  if (parts.length === 0) {
+    const headingPattern = /^##?\s*(User|Assistant|Human)\s*$/gim;
+    while ((match = headingPattern.exec(content)) !== null) {
+      const rawRole = match[1].toLowerCase();
+      parts.push({
+        role: (rawRole === 'human' ? 'user' : rawRole) as 'user' | 'assistant',
+        startIdx: match.index + match[0].length
+      });
+    }
+  }
+
+  if (parts.length === 0) return null;
+
+  const now = new Date().toISOString();
+  for (let i = 0; i < parts.length; i++) {
+    const start = parts[i].startIdx;
+    // End at next role marker (search backward a bit to exclude the marker prefix)
+    const end = i + 1 < parts.length
+      ? content.lastIndexOf('\n', content.indexOf('[', parts[i + 1].startIdx - 80))
+      : content.length;
+    const text = content.slice(start, end > start ? end : content.length).trim();
+
+    if (text.length > 10) {
+      messages.push({
+        session_id: sessionId,
+        timestamp: now,
+        role: parts[i].role,
+        content: text
+      });
+    }
+  }
+
+  return messages.length > 0 ? { sessionId, messages } : null;
+}
+
+/**
+ * Find the current session across all supported agent types.
+ * Priority: Claude Code JSONL > OpenCode drops > Pi drops
+ */
+export function findCurrentSessionAcrossAgents(): ParsedSession | null {
+  // Try Claude Code first (most common)
+  const claudeFile = findCurrentSessionFile();
+  if (claudeFile) {
+    const parsed = parseSessionFile(claudeFile);
+    if (parsed && parsed.messages.length > 0) {
+      return {
+        source: 'claude',
+        sessionId: parsed.sessionId,
+        project: parsed.project,
+        messages: parsed.messages,
+        filePath: claudeFile
+      };
+    }
+  }
+
+  // Try OpenCode drops
+  const openCodeFile = findLatestDropFile(OPENCODE_DROP_DIR);
+  if (openCodeFile) {
+    const parsed = parseMarkdownDrop(openCodeFile);
+    if (parsed && parsed.messages.length > 0) {
+      return {
+        source: 'opencode',
+        sessionId: parsed.sessionId,
+        project: 'opencode',
+        messages: parsed.messages.map(m => ({ ...m, project: 'opencode' })),
+        filePath: openCodeFile
+      };
+    }
+  }
+
+  // Try Pi drops
+  const piFile = findLatestDropFile(PI_DROP_DIR);
+  if (piFile) {
+    const parsed = parseMarkdownDrop(piFile);
+    if (parsed && parsed.messages.length > 0) {
+      return {
+        source: 'pi',
+        sessionId: parsed.sessionId,
+        project: 'pi',
+        messages: parsed.messages.map(m => ({ ...m, project: 'pi' })),
+        filePath: piFile
+      };
+    }
+  }
+
+  return null;
+}
+
+// ============ Summary Generation ============
+
+/**
+ * Generate a basic summary from messages when Fabric is unavailable.
+ */
+export function generateBasicSummary(messages: Omit<Message, 'id'>[]): string {
+  const userMessages = messages.filter(m => m.role === 'user');
+  const assistantMessages = messages.filter(m => m.role === 'assistant');
+
+  const firstUser = userMessages[0]?.content.slice(0, 200) || 'No user messages';
+  const lastAssistant = assistantMessages[assistantMessages.length - 1]?.content.slice(0, 200) || 'No assistant messages';
+
+  return `## ONE SENTENCE SUMMARY
+
+Session with ${messages.length} messages.
+
+## MAIN IDEAS
+
+- User started with: ${firstUser}${firstUser.length >= 200 ? '...' : ''}
+- Final response covered: ${lastAssistant}${lastAssistant.length >= 200 ? '...' : ''}
+
+## TOPICS
+
+- ${messages.length} total messages (${userMessages.length} user, ${assistantMessages.length} assistant)
+`;
+}
+
+// ============ Internal Helpers ============
+
+async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: string): Promise<void> {
+  try {
+    const serviceStatus = await checkEmbeddingService();
+    if (!serviceStatus.available) return;
+
+    const content = `${title}\n\n${fabricExtract}`;
+    const result = await embed(content);
+    const blob = embeddingToBlob(result.embedding);
+
+    const db = getDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('loa_entries', id, result.model, result.dimensions, blob);
+  } catch {
+    // Non-fatal
+  }
+}
+
 function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: number[]): void {
   if (loaIds.length === 0) return;
 
-  // Find all children of these LoA entries
   const childIds = db.prepare(`
     SELECT id FROM loa_entries WHERE parent_loa_id IN (${loaIds.map(() => '?').join(',')})
   `).all(...loaIds) as Array<{ id: number }>;
 
-  // Recursively delete children first
   if (childIds.length > 0) {
     deleteLoaEntriesRecursive(db, childIds.map(c => c.id));
   }
 
-  // Now delete these entries
   db.prepare(`
     DELETE FROM loa_entries WHERE id IN (${loaIds.map(() => '?').join(',')})
   `).run(...loaIds);
 }
 
-/**
- * Delete existing session and messages (for re-import)
- * Uses transaction to ensure atomic operation - no partial deletes
- */
 function deleteSession(sessionId: string): number {
   const db = getDb();
 
-  // Wrap all deletes in a transaction for atomicity (FIX #3)
   const deleteAll = db.transaction(() => {
-    // Count messages to be deleted
     const countResult = db.prepare('SELECT COUNT(*) as count FROM messages WHERE session_id = ?').get(sessionId) as { count: number };
     const count = countResult?.count || 0;
 
-    // Get message ID range for this session
     const rangeResult = db.prepare('SELECT MIN(id) as minId, MAX(id) as maxId FROM messages WHERE session_id = ?').get(sessionId) as { minId: number | null; maxId: number | null };
 
     if (rangeResult && rangeResult.minId !== null && rangeResult.maxId !== null) {
-      // Find LoA entries that reference messages in this range
       const affectedLoaIds = db.prepare(`
         SELECT id FROM loa_entries
         WHERE message_range_start >= ? AND message_range_end <= ?
       `).all(rangeResult.minId, rangeResult.maxId) as Array<{ id: number }>;
 
-      // Recursively delete LoA entries and their children (FIX #5)
       if (affectedLoaIds.length > 0) {
         deleteLoaEntriesRecursive(db, affectedLoaIds.map(e => e.id));
       }
     }
 
-    // Delete messages
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-
-    // Delete session
     db.prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
 
     return count;
@@ -218,168 +357,140 @@ function deleteSession(sessionId: string): number {
   return deleteAll();
 }
 
-// Maximum input size for Fabric (50MB) - larger sessions should be split
-const MAX_FABRIC_INPUT_BYTES = 50 * 1024 * 1024;
-
-/**
- * Run Fabric extract_wisdom on content
- * FIX #4: Increased buffer to 50MB, added input size validation
- */
 function runFabricExtract(content: string): string {
-  // Check input size before attempting
   const inputBytes = Buffer.byteLength(content, 'utf-8');
   if (inputBytes > MAX_FABRIC_INPUT_BYTES) {
     throw new Error(`Input too large for Fabric (${(inputBytes / 1024 / 1024).toFixed(1)}MB > 50MB limit). Use --limit to reduce message count.`);
   }
 
-  try {
-    const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
-      input: content,
-      encoding: 'utf-8',
-      maxBuffer: MAX_FABRIC_INPUT_BYTES, // 50MB buffer
-      timeout: 600000 // 10 minute timeout for large sessions
-    });
-    return result.trim();
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    throw new Error(`Fabric extraction failed: ${error}`);
-  }
+  const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
+    input: content,
+    encoding: 'utf-8',
+    maxBuffer: MAX_FABRIC_INPUT_BYTES,
+    timeout: 600000
+  });
+  return result.trim();
 }
 
-export async function runDump(title: string, options: DumpOptions): Promise<void> {
-  console.log('Memory Dump');
-  console.log('===========\n');
+// ============ Core Dump Logic (shared by CLI and MCP) ============
 
-  // Step 1: Find current session
-  const sessionFile = findCurrentSessionFile();
+/**
+ * Core dump logic — imports session to SQLite and optionally runs Fabric.
+ * Used by both the `mem dump` CLI command and the `memory_dump` MCP tool.
+ */
+export async function coreDump(title: string, options: DumpOptions & { session?: ParsedSession }): Promise<{
+  success: boolean;
+  sessionId: string;
+  messageCount: number;
+  loaId?: number;
+  source: SessionSource;
+  error?: string;
+}> {
+  const session = options.session || findCurrentSessionAcrossAgents();
 
-  if (!sessionFile) {
-    console.error('Error: No session files found');
-    process.exit(1);
+  if (!session) {
+    return { success: false, sessionId: '', messageCount: 0, source: 'claude', error: 'No session files found' };
   }
 
-  console.log(`Current session: ${basename(sessionFile)}`);
-  console.log(`File size: ${(statSync(sessionFile).size / 1024).toFixed(1)} KB\n`);
-
-  // Step 2: Parse the session
-  const parsed = parseSessionFile(sessionFile);
-
-  if (!parsed || parsed.messages.length === 0) {
-    console.error('Error: No messages found in session file');
-    process.exit(1);
+  if (options.project) {
+    for (const msg of session.messages) {
+      msg.project = options.project;
+    }
   }
 
-  console.log(`Messages found: ${parsed.messages.length}`);
-  console.log(`Project: ${parsed.project}`);
-
-  // Step 3: Check if session exists, delete if so (re-import)
-  let deletedCount = 0;
-  if (sessionExists(parsed.sessionId)) {
-    console.log(`\nRe-importing session (replacing ${parsed.sessionId})...`);
-    deletedCount = deleteSession(parsed.sessionId);
-    console.log(`Deleted ${deletedCount} existing messages`);
+  // Delete existing session if re-importing
+  if (sessionExists(session.sessionId)) {
+    deleteSession(session.sessionId);
   }
 
-  // Step 4: Import the session
-  const timestamps = parsed.messages.map(m => m.timestamp).sort();
-  const startedAt = timestamps[0];
-  const endedAt = timestamps[timestamps.length - 1];
-
+  // Import messages to SQLite FIRST (fast, always succeeds)
+  const timestamps = session.messages.map(m => m.timestamp).sort();
   createSession({
-    session_id: parsed.sessionId,
-    started_at: startedAt,
-    ended_at: endedAt,
-    project: parsed.project,
+    session_id: session.sessionId,
+    started_at: timestamps[0],
+    ended_at: timestamps[timestamps.length - 1],
+    project: options.project || session.project,
     summary: `Dumped: ${title}`
   });
 
-  const importedCount = addMessagesBatch(parsed.messages);
-  console.log(`\n✓ Imported ${importedCount} messages`);
+  const importedCount = addMessagesBatch(session.messages);
 
-  // Step 5: Run LoA capture (similar to loa.ts logic)
-  if (options.skipFabric) {
-    console.log('\nSkipping Fabric extraction (--skip-fabric)');
-    return;
-  }
-
-  // Get message range for LoA
+  // Get imported message IDs for LoA
   const db = getDb();
-  const lastLoa = getLastLoaEntry();
-
-  let startId: number;
-  let endId: number;
-  let messageCount: number;
-
-  // Get the messages we just imported
   const importedMessages = db.prepare(`
     SELECT id, content, role, timestamp
     FROM messages
     WHERE session_id = ?
     ORDER BY timestamp
     ${options.limit ? 'LIMIT ?' : ''}
-  `).all(parsed.sessionId, ...(options.limit ? [options.limit] : [])) as Array<{
-    id: number;
-    content: string;
-    role: string;
-    timestamp: string;
+  `).all(session.sessionId, ...(options.limit ? [options.limit] : [])) as Array<{
+    id: number; content: string; role: string; timestamp: string;
   }>;
 
   if (importedMessages.length === 0) {
-    console.log('\nNo messages to capture for LoA');
-    return;
+    return { success: true, sessionId: session.sessionId, messageCount: importedCount, source: session.source };
   }
 
-  // FIX #6: Proper null checks instead of non-null assertion
-  const firstMsg = importedMessages[0];
-  const lastMsg = importedMessages[importedMessages.length - 1];
+  const startId = importedMessages[0].id;
+  const endId = importedMessages[importedMessages.length - 1].id;
 
-  if (firstMsg.id === undefined || firstMsg.id === null || lastMsg.id === undefined || lastMsg.id === null) {
-    console.error('\nError: Messages missing IDs after import');
-    process.exit(1);
-  }
-
-  startId = firstMsg.id;
-  endId = lastMsg.id;
-  messageCount = importedMessages.length;
-
-  // Format for Fabric
-  const conversationText = importedMessages.map(m => {
-    const role = m.role.toUpperCase();
-    const time = m.timestamp.split('T')[1]?.split('.')[0] || '';
-    return `[${role} ${time}]\n${m.content}`;
-  }).join('\n\n---\n\n');
-
-  console.log(`\nProcessing ${messageCount} messages through Fabric extract_wisdom...`);
-
+  // Try Fabric, fall back to basic summary
   let fabricExtract: string;
-  try {
-    fabricExtract = runFabricExtract(conversationText);
-  } catch (err) {
-    console.error(`\nFabric extraction failed: ${err instanceof Error ? err.message : err}`);
-    console.log('Messages were imported but LoA entry was not created.');
-    return;
+  if (options.skipFabric) {
+    fabricExtract = generateBasicSummary(session.messages);
+  } else {
+    try {
+      const conversationText = importedMessages.map(m => {
+        const role = m.role.toUpperCase();
+        const time = m.timestamp.split('T')[1]?.split('.')[0] || '';
+        return `[${role} ${time}]\n${m.content}`;
+      }).join('\n\n---\n\n');
+      fabricExtract = runFabricExtract(conversationText);
+    } catch {
+      fabricExtract = generateBasicSummary(session.messages);
+    }
   }
 
-  // Create LoA entry
   const loaId = createLoaEntry({
     title,
     fabric_extract: fabricExtract,
     message_range_start: startId,
     message_range_end: endId,
     parent_loa_id: options.continues,
-    project: options.project || parsed.project,
+    project: options.project || session.project,
     tags: options.tags,
-    message_count: messageCount
+    message_count: importedMessages.length
   });
 
-  console.log(`\n✓ LoA #${loaId} captured: "${title}"`);
-  console.log(`  Messages: ${messageCount} (IDs ${startId}-${endId})`);
-  console.log(`  Project: ${options.project || parsed.project}`);
-
-  // Auto-embed for semantic search (Phase 3)
   await autoEmbedLoaEntry(loaId, title, fabricExtract);
 
-  // Show preview
-  console.log('\n--- Fabric Extract Preview ---\n');
-  console.log(fabricExtract.slice(0, 500) + (fabricExtract.length > 500 ? '...' : ''));
+  return {
+    success: true,
+    sessionId: session.sessionId,
+    messageCount: importedCount,
+    loaId,
+    source: session.source
+  };
+}
+
+// ============ CLI Entry Point ============
+
+export async function runDump(title: string, options: DumpOptions): Promise<void> {
+  console.log('Memory Dump');
+  console.log('===========\n');
+
+  const result = await coreDump(title, options);
+
+  if (!result.success) {
+    console.error(`Error: ${result.error}`);
+    process.exit(1);
+  }
+
+  console.log(`Source: ${result.source}`);
+  console.log(`Session: ${result.sessionId}`);
+  console.log(`✓ Imported ${result.messageCount} messages`);
+
+  if (result.loaId) {
+    console.log(`✓ LoA #${result.loaId} captured: "${title}"`);
+  }
 }

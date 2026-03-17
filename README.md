@@ -420,6 +420,24 @@ The hook self-spawns in background so the session exits immediately (non-blockin
 
 ---
 
+## Slash Commands
+
+Recall provides Claude Code slash commands for quick access to common operations. These are available as `/recall:command` in any Claude Code session.
+
+| Command | Description |
+|---------|-------------|
+| `/recall:dump <title>` | Flush current session to database + capture LoA entry |
+| `/recall:search <query>` | FTS5 full-text search across all memory tables |
+| `/recall:recent [table]` | Show recent records (all tables, or filter to one) |
+| `/recall:stats` | Database statistics — record counts, size, table breakdown |
+| `/recall:add` | Add a structured record — breadcrumb, decision, or learning |
+| `/recall:doctor` | Health check all subsystems — database, MCP, hooks, embeddings |
+| `/recall:loa` | Browse and view Library of Alexandria entries |
+
+Slash command files are installed to `~/.claude/commands/recall/` during setup. Source files are in `commands/recall/` in this repository.
+
+---
+
 ## CLI Quick Reference
 
 ```bash

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { join } from 'path';
 import { setupMigrationDb, teardownMigrationDb, getDbPath, getMigrationDb } from '../helpers/migrationSetup';
 import {
   acquireSemaphore,
@@ -8,7 +9,7 @@ import {
   getActiveLockCount,
 } from '../../hooks/lib/extraction-semaphore';
 
-const WORKER_PATH = '/Users/ed/Developer/atlas-recall/.worktrees/sqlite-migration/tests/helpers/concurrency_worker.ts';
+const WORKER_PATH = join(import.meta.dir, '../helpers/concurrency_worker.ts');
 
 let dbPath: string;
 

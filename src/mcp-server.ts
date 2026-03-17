@@ -570,6 +570,76 @@ server.tool(
 	},
 );
 
+// Tool: memory_dump - Dump current session to SQLite
+server.tool(
+	"memory_dump",
+	"Dump the current conversation session into SQLite for immediate searchability. Works across Claude Code, OpenCode, and Pi. Use when the user says /dump or you need to persist the current session mid-conversation. Messages are immediately searchable via memory_search after dumping.",
+	{
+		title: z
+			.string()
+			.min(1)
+			.describe("Descriptive title for this session dump"),
+		project: z
+			.string()
+			.optional()
+			.describe("Override project name"),
+		skip_fabric: z
+			.boolean()
+			.default(true)
+			.describe(
+				"Skip Fabric extract_wisdom (faster, uses basic summary). Default: true for speed.",
+			),
+	},
+	async ({ title, project, skip_fabric }) => {
+		try {
+			const { coreDump } = await import("./commands/dump.js");
+
+			const result = await coreDump(title, {
+				project,
+				skipFabric: skip_fabric,
+			});
+
+			// Log memory usage
+			logMemoryUsage("memory_dump", title, result.messageCount, project);
+
+			if (!result.success) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Dump failed: ${result.error}`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			let output = `✓ Session dumped to SQLite\n\n`;
+			output += `- **Source:** ${result.source}\n`;
+			output += `- **Session ID:** ${result.sessionId}\n`;
+			output += `- **Messages:** ${result.messageCount}\n`;
+			if (result.loaId) {
+				output += `- **LoA Entry:** #${result.loaId}\n`;
+			}
+			output += `\nMessages are now searchable via \`memory_search\`.`;
+
+			return {
+				content: [{ type: "text", text: output }],
+			};
+		} catch (err) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Dump error: ${err instanceof Error ? err.message : String(err)}`,
+					},
+				],
+				isError: true,
+			};
+		}
+	},
+);
+
 // Tool: memory_stats - Database statistics
 server.tool("memory_stats", "Get RECALL database statistics.", {}, async () => {
 	try {
