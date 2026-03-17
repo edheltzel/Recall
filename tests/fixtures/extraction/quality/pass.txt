@@ -1,0 +1,14 @@
+ONE SENTENCE SUMMARY:
+Implemented SQLite-based extraction tracker to replace JSON file storage for improved concurrency safety.
+
+MAIN IDEAS:
+1. Replaced read-modify-write JSON files with atomic SQLite INSERT OR REPLACE operations
+2. Added counting semaphore to limit concurrent extractors to 3
+3. Fixed TOCTOU race condition in lock acquisition using INSERT OR IGNORE
+4. Improved quality gate to handle short sessions with adaptive prompting
+5. Migration script converts existing JSON state to SQLite tables
+
+MAIN RECOMMENDATIONS:
+1. Monitor extraction success rate after migration to validate improvement
+2. Consider adding metrics endpoint for extraction health monitoring
+3. Review BatchExtract.ts for similar concurrency issues

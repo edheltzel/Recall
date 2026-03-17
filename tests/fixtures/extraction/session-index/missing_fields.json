@@ -1,0 +1,21 @@
+[
+  {
+    "sessionId": "sess-missing-1",
+    "timestamp": "2026-03-10T08:00:00.000Z"
+  },
+  {
+    "sessionId": "sess-missing-2",
+    "project": "test-project",
+    "timestamp": null,
+    "summary": null,
+    "topics": null
+  },
+  {
+    "sessionId": "sess-missing-3",
+    "project": "test-project",
+    "branch": "main",
+    "timestamp": "2026-03-09T12:00:00.000Z",
+    "summary": "",
+    "topics": []
+  }
+]

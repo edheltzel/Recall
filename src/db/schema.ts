@@ -1,6 +1,5 @@
 // Database schema for RECALL
-
-export const SCHEMA_VERSION = 3; // Bumped for multi-platform source tracking
+// Version tracking uses PRAGMA user_version (see migrations.ts)
 
 export const CREATE_TABLES = `
 -- Sessions table: tracks coding agent sessions (Claude Code, OpenCode, etc.)
@@ -121,6 +120,45 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Extraction tracker (replaces .extraction_tracker.json)
+CREATE TABLE IF NOT EXISTS extraction_tracker (
+  conversation_path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  extracted_at TEXT,
+  failed_at TEXT,
+  retry_after TEXT,
+  error TEXT,
+  skipped INTEGER DEFAULT 0
+);
+
+-- Extraction sessions (replaces SESSION_INDEX.json and HOT_RECALL.md)
+CREATE TABLE IF NOT EXISTS extraction_sessions (
+  session_id TEXT PRIMARY KEY,
+  project TEXT,
+  branch TEXT,
+  timestamp TEXT NOT NULL,
+  summary TEXT,
+  topics TEXT,
+  conversation_path TEXT
+);
+
+-- Extraction errors (replaces ERROR_PATTERNS.json)
+CREATE TABLE IF NOT EXISTS extraction_errors (
+  error_key TEXT PRIMARY KEY,
+  error TEXT NOT NULL,
+  fix TEXT,
+  context TEXT,
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL
+);
+
+-- Extraction locks (counting semaphore for concurrent extractors)
+CREATE TABLE IF NOT EXISTS extraction_locks (
+  conversation_path TEXT PRIMARY KEY,
+  pid INTEGER NOT NULL,
+  started_at TEXT NOT NULL
+);
 `;
 
 export const CREATE_INDEXES = `
@@ -162,6 +200,9 @@ CREATE INDEX IF NOT EXISTS idx_telos_parent ON telos(parent_code);
 -- Documents indexes
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
 CREATE INDEX IF NOT EXISTS idx_documents_created ON documents(created_at);
+
+-- Extraction session indexes
+CREATE INDEX IF NOT EXISTS idx_extraction_sessions_ts ON extraction_sessions(timestamp DESC);
 `;
 
 export const CREATE_FTS = `
@@ -343,7 +384,4 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
 // Note: sqlite-vec virtual tables are created dynamically after loading the extension
 // They use: CREATE VIRTUAL TABLE vec_xxx USING vec0(embedding float[768]);
 
-// Migration: v2 → v3 (add source column for multi-platform support)
-export const MIGRATE_V2_TO_V3 = `
-ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code';
-`;
+// Migration SQL lives in src/db/migrations.ts (ordered migration array)

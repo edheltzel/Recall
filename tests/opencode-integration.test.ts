@@ -4,7 +4,10 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { Database } from 'bun:sqlite';
 import { execFileSync } from 'child_process';
-import { MIGRATE_V2_TO_V3, CREATE_TABLES } from '../src/db/schema';
+import { CREATE_TABLES } from '../src/db/schema';
+
+// v2→v3 migration SQL (inlined — formerly exported from schema.ts, now in migrations.ts)
+const MIGRATE_V2_TO_V3 = "ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code'";
 import { linearizeSession } from '../pi/recall-extract';
 
 // ─── Schema v3 Migration Tests ───

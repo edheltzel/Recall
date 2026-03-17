@@ -1,0 +1,23 @@
+{"type":"message","role":"user","content":"I'm getting a race condition in my extraction hook. Multiple processes are writing to the same JSON file and corrupting it."}
+{"type":"message","role":"assistant","content":"That's a common issue with file-based state management. Let me look at your extraction hook to understand the current approach."}
+{"type":"message","role":"user","content":"The hook runs on every session stop event. It reads a tracker JSON file, checks if the session was already extracted, and if not, spawns a background process to do the extraction."}
+{"type":"message","role":"assistant","content":"I see several potential issues: 1) The read-check-write cycle on the tracker file is not atomic, creating a TOCTOU race. 2) Multiple background processes can spawn for the same session. 3) The lock mechanism uses file-based locks which have their own race conditions."}
+{"type":"message","role":"user","content":"Yes exactly. I've seen up to 84 concurrent extractors running at once, which causes system instability."}
+{"type":"message","role":"assistant","content":"That's extreme. Let me propose a solution using SQLite instead of JSON files. SQLite provides atomic operations through INSERT OR REPLACE, and we can implement a counting semaphore to limit concurrency."}
+{"type":"message","role":"user","content":"How would the semaphore work?"}
+{"type":"message","role":"assistant","content":"We'd create an extraction_locks table. Before spawning an extractor, we INSERT OR IGNORE a row. If the insert succeeds, we got the lock. We limit to 3 concurrent locks by checking COUNT(*) first. Stale locks are cleaned by checking PID liveness."}
+{"type":"message","role":"user","content":"What about the quality gate issue? 80% of extractions fail because Haiku doesn't produce the expected headers for short sessions."}
+{"type":"message","role":"assistant","content":"We should implement an adaptive approach: 1) Skip sessions under 500 chars entirely. 2) Use a simplified prompt for 500-2000 char sessions. 3) Full structured prompt only for longer sessions. 4) Relax the quality gate to accept any meaningful content over 100 chars."}
+{"type":"message","role":"user","content":"That makes sense. Let's also track failure categories so we can monitor improvement."}
+{"type":"message","role":"assistant","content":"Good idea. We'll add an error field to the tracker that categorizes failures: quality_gate, api_error, timeout, or skipped. This gives us data to tune thresholds over time."}
+{"type":"message","role":"user","content":"Can you show me the schema for the new tables?"}
+{"type":"message","role":"assistant","content":"Here are the four new tables: extraction_tracker (replaces .extraction_tracker.json), extraction_sessions (replaces SESSION_INDEX.json and HOT_RECALL.md), extraction_errors (replaces ERROR_PATTERNS.json), and extraction_locks (replaces file-based .lock files)."}
+{"type":"message","role":"user","content":"How do we handle the migration from JSON to SQLite?"}
+{"type":"message","role":"assistant","content":"We'll create migration functions that read each JSON file and bulk INSERT into the corresponding SQLite table. The migration is idempotent (INSERT OR REPLACE) and never modifies source files. We back up JSON files as .bak before migrating."}
+{"type":"message","role":"user","content":"What about testing? How do we test race conditions?"}
+{"type":"message","role":"assistant","content":"We use Bun.spawn to create multiple concurrent child processes that all try to acquire the semaphore simultaneously. We assert that exactly MAX_CONCURRENT succeed and the rest are blocked. We also test crash recovery by SIGKILL-ing a child and verifying its lock is cleaned up."}
+{"type":"message","role":"user","content":"Let's start implementing. Test-first approach."}
+{"type":"message","role":"assistant","content":"Perfect. I'll follow a test-first ratchet: write tests for each phase, verify they fail, implement the code, verify they pass, then move to the next phase. Phase 0 creates fixtures, Phase 1 tests the schema DDL, and so on through Phase 7 for end-to-end integration."}
+{"type":"message","role":"user","content":"How many tests total?"}
+{"type":"message","role":"assistant","content":"66 tests across 8 phases: Schema (8), Tracker CRUD (11), Semaphore (9), Migration (14), Quality Gate (8), Lock Redesign (10), and E2E Integration (6). No real data is touched until all 66 pass."}
+{"type":"message","role":"user","content":"Sounds good. Let's go."}

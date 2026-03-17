@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
-import { SCHEMA_VERSION } from '../../src/db/schema';
+import { MIGRATIONS } from '../../src/db/migrations';
 
 beforeAll(() => {
   setupTestDb();
@@ -11,9 +11,11 @@ afterAll(() => {
   teardownTestDb();
 });
 
-describe('SCHEMA_VERSION', () => {
-  test('equals 3', () => {
-    expect(SCHEMA_VERSION).toBe(3);
+describe('migration version', () => {
+  test('PRAGMA user_version equals migration count', () => {
+    const db = getDb();
+    const row = db.prepare('PRAGMA user_version').get() as any;
+    expect(row.user_version).toBe(MIGRATIONS.length);
   });
 });
 
@@ -170,6 +172,6 @@ describe('schema_meta', () => {
       .get() as { value: string } | null;
 
     expect(row).not.toBeNull();
-    expect(row?.value).toBe(String(SCHEMA_VERSION));
+    expect(row?.value).toBe(String(MIGRATIONS.length));
   });
 });

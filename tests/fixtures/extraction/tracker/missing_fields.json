@@ -1,0 +1,7 @@
+{
+  "/path/no-size.jsonl": {},
+  "/path/zero-size.jsonl": { "size": 0 },
+  "/path/retry-no-fail.jsonl": { "size": 5000, "retryAfter": "2026-03-15T00:00:00.000Z" },
+  "/path/empty-extracted.jsonl": { "size": 3000, "extractedAt": "" },
+  "/path/far-future-retry.jsonl": { "size": 7000, "failedAt": "2026-03-01T00:00:00.000Z", "retryAfter": "2099-01-01T00:00:00.000Z" }
+}

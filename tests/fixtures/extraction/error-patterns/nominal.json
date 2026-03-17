@@ -1,0 +1,25 @@
+{
+  "patterns": [
+    {
+      "error": "API rate limit exceeded",
+      "fix": "Reduce concurrent extraction count",
+      "context": "Claude API returns 429 when too many parallel requests",
+      "firstSeen": "2026-03-01T10:00:00.000Z",
+      "lastSeen": "2026-03-14T08:00:00.000Z"
+    },
+    {
+      "error": "Quality gate: missing ONE SENTENCE SUMMARY",
+      "fix": "Use adaptive prompt for short sessions",
+      "context": "Haiku omits section headers for conversations under 10 messages",
+      "firstSeen": "2026-03-05T14:00:00.000Z",
+      "lastSeen": "2026-03-14T16:00:00.000Z"
+    },
+    {
+      "error": "JSONL parse error: unexpected end of input",
+      "fix": "Skip corrupted session files",
+      "context": "Session file was truncated during write",
+      "firstSeen": "2026-03-08T09:00:00.000Z",
+      "lastSeen": "2026-03-10T11:00:00.000Z"
+    }
+  ]
+}

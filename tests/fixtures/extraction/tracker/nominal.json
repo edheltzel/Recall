@@ -1,0 +1,23 @@
+{
+  "/Users/ed/.claude/projects/project-a/conv1.jsonl": {
+    "size": 45000,
+    "extractedAt": "2026-03-10T14:30:00.000Z"
+  },
+  "/Users/ed/.claude/projects/project-a/conv2.jsonl": {
+    "size": 12000,
+    "failedAt": "2026-03-11T10:00:00.000Z",
+    "retryAfter": "2026-03-10T10:00:00.000Z"
+  },
+  "/Users/ed/.claude/projects/project-b/conv3.jsonl": {
+    "size": 8000,
+    "failedAt": "2026-03-12T08:00:00.000Z",
+    "retryAfter": "2030-12-31T23:59:59.000Z"
+  },
+  "/Users/ed/.claude/projects/project-b/conv4.jsonl": {
+    "size": 25000
+  },
+  "/Users/ed/.claude/projects/project-c/conv5.jsonl": {
+    "size": 150000,
+    "extractedAt": "2026-03-14T16:45:00.000Z"
+  }
+}

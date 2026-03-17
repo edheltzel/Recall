@@ -1,0 +1,38 @@
+[
+  {
+    "sessionId": "sess-001",
+    "project": "atlas-recall",
+    "branch": "main",
+    "timestamp": "2026-03-14T10:00:00.000Z",
+    "summary": "Implemented SQLite migration for extraction tracker",
+    "topics": ["sqlite", "migration", "extraction"],
+    "conversationPath": "/Users/ed/.claude/projects/project-a/conv1.jsonl"
+  },
+  {
+    "sessionId": "sess-002",
+    "project": "atlas-recall",
+    "branch": "feat/hooks",
+    "timestamp": "2026-03-13T15:30:00.000Z",
+    "summary": "Fixed concurrency bugs in SessionExtract hook",
+    "topics": ["concurrency", "hooks", "bugfix"],
+    "conversationPath": "/Users/ed/.claude/projects/project-a/conv2.jsonl"
+  },
+  {
+    "sessionId": "sess-003",
+    "project": "pai-system",
+    "branch": "main",
+    "timestamp": "2026-03-12T09:00:00.000Z",
+    "summary": "Added Algorithm v3.5 phase transitions",
+    "topics": [],
+    "conversationPath": "/Users/ed/.claude/projects/project-b/conv3.jsonl"
+  },
+  {
+    "sessionId": "sess-004",
+    "project": "pai-system",
+    "branch": "develop",
+    "timestamp": "2026-03-11T14:00:00.000Z",
+    "summary": "Refactored skill loading system",
+    "topics": ["skills", "refactor"],
+    "conversationPath": "/Users/ed/.claude/projects/project-b/conv4.jsonl"
+  }
+]
