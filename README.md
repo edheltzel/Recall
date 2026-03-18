@@ -74,6 +74,19 @@ mem stats                      # See what's stored
 mem doctor                     # Health check
 ```
 
+<details>
+<summary>See it in action</summary>
+
+| Search | Stats |
+|--------|-------|
+| ![mem search](assets/demo-search.gif) | ![mem stats](assets/demo-stats.gif) |
+
+| Health Check | Recent Memory |
+|-------------|---------------|
+| ![mem doctor](assets/demo-doctor.gif) | ![mem recent](assets/demo-recent.gif) |
+
+</details>
+
 > [Full CLI reference](docs/cli-reference.md)
 
 ## For AI Agents
