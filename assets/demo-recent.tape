@@ -1,5 +1,5 @@
-# demo-stats.tape — Recall database statistics demo
-Output assets/demo-stats.gif
+# demo-recent.tape — Recall recent memory demo
+Output assets/demo-recent.gif
 Set FontSize 14
 Set Width 900
 Set Height 450
@@ -9,7 +9,7 @@ Set Padding 20
 Set Shell "bash"
 Env PATH "/Users/ed/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
-Type "mem stats"
+Type "mem recent"
 Sleep 500ms
 Enter
 Sleep 3s

@@ -2,12 +2,14 @@
 Output assets/demo-doctor.gif
 Set FontSize 14
 Set Width 900
-Set Height 550
+Set Height 450
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 50ms
 Set Padding 20
+Set Shell "bash"
+Env PATH "/Users/ed/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 Type "mem doctor"
 Sleep 500ms
 Enter
-Sleep 5s
+Sleep 4s

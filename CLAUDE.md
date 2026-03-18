@@ -74,6 +74,15 @@ docs/
   slash-commands.md     # /recall:* command reference
   troubleshooting.md   # Common issues and fixes (start with mem doctor)
   upgrading.md         # Update, backup/restore, migration system
+  OPENCODE_INTEGRATION.md  # OpenCode integration guide
+  PI_INTEGRATION.md    # Pi integration guide
+assets/
+  banner.png           # README banner image
+  demo-search.gif      # VHS recording: mem search
+  demo-stats.gif       # VHS recording: mem stats
+  demo-doctor.gif      # VHS recording: mem doctor
+  demo-recent.gif      # VHS recording: mem recent
+  demo-*.tape          # VHS tape scripts for re-recording demos
 FOR_CLAUDE.md          # Guide for Claude Code instances (copied to ~/.claude/Recall_GUIDE.md)
 install.sh             # Installer with backup/restore, OS detection, MCP + hook registration
 tsconfig.json          # TypeScript config
