@@ -423,6 +423,10 @@ configure_hooks() {
     log_success "Copied TelosSync.ts to $hooks_dir"
   fi
 
+  if [[ -f "$src_dir/SessionRecall.ts" ]]; then
+    cp "$src_dir/SessionRecall.ts" "$hooks_dir/SessionRecall.ts"
+    log_success "Copied SessionRecall.ts to $hooks_dir"
+  fi
   # Copy extraction prompt template
   local memory_dir="$CLAUDE_DIR/MEMORY"
   mkdir -p "$memory_dir"
@@ -489,6 +493,30 @@ configure_hooks() {
       '
     log_success "Registered TelosSync hook in settings.json"
   fi
+
+  # Register SessionRecall hook (SessionStart) for auto-loading memory context
+  local recall_cmd="$bun_path run $hooks_dir/SessionRecall.ts"
+
+  SETTINGS_FILE="$settings_file" RECALL_CMD="$recall_cmd" bun -e '
+        const fs = require("fs");
+        const settingsFile = process.env.SETTINGS_FILE;
+        const recallCmd = process.env.RECALL_CMD;
+        let config = {};
+        try { config = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch {}
+        config.hooks = config.hooks || {};
+        config.hooks.SessionStart = config.hooks.SessionStart || [];
+        const exists = config.hooks.SessionStart.some(e =>
+            e.hooks && e.hooks.some(h => h.command && h.command.includes("SessionRecall"))
+        );
+        if (!exists) {
+            config.hooks.SessionStart.push({
+                matcher: "",
+                hooks: [{ type: "command", command: recallCmd }]
+            });
+        }
+        fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
+    '
+  log_success "Registered SessionRecall hook (SessionStart) in settings.json"
 }
 
 #
@@ -502,14 +530,25 @@ configure_claude_md() {
 
 You have persistent memory via Recall. **Read the full guide:** $CLAUDE_DIR/Recall_GUIDE.md
 
+A SessionStart hook automatically loads recent memory context. Review it before your first response.
+
 Core rules:
-1. Before asking user to repeat anything → search first with \`memory_search\`
-2. Before spawning agents (Task tool) → call \`context_for_agent\`
-3. When decisions are made → record with \`memory_add\`
-4. End of session when user says \`/dump\` or \`/recall:dump\` → call \`memory_dump({ title: \"Descriptive Title\" })\`
+1. **Memory-first** → Review SessionStart hook output, then search Recall before falling back to git log
+2. Before asking user to repeat anything → search first with \`memory_search\` or \`memory_hybrid_search\`
+3. Before spawning agents (Task tool) → call \`context_for_agent\`
+4. When decisions are made → record with \`memory_add\`
+5. End of session when user says \`/dump\` or \`/recall:dump\` → call \`memory_dump({ title: \"Descriptive Title\" })\`
+
+Context resolution order:
+1. SessionStart hook output (already loaded)
+2. \`memory_hybrid_search\` (keyword + semantic search)
+3. \`memory_recall\` (recent LoA, decisions, breadcrumbs)
+4. Native Claude memory / conversation context
+5. \`git log\` / \`git show\` (last resort)
 
 Tool syntax:
 - \`memory_search({ query: \"search terms\" })\`
+- \`memory_hybrid_search({ query: \"natural language question\" })\`
 - \`memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })\`
 - \`memory_dump({ title: \"Session title\", skip_fabric: true })\`
 - \`context_for_agent({ task_description: \"what the agent will do\" })\`"
