@@ -10,6 +10,8 @@ Every Claude Code session starts from zero. Recall fixes that — conversations 
 
 ---
 
+[Jump to the Docs](https://github.com/edheltzel/Recall/blob/main/README.md#documentation)
+
 ## The Problem
 
 Claude Code has no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today.
