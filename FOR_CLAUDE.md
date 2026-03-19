@@ -107,10 +107,22 @@ mem dump "Session title"            # Capture current session
 
 ## Core Rules
 
-1. **Search before asking** — Before asking the user to repeat information, search memory first
-2. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
-3. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
-4. **Session capture** — When the user says `/dump` or `/recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
+1. **Memory-first at session start** — A `SessionStart` hook automatically loads recent decisions, breadcrumbs, and learnings. Review that context before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`.
+2. **Search memory before git** — When you need context about past work, **always search Recall first** (`memory_search` or `memory_hybrid_search`) before falling back to `git log`, `git show`, or commit history. Recall contains structured decisions, learnings, and session summaries that are richer than commit messages.
+3. **Search before asking** — Before asking the user to repeat information, search memory first
+4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
+5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
+6. **Session capture** — When the user says `/dump` or `/recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
+
+### Context Resolution Order
+
+When you need information about past work or project context, follow this priority:
+
+1. **SessionStart hook output** — Already loaded, check it first
+2. **`memory_hybrid_search`** — Search Recall for relevant history (keyword + semantic)
+3. **`memory_recall`** — Get recent LoA entries, decisions, breadcrumbs
+4. **Native Claude memory** — Check conversation context and compact summaries
+5. **`git log` / `git show`** — Only as a last resort for commit-level detail
 
 ## How Extraction Works
 
