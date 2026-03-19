@@ -418,6 +418,11 @@ configure_hooks() {
     log_success "Copied BatchExtract.ts to $hooks_dir"
   fi
 
+  if [[ -f "$src_dir/TelosSync.ts" ]]; then
+    cp "$src_dir/TelosSync.ts" "$hooks_dir/TelosSync.ts"
+    log_success "Copied TelosSync.ts to $hooks_dir"
+  fi
+
   # Copy extraction prompt template
   local memory_dir="$CLAUDE_DIR/MEMORY"
   mkdir -p "$memory_dir"
@@ -460,6 +465,30 @@ configure_hooks() {
         fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
     '
   log_success "Registered SessionExtract hook in settings.json"
+
+  # Register TelosSync on SessionStart
+  local telos_cmd="$bun_path run $hooks_dir/TelosSync.ts"
+  if [[ -f "$hooks_dir/TelosSync.ts" ]]; then
+    SETTINGS_FILE="$settings_file" TELOS_CMD="$telos_cmd" bun -e '
+          const fs = require("fs");
+          const settingsFile = process.env.SETTINGS_FILE;
+          const telosCmd = process.env.TELOS_CMD;
+          let config = {};
+          try { config = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch {}
+          config.hooks = config.hooks || {};
+          config.hooks.SessionStart = config.hooks.SessionStart || [];
+          const exists = config.hooks.SessionStart.some(e =>
+              e.hooks && e.hooks.some(h => h.command && h.command.includes("TelosSync"))
+          );
+          if (!exists) {
+              config.hooks.SessionStart.push({
+                  hooks: [{ type: "command", command: telosCmd, timeout: 10000 }]
+              });
+          }
+          fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
+      '
+    log_success "Registered TelosSync hook in settings.json"
+  fi
 }
 
 #
