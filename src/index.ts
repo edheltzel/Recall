@@ -228,7 +228,7 @@ const telosCmd = program
 
 telosCmd
   .command('import')
-  .description('Import TELOS sections from identity document')
+  .description('Import TELOS files from ~/.claude/skills/PAI/USER/TELOS/')
   .option('--dry-run', 'Preview what would be imported')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-y, --yes', 'Confirm import')
@@ -258,7 +258,7 @@ telosCmd
 
 telosCmd
   .command('show <code>')
-  .description('Show a specific TELOS entry (e.g., G7, S15, P1)')
+  .description('Show a specific TELOS entry by code (e.g., GOALS, PROJECTS, MISSION)')
   .action((code) => {
     runTelosShow(code);
     closeDb();
