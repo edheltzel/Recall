@@ -58,6 +58,7 @@ commands/
     loa.md             #   /recall:loa — Library of Alexandria browser
 hooks/
   SessionExtract.ts    # Stop hook — extracts sessions via Claude Haiku on exit
+  SessionRecall.ts     # SessionStart hook — loads memory context at session start
   BatchExtract.ts      # Cron job — batch extracts missed sessions
   extract_prompt.md    # Extraction prompt template (copied to ~/.claude/MEMORY/)
 tests/

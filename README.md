@@ -55,6 +55,93 @@ Restart Claude Code to load the MCP server and hooks.
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup
 
+## How Recall Works
+
+Recall operates as three integrated layers — data flows in automatically, gets stored in a searchable database, and surfaces when you (or Claude) need it.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        DATA ENTRY POINTS                             │
+│                                                                      │
+│  ┌────────────┐  ┌────────────┐  ┌──────────────┐  ┌────────────┐  │
+│  │ CLI Direct │  │ MCP Server │  │  Stop Hook   │  │   Batch    │  │
+│  │  mem add   │  │ (Claude    │  │ SessionExt-  │  │  Extract   │  │
+│  │  mem dump  │  │  Code)     │  │  ract.ts     │  │  (cron)    │  │
+│  └─────┬──────┘  └─────┬──────┘  └──────┬───────┘  └─────┬──────┘  │
+└────────┼────────────────┼────────────────┼────────────────┼──────────┘
+         │                │                │                │
+         ▼                ▼                ▼                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      PROCESSING LAYER                                │
+│                                                                      │
+│  Direct Inserts:              Session Extraction Pipeline:           │
+│  mem add breadcrumb ──┐       Read JSONL                             │
+│  mem add decision  ───┤         → Filter noise (tool results)        │
+│  mem add learning  ───┤         → Dedup check (.extraction_tracker)  │
+│  memory_add (MCP)  ───┤         → Acquire lock                       │
+│                       │         → Claude Haiku extract                │
+│                       │           (>120K? chunk → meta-extract)       │
+│                       │           (fallback: Ollama)                  │
+│                       │         → Quality gate                        │
+│                       │           (requires SUMMARY + MAIN IDEAS)     │
+│                       │              │                                │
+└───────────────────────┼──────────────┼────────────────────────────────┘
+                        │              │
+                        ▼              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                    STORAGE LAYER (Dual-Write)                        │
+│                                                                      │
+│  SQLite (~/.claude/memory.db)       Memory Files (~/.claude/MEMORY/) │
+│  ┌────────────────────────────┐     ┌──────────────────────────────┐ │
+│  │ sessions ←── messages      │     │ DISTILLED.md    (archive)    │ │
+│  │ decisions    learnings     │     │ HOT_RECALL.md   (last 10)   │ │
+│  │ breadcrumbs  loa_entries   │     │ SESSION_INDEX.json           │ │
+│  │ embeddings (768-dim vecs)  │     │ DECISIONS.log                │ │
+│  │                            │     │ REJECTIONS.log               │ │
+│  │ FTS5 indexes (auto-sync)   │     │ ERROR_PATTERNS.json          │ │
+│  │ WAL mode · 0600 perms      │     └──────────────────────────────┘ │
+│  └────────────────────────────┘                                      │
+└──────────────────────────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      RETRIEVAL LAYER                                 │
+│                                                                      │
+│  ┌───────────────┐  ┌────────────────┐  ┌─────────────────────────┐ │
+│  │Keyword (FTS5) │  │Semantic (Embed)│  │  Hybrid (RRF Fusion)    │ │
+│  │mem search     │  │mem semantic    │  │  mem hybrid (DEFAULT)   │ │
+│  │memory_search  │  │embed → Ollama  │  │  FTS5 rank ─┐          │ │
+│  │               │  │cosine sim      │  │  Embed rank ─┤→ merged  │ │
+│  └───────────────┘  └────────────────┘  │  RRF(k=60) ◄┘          │ │
+│                                          └─────────────────────────┘ │
+│  Direct: mem recent · mem show · memory_recall · context_for_agent   │
+└──────────────────────────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  CONSUMERS:  Claude Code (MCP)  ·  CLI User (mem)  ·  Sub-agents   │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Session Lifecycle
+
+1. **Session starts** — A `SessionStart` hook loads recent decisions, breadcrumbs, and learnings from SQLite, giving Claude context from previous sessions immediately
+2. **During the session** — Claude searches memory via MCP tools (`memory_search`, `memory_hybrid_search`) before falling back to git history. Decisions and learnings are recorded in real-time with `memory_add`
+3. **Session ends** — A `Stop` hook fires `SessionExtract.ts`, which spawns a background process (non-blocking) to extract the conversation via Claude Haiku
+4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to Claude Haiku (with chunking for large sessions >120K chars). A quality gate rejects low-quality extractions
+5. **Dual-write storage** — Results are written to both SQLite (structured, searchable) and markdown files (`DISTILLED.md`, `HOT_RECALL.md`, etc.)
+6. **Batch catchup** — A cron job (`BatchExtract.ts`) runs every 30 minutes to catch sessions missed during crashes or interruptions
+
+### Search Strategies
+
+| Strategy | Command | How it works |
+|----------|---------|-------------|
+| **Keyword** | `mem search "query"` | FTS5 full-text search across all tables |
+| **Semantic** | `mem semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama) |
+| **Hybrid** (default) | `mem "query"` | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
+
+> [Architecture deep-dive](docs/architecture.md) — database tables, FTS5 indexes, extraction pipeline details
+
 ## What You Get
 
 - **Session memory** — auto-extracted on every session end via Claude Haiku
