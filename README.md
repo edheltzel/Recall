@@ -6,7 +6,7 @@
 
 Every Claude Code session starts from zero. Recall fixes that — conversations are automatically extracted, indexed, and searchable across sessions.
 
-> [Opencode](https://opencode.ai/) and [Pi π](https://pi.dev/) are ** very Alpha**
+> [Opencode](https://opencode.ai/) and [Pi π](https://pi.dev/) are **very Alpha**
 
 ---
 
