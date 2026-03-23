@@ -200,6 +200,7 @@ export function search(query: string, options?: { project?: string; table?: stri
           FROM decisions_fts f
           JOIN decisions d ON d.id = f.rowid
           WHERE decisions_fts MATCH ?
+          AND d.status = 'active'
           ${options?.project ? 'AND d.project = ?' : ''}
           ORDER BY f.rank
           LIMIT ?
@@ -294,8 +295,8 @@ export function recentMessages(limit: number = 10, project?: string): Message[] 
 export function recentDecisions(limit: number = 10, project?: string): Decision[] {
   const db = getDb();
   const sql = project
-    ? 'SELECT * FROM decisions WHERE project = ? ORDER BY created_at DESC LIMIT ?'
-    : 'SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?';
+    ? "SELECT * FROM decisions WHERE project = ? AND status = 'active' ORDER BY created_at DESC LIMIT ?"
+    : "SELECT * FROM decisions WHERE status = 'active' ORDER BY created_at DESC LIMIT ?";
   const params = project ? [project, limit] : [limit];
   return db.prepare(sql).all(...params) as Decision[];
 }

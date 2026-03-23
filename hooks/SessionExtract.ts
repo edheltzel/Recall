@@ -30,6 +30,7 @@
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, unlinkSync, openSync, closeSync } from 'fs';
 import { join } from 'path';
 import { execSync, spawn } from 'child_process';
+import { evaluateQuality, shouldSkipExtraction } from './lib/extraction-quality';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
@@ -872,7 +873,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     // Extract messages from conversation
     const messages = extractMessages(conversationPath);
 
-    if (messages.length < 500) {
+    if (shouldSkipExtraction(messages.length)) {
       console.error('[FabricExtract] Conversation too short, skipping extraction');
       return;
     }
@@ -912,9 +913,10 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     }
 
     // Quality gate: reject extractions that don't follow the structured format
-    if (!extracted.includes('ONE SENTENCE SUMMARY') && !extracted.includes('MAIN IDEAS')) {
-      console.error("[FabricExtract] QUALITY GATE FAILED: extraction missing required sections. Discarding.");
-      logExtract("QUALITY GATE FAILED: extraction missing required sections (ONE SENTENCE SUMMARY, MAIN IDEAS)");
+    const quality = evaluateQuality(extracted);
+    if (!quality.pass) {
+      console.error(`[FabricExtract] QUALITY GATE FAILED: ${quality.reason}. Discarding.`);
+      logExtract(`QUALITY GATE FAILED: ${quality.reason}`);
       markAsFailed(convHash);
       return;
     }
@@ -1020,7 +1022,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
 
     const messages = readFileSync(mdPath, 'utf-8');
 
-    if (messages.length < 500) {
+    if (shouldSkipExtraction(messages.length)) {
       console.error('[FabricExtract] Markdown too short, skipping extraction');
       return;
     }
@@ -1053,9 +1055,10 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     }
 
     // Quality gate
-    if (!extracted.includes('ONE SENTENCE SUMMARY') && !extracted.includes('MAIN IDEAS')) {
-      console.error("[FabricExtract] QUALITY GATE FAILED: extraction missing required sections.");
-      logExtract("QUALITY GATE FAILED (markdown): missing required sections");
+    const mdQuality = evaluateQuality(extracted);
+    if (!mdQuality.pass) {
+      console.error(`[FabricExtract] QUALITY GATE FAILED: ${mdQuality.reason}.`);
+      logExtract(`QUALITY GATE FAILED (markdown): ${mdQuality.reason}`);
       markAsFailed(convHash);
       return;
     }
