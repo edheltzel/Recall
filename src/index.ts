@@ -17,6 +17,7 @@ import { runDump } from './commands/dump.js';
 import { runImportLegacy } from './commands/import-legacy.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
+import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { closeDb } from './db/connection.js';
@@ -88,6 +89,42 @@ addCmd
       category: options.category,
       prevention: options.prevention,
       tags: options.tags
+    });
+    closeDb();
+  });
+
+// mem decision — lifecycle management
+const decisionCmd = program
+  .command('decision')
+  .description('Decision lifecycle management (supersede, revert, list)');
+
+decisionCmd
+  .command('supersede <id>')
+  .description('Mark a decision as superseded (replaced by a newer decision)')
+  .action((id) => {
+    runSupersede(parseInt(id, 10));
+    closeDb();
+  });
+
+decisionCmd
+  .command('revert <id>')
+  .description('Mark a decision as reverted (was wrong, rolled back)')
+  .action((id) => {
+    runRevert(parseInt(id, 10));
+    closeDb();
+  });
+
+decisionCmd
+  .command('list')
+  .description('List decisions with optional status filter')
+  .option('-p, --project <name>', 'Filter by project')
+  .option('-s, --status <status>', 'Filter by status (active, superseded, reverted)')
+  .option('-l, --limit <n>', 'Max results', '20')
+  .action((options) => {
+    runDecisionList({
+      project: options.project,
+      status: options.status,
+      limit: parseInt(options.limit, 10)
     });
     closeDb();
   });

@@ -110,6 +110,50 @@ export function getDecision(id: number): Decision | undefined {
   return db.prepare('SELECT * FROM decisions WHERE id = ?').get(id) as Decision | undefined;
 }
 
+export function supersedeDecision(id: number): number {
+  const db = getDb();
+  // Check current status first — changes count includes FTS trigger operations
+  const before = db.prepare('SELECT status FROM decisions WHERE id = ?').get(id) as { status: string } | undefined;
+  if (!before || before.status !== 'active') return 0;
+  db.prepare(
+    `UPDATE decisions SET status = 'superseded' WHERE id = $id AND status = 'active'`
+  ).run({ $id: id });
+  return 1;
+}
+
+export function revertDecision(id: number): number {
+  const db = getDb();
+  // Check current status first — changes count includes FTS trigger operations
+  const before = db.prepare('SELECT status FROM decisions WHERE id = ?').get(id) as { status: string } | undefined;
+  if (!before || before.status !== 'active') return 0;
+  db.prepare(
+    `UPDATE decisions SET status = 'reverted' WHERE id = $id AND status = 'active'`
+  ).run({ $id: id });
+  return 1;
+}
+
+export function listDecisions(limit: number = 20, project?: string, status?: string): Decision[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (project) {
+    conditions.push('project = ?');
+    params.push(project);
+  }
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+
+  return db.prepare(
+    `SELECT * FROM decisions ${where} ORDER BY created_at DESC LIMIT ?`
+  ).all(...params) as Decision[];
+}
+
 // ============ Learnings ============
 
 export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
