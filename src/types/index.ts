@@ -31,6 +31,7 @@ export interface Decision {
   reasoning?: string;
   alternatives?: string;
   status: 'active' | 'superseded' | 'reverted';
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface Learning {
@@ -43,6 +44,7 @@ export interface Learning {
   solution?: string;
   prevention?: string;
   tags?: string;
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface Breadcrumb {
