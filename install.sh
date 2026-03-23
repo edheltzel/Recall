@@ -427,6 +427,14 @@ configure_hooks() {
     cp "$src_dir/SessionRecall.ts" "$hooks_dir/SessionRecall.ts"
     log_success "Copied SessionRecall.ts to $hooks_dir"
   fi
+
+  # Copy hooks/lib/ (shared libraries used by hooks)
+  if [[ -d "$src_dir/lib" ]]; then
+    mkdir -p "$hooks_dir/lib"
+    cp "$src_dir/lib/"*.ts "$hooks_dir/lib/" 2>/dev/null
+    log_success "Copied hooks/lib/ to $hooks_dir/lib/"
+  fi
+
   # Copy extraction prompt template
   local memory_dir="$CLAUDE_DIR/MEMORY"
   mkdir -p "$memory_dir"

@@ -15,7 +15,7 @@ export function evaluateQuality(text: string, options?: QualityOptions): Quality
   const minChars = options?.minChars ?? 100;
 
   // Word count check
-  const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+  const words = text.trim().split(/\s+/);
   if (words.length < minWords) {
     return { pass: false, reason: 'below_word_count' };
   }
