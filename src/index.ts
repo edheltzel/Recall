@@ -67,12 +67,14 @@ addCmd
   .option('-c, --category <cat>', 'Category (architecture, tooling, process)')
   .option('-w, --why <reasoning>', 'Why this decision was made')
   .option('-a, --alternatives <alt>', 'Alternatives considered')
+  .option('--confidence <level>', 'Confidence level (high, medium, low)', 'medium')
   .action((decision, options) => {
     runAddDecision(decision, {
       project: options.project,
       category: options.category,
       why: options.why,
-      alternatives: options.alternatives
+      alternatives: options.alternatives,
+      confidence: options.confidence
     });
     closeDb();
   });

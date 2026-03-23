@@ -108,13 +108,13 @@ export function gatherContext(): string {
   const decisions = project
     ? queryDb(
         `SELECT id, decision, reasoning, project, created_at FROM decisions
-         WHERE project = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5`,
+         WHERE project = ? AND status = 'active' AND (confidence IS NULL OR confidence != 'low') ORDER BY created_at DESC LIMIT 5`,
         [project]
       )
     : [];
   const globalDecisions = queryDb(
     `SELECT id, decision, reasoning, project, created_at FROM decisions
-     WHERE status = 'active' ORDER BY created_at DESC LIMIT ${project ? 3 : 5}`
+     WHERE status = 'active' AND (confidence IS NULL OR confidence != 'low') ORDER BY created_at DESC LIMIT ${project ? 3 : 5}`
   );
   // Merge, deduplicate by id
   const seenIds = new Set<number>();

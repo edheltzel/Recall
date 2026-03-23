@@ -90,8 +90,8 @@ export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
 export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status)
-    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status)
+    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence)
+    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence)
   `);
   const result = stmt.run({
     $session_id: decision.session_id || null,
@@ -100,7 +100,8 @@ export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): numb
     $decision: decision.decision,
     $reasoning: decision.reasoning || null,
     $alternatives: decision.alternatives || null,
-    $status: decision.status || 'active'
+    $status: decision.status || 'active',
+    $confidence: decision.confidence || 'medium'
   });
   return result.lastInsertRowid as number;
 }
@@ -159,8 +160,8 @@ export function listDecisions(limit: number = 20, project?: string, status?: str
 export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags)
-    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags)
+    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence)
+    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence)
   `);
   const result = stmt.run({
     $session_id: learning.session_id || null,
@@ -169,7 +170,8 @@ export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): numb
     $problem: learning.problem,
     $solution: learning.solution || null,
     $prevention: learning.prevention || null,
-    $tags: learning.tags || null
+    $tags: learning.tags || null,
+    $confidence: learning.confidence || 'medium'
   });
   return result.lastInsertRowid as number;
 }
@@ -246,7 +248,7 @@ export function search(query: string, options?: { project?: string; table?: stri
           WHERE decisions_fts MATCH ?
           AND d.status = 'active'
           ${options?.project ? 'AND d.project = ?' : ''}
-          ORDER BY f.rank
+          ORDER BY CASE d.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, f.rank
           LIMIT ?
         `;
         break;

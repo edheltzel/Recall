@@ -117,6 +117,20 @@ export const MIGRATIONS: Migration[] = [
       } catch { /* corrupted — skip */ }
     }
   },
+
+  // Migration 5 → 6: Add confidence column to decisions and learnings
+  (db) => {
+    try {
+      db.prepare(`ALTER TABLE decisions ADD COLUMN confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low'))`).run();
+    } catch {
+      // Column already exists — safe to ignore
+    }
+    try {
+      db.prepare(`ALTER TABLE learnings ADD COLUMN confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low'))`).run();
+    } catch {
+      // Column already exists — safe to ignore
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------
