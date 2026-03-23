@@ -32,6 +32,7 @@ interface AddDecisionOptions {
   category?: string;
   why?: string;
   alternatives?: string;
+  confidence?: string;
 }
 
 export function runAddDecision(decision: string, options: AddDecisionOptions): void {
@@ -41,6 +42,7 @@ export function runAddDecision(decision: string, options: AddDecisionOptions): v
   }
 
   const project = options.project || detectProject();
+  const confidence = (options.confidence || 'medium') as 'high' | 'medium' | 'low';
 
   const id = addDecision({
     decision,
@@ -48,10 +50,11 @@ export function runAddDecision(decision: string, options: AddDecisionOptions): v
     category: options.category,
     reasoning: options.why,
     alternatives: options.alternatives,
-    status: 'active'
+    status: 'active',
+    confidence
   });
 
-  console.log(`✓ Added decision #${id}${project ? ` [${project}]` : ''}`);
+  console.log(`✓ Added decision #${id}${project ? ` [${project}]` : ''} (${confidence})`);
 }
 
 interface AddLearningOptions {

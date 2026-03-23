@@ -16,7 +16,8 @@ Follow this format EXACTLY:
 - [Another insight]
 
 ## DECISIONS MADE
-- [Decision that was made]: [reasoning behind it]
+For each decision, rate confidence: HIGH (explicit, discussed), MEDIUM (implied, reasonable), LOW (speculative, uncertain)
+- [Decision]: [reasoning] (confidence: HIGH|MEDIUM|LOW)
 
 ## THINGS TO REJECT / AVOID
 - [Thing to avoid or reject]: [why it should be avoided]

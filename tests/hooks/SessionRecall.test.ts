@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS decisions (
   decision TEXT NOT NULL,
   reasoning TEXT,
   alternatives TEXT,
-  status TEXT DEFAULT 'active'
+  status TEXT DEFAULT 'active',
+  confidence TEXT DEFAULT 'medium'
 );
 CREATE TABLE IF NOT EXISTS learnings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -75,8 +75,26 @@ export function queryDb(sql: string, params: any[] = []): any[] {
   }
 }
 
+// ─── Sweep Expired Breadcrumbs ──────────────────────────────────────
+function sweepExpiredBreadcrumbs(): void {
+  try {
+    const { Database } = require('bun:sqlite');
+    const dbPath = getDbPath();
+    if (!existsSync(dbPath)) return;
+    const db = new Database(dbPath);
+    db.prepare("PRAGMA journal_mode = WAL").run();
+    db.prepare("DELETE FROM breadcrumbs WHERE expires_at IS NOT NULL AND expires_at < datetime('now')").run();
+    db.close();
+  } catch {
+    // Non-fatal: sweep is best-effort cleanup
+  }
+}
+
 // ─── Gather Memory Context ───────────────────────────────────────────
 export function gatherContext(): string {
+  // Sweep expired breadcrumbs before loading context
+  sweepExpiredBreadcrumbs();
+
   const project = detectProject();
   const sections: string[] = [];
   let hasContent = false;
@@ -90,13 +108,13 @@ export function gatherContext(): string {
   const decisions = project
     ? queryDb(
         `SELECT id, decision, reasoning, project, created_at FROM decisions
-         WHERE project = ? AND status = 'active' ORDER BY created_at DESC LIMIT 5`,
+         WHERE project = ? AND status = 'active' AND (confidence IS NULL OR confidence != 'low') ORDER BY created_at DESC LIMIT 5`,
         [project]
       )
     : [];
   const globalDecisions = queryDb(
     `SELECT id, decision, reasoning, project, created_at FROM decisions
-     WHERE status = 'active' ORDER BY created_at DESC LIMIT ${project ? 3 : 5}`
+     WHERE status = 'active' AND (confidence IS NULL OR confidence != 'low') ORDER BY created_at DESC LIMIT ${project ? 3 : 5}`
   );
   // Merge, deduplicate by id
   const seenIds = new Set<number>();
