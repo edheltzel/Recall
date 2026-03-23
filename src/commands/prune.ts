@@ -83,6 +83,11 @@ export function runPrune(options: PruneOptions): void {
   );
   results.push({ table: 'extraction_tracker', description: `Tracker entries older than ${days}d`, count: trackerCount });
 
+  // 6. Extraction sessions: cap at 500 rows (matches legacy SESSION_INDEX.json behavior)
+  const totalExtSessions = countRows(db, `SELECT COUNT(*) as count FROM extraction_sessions`);
+  const extSessionOverflow = Math.max(0, totalExtSessions - 500);
+  results.push({ table: 'extraction_sessions', description: `Rows exceeding 500-row cap (${totalExtSessions} total)`, count: extSessionOverflow });
+
   // Never prune: loa_entries, learnings, extraction_errors
 
   const totalPrunable = results.reduce((sum, r) => sum + r.count, 0);
@@ -153,6 +158,15 @@ export function runPrune(options: PruneOptions): void {
     db.prepare(
       `DELETE FROM extraction_tracker
        WHERE extracted_at < ${cutoff}`
+    ).run();
+  }
+
+  if (extSessionOverflow > 0) {
+    db.prepare(
+      `DELETE FROM extraction_sessions
+       WHERE id NOT IN (
+         SELECT id FROM extraction_sessions ORDER BY timestamp DESC LIMIT 500
+       )`
     ).run();
   }
 

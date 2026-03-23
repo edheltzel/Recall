@@ -464,6 +464,7 @@ export function getStats(): Stats {
   const telos = count('SELECT COUNT(*) as count FROM telos');
   const documents = count('SELECT COUNT(*) as count FROM documents');
   const extraction_tracker = count('SELECT COUNT(*) as count FROM extraction_tracker');
+  const extraction_sessions = count('SELECT COUNT(*) as count FROM extraction_sessions');
   const extraction_errors = count('SELECT COUNT(*) as count FROM extraction_errors');
   const embeddings = count('SELECT COUNT(*) as count FROM embeddings');
 
@@ -476,7 +477,7 @@ export function getStats(): Stats {
     learnings,
     breadcrumbs, breadcrumbs_expired,
     loa_entries, telos, documents,
-    extraction_tracker, extraction_errors, embeddings,
+    extraction_tracker, extraction_sessions, extraction_errors, embeddings,
     db_size_bytes
   };
 }
