@@ -40,9 +40,11 @@ export function runStats(): void {
 
   console.log('Extraction:');
   console.log(`  Tracker:     ${stats.extraction_tracker.toLocaleString()}`);
+  const sessWarn = stats.extraction_sessions > 500 ? '  ** Consider mem prune' : '';
+  console.log(`  Sessions:    ${stats.extraction_sessions.toLocaleString()}${sessWarn}`);
   console.log(`  Errors:      ${stats.extraction_errors.toLocaleString()}`);
   console.log('');
 
-  const total = stats.sessions + stats.messages + stats.loa_entries + stats.telos + stats.documents + stats.decisions + stats.learnings + stats.breadcrumbs + stats.extraction_tracker + stats.extraction_errors + stats.embeddings;
+  const total = stats.sessions + stats.messages + stats.loa_entries + stats.telos + stats.documents + stats.decisions + stats.learnings + stats.breadcrumbs + stats.extraction_tracker + stats.extraction_sessions + stats.extraction_errors + stats.embeddings;
   console.log(`Total Records: ${total.toLocaleString()}`);
 }

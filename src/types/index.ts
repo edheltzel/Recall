@@ -96,6 +96,7 @@ export interface Stats {
   telos: number;
   documents: number;
   extraction_tracker: number;
+  extraction_sessions: number;
   extraction_errors: number;
   embeddings: number;
   db_size_bytes: number;
