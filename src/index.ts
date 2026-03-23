@@ -18,6 +18,7 @@ import { runImportLegacy } from './commands/import-legacy.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
 import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
+import { runPrune } from './commands/prune.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { closeDb } from './db/connection.js';
@@ -125,6 +126,22 @@ decisionCmd
       project: options.project,
       status: options.status,
       limit: parseInt(options.limit, 10)
+    });
+    closeDb();
+  });
+
+// mem prune — table lifecycle management
+program
+  .command('prune')
+  .description('Prune old/expired records (dry-run by default, --execute to delete)')
+  .option('--execute', 'Actually delete rows (default is dry-run)')
+  .option('--older-than <duration>', 'Retention period (e.g., 90d, 180d)', '180d')
+  .option('--keep-decisions', 'Skip pruning inactive decisions')
+  .action((options) => {
+    runPrune({
+      execute: options.execute,
+      olderThan: options.olderThan,
+      keepDecisions: options.keepDecisions
     });
     closeDb();
   });

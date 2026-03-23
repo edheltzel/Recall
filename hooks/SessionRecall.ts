@@ -75,8 +75,26 @@ export function queryDb(sql: string, params: any[] = []): any[] {
   }
 }
 
+// ─── Sweep Expired Breadcrumbs ──────────────────────────────────────
+function sweepExpiredBreadcrumbs(): void {
+  try {
+    const { Database } = require('bun:sqlite');
+    const dbPath = getDbPath();
+    if (!existsSync(dbPath)) return;
+    const db = new Database(dbPath);
+    db.prepare("PRAGMA journal_mode = WAL").run();
+    db.prepare("DELETE FROM breadcrumbs WHERE expires_at IS NOT NULL AND expires_at < datetime('now')").run();
+    db.close();
+  } catch {
+    // Non-fatal: sweep is best-effort cleanup
+  }
+}
+
 // ─── Gather Memory Context ───────────────────────────────────────────
 export function gatherContext(): string {
+  // Sweep expired breadcrumbs before loading context
+  sweepExpiredBreadcrumbs();
+
   const project = detectProject();
   const sections: string[] = [];
   let hasContent = false;

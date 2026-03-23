@@ -447,29 +447,34 @@ export function recentLoaEntries(limit: number = 10, project?: string): LoaEntry
 
 export function getStats(): Stats {
   const db = getDb();
+  const count = (sql: string) => (db.prepare(sql).get() as { count: number }).count;
 
-  const sessions = (db.prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number }).count;
-  const messages = (db.prepare('SELECT COUNT(*) as count FROM messages').get() as { count: number }).count;
-  const decisions = (db.prepare('SELECT COUNT(*) as count FROM decisions').get() as { count: number }).count;
-  const learnings = (db.prepare('SELECT COUNT(*) as count FROM learnings').get() as { count: number }).count;
-  const breadcrumbs = (db.prepare('SELECT COUNT(*) as count FROM breadcrumbs').get() as { count: number }).count;
-  const loa_entries = (db.prepare('SELECT COUNT(*) as count FROM loa_entries').get() as { count: number }).count;
-  const telos = (db.prepare('SELECT COUNT(*) as count FROM telos').get() as { count: number }).count;
-  const documents = (db.prepare('SELECT COUNT(*) as count FROM documents').get() as { count: number }).count;
+  const sessions = count('SELECT COUNT(*) as count FROM sessions');
+  const messages = count('SELECT COUNT(*) as count FROM messages');
+  const decisions = count('SELECT COUNT(*) as count FROM decisions');
+  const decisions_active = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'active'");
+  const decisions_superseded = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'superseded'");
+  const decisions_reverted = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'reverted'");
+  const learnings = count('SELECT COUNT(*) as count FROM learnings');
+  const breadcrumbs = count('SELECT COUNT(*) as count FROM breadcrumbs');
+  const breadcrumbs_expired = count("SELECT COUNT(*) as count FROM breadcrumbs WHERE expires_at IS NOT NULL AND expires_at < datetime('now')");
+  const loa_entries = count('SELECT COUNT(*) as count FROM loa_entries');
+  const telos = count('SELECT COUNT(*) as count FROM telos');
+  const documents = count('SELECT COUNT(*) as count FROM documents');
+  const extraction_tracker = count('SELECT COUNT(*) as count FROM extraction_tracker');
+  const extraction_errors = count('SELECT COUNT(*) as count FROM extraction_errors');
+  const embeddings = count('SELECT COUNT(*) as count FROM embeddings');
 
-  // Get DB file size
   const dbPath = getDbPath();
   const db_size_bytes = existsSync(dbPath) ? statSync(dbPath).size : 0;
 
   return {
-    sessions,
-    messages,
-    decisions,
+    sessions, messages,
+    decisions, decisions_active, decisions_superseded, decisions_reverted,
     learnings,
-    breadcrumbs,
-    loa_entries,
-    telos,
-    documents,
+    breadcrumbs, breadcrumbs_expired,
+    loa_entries, telos, documents,
+    extraction_tracker, extraction_errors, embeddings,
     db_size_bytes
   };
 }

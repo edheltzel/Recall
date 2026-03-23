@@ -84,11 +84,18 @@ export interface Stats {
   sessions: number;
   messages: number;
   decisions: number;
+  decisions_active: number;
+  decisions_superseded: number;
+  decisions_reverted: number;
   learnings: number;
   breadcrumbs: number;
+  breadcrumbs_expired: number;
   loa_entries: number;
   telos: number;
   documents: number;
+  extraction_tracker: number;
+  extraction_errors: number;
+  embeddings: number;
   db_size_bytes: number;
 }
 

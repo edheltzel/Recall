@@ -19,15 +19,30 @@ export function runStats(): void {
 
   console.log('Record Counts:');
   console.log(`  Sessions:    ${stats.sessions.toLocaleString()}`);
-  console.log(`  Messages:    ${stats.messages.toLocaleString()}`);
+
+  const msgWarn = stats.messages > 10000 ? '  ** Consider mem prune' : '';
+  console.log(`  Messages:    ${stats.messages.toLocaleString()}${msgWarn}`);
+
   console.log(`  LoA Entries: ${stats.loa_entries.toLocaleString()}`);
   console.log(`  TELOS:       ${stats.telos.toLocaleString()}`);
   console.log(`  Documents:   ${stats.documents.toLocaleString()}`);
-  console.log(`  Decisions:   ${stats.decisions.toLocaleString()}`);
+
+  const decDetail = ` (${stats.decisions_active} active, ${stats.decisions_superseded} superseded, ${stats.decisions_reverted} reverted)`;
+  console.log(`  Decisions:   ${stats.decisions.toLocaleString()}${decDetail}`);
+
   console.log(`  Learnings:   ${stats.learnings.toLocaleString()}`);
-  console.log(`  Breadcrumbs: ${stats.breadcrumbs.toLocaleString()}`);
+
+  const bcExpired = stats.breadcrumbs_expired > 0 ? ` (${stats.breadcrumbs_expired} expired)` : '';
+  console.log(`  Breadcrumbs: ${stats.breadcrumbs.toLocaleString()}${bcExpired}`);
+
+  console.log(`  Embeddings:  ${stats.embeddings.toLocaleString()}`);
   console.log('');
 
-  const total = stats.sessions + stats.messages + stats.loa_entries + stats.telos + stats.documents + stats.decisions + stats.learnings + stats.breadcrumbs;
+  console.log('Extraction:');
+  console.log(`  Tracker:     ${stats.extraction_tracker.toLocaleString()}`);
+  console.log(`  Errors:      ${stats.extraction_errors.toLocaleString()}`);
+  console.log('');
+
+  const total = stats.sessions + stats.messages + stats.loa_entries + stats.telos + stats.documents + stats.decisions + stats.learnings + stats.breadcrumbs + stats.extraction_tracker + stats.extraction_errors + stats.embeddings;
   console.log(`Total Records: ${total.toLocaleString()}`);
 }
