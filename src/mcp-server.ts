@@ -515,8 +515,12 @@ server.tool(
 			.string()
 			.optional()
 			.describe("Comma-separated tags (for learnings)"),
+		confidence: z
+			.enum(["high", "medium", "low"])
+			.optional()
+			.describe("Confidence level (for decisions and learnings). HIGH=explicit/discussed, MEDIUM=implied/reasonable, LOW=speculative/uncertain"),
 	},
-	async ({ type, content, detail, project, tags }) => {
+	async ({ type, content, detail, project, tags, confidence }) => {
 		try {
 			let id: number;
 
@@ -527,6 +531,7 @@ server.tool(
 						reasoning: detail,
 						project,
 						status: "active",
+						confidence: confidence || "medium",
 					});
 					return {
 						content: [
@@ -540,6 +545,7 @@ server.tool(
 						solution: detail,
 						project,
 						tags,
+						confidence: confidence || "medium",
 					});
 					return {
 						content: [
