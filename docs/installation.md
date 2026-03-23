@@ -123,7 +123,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 4. Link | Links `mem` and `mem-mcp` globally via `bun link` (falls back to `npm link` on failure) |
 | 5. Init DB | Initializes the SQLite database at `~/.claude/memory.db` and creates `~/.claude/MEMORY/` |
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
-| 7. Setup hooks | Copies `SessionExtract.ts` and `BatchExtract.ts` to `~/.claude/hooks/` and registers the `Stop` hook in `~/.claude/settings.json` |
+| 7. Setup hooks | Copies `SessionExtract.ts` and `BatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
 | 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs slash commands to `~/.claude/commands/recall/` |
 | 9. Update CLAUDE.md | Appends a MEMORY section to `~/.claude/CLAUDE.md` with core usage rules |
 

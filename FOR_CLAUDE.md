@@ -50,6 +50,27 @@ memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail:
 memory_add({ type: "breadcrumb", content: "Auth refactor in progress, do not touch middleware yet" })
 ```
 
+Parameters:
+- `confidence` (optional, "high" | "medium" | "low", default: "medium") — How certain is this decision?
+  - HIGH = explicitly discussed and agreed upon
+  - MEDIUM = implied or reasonably inferred
+  - LOW = speculative or uncertain
+  - Note: Low-confidence decisions are filtered from session context to save context budget
+
+### decision_update
+
+Update a decision's lifecycle status:
+
+```
+decision_update({ id: 5, action: "supersede" })
+```
+
+Parameters:
+- `id` (number): The decision record ID to update
+- `action` ("supersede" | "revert"): Mark the decision as superseded by a newer one, or revert it if it was wrong
+
+When to use: When a newer decision replaces an older one, or when a decision turned out to be incorrect and should no longer influence future sessions.
+
 ### context_for_agent
 
 Before spawning agents via the Task tool, call this to prepare memory context:

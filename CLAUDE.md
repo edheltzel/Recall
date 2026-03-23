@@ -37,6 +37,8 @@ src/
     search.ts          #   mem search (FTS5)
     show.ts            #   mem show <table> <id>
     stats.ts           #   mem stats
+    decision.ts        #   mem decision supersede/revert/list
+    prune.ts           #   mem prune (table lifecycle cleanup)
   db/
     connection.ts      # SQLite connection (bun:sqlite, WAL mode)
     schema.ts          # Table definitions and FTS5 indexes
@@ -59,6 +61,7 @@ commands/
 hooks/
   SessionExtract.ts    # Stop hook — extracts sessions via Claude Haiku on exit
   SessionRecall.ts     # SessionStart hook — loads memory context at session start
+  lib/                 # Shared hook libraries (extraction-quality.ts, etc.)
   BatchExtract.ts      # Cron job — batch extracts missed sessions
   extract_prompt.md    # Extraction prompt template (copied to ~/.claude/MEMORY/)
 tests/

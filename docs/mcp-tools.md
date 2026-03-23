@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-All 7 tools available when Claude Code connects to the Recall MCP server (`recall-memory`).
+All 8 tools available when Claude Code connects to the Recall MCP server (`recall-memory`).
 
 ---
 
@@ -98,6 +98,7 @@ Add structured records during a session. Use this to capture decisions, learning
 | detail | string | no | — | Additional detail — reasoning for decisions, solution steps for learnings |
 | project | string | no | — | Project name |
 | tags | string | no | — | Comma-separated tags (applies to learnings) |
+| confidence | string | no | — | Confidence level: `"high"`, `"medium"`, or `"low"` — applies to decisions and learnings |
 
 **Returns:** Confirmation with the new record's id and table.
 
@@ -159,6 +160,26 @@ memory_dump({ title: "Auth middleware refactor — JWT validation approach", pro
 
 ---
 
+## decision_update
+
+Update the status of an existing decision. Use this to mark decisions as superseded (replaced by a newer decision) or reverted (rolled back because it was wrong).
+
+**Parameters**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| id | number | yes | — | Decision ID to update |
+| action | string | yes | — | Status transition: `"supersede"` or `"revert"` |
+
+**Returns:** Confirmation with the updated decision's id and new status.
+
+```js
+decision_update({ id: 42, action: "supersede" })
+decision_update({ id: 17, action: "revert" })
+```
+
+---
+
 ## When to Use Each Tool
 
 | Scenario | Tool |
@@ -169,6 +190,7 @@ memory_dump({ title: "Auth middleware refactor — JWT validation approach", pro
 | Recording an architectural decision | `memory_add` with `type: "decision"` |
 | Capturing a technical insight | `memory_add` with `type: "learning"` |
 | Marking work-in-progress state | `memory_add` with `type: "breadcrumb"` |
+| Marking a decision as replaced or rolled back | `decision_update` |
 | End of session | `memory_dump` |
 | Viewing curated knowledge | `loa_show` |
 | Quick database health check | `memory_stats` |

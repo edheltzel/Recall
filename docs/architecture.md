@@ -20,7 +20,8 @@
 │   └── .extraction_tracker.json       # Per-file extraction state (dedup + retry)
 ├── hooks/
 │   ├── SessionExtract.ts              # Stop hook — extracts sessions on exit
-│   └── BatchExtract.ts                # Cron batch extractor for missed sessions
+│   ├── BatchExtract.ts                # Cron batch extractor for missed sessions
+│   └── lib/                           # Shared hook libraries (imported by hook scripts)
 └── settings.json                      # Hook registration + MCP server (recall-memory)
 ```
 
@@ -31,8 +32,8 @@
 | sessions | Claude Code session metadata (ID, timestamps, project, branch) | No |
 | messages | Conversation turns (user + assistant content) | Yes |
 | loa_entries | Library of Alexandria curated knowledge with Fabric extraction | Yes |
-| decisions | Architectural decisions with reasoning and status | Yes |
-| learnings | Problems solved and patterns discovered | Yes |
+| decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted) and `confidence` (high/medium/low) columns | Yes |
+| learnings | Problems solved and patterns discovered; includes `confidence` (high/medium/low) column | Yes |
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |
 | telos | Purpose framework entries (optional) | Yes |
 | documents | Imported standalone markdown documents (optional) | Yes |
@@ -93,6 +94,12 @@ The hook self-spawns in background so the session exits immediately (non-blockin
 If Haiku is unavailable, falls back to a local Ollama model (configurable via `RECALL_OLLAMA_MODEL`).
 
 ## Technical Details
+
+### Lifecycle Management
+
+- **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `mem decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
+- **Breadcrumb sweep** — at session start, the `SessionRecall` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
+- **Prune strategy** — `mem prune` removes stale records: superseded/reverted decisions older than a retention window, breadcrumbs below an importance threshold, and orphaned embeddings with no parent row. Prune is always dry-run by default; pass `--apply` to commit changes.
 
 - **WAL mode** for concurrent reads (no locking during MCP queries)
 - **FTS5** full-text search with automatic sync triggers

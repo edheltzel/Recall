@@ -148,7 +148,7 @@ Recall operates as three integrated layers — data flows in automatically, gets
 
 - **Session memory** — auto-extracted on every session end via Claude Haiku
 - **Full-text + semantic search** — FTS5 keyword search, Ollama vector embeddings, or hybrid with Reciprocal Rank Fusion
-- **Decision & learning tracking** — record architectural decisions with reasoning, capture problems solved
+- **Decision & learning tracking** — record architectural decisions with reasoning, capture problems solved; decisions support lifecycle management (supersede/revert) and confidence scoring (high/medium/low)
 - **Agent context** — spawned agents inherit relevant memory via `context_for_agent`
 - **Library of Alexandria** — curated knowledge entries with Fabric extract_wisdom analysis
 - **Breadcrumbs** — quick context notes for future sessions
@@ -159,6 +159,8 @@ Recall operates as three integrated layers — data flows in automatically, gets
 mem "kubernetes auth"          # Search your memory
 mem dump "Session Title"       # Save this session
 mem add decision "Use X" ...   # Record a decision
+mem decision list              # List decisions with status and confidence
+mem prune                      # Preview stale records for removal
 mem stats                      # See what's stored
 mem doctor                     # Health check
 ```
