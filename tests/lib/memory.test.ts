@@ -9,6 +9,9 @@ import {
   addMessagesBatch,
   addDecision,
   getDecision,
+  supersedeDecision,
+  revertDecision,
+  listDecisions,
   addLearning,
   getLearning,
   addBreadcrumb,
@@ -165,6 +168,101 @@ describe('Decisions', () => {
     const decision = getDecision(id);
     expect(decision).toBeDefined();
     expect(decision!.status).toBe('active');
+  });
+});
+
+// ============ Decision Lifecycle ============
+
+describe('Decision Lifecycle', () => {
+  test('supersedeDecision changes active to superseded', () => {
+    const id = addDecision({
+      decision: 'Use PostgreSQL for the API',
+      status: 'active',
+    });
+
+    const changes = supersedeDecision(id);
+    expect(changes).toBe(1);
+
+    const decision = getDecision(id);
+    expect(decision!.status).toBe('superseded');
+  });
+
+  test('supersedeDecision returns 0 for already superseded decision', () => {
+    const id = addDecision({
+      decision: 'Already superseded decision',
+      status: 'active',
+    });
+    supersedeDecision(id);
+
+    const changes = supersedeDecision(id);
+    expect(changes).toBe(0);
+  });
+
+  test('supersedeDecision returns 0 for non-existent id', () => {
+    const changes = supersedeDecision(99999);
+    expect(changes).toBe(0);
+  });
+
+  test('revertDecision changes active to reverted', () => {
+    const id = addDecision({
+      decision: 'Use MongoDB for caching',
+      status: 'active',
+    });
+
+    const changes = revertDecision(id);
+    expect(changes).toBe(1);
+
+    const decision = getDecision(id);
+    expect(decision!.status).toBe('reverted');
+  });
+
+  test('revertDecision returns 0 for already reverted decision', () => {
+    const id = addDecision({
+      decision: 'Already reverted decision',
+      status: 'active',
+    });
+    revertDecision(id);
+
+    const changes = revertDecision(id);
+    expect(changes).toBe(0);
+  });
+
+  test('cannot revert a superseded decision', () => {
+    const id = addDecision({
+      decision: 'Superseded then revert attempt',
+      status: 'active',
+    });
+    supersedeDecision(id);
+
+    const changes = revertDecision(id);
+    expect(changes).toBe(0);
+
+    const decision = getDecision(id);
+    expect(decision!.status).toBe('superseded');
+  });
+
+  test('listDecisions returns all statuses when no filter', () => {
+    const id1 = addDecision({ decision: 'List test active', status: 'active' });
+    const id2 = addDecision({ decision: 'List test to supersede', status: 'active' });
+    supersedeDecision(id2);
+
+    const all = listDecisions(100);
+    const ids = all.map(d => d.id);
+    expect(ids).toContain(id1);
+    expect(ids).toContain(id2);
+  });
+
+  test('listDecisions filters by status', () => {
+    const id = addDecision({ decision: 'Filter test decision', status: 'active' });
+    supersedeDecision(id);
+
+    const superseded = listDecisions(100, undefined, 'superseded');
+    const ids = superseded.map(d => d.id);
+    expect(ids).toContain(id);
+
+    const active = listDecisions(100, undefined, 'active');
+    const activeIds = active.map(d => d.id);
+    expect(activeIds).not.toContain(id);
   });
 });
 
