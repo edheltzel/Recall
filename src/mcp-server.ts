@@ -52,6 +52,9 @@ import {
 	addDecision,
 	addLearning,
 	addBreadcrumb,
+	getDecision,
+	supersedeDecision,
+	revertDecision,
 	getStats,
 } from "./lib/memory.js";
 import {
@@ -562,6 +565,74 @@ server.tool(
 					{
 						type: "text",
 						text: `Add error: ${err instanceof Error ? err.message : String(err)}`,
+					},
+				],
+				isError: true,
+			};
+		}
+	},
+);
+
+// Tool: decision_update - Change decision status (supersede or revert)
+server.tool(
+	"decision_update",
+	"Update a decision's lifecycle status. Use 'supersede' when a newer decision replaces an older one. Use 'revert' when a decision was wrong and rolled back. Only active decisions can be transitioned.",
+	{
+		id: z.number().describe("The decision ID to update"),
+		action: z
+			.enum(["supersede", "revert"])
+			.describe("The lifecycle action: 'supersede' (replaced by newer) or 'revert' (was wrong)"),
+	},
+	async ({ id, action }) => {
+		try {
+			const decision = getDecision(id);
+			if (!decision) {
+				return {
+					content: [{ type: "text", text: `Decision #${id} not found` }],
+					isError: true,
+				};
+			}
+
+			if (decision.status !== "active") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Decision #${id} is already ${decision.status} — only active decisions can be transitioned`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const changes =
+				action === "supersede"
+					? supersedeDecision(id)
+					: revertDecision(id);
+
+			if (changes > 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Decision #${id} marked as ${action === "supersede" ? "superseded" : "reverted"}: ${decision.decision}`,
+						},
+					],
+				};
+			}
+
+			return {
+				content: [
+					{ type: "text", text: `Failed to update decision #${id}` },
+				],
+				isError: true,
+			};
+		} catch (err) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Decision update error: ${err instanceof Error ? err.message : String(err)}`,
 					},
 				],
 				isError: true,
