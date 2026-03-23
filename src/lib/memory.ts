@@ -90,8 +90,8 @@ export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
 export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status)
-    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status)
+    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence)
+    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence)
   `);
   const result = stmt.run({
     $session_id: decision.session_id || null,
@@ -100,7 +100,8 @@ export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): numb
     $decision: decision.decision,
     $reasoning: decision.reasoning || null,
     $alternatives: decision.alternatives || null,
-    $status: decision.status || 'active'
+    $status: decision.status || 'active',
+    $confidence: decision.confidence || 'medium'
   });
   return result.lastInsertRowid as number;
 }
@@ -110,13 +111,57 @@ export function getDecision(id: number): Decision | undefined {
   return db.prepare('SELECT * FROM decisions WHERE id = ?').get(id) as Decision | undefined;
 }
 
+export function supersedeDecision(id: number): number {
+  const db = getDb();
+  // Check current status first — changes count includes FTS trigger operations
+  const before = db.prepare('SELECT status FROM decisions WHERE id = ?').get(id) as { status: string } | undefined;
+  if (!before || before.status !== 'active') return 0;
+  db.prepare(
+    `UPDATE decisions SET status = 'superseded' WHERE id = $id AND status = 'active'`
+  ).run({ $id: id });
+  return 1;
+}
+
+export function revertDecision(id: number): number {
+  const db = getDb();
+  // Check current status first — changes count includes FTS trigger operations
+  const before = db.prepare('SELECT status FROM decisions WHERE id = ?').get(id) as { status: string } | undefined;
+  if (!before || before.status !== 'active') return 0;
+  db.prepare(
+    `UPDATE decisions SET status = 'reverted' WHERE id = $id AND status = 'active'`
+  ).run({ $id: id });
+  return 1;
+}
+
+export function listDecisions(limit: number = 20, project?: string, status?: string): Decision[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (project) {
+    conditions.push('project = ?');
+    params.push(project);
+  }
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+
+  return db.prepare(
+    `SELECT * FROM decisions ${where} ORDER BY created_at DESC LIMIT ?`
+  ).all(...params) as Decision[];
+}
+
 // ============ Learnings ============
 
 export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags)
-    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags)
+    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence)
+    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence)
   `);
   const result = stmt.run({
     $session_id: learning.session_id || null,
@@ -125,7 +170,8 @@ export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): numb
     $problem: learning.problem,
     $solution: learning.solution || null,
     $prevention: learning.prevention || null,
-    $tags: learning.tags || null
+    $tags: learning.tags || null,
+    $confidence: learning.confidence || 'medium'
   });
   return result.lastInsertRowid as number;
 }
@@ -202,7 +248,7 @@ export function search(query: string, options?: { project?: string; table?: stri
           WHERE decisions_fts MATCH ?
           AND d.status = 'active'
           ${options?.project ? 'AND d.project = ?' : ''}
-          ORDER BY f.rank
+          ORDER BY CASE d.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, f.rank
           LIMIT ?
         `;
         break;
@@ -403,29 +449,34 @@ export function recentLoaEntries(limit: number = 10, project?: string): LoaEntry
 
 export function getStats(): Stats {
   const db = getDb();
+  const count = (sql: string) => (db.prepare(sql).get() as { count: number }).count;
 
-  const sessions = (db.prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number }).count;
-  const messages = (db.prepare('SELECT COUNT(*) as count FROM messages').get() as { count: number }).count;
-  const decisions = (db.prepare('SELECT COUNT(*) as count FROM decisions').get() as { count: number }).count;
-  const learnings = (db.prepare('SELECT COUNT(*) as count FROM learnings').get() as { count: number }).count;
-  const breadcrumbs = (db.prepare('SELECT COUNT(*) as count FROM breadcrumbs').get() as { count: number }).count;
-  const loa_entries = (db.prepare('SELECT COUNT(*) as count FROM loa_entries').get() as { count: number }).count;
-  const telos = (db.prepare('SELECT COUNT(*) as count FROM telos').get() as { count: number }).count;
-  const documents = (db.prepare('SELECT COUNT(*) as count FROM documents').get() as { count: number }).count;
+  const sessions = count('SELECT COUNT(*) as count FROM sessions');
+  const messages = count('SELECT COUNT(*) as count FROM messages');
+  const decisions = count('SELECT COUNT(*) as count FROM decisions');
+  const decisions_active = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'active'");
+  const decisions_superseded = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'superseded'");
+  const decisions_reverted = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'reverted'");
+  const learnings = count('SELECT COUNT(*) as count FROM learnings');
+  const breadcrumbs = count('SELECT COUNT(*) as count FROM breadcrumbs');
+  const breadcrumbs_expired = count("SELECT COUNT(*) as count FROM breadcrumbs WHERE expires_at IS NOT NULL AND expires_at < datetime('now')");
+  const loa_entries = count('SELECT COUNT(*) as count FROM loa_entries');
+  const telos = count('SELECT COUNT(*) as count FROM telos');
+  const documents = count('SELECT COUNT(*) as count FROM documents');
+  const extraction_tracker = count('SELECT COUNT(*) as count FROM extraction_tracker');
+  const extraction_errors = count('SELECT COUNT(*) as count FROM extraction_errors');
+  const embeddings = count('SELECT COUNT(*) as count FROM embeddings');
 
-  // Get DB file size
   const dbPath = getDbPath();
   const db_size_bytes = existsSync(dbPath) ? statSync(dbPath).size : 0;
 
   return {
-    sessions,
-    messages,
-    decisions,
+    sessions, messages,
+    decisions, decisions_active, decisions_superseded, decisions_reverted,
     learnings,
-    breadcrumbs,
-    loa_entries,
-    telos,
-    documents,
+    breadcrumbs, breadcrumbs_expired,
+    loa_entries, telos, documents,
+    extraction_tracker, extraction_errors, embeddings,
     db_size_bytes
   };
 }

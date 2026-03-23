@@ -17,6 +17,8 @@ import { runDump } from './commands/dump.js';
 import { runImportLegacy } from './commands/import-legacy.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
+import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
+import { runPrune } from './commands/prune.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { closeDb } from './db/connection.js';
@@ -65,12 +67,14 @@ addCmd
   .option('-c, --category <cat>', 'Category (architecture, tooling, process)')
   .option('-w, --why <reasoning>', 'Why this decision was made')
   .option('-a, --alternatives <alt>', 'Alternatives considered')
+  .option('--confidence <level>', 'Confidence level (high, medium, low)', 'medium')
   .action((decision, options) => {
     runAddDecision(decision, {
       project: options.project,
       category: options.category,
       why: options.why,
-      alternatives: options.alternatives
+      alternatives: options.alternatives,
+      confidence: options.confidence
     });
     closeDb();
   });
@@ -88,6 +92,58 @@ addCmd
       category: options.category,
       prevention: options.prevention,
       tags: options.tags
+    });
+    closeDb();
+  });
+
+// mem decision — lifecycle management
+const decisionCmd = program
+  .command('decision')
+  .description('Decision lifecycle management (supersede, revert, list)');
+
+decisionCmd
+  .command('supersede <id>')
+  .description('Mark a decision as superseded (replaced by a newer decision)')
+  .action((id) => {
+    runSupersede(parseInt(id, 10));
+    closeDb();
+  });
+
+decisionCmd
+  .command('revert <id>')
+  .description('Mark a decision as reverted (was wrong, rolled back)')
+  .action((id) => {
+    runRevert(parseInt(id, 10));
+    closeDb();
+  });
+
+decisionCmd
+  .command('list')
+  .description('List decisions with optional status filter')
+  .option('-p, --project <name>', 'Filter by project')
+  .option('-s, --status <status>', 'Filter by status (active, superseded, reverted)')
+  .option('-l, --limit <n>', 'Max results', '20')
+  .action((options) => {
+    runDecisionList({
+      project: options.project,
+      status: options.status,
+      limit: parseInt(options.limit, 10)
+    });
+    closeDb();
+  });
+
+// mem prune — table lifecycle management
+program
+  .command('prune')
+  .description('Prune old/expired records (dry-run by default, --execute to delete)')
+  .option('--execute', 'Actually delete rows (default is dry-run)')
+  .option('--older-than <duration>', 'Retention period (e.g., 90d, 180d)', '180d')
+  .option('--keep-decisions', 'Skip pruning inactive decisions')
+  .action((options) => {
+    runPrune({
+      execute: options.execute,
+      olderThan: options.olderThan,
+      keepDecisions: options.keepDecisions
     });
     closeDb();
   });

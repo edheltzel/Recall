@@ -115,7 +115,8 @@ function showRecentDecisions(limit: number, project?: string): void {
     const date = d.created_at?.split('T')[0] || 'unknown';
     const projectTag = d.project ? ` [${d.project}]` : '';
 
-    console.log(`#${d.id}${projectTag} ${date}`);
+    const conf = d.confidence && d.confidence !== 'medium' ? ` (${d.confidence})` : '';
+    console.log(`#${d.id}${projectTag}${conf} ${date}`);
     console.log(`  Decision: ${d.decision}`);
     if (d.reasoning) {
       console.log(`  Why: ${d.reasoning}`);
