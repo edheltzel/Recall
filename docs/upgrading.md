@@ -26,7 +26,38 @@ To also update the hooks manually:
 ```bash
 cp hooks/SessionExtract.ts ~/.claude/hooks/
 cp hooks/BatchExtract.ts ~/.claude/hooks/
+cp -r hooks/lib/ ~/.claude/hooks/lib/
 ```
+
+## v0.6.0 Migration Notes
+
+### Schema changes (migration 5 → 6)
+
+Migration 5→6 adds a `confidence` column (high/medium/low, DEFAULT 'medium') to both the `decisions` and `learnings` tables. This migration is non-destructive — existing rows receive the default value and no data is removed.
+
+### New hooks/lib/ directory
+
+v0.6.0 introduces a `hooks/lib/` directory containing shared utilities imported by `SessionExtract.ts` and `BatchExtract.ts`. If you update the hooks manually rather than via `./install.sh`, you must copy this directory:
+
+```bash
+cp -r hooks/lib/ ~/.claude/hooks/lib/
+```
+
+Without `hooks/lib/`, the hook scripts will fail to resolve imports at runtime.
+
+### New commands
+
+| Command | Purpose |
+|---------|---------|
+| `mem decision list` | List decisions with status and confidence |
+| `mem decision update <id>` | Update a decision's status (supersede/revert) |
+| `mem prune` | Preview and remove stale records (dry-run by default; use `--apply` to commit) |
+
+### New MCP tool
+
+`decision_update` — update the status and/or confidence of a stored decision. Accepts `id`, `status` (active/superseded/reverted), and optional `confidence` (high/medium/low).
+
+---
 
 ## Database Migrations
 

@@ -59,9 +59,28 @@ LoA is the primary knowledge capture mechanism. Raw transcripts are high-noise; 
 
 ```bash
 mem add decision "Use TypeScript over Python" --why "Type safety, team preference" -p myproject
+mem add decision "Use SQLite for storage" -w "Lightweight, zero-config" --confidence high
 ```
 
 Records an architectural or strategic decision with rationale. Decisions carry a status field (`active`, `superseded`, `reverted`) so you can track when a decision is overturned and why.
+
+### Decision Lifecycle
+
+Manage decision status transitions.
+
+```bash
+# List all decisions (all statuses)
+mem decision list
+mem decision list --status active
+mem decision list --status superseded
+mem decision list --project my-project --limit 10
+
+# Mark a decision as superseded (replaced by newer)
+mem decision supersede 42
+
+# Mark a decision as reverted (was wrong, rolled back)
+mem decision revert 42
+```
 
 ### Learnings
 
@@ -151,3 +170,32 @@ mem stats                            # Database statistics
 `mem doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, and Ollama availability. Run this first when troubleshooting.
 
 `mem stats` reports row counts per table and total database size.
+
+### Prune
+
+Clean up old and expired records. **Dry-run by default** — must pass `--execute` to actually delete.
+
+```bash
+# Preview what would be pruned (safe, no deletions)
+mem prune
+
+# Actually prune with default 180-day retention
+mem prune --execute
+
+# Custom retention period
+mem prune --execute --older-than 90d
+
+# Skip decision pruning
+mem prune --execute --keep-decisions
+```
+
+**What gets pruned:**
+| Table | Strategy |
+|-------|----------|
+| messages | Consolidated sessions (with LoA) older than N days |
+| sessions | Orphaned (no messages, no LoA) older than N days |
+| breadcrumbs | Expired (`expires_at` in the past) |
+| decisions | Superseded/reverted older than 90 days |
+| extraction_tracker | Older than N days |
+
+**Never pruned:** loa_entries, learnings, extraction_errors
