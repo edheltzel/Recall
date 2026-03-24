@@ -345,8 +345,9 @@ check_prerequisites() {
 # CONFIGURE MCP
 #
 configure_mcp() {
-  local mem_mcp_path
+  local mem_mcp_path bun_path
   mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+  bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
 
   mkdir -p "$CLAUDE_DIR"
 
@@ -358,22 +359,24 @@ configure_mcp() {
     fi
 
     # Register via Claude Code CLI (user scope = available in all projects)
+    # Use full bun path as command to avoid PATH issues in Claude Code's subprocess
     log_info "Registering recall-memory MCP server..."
-    if claude mcp add --transport stdio --scope user recall-memory -- "$mem_mcp_path" 2>/dev/null; then
+    if claude mcp add --transport stdio --scope user recall-memory -- "$bun_path" "run" "$mem_mcp_path" 2>/dev/null; then
       log_success "Registered recall-memory MCP server via Claude Code CLI"
     else
       log_warn "claude mcp add failed — adding to settings.json directly"
-      _write_mcp_settings "$mem_mcp_path"
+      _write_mcp_settings "$bun_path" "$mem_mcp_path"
     fi
   else
     # Claude Code not installed yet — write to settings.json (user scope) as fallback
     log_warn "Claude Code CLI not found — adding recall-memory to settings.json directly"
-    _write_mcp_settings "$mem_mcp_path"
+    _write_mcp_settings "$bun_path" "$mem_mcp_path"
   fi
 }
 
 _write_mcp_settings() {
-  local mem_mcp_path="$1"
+  local bun_path="$1"
+  local mem_mcp_path="$2"
   local settings_file="$CLAUDE_DIR/settings.json"
 
   # Check if already registered
@@ -382,13 +385,17 @@ _write_mcp_settings() {
     return
   fi
 
-  # Merge into existing settings.json (or create new) using bun — no shell interpolation
-  SETTINGS_FILE="$settings_file" MCP_PATH="$mem_mcp_path" bun -e '
+  # Merge into existing settings.json (or create new) using node — no shell interpolation
+  # Use node (not bun) to avoid PATH issues in non-interactive shells
+  SETTINGS_FILE="$settings_file" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" node -e '
         const fs = require("fs");
         let config = {};
         try { config = JSON.parse(fs.readFileSync(process.env.SETTINGS_FILE, "utf8")); } catch {}
         config.mcpServers = config.mcpServers || {};
-        config.mcpServers["recall-memory"] = { command: process.env.MCP_PATH, args: [] };
+        config.mcpServers["recall-memory"] = {
+            command: process.env.BUN_PATH,
+            args: ["run", process.env.MCP_PATH]
+        };
         fs.writeFileSync(process.env.SETTINGS_FILE, JSON.stringify(config, null, 2));
     '
   log_success "Added recall-memory to settings.json mcpServers"

@@ -164,8 +164,8 @@ export function runPrune(options: PruneOptions): void {
   if (extSessionOverflow > 0) {
     db.prepare(
       `DELETE FROM extraction_sessions
-       WHERE id NOT IN (
-         SELECT id FROM extraction_sessions ORDER BY timestamp DESC LIMIT 500
+       WHERE session_id NOT IN (
+         SELECT session_id FROM extraction_sessions ORDER BY timestamp DESC LIMIT 500
        )`
     ).run();
   }

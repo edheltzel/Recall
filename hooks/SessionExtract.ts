@@ -479,7 +479,12 @@ function appendDecisions(fabricOutput: string, sessionLabel: string, timestamp: 
     for (const line of content.split('\n')) {
       if (line.startsWith('#') || line.trim() === '') continue;
       const parts = line.split('|');
-      if (parts.length >= 3) {
+      if (parts.length >= 4) {
+        // New format: timestamp|session|confidence|decision
+        const decision = parts.slice(3).join('|');
+        existingDecisions.add(normalize(decision));
+      } else if (parts.length >= 3) {
+        // Legacy format: timestamp|session|decision
         const decision = parts.slice(2).join('|');
         existingDecisions.add(normalize(decision));
       }
@@ -497,7 +502,11 @@ function appendDecisions(fabricOutput: string, sessionLabel: string, timestamp: 
       continue;
     }
     existingDecisions.add(normalized);
-    newEntries.push(`${timestamp}|${sessionLabel}|${line.replace(/\|/g, '/')}`);
+    // Parse confidence suffix: (confidence: HIGH|MEDIUM|LOW)
+    const confidenceMatch = line.match(/\(confidence:\s*(HIGH|MEDIUM|LOW)\)/i);
+    const confidence = confidenceMatch ? confidenceMatch[1].toLowerCase() : 'medium';
+    const cleanLine = line.replace(/\s*\(confidence:\s*(?:HIGH|MEDIUM|LOW)\)/i, '').replace(/\|/g, '/');
+    newEntries.push(`${timestamp}|${sessionLabel}|${confidence}|${cleanLine}`);
   }
 
   if (newEntries.length > 0) {

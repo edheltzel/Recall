@@ -155,6 +155,29 @@ export function listDecisions(limit: number = 20, project?: string, status?: str
   ).all(...params) as Decision[];
 }
 
+/**
+ * Find active decisions similar to the given text using FTS5.
+ * Used for auto-supersede when adding a new decision on the same topic.
+ */
+export function findSimilarDecisions(text: string, limit = 3): Decision[] {
+  const db = getDb();
+  // Extract key terms for FTS5 query (first 10 significant words)
+  const terms = text.split(/\s+/).filter(w => w.length > 3).slice(0, 10).join(' OR ');
+  if (!terms) return [];
+  try {
+    return db.prepare(`
+      SELECT d.*
+      FROM decisions_fts fts
+      JOIN decisions d ON d.id = fts.rowid
+      WHERE decisions_fts MATCH ? AND d.status = 'active'
+      ORDER BY fts.rank
+      LIMIT ?
+    `).all(terms, limit) as Decision[];
+  } catch {
+    return []; // FTS query syntax error — no matches
+  }
+}
+
 // ============ Learnings ============
 
 export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
@@ -341,8 +364,8 @@ export function recentMessages(limit: number = 10, project?: string): Message[] 
 export function recentDecisions(limit: number = 10, project?: string): Decision[] {
   const db = getDb();
   const sql = project
-    ? "SELECT * FROM decisions WHERE project = ? AND status = 'active' ORDER BY created_at DESC LIMIT ?"
-    : "SELECT * FROM decisions WHERE status = 'active' ORDER BY created_at DESC LIMIT ?";
+    ? "SELECT * FROM decisions WHERE project = ? AND status = 'active' ORDER BY CASE confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, created_at DESC LIMIT ?"
+    : "SELECT * FROM decisions WHERE status = 'active' ORDER BY CASE confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, created_at DESC LIMIT ?";
   const params = project ? [project, limit] : [limit];
   return db.prepare(sql).all(...params) as Decision[];
 }

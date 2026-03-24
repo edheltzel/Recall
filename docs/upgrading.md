@@ -51,7 +51,7 @@ Without `hooks/lib/`, the hook scripts will fail to resolve imports at runtime.
 |---------|---------|
 | `mem decision list` | List decisions with status and confidence |
 | `mem decision update <id>` | Update a decision's status (supersede/revert) |
-| `mem prune` | Preview and remove stale records (dry-run by default; use `--apply` to commit) |
+| `mem prune` | Preview and remove stale records (dry-run by default; use `--execute` to commit) |
 
 ### New MCP tool
 
