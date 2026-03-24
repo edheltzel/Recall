@@ -159,6 +159,19 @@ CREATE TABLE IF NOT EXISTS extraction_locks (
   pid INTEGER NOT NULL,
   started_at TEXT NOT NULL
 );
+
+-- Procedures (synthesized from clustered learnings)
+CREATE TABLE IF NOT EXISTS procedures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  title TEXT NOT NULL,
+  trigger_context TEXT,
+  steps TEXT NOT NULL,
+  source_learnings TEXT,
+  project TEXT,
+  times_observed INTEGER DEFAULT 2,
+  confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low'))
+);
 `;
 
 export const CREATE_INDEXES = `

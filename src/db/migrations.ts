@@ -131,6 +131,23 @@ export const MIGRATIONS: Migration[] = [
       // Column already exists — safe to ignore
     }
   },
+
+  // Migration 6 → 7: Create procedures table
+  (db) => {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS procedures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        title TEXT NOT NULL,
+        trigger_context TEXT,
+        steps TEXT NOT NULL,
+        source_learnings TEXT,
+        project TEXT,
+        times_observed INTEGER DEFAULT 2,
+        confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low'))
+      )
+    `).run();
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddi
 import { search as ftsSearch } from '../lib/memory.js';
 
 interface EmbedOptions {
-  table?: 'loa' | 'decisions' | 'messages';
+  table?: 'loa' | 'decisions' | 'messages' | 'learnings';
   limit?: number;
   force?: boolean;
 }
@@ -19,6 +19,8 @@ function getContentForTable(table: string, row: any): string {
       return `${row.title}\n\n${row.fabric_extract}`;
     case 'decisions':
       return `${row.decision}\n\nReasoning: ${row.reasoning || 'N/A'}`;
+    case 'learnings':
+      return `${row.problem}\n\nSolution: ${row.solution || 'N/A'}`;
     case 'messages':
       return row.content;
     default:
@@ -69,6 +71,15 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
            LEFT JOIN embeddings e ON e.source_table = 'decisions' AND e.source_id = d.id
            WHERE e.id IS NULL
            ORDER BY d.created_at DESC LIMIT ?`;
+      break;
+    case 'learnings':
+      sourceTable = 'learnings';
+      query = options.force
+        ? `SELECT id, problem, solution FROM learnings ORDER BY created_at DESC LIMIT ?`
+        : `SELECT l.id, l.problem, l.solution FROM learnings l
+           LEFT JOIN embeddings e ON e.source_table = 'learnings' AND e.source_id = l.id
+           WHERE e.id IS NULL
+           ORDER BY l.created_at DESC LIMIT ?`;
       break;
     case 'messages':
       sourceTable = 'messages';
