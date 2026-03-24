@@ -182,6 +182,29 @@ export function gatherContext(): string {
     sections.push('');
   }
 
+  // Known procedures (synthesized from clustered learnings)
+  const procedures = project
+    ? queryDb(
+        `SELECT title, steps FROM procedures
+         WHERE (project = ? OR project IS NULL)
+         ORDER BY times_observed DESC, created_at DESC LIMIT 3`,
+        [project]
+      )
+    : queryDb(
+        `SELECT title, steps FROM procedures
+         ORDER BY times_observed DESC, created_at DESC LIMIT 3`
+      );
+
+  if (procedures.length > 0) {
+    hasContent = true;
+    sections.push('### Known Procedures');
+    for (const p of procedures) {
+      const preview = p.steps.length > 200 ? p.steps.slice(0, 200) + '...' : p.steps;
+      sections.push(`- **${p.title}**: ${preview}`);
+    }
+    sections.push('');
+  }
+
   // Hot recall summary (last few lines from HOT_RECALL.md)
   const hotRecallPath = getHotRecallPath();
   if (existsSync(hotRecallPath)) {

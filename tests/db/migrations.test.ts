@@ -112,7 +112,7 @@ describe('migration failure handling', () => {
 
 describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
-    expect(MIGRATIONS.length).toBe(6);
+    expect(MIGRATIONS.length).toBe(7);
   });
 
   test('all entries are functions', () => {

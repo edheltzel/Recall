@@ -19,6 +19,7 @@ import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './co
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
 import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
 import { runPrune } from './commands/prune.js';
+import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { closeDb } from './db/connection.js';
@@ -144,6 +145,20 @@ program
       execute: options.execute,
       olderThan: options.olderThan,
       keepDecisions: options.keepDecisions
+    });
+    closeDb();
+  });
+
+// mem cluster — procedure detection from learnings
+program
+  .command('cluster')
+  .description('Detect procedures from clustered learnings (dry-run by default)')
+  .option('--execute', 'Synthesize and create procedure records')
+  .option('--threshold <n>', 'Cosine similarity threshold (0-1)', '0.85')
+  .action((options) => {
+    runCluster({
+      execute: options.execute,
+      threshold: parseFloat(options.threshold)
     });
     closeDb();
   });
