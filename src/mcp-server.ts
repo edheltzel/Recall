@@ -55,6 +55,7 @@ import {
 	getDecision,
 	supersedeDecision,
 	revertDecision,
+	findSimilarDecisions,
 	getStats,
 } from "./lib/memory.js";
 import {
@@ -525,7 +526,21 @@ server.tool(
 			let id: number;
 
 			switch (type) {
-				case "decision":
+				case "decision": {
+					// Check for similar active decisions to auto-supersede
+					const similar = findSimilarDecisions(content, 3);
+					const superseded: number[] = [];
+
+					for (const existing of similar) {
+						const existingWords = new Set(existing.decision.toLowerCase().split(/\s+/).filter(w => w.length > 4));
+						const newWords = content.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+						const overlap = newWords.filter(w => existingWords.has(w)).length;
+						if (overlap >= 3 && existingWords.size > 0) {
+							supersedeDecision(existing.id!);
+							superseded.push(existing.id!);
+						}
+					}
+
 					id = addDecision({
 						decision: content,
 						reasoning: detail,
@@ -533,11 +548,17 @@ server.tool(
 						status: "active",
 						confidence: confidence || "medium",
 					});
+
+					let resultText = `Added decision #${id}: ${content}`;
+					if (superseded.length > 0) {
+						resultText += ` (superseded decision(s) #${superseded.join(', #')})`;
+					}
 					return {
 						content: [
-							{ type: "text", text: `Added decision #${id}: ${content}` },
+							{ type: "text", text: resultText },
 						],
 					};
+				}
 
 				case "learning":
 					id = addLearning({

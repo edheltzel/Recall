@@ -132,6 +132,14 @@ export function migrateSessionIndex(
       imported++;
     }
 
+    // Cap at 500 rows (matches legacy SESSION_INDEX.json behavior)
+    db.prepare(`
+      DELETE FROM extraction_sessions
+      WHERE session_id NOT IN (
+        SELECT session_id FROM extraction_sessions ORDER BY timestamp DESC LIMIT 500
+      )
+    `).run();
+
     return { imported };
   } finally {
     db.close();
