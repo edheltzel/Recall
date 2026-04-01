@@ -7,7 +7,6 @@ dist/
 # Environment
 .env
 .env.local
-.atlas-plans/
 
 # IDE
 .vscode/
