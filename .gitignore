@@ -17,6 +17,7 @@ dist/
 .atlas-plans/
 .worktrees/
 .claude/worktrees
+.maestro/
 
 # OS
 .DS_Store
