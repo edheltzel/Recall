@@ -13,6 +13,11 @@ dist/
 .vscode/
 .idea/
 
+# Coding Agents
+.atlas-plans/
+.worktrees/
+.claude/worktrees
+
 # OS
 .DS_Store
 Thumbs.db
