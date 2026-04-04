@@ -4,7 +4,7 @@
 
 # Recall — Persistent Memory for Claude Code
 
-Every Claude Code session starts from zero. Recall fixes that — conversations are automatically extracted, indexed, and searchable across sessions.
+Claude Code forgets everything when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session.
 
 > [Opencode](https://opencode.ai/) and [Pi π](https://pi.dev/) are **very Alpha**
 
