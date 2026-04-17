@@ -435,6 +435,11 @@ configure_hooks() {
     log_success "Copied SessionRecall.ts to $hooks_dir"
   fi
 
+  if [[ -f "$src_dir/SessionPreCompact.ts" ]]; then
+    cp "$src_dir/SessionPreCompact.ts" "$hooks_dir/SessionPreCompact.ts"
+    log_success "Copied SessionPreCompact.ts to $hooks_dir"
+  fi
+
   # Copy hooks/lib/ (shared libraries used by hooks)
   if [[ -d "$src_dir/lib" ]]; then
     mkdir -p "$hooks_dir/lib"
@@ -532,6 +537,34 @@ configure_hooks() {
         fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
     '
   log_success "Registered SessionRecall hook (SessionStart) in settings.json"
+
+  # Register SessionPreCompact hook (PreCompact) — flushes in-flight messages
+  # to SQLite before context compaction so long sessions don't lose memory
+  # between Stop events. Flush-only: no Haiku, no LoA. The Stop hook still
+  # runs full extraction at session end.
+  if [[ -f "$hooks_dir/SessionPreCompact.ts" ]]; then
+    local precompact_cmd="$bun_path run $hooks_dir/SessionPreCompact.ts"
+    SETTINGS_FILE="$settings_file" PRECOMPACT_CMD="$precompact_cmd" bun -e '
+          const fs = require("fs");
+          const settingsFile = process.env.SETTINGS_FILE;
+          const precompactCmd = process.env.PRECOMPACT_CMD;
+          let config = {};
+          try { config = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch {}
+          config.hooks = config.hooks || {};
+          config.hooks.PreCompact = config.hooks.PreCompact || [];
+          const exists = config.hooks.PreCompact.some(e =>
+              e.hooks && e.hooks.some(h => h.command && h.command.includes("SessionPreCompact"))
+          );
+          if (!exists) {
+              config.hooks.PreCompact.push({
+                  matcher: "",
+                  hooks: [{ type: "command", command: precompactCmd, timeout: 10000 }]
+              });
+          }
+          fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
+      '
+    log_success "Registered SessionPreCompact hook (PreCompact) in settings.json"
+  fi
 }
 
 #
