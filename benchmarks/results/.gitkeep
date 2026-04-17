@@ -1,0 +1,3 @@
+# Benchmark results land here. JSONL files are the source of truth; the .md
+# files alongside are rendered for humans. Both are committed so historical
+# trends are diffable.

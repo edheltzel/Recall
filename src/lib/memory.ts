@@ -47,15 +47,16 @@ export function endSession(sessionId: string, summary?: string): void {
 export function addMessage(message: Omit<Message, 'id'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO messages (session_id, timestamp, role, content, project)
-    VALUES ($session_id, $timestamp, $role, $content, $project)
+    INSERT INTO messages (session_id, timestamp, role, content, project, importance)
+    VALUES ($session_id, $timestamp, $role, $content, $project, $importance)
   `);
   const result = stmt.run({
     $session_id: message.session_id,
     $timestamp: message.timestamp,
     $role: message.role,
     $content: message.content,
-    $project: message.project || null
+    $project: message.project || null,
+    $importance: clampImportance(message.importance, 5)
   });
   return result.lastInsertRowid as number;
 }
@@ -63,8 +64,8 @@ export function addMessage(message: Omit<Message, 'id'>): number {
 export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO messages (session_id, timestamp, role, content, project)
-    VALUES ($session_id, $timestamp, $role, $content, $project)
+    INSERT INTO messages (session_id, timestamp, role, content, project, importance)
+    VALUES ($session_id, $timestamp, $role, $content, $project, $importance)
   `);
 
   const insertMany = db.transaction((msgs: Omit<Message, 'id'>[]) => {
@@ -75,7 +76,8 @@ export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
         $timestamp: msg.timestamp,
         $role: msg.role,
         $content: msg.content,
-        $project: msg.project || null
+        $project: msg.project || null,
+        $importance: clampImportance(msg.importance, 5)
       });
       count++;
     }
@@ -85,13 +87,33 @@ export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
   return insertMany(messages);
 }
 
+// ============ Importance ============
+//
+// Importance is an integer 1-10 used by tiered session loading (L1 assembly)
+// and as a ranking bias. Clamped here in application code because SQLite
+// ALTER TABLE cannot add a CHECK constraint to existing rows (migration 7→8).
+// Defaults: breadcrumbs/decisions/learnings/messages = 5, loa_entries = 8.
+// LoA writes enforce a floor of 5 — the curated tier must never be demoted
+// below "neutral" importance.
+export function clampImportance(value: number | undefined, fallback: number): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.min(10, Math.max(1, n));
+}
+
+export function pinRecord(table: 'decisions' | 'learnings' | 'breadcrumbs' | 'loa_entries' | 'messages', id: number, importance = 10): boolean {
+  const db = getDb();
+  const clamped = clampImportance(importance, 10);
+  const result = db.prepare(`UPDATE ${table} SET importance = ? WHERE id = ?`).run(clamped, id);
+  return (result.changes as number) > 0;
+}
+
 // ============ Decisions ============
 
 export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence)
-    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence)
+    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence, importance)
+    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence, $importance)
   `);
   const result = stmt.run({
     $session_id: decision.session_id || null,
@@ -101,7 +123,8 @@ export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): numb
     $reasoning: decision.reasoning || null,
     $alternatives: decision.alternatives || null,
     $status: decision.status || 'active',
-    $confidence: decision.confidence || 'medium'
+    $confidence: decision.confidence || 'medium',
+    $importance: clampImportance(decision.importance, 5)
   });
   return result.lastInsertRowid as number;
 }
@@ -183,8 +206,8 @@ export function findSimilarDecisions(text: string, limit = 3): Decision[] {
 export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence)
-    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence)
+    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance)
+    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence, $importance)
   `);
   const result = stmt.run({
     $session_id: learning.session_id || null,
@@ -194,7 +217,8 @@ export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): numb
     $solution: learning.solution || null,
     $prevention: learning.prevention || null,
     $tags: learning.tags || null,
-    $confidence: learning.confidence || 'medium'
+    $confidence: learning.confidence || 'medium',
+    $importance: clampImportance(learning.importance, 5)
   });
   return result.lastInsertRowid as number;
 }
@@ -392,9 +416,12 @@ export function recentBreadcrumbs(limit: number = 10, project?: string): Breadcr
 
 export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): number {
   const db = getDb();
+  // LoA is the curated tier: importance defaults to 8 and is floored at 5
+  // so a careless caller cannot demote curated knowledge below neutral.
+  const importance = Math.max(5, clampImportance(entry.importance, 8));
   const stmt = db.prepare(`
-    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count)
-    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count)
+    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance)
+    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance)
   `);
   const result = stmt.run({
     $title: entry.title,
@@ -406,7 +433,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
     $session_id: entry.session_id || null,
     $project: entry.project || null,
     $tags: entry.tags || null,
-    $message_count: entry.message_count || null
+    $message_count: entry.message_count || null,
+    $importance: importance
   });
   return result.lastInsertRowid as number;
 }

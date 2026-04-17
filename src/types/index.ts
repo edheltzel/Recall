@@ -19,6 +19,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   project?: string;
+  importance?: number;
 }
 
 export interface Decision {
@@ -32,6 +33,7 @@ export interface Decision {
   alternatives?: string;
   status: 'active' | 'superseded' | 'reverted';
   confidence?: 'high' | 'medium' | 'low';
+  importance?: number;
 }
 
 export interface Learning {
@@ -45,6 +47,7 @@ export interface Learning {
   prevention?: string;
   tags?: string;
   confidence?: 'high' | 'medium' | 'low';
+  importance?: number;
 }
 
 export interface Breadcrumb {
@@ -71,6 +74,7 @@ export interface LoaEntry {
   project?: string;
   tags?: string;
   message_count?: number;
+  importance?: number;
 }
 
 export interface SearchResult {
