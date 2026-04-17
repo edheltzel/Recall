@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
   content TEXT NOT NULL,
   project TEXT,
+  importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   reasoning TEXT,
   alternatives TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'reverted')),
+  importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -52,6 +54,7 @@ CREATE TABLE IF NOT EXISTS learnings (
   solution TEXT,
   prevention TEXT,
   tags TEXT,
+  importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -88,6 +91,7 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   project TEXT,
   tags TEXT,
   message_count INTEGER,
+  importance INTEGER DEFAULT 8 CHECK (importance BETWEEN 1 AND 10),
   FOREIGN KEY (parent_loa_id) REFERENCES loa_entries(id),
   FOREIGN KEY (message_range_start) REFERENCES messages(id),
   FOREIGN KEY (message_range_end) REFERENCES messages(id)
@@ -204,6 +208,12 @@ CREATE INDEX IF NOT EXISTS idx_breadcrumbs_created ON breadcrumbs(created_at);
 CREATE INDEX IF NOT EXISTS idx_loa_project ON loa_entries(project);
 CREATE INDEX IF NOT EXISTS idx_loa_created ON loa_entries(created_at);
 CREATE INDEX IF NOT EXISTS idx_loa_parent ON loa_entries(parent_loa_id);
+CREATE INDEX IF NOT EXISTS idx_loa_importance ON loa_entries(importance);
+
+-- Importance indexes for tiered loading (L1 assembly)
+CREATE INDEX IF NOT EXISTS idx_messages_importance ON messages(importance);
+CREATE INDEX IF NOT EXISTS idx_decisions_importance ON decisions(importance);
+CREATE INDEX IF NOT EXISTS idx_learnings_importance ON learnings(importance);
 
 -- TELOS indexes
 CREATE INDEX IF NOT EXISTS idx_telos_type ON telos(type);
