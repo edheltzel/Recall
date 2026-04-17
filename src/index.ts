@@ -23,6 +23,7 @@ import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
+import { runBenchmark, listBenchmarks, reportLatestBenchmark } from './commands/benchmark.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -508,6 +509,34 @@ program
     closeDb();
   });
 
+// mem benchmark — Phase 2 benchmark harness
+const benchmarkCmd = program
+  .command('benchmark')
+  .description('Run, list, or report Phase 2 benchmarks (see benchmarks/README.md)');
+
+benchmarkCmd
+  .command('run [suite]')
+  .description('Run benchmarks. Pass a suite id (A-E) to run just one; omit to run all available.')
+  .option('-p, --project <name>', 'Scope the benchmark to a specific project')
+  .action(async (suite, options) => {
+    await runBenchmark({ suite, project: options.project });
+    closeDb();
+  });
+
+benchmarkCmd
+  .command('list')
+  .description('List available benchmark suites and their build status')
+  .action(() => {
+    listBenchmarks();
+  });
+
+benchmarkCmd
+  .command('report')
+  .description('Show the latest benchmark report')
+  .action(() => {
+    reportLatestBenchmark();
+  });
+
 // mem doctor - Run health checks on all memory subsystems
 program
   .command('doctor')
@@ -526,7 +555,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {
