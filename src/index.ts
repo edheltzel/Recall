@@ -22,6 +22,7 @@ import { runPrune } from './commands/prune.js';
 import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
+import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -469,6 +470,44 @@ program
     closeDb();
   });
 
+// mem importance — heuristic backfill for the importance column
+const importanceCmd = program
+  .command('importance')
+  .description('Manage the importance score on memory records');
+
+importanceCmd
+  .command('backfill')
+  .description('Backfill importance scores using confidence-based heuristics (dry-run by default)')
+  .option('--execute', 'Apply changes (default is dry-run)')
+  .option('--force', 'Overwrite non-default values too (default: only update rows still at the default)')
+  .option('-t, --table <table>', 'Target table: decisions, learnings, loa_entries, all', 'all')
+  .action((options) => {
+    runImportanceBackfill({
+      dryRun: !options.execute,
+      force: options.force,
+      table: options.table
+    });
+    closeDb();
+  });
+
+// mem pin <table> <id> [importance] — force a record to a high importance (default 10)
+program
+  .command('pin <table> <id> [importance]')
+  .description('Pin a memory record to a high importance (default 10). LoA floor of 5 enforced.')
+  .action((table, id, importance) => {
+    runPin(table, parseInt(id, 10), importance !== undefined ? parseInt(importance, 10) : undefined);
+    closeDb();
+  });
+
+// mem unpin <table> <id> — reset importance to table default
+program
+  .command('unpin <table> <id>')
+  .description("Reset a record's importance to its table default (5 for most, 8 for LoA)")
+  .action((table, id) => {
+    runUnpin(table, parseInt(id, 10));
+    closeDb();
+  });
+
 // mem doctor - Run health checks on all memory subsystems
 program
   .command('doctor')
@@ -487,7 +526,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

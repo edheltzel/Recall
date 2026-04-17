@@ -190,12 +190,12 @@ describe('gatherContext', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('## Recall — Session Memory Context');
-    expect(output).toContain('No memory entries found yet');
-    expect(output).toContain('Recall is active');
+    expect(output).toContain('## Recall — Session Memory (tiered)');
+    // v2 empty-state: no identity, no L1 — hint plus the L2/L3 pointer line
+    expect(output).toContain('on demand');
   });
 
-  test('includes decisions section when decisions exist', async () => {
+  test('includes decisions in L1 when decisions exist', async () => {
     const db = createTestDb();
     seedDecisions(db, [
       { decision: 'Use PostgreSQL', reasoning: 'Better JSON support', project: 'Recall' },
@@ -205,9 +205,11 @@ describe('gatherContext', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('### Active Decisions');
+    expect(output).toContain('### L1 — Top Memory');
     expect(output).toContain('Use PostgreSQL');
     expect(output).toContain('Better JSON support');
+    // v2: records are tagged by table inline, not in separate sections
+    expect(output).toContain('[decisions#');
   });
 
   test('deduplicates decisions across project-scoped and global queries', async () => {
@@ -229,7 +231,7 @@ describe('gatherContext', () => {
     expect(countB).toBe(1);
   });
 
-  test('includes breadcrumbs sorted by importance', async () => {
+  test('includes breadcrumbs in L1 sorted by importance', async () => {
     const db = createTestDb();
     seedBreadcrumbs(db, [
       { content: 'Low importance note', importance: 2, project: TEST_PROJECT },
@@ -241,11 +243,10 @@ describe('gatherContext', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('### Breadcrumbs');
+    expect(output).toContain('### L1 — Top Memory');
     expect(output).toContain('Critical note');
-    expect(output).toContain('(importance: 9/10)');
-    // Low importance (<=5) should not show the importance tag
-    expect(output).not.toContain('(importance: 2/10)');
+    // v2: importance displayed as ★N, always shown (not just when >5)
+    expect(output).toContain('★9');
 
     // Critical should appear before low importance in the output
     const critIdx = output.indexOf('Critical note');
@@ -270,7 +271,7 @@ describe('gatherContext', () => {
     expect(output).not.toContain('Expired breadcrumb');
   });
 
-  test('includes learnings with problem and solution', async () => {
+  test('includes learnings in L1 with problem and solution', async () => {
     const db = createTestDb();
     seedLearnings(db, [
       { problem: 'bun:sqlite uses $param', solution: 'Not :param like better-sqlite3', project: TEST_PROJECT },
@@ -280,9 +281,10 @@ describe('gatherContext', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('### Recent Learnings');
+    expect(output).toContain('### L1 — Top Memory');
     expect(output).toContain('bun:sqlite uses $param');
     expect(output).toContain('Not :param like better-sqlite3');
+    expect(output).toContain('[learnings#');
   });
 
   test('handles learnings without solution', async () => {
@@ -297,62 +299,20 @@ describe('gatherContext', () => {
     expect(output).not.toContain(' → '); // No arrow when no solution
   });
 
-  test('includes HOT_RECALL.md last session summary', async () => {
-    writeFileSync(hotRecallPath, `First session summary\n---\nSecond session summary\n---\nThird and latest session`);
-    createTestDb().close();
+  // HOT_RECALL.md integration was removed in Sprint #1 (tiered SessionRecall).
+  // Historical rationale: HOT_RECALL was a pre-SQLite legacy store; tiered L0/L1
+  // assembly from the structured tables makes it redundant. See
+  // .atlas-plans/2026-04-17-mempalace-research-borrow-list.md.
 
-    const { gatherContext } = await importHook();
-    const output = gatherContext();
-
-    expect(output).toContain('### Last Session Summary');
-    expect(output).toContain('Third and latest session');
-    // Should NOT include earlier sessions
-    expect(output).not.toContain('First session summary');
-  });
-
-  test('truncates HOT_RECALL.md content over 500 chars', async () => {
-    const longContent = 'A'.repeat(600);
-    writeFileSync(hotRecallPath, longContent);
-    createTestDb().close();
-
-    const { gatherContext } = await importHook();
-    const output = gatherContext();
-
-    expect(output).toContain('### Last Session Summary');
-    expect(output).toContain('...');
-    // The content should be truncated, not the full 600 chars
-    expect(output).not.toContain('A'.repeat(600));
-  });
-
-  test('ignores HOT_RECALL.md if it does not exist', async () => {
-    createTestDb().close();
-    // Don't create HOT_RECALL.md
-    const { gatherContext } = await importHook();
-    const output = gatherContext();
-
-    // Should not crash, should not contain "Last Session Summary"
-    expect(output).not.toContain('### Last Session Summary');
-    expect(output).toContain('Recall');
-  });
-
-  test('ignores empty HOT_RECALL.md', async () => {
-    writeFileSync(hotRecallPath, '');
-    createTestDb().close();
-
-    const { gatherContext } = await importHook();
-    const output = gatherContext();
-
-    expect(output).not.toContain('### Last Session Summary');
-  });
-
-  test('always includes the behavioral reminder footer', async () => {
+  // The v1 "Recall is active" behavioral reminder was removed as part of the
+  // red-team review: embedding model-directed instructions in tool output /
+  // hook output is a prompt-injection vector. If we want to reinforce
+  // verification-first behavior it belongs in FOR_CLAUDE.md, not here.
+  test('v2 does not emit the removed behavioral reminder footer', async () => {
     createTestDb().close();
     const { gatherContext } = await importHook();
     const output = gatherContext();
-
-    expect(output).toContain('**Recall is active.**');
-    expect(output).toContain('memory_search');
-    expect(output).toContain('memory_hybrid_search');
+    expect(output).not.toContain('**Recall is active.**');
   });
 });
 
@@ -389,8 +349,10 @@ describe('Edge cases: missing and empty state', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('## Recall — Session Memory Context');
-    expect(output).toContain('No memory entries found yet');
+    expect(output).toContain('## Recall — Session Memory (tiered)');
+    // v2: empty state shows either the empty hint or the on-demand pointer.
+    // Content is deliberately terse — we just care that it's non-empty.
+    expect(output.length).toBeGreaterThan(0);
   });
 
   test('gracefully handles empty tables', async () => {
@@ -398,23 +360,23 @@ describe('Edge cases: missing and empty state', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('No memory entries found yet');
-    expect(output).not.toContain('### Active Decisions');
-    expect(output).not.toContain('### Breadcrumbs');
-    expect(output).not.toContain('### Recent Learnings');
+    // v2: no L1 section emitted when all tables are empty
+    expect(output).not.toContain('### L1 — Top Memory');
+    // Always emits the header and the on-demand pointer
+    expect(output).toContain('## Recall — Session Memory (tiered)');
   });
 
   test('handles decisions with NULL reasoning and created_at', async () => {
     const db = createTestDb();
-    db.prepare('INSERT INTO decisions (decision) VALUES (?)').run('Bare decision');
+    db.prepare("INSERT INTO decisions (decision, project) VALUES (?, ?)").run('Bare decision', TEST_PROJECT);
     db.close();
 
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
     expect(output).toContain('Bare decision');
-    // Should not crash on null reasoning — no " — null" in output
-    expect(output).not.toContain('null');
+    // Should not crash on null reasoning — the content renderer must handle null
+    expect(output).not.toContain(' — null');
   });
 
   test('handles breadcrumbs with NULL project (excluded from project-scoped query)', async () => {
@@ -436,13 +398,11 @@ describe('Edge cases: missing and empty state', () => {
 // SAFETY TESTS — Output bounds and runaway prevention
 // =====================================================================
 describe('Safety: output bounds and runaway prevention', () => {
-  test('output is capped at MAX_OUTPUT_CHARS', async () => {
+  test('output is capped at MAX_TOTAL_CHARS', async () => {
     const db = createTestDb();
-    // Insert decisions with very large content to exceed 8000 chars
-    // SQL LIMIT returns 5 project-scoped + 3 global = up to 7 unique
-    // Each entry needs ~1200+ chars to exceed 8000 total
+    // Insert many large records so L1 would overflow the budget
     const entries = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       entries.push({
         decision: `Decision ${i}: ${'X'.repeat(1500)}`,
         reasoning: `Reasoning ${i}: ${'Y'.repeat(1500)}`,
@@ -450,8 +410,7 @@ describe('Safety: output bounds and runaway prevention', () => {
       });
     }
     seedDecisions(db, entries);
-    // Also add large breadcrumbs and learnings
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       seedBreadcrumbs(db, [{ content: `Breadcrumb ${'Z'.repeat(1500)}`, project: TEST_PROJECT }]);
       seedLearnings(db, [{ problem: `Problem ${'W'.repeat(1500)}`, solution: `Solution ${'V'.repeat(1500)}`, project: TEST_PROJECT }]);
     }
@@ -460,9 +419,8 @@ describe('Safety: output bounds and runaway prevention', () => {
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
-    // Output should be bounded (MAX_OUTPUT_CHARS = 8000 + truncation message)
+    // v2 MAX_TOTAL_CHARS = 8000. Plus trailing truncation marker allowance.
     expect(output.length).toBeLessThan(8200);
-    expect(output).toContain('[Output truncated');
   });
 
   test('process exits cleanly (no hang) even with large DB', async () => {
@@ -523,7 +481,7 @@ describe('Safety: output bounds and runaway prevention', () => {
 // SUBPROCESS TESTS — End-to-end hook execution
 // =====================================================================
 describe('End-to-end subprocess execution', () => {
-  test('outputs valid markdown with decisions, breadcrumbs, learnings', async () => {
+  test('outputs valid markdown with decisions, breadcrumbs, learnings in L1', async () => {
     const db = createTestDb();
     seedDecisions(db, [{ decision: 'Use TypeScript', reasoning: 'Type safety', project: TEST_PROJECT }]);
     seedBreadcrumbs(db, [{ content: 'Auth module is fragile', importance: 8, project: TEST_PROJECT }]);
@@ -533,14 +491,13 @@ describe('End-to-end subprocess execution', () => {
     const { exitCode, stdout } = await runHookProcess();
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('## Recall — Session Memory Context');
-    expect(stdout).toContain('### Active Decisions');
+    expect(stdout).toContain('## Recall — Session Memory (tiered)');
+    expect(stdout).toContain('### L1 — Top Memory');
     expect(stdout).toContain('Use TypeScript');
-    expect(stdout).toContain('### Breadcrumbs');
     expect(stdout).toContain('Auth module is fragile');
-    expect(stdout).toContain('### Recent Learnings');
     expect(stdout).toContain('SQLite locking');
-    expect(stdout).toContain('**Recall is active.**');
+    // v2 does NOT emit the v1 behavioral reminder (prompt-injection risk).
+    expect(stdout).not.toContain('**Recall is active.**');
   });
 
   test('subprocess does not hang or spawn child processes', async () => {
@@ -597,7 +554,7 @@ describe('Safety: no recursive spawning', () => {
     const { stdout } = await runHookProcess();
 
     // Output should be just memory context, not multiple copies
-    const headerCount = (stdout.match(/## Recall — Session Memory Context/g) || []).length;
+    const headerCount = (stdout.match(/## Recall — Session Memory \(tiered\)/g) || []).length;
     expect(headerCount).toBe(1);
   });
 

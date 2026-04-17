@@ -148,6 +148,37 @@ export const MIGRATIONS: Migration[] = [
       )
     `).run();
   },
+
+  // Migration 7 → 8: Importance scoring on all memory tables.
+  // Enables tiered context loading (L0 identity + L1 top-N by importance).
+  // Breadcrumbs already has importance (integer 1-10); we unify the other tables
+  // on the same type/scale. LoA defaults to 8 — it is the curated tier and
+  // must not be demoted by later rescoring (see importance backfill command).
+  //
+  // SQLite limitation: ALTER TABLE ... ADD COLUMN cannot express a CHECK
+  // constraint that references the new column on an existing table. The
+  // constraint is present in CREATE TABLE for fresh installs (schema.ts) and
+  // is enforced in application code for upgraded installs.
+  (db) => {
+    const adds: Array<[string, string, number]> = [
+      ['messages', 'importance', 5],
+      ['decisions', 'importance', 5],
+      ['learnings', 'importance', 5],
+      ['loa_entries', 'importance', 8],
+    ];
+    for (const [table, column, def] of adds) {
+      try {
+        db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} INTEGER DEFAULT ${def}`).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install case)
+      }
+    }
+    // Importance indexes for efficient L1 assembly
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_importance ON messages(importance)').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_decisions_importance ON decisions(importance)').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_learnings_importance ON learnings(importance)').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_loa_importance ON loa_entries(importance)').run();
+  },
 ];
 
 // ---------------------------------------------------------------------------
