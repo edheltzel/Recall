@@ -520,8 +520,15 @@ server.tool(
 			.enum(["high", "medium", "low"])
 			.optional()
 			.describe("Confidence level (for decisions and learnings). HIGH=explicit/discussed, MEDIUM=implied/reasonable, LOW=speculative/uncertain"),
+		importance: z
+			.number()
+			.int()
+			.min(1)
+			.max(10)
+			.optional()
+			.describe("Importance 1-10 (default: 5). Used by tiered SessionRecall to rank L1 records. Set 8-10 for explicit user decisions/preferences, 2-3 for routine context."),
 	},
-	async ({ type, content, detail, project, tags, confidence }) => {
+	async ({ type, content, detail, project, tags, confidence, importance }) => {
 		try {
 			let id: number;
 
@@ -547,6 +554,7 @@ server.tool(
 						project,
 						status: "active",
 						confidence: confidence || "medium",
+						importance,
 					});
 
 					let resultText = `Added decision #${id}: ${content}`;
@@ -567,6 +575,7 @@ server.tool(
 						project,
 						tags,
 						confidence: confidence || "medium",
+						importance,
 					});
 					return {
 						content: [
@@ -578,7 +587,7 @@ server.tool(
 					id = addBreadcrumb({
 						content,
 						project,
-						importance: 5,
+						importance: importance ?? 5,
 					});
 					return {
 						content: [

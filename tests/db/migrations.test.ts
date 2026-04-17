@@ -112,7 +112,8 @@ describe('migration failure handling', () => {
 
 describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
-    expect(MIGRATIONS.length).toBe(7);
+    // 7 → 8: importance column on messages/decisions/learnings/loa_entries (Sprint #4)
+    expect(MIGRATIONS.length).toBe(8);
   });
 
   test('all entries are functions', () => {
