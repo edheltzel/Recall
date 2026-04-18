@@ -1039,6 +1039,11 @@ do_install() {
   fi
   echo "  $step. Test: mem stats"
   step=$((step + 1))
+  echo "  $step. (Recommended) Set up your L0 identity tier:"
+  echo "     mem onboard"
+  echo "     A 7-question interview that writes ~/.claude/MEMORY/identity.md."
+  echo "     Loads at every session start, gives every agent the same baseline."
+  step=$((step + 1))
   echo "  $step. (Optional) Install Fabric for richer session extraction:"
   echo "     https://github.com/danielmiessler/fabric"
   step=$((step + 1))

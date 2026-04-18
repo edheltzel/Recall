@@ -24,6 +24,7 @@ import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } f
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
 import { runBenchmark, listBenchmarks, reportLatestBenchmark } from './commands/benchmark.js';
+import { runOnboard } from './commands/onboard.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -471,6 +472,24 @@ program
     closeDb();
   });
 
+// mem onboard — interactive interview that creates the L0 identity tier
+program
+  .command('onboard')
+  .description('Interactive interview to create your L0 identity.md (loaded at every session start)')
+  .option('--project', 'Write to ./.atlas-recall/identity.md (project-local) instead of the global path')
+  .option('--print', 'Preview the rendered markdown without writing to disk')
+  .option('--yes', 'Accept all suggested defaults non-interactively')
+  .option('--out <path>', 'Override the output path entirely')
+  .action(async (options) => {
+    // onboard never opens the DB, so closeDb() is intentionally not called.
+    await runOnboard({
+      project: options.project,
+      print: options.print,
+      yes: options.yes,
+      out: options.out,
+    });
+  });
+
 // mem importance — heuristic backfill for the importance column
 const importanceCmd = program
   .command('importance')
@@ -555,7 +574,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {
