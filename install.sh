@@ -455,15 +455,15 @@ configure_hooks() {
     log_success "Copied extraction prompt template to $memory_dir"
   fi
 
-  # Register hook in settings.json
-  if [[ -f "$settings_file" ]]; then
-    if grep -q "SessionExtract" "$settings_file"; then
-      log_success "SessionExtract hook already registered in settings.json"
-      return
-    fi
-  fi
-
-  # Build hook command — resolve bun path dynamically
+  # Register hooks in settings.json — per-hook idempotent.
+  #
+  # Each `bun -e` block below guards its own registration with
+  # `.some(h => h.command.includes(<hook-name>))` before pushing. Running this
+  # function repeatedly is safe and always reconciles settings.json against the
+  # four hooks Recall ships. Do NOT add a blanket early-return based on any
+  # single hook's presence — that was the pre-0.7.0.1 bug that caused
+  # SessionRecall, TelosSync, and SessionPreCompact to be silently skipped on
+  # re-install whenever SessionExtract was already registered.
   local bun_path
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
   local hook_cmd="$bun_path run $hooks_dir/SessionExtract.ts"
