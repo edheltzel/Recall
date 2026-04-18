@@ -13,6 +13,56 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.7.11] — 2026-04-18 — "initDb ordering hotfix"
+
+Second surgical fix of the day. `install.sh` now succeeds end-to-end for
+users upgrading from any 0.6.x release to the current 0.7 line. Version
+jumps 0.7.1 → 0.7.11 (skipping 0.7.2–0.7.10) — the lifecycle release
+originally scoped as 0.7.2 in the plan keeps its slot open.
+
+### Fixed
+- **`initDb()` ran `CREATE_INDEXES` before `applyMigrations()`**
+  (`src/db/connection.ts`). Every index that references a post-migration
+  column — `idx_messages_importance`, `idx_decisions_importance`,
+  `idx_learnings_importance`, `idx_loa_importance` — failed on any DB still
+  at `PRAGMA user_version = 7`, with `SQLiteError: no such column:
+  importance`. The migration step never ran because the index creation
+  aborted first. Effect: `install.sh` step 5 (`mem init`) crashed for every
+  user upgrading from 0.6.x, which is why Ed's live install had to be
+  hand-migrated via `sqlite3 ALTER TABLE` before step 5 could succeed.
+
+  **Fix:** reorder `initDb()` so `applyMigrations` runs between
+  `CREATE_TABLES` and `CREATE_INDEXES`. Documented inline as a runtime
+  contract (do not reorder without reading this entry first).
+
+### Added
+- Regression test at `tests/db/connection.test.ts` — seeds a v7-schema DB
+  with `messages` missing `importance`, calls `initDb()`, asserts no throw
+  plus `user_version ≥ 8`, `importance` column present on all four
+  migrated tables, and `idx_*_importance` indexes exist. Pre-0.7.11 this
+  throws; post-fix it passes.
+
+### Notes
+- **Same root pathology as 0.7.1's hook bug:** a side-effect function
+  running in an order that assumes something it hadn't verified. Both bite
+  precisely on the upgrade path, never on fresh install. The upcoming
+  lifecycle release should codify an explicit ordering discipline in the
+  shared `install-lib.sh`.
+- The version jump (0.7.1 → 0.7.11) skips 0.7.2 through 0.7.10 to keep the
+  previously-planned 0.7.2 lifecycle release slot available. All standard
+  semver tooling treats 0.7.11 as strictly greater than 0.7.2, so this is
+  safe from an ordering perspective.
+
+### Upgrading from 0.7.1
+```bash
+cd /path/to/Recall
+git pull --ff-only origin main
+bun install && bun run build
+./install.sh
+```
+No manual DB intervention required — `initDb()` now migrates cleanly from
+any pre-0.7.0 schema.
+
 ## [0.7.1] — 2026-04-18 — "hook re-registration hotfix"
 
 Surgical fix release for two v0.7.0 regressions surfaced by live verification.

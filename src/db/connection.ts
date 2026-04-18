@@ -71,17 +71,23 @@ export function initDb(): { created: boolean; path: string } {
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
 
-  // Run schema creation (exec handles multiple statements)
+  // Schema setup — ordering matters. See CHANGELOG 0.7.11.
+  // 1) CREATE_TABLES: idempotent — creates tables that don't exist yet.
+  // 2) applyMigrations: mutates existing tables (ADD COLUMN etc.) based on
+  //    PRAGMA user_version. Must run BEFORE any step that references
+  //    post-migration columns.
+  // 3) CREATE_INDEXES / FTS / vector tables: may reference columns added
+  //    by migrations (e.g. idx_messages_importance from migration 7->8).
+  //    Running these before applyMigrations breaks every upgrade path.
   db.exec(CREATE_TABLES);
+  const migration = applyMigrations(db);
   db.exec(CREATE_INDEXES);
   db.exec(CREATE_FTS);
   db.exec(CREATE_FTS_TRIGGERS);
   db.exec(CREATE_VECTOR_TABLES);
 
-  // Apply migrations (uses PRAGMA user_version for state tracking)
-  const migration = applyMigrations(db);
   if (migration.applied > 0) {
-    // Keep schema_meta in sync for backward compatibility with older code
+    // Keep schema_meta in sync for backward compatibility with older code.
     db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run('version', String(migration.to));
   }
 
