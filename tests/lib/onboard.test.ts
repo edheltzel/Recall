@@ -24,7 +24,8 @@ const fullAnswers: IdentityAnswers = {
     'gstack — browser automation toolkit',
   ],
   preferences: [
-    'plans live in .atlas-plans/',
+    'plans live in .atlas/plans/',
+    'handoffs live in .atlas/handoffs/',
     'work in git worktrees',
     'no force-push without asking',
   ],

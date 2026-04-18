@@ -255,7 +255,7 @@ export async function runInterview(autoYes: boolean): Promise<IdentityAnswers> {
     const prefsRaw = await ask(
       'Working preferences for every session? (separate with `|`)',
       {
-        default: 'plans live in .atlas-plans/ | work in git worktrees | no force-push without asking',
+        default: 'plans live in .atlas/plans/ | handoffs live in .atlas/handoffs/ | work in git worktrees | no force-push without asking',
       },
     );
     const preferences = splitMultiline(prefsRaw);
