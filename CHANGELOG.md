@@ -13,6 +13,47 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.7.1] — 2026-04-18 — "hook re-registration hotfix"
+
+Surgical fix release for two v0.7.0 regressions surfaced by live verification.
+
+### Fixed
+- **`install.sh configure_hooks()` silently skipped three hooks on re-install.**
+  A blanket `grep -q SessionExtract … return` short-circuit fired after
+  copying hook files but before registering `TelosSync`, `SessionRecall`, and
+  `SessionPreCompact`. Any re-install where `SessionExtract` was already
+  present left the other three unregistered — which meant v0.7.0's tiered
+  SessionRecall and PreCompact flush were architecturally inactive for any
+  user who had installed a prior Recall version. Fresh installs always hit
+  the happy path, which is why the existing test suite did not catch it.
+  Each per-hook `bun -e` block already has `.some(...includes(...))`
+  idempotency guards, so removing the outer early-return is the whole fix.
+- **`mem onboard --yes` default used deprecated `.atlas-plans/` path.** The
+  Atlas namespace moved to `.atlas/plans/` + `.atlas/handoffs/` on
+  2026-04-18; `src/commands/onboard.ts` still referenced the old path,
+  baking the wrong convention into every non-interactive onboarding run.
+
+### Added
+- `tests/install/configure-hooks.test.ts` — regression suite covering fresh
+  install + re-install (with the three other hooks manually wiped) +
+  idempotent double-run. Drives the bash function via
+  `eval "$(awk ...)"` because macOS bash 3.2's `source <(...)` has a
+  process-substitution bug that fails to persist function definitions.
+
+### Notes
+- 306 tests pass (303 baseline + 3 new regression tests).
+- The `.atlas-plans/` stale-reference sweep across remaining files
+  (`benchmarks/README.md`, `.gitignore`, `tests/hooks/SessionRecall.test.ts`
+  comment, root `CLAUDE.md`) is deferred to the upcoming 0.7.2 release.
+- The broader install-lifecycle release originally scoped as 0.7.1 shifts
+  to **0.7.2** — the hotfix claims the 0.7.1 slot to satisfy strict-semver
+  guards. See `.atlas/plans/2026-04-18-recall-0.7.1-lifecycle.md`.
+
+**After upgrading from 0.7.0:** re-run `./install.sh` to register the
+three hooks that the earlier installer skipped. Verify with
+`jq '.hooks' ~/.claude/settings.json` — all four of `SessionExtract`,
+`SessionRecall`, `TelosSync`, and `SessionPreCompact` should appear.
+
 ## [0.7.0] — 2026-04-18 — "v2 foundation"
 
 A large release. Recall's session-context loading is rewritten as a tiered
