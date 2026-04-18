@@ -481,13 +481,13 @@ program
   .option('--yes', 'Accept all suggested defaults non-interactively')
   .option('--out <path>', 'Override the output path entirely')
   .action(async (options) => {
+    // onboard never opens the DB, so closeDb() is intentionally not called.
     await runOnboard({
       project: options.project,
       print: options.print,
       yes: options.yes,
       out: options.out,
     });
-    closeDb();
   });
 
 // mem importance — heuristic backfill for the importance column

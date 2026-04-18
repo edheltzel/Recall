@@ -17,11 +17,16 @@
 // If a file already exists, the user must explicitly confirm overwrite —
 // the previous file is backed up to identity.md.bak first.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from 'fs';
-import { join, dirname, basename } from 'path';
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, renameSync, statSync } from 'fs';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { execFileSync } from 'child_process';
 import { createInterface, type Interface } from 'readline';
+import { detectProject } from '../lib/project.js';
+
+// L0 identity files are silently truncated at load by hooks/SessionRecall.ts.
+// Mirror that constant here so the onboarding UX can warn the user before the
+// truncation ever happens.
+const MAX_L0_CHARS = 1200;
 
 // ───────────────────────────────────────────────────────────────────────
 // Public CLI options
@@ -49,6 +54,13 @@ export interface IdentityAnswers {
   preferences: string[];
   hosts: string[];
   notes: string;
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Length check — mirrors SessionRecall's silent truncation threshold.
+
+export function exceedsMaxL0(markdown: string): boolean {
+  return markdown.length > MAX_L0_CHARS;
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -114,8 +126,11 @@ export function renderIdentityMarkdown(a: IdentityAnswers): string {
 // ───────────────────────────────────────────────────────────────────────
 // Smart defaults — read from the local environment.
 
+// safeGitName uses child_process lazily so the import stays out of the pure
+// render path and its tests.
 function safeGitName(): string {
   try {
+    const { execFileSync } = require('child_process');
     return execFileSync('git', ['config', '--get', 'user.name'], {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -126,37 +141,32 @@ function safeGitName(): string {
   }
 }
 
-function detectCwdProject(): string {
-  // Try `git remote get-url origin` first, fall back to cwd basename.
-  try {
-    const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 2000,
-    }).trim();
-    const m = remote.match(/\/([^/]+?)(\.git)?$/);
-    if (m) return m[1];
-  } catch {
-    /* fall through */
-  }
-  return basename(process.cwd());
-}
-
 function detectMachine(): string {
   const platform = process.platform === 'darwin' ? 'macOS'
     : process.platform === 'linux' ? 'Linux'
     : process.platform === 'win32' ? 'Windows'
     : process.platform;
-  // Bun is the project's runtime; most users will have it.
-  const runtime = typeof Bun !== 'undefined' ? `Bun ${Bun.version}` : 'Node.js';
+  // process.versions.bun is set on Bun and undefined on Node — avoids the
+  // Bun global so we don't need @types/bun.
+  const bunVersion = process.versions.bun;
+  const runtime = bunVersion ? `Bun ${bunVersion}` : 'Node.js';
   return `${platform} · ${runtime}`;
 }
 
 // ───────────────────────────────────────────────────────────────────────
 // Path resolution — mirror SessionRecall's identity-file lookup order.
+// Precedence: --out > RECALL_IDENTITY_PATH env > --project > global default.
+// The env var is honored because SessionRecall reads it with highest
+// precedence at load; without this, a user with the env set could write
+// to one path while the hook loads from another.
 
-export function resolveOutputPath(options: OnboardOptions): string {
+export function resolveOutputPath(
+  options: OnboardOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   if (options.out) return options.out;
+  const envPath = env.RECALL_IDENTITY_PATH;
+  if (envPath && envPath.trim()) return envPath.trim();
   if (options.project) return join(process.cwd(), '.atlas-recall', 'identity.md');
   return join(homedir(), '.claude', 'MEMORY', 'identity.md');
 }
@@ -196,10 +206,12 @@ function makeAsker(rl: Interface, autoYes: boolean) {
   };
 }
 
-function splitMultiline(s: string): string[] {
+// Separator choice: pipe (`|`) never appears in natural phrases, so a user
+// can type "no force-push, ever" as a single preference without it being
+// silently split. Prompts below document the separator explicitly.
+export function splitMultiline(s: string): string[] {
   if (!s) return [];
-  // Accept comma-separated OR semicolon-separated values; trim each.
-  return s.split(/[,;]/).map(x => x.trim()).filter(Boolean);
+  return s.split('|').map(x => x.trim()).filter(Boolean);
 }
 
 export async function runInterview(autoYes: boolean): Promise<IdentityAnswers> {
@@ -207,7 +219,7 @@ export async function runInterview(autoYes: boolean): Promise<IdentityAnswers> {
   const ask = makeAsker(rl, autoYes);
 
   const defaultName = safeGitName();
-  const defaultProject = detectCwdProject();
+  const defaultProject = detectProject() ?? '';
   const defaultMachine = detectMachine();
 
   try {
@@ -232,22 +244,24 @@ export async function runInterview(autoYes: boolean): Promise<IdentityAnswers> {
       default: defaultMachine,
     });
 
+    // Multi-value prompts use `|` as the separator so a single value can
+    // safely contain commas (e.g. "no force-push, ever").
     const projectsRaw = await ask(
-      'What are your top 1-3 active projects? (comma-separated, one line each)',
+      'Top 1-3 active projects? (separate with `|`, e.g. alpha | beta | gamma)',
       { default: defaultProject },
     );
     const projects = splitMultiline(projectsRaw);
 
     const prefsRaw = await ask(
-      'What working preferences should every session know? (comma-separated)',
+      'Working preferences for every session? (separate with `|`)',
       {
-        default: 'plans live in .atlas-plans/, work in git worktrees, no force-push without asking',
+        default: 'plans live in .atlas-plans/ | work in git worktrees | no force-push without asking',
       },
     );
     const preferences = splitMultiline(prefsRaw);
 
     const hostsRaw = await ask(
-      'Which AI agents/hosts do you use? (comma-separated)',
+      'Which AI agents/hosts do you use? (separate with `|`)',
       { default: 'Claude Code' },
     );
     const hosts = splitMultiline(hostsRaw);
@@ -278,6 +292,16 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 // ───────────────────────────────────────────────────────────────────────
 // Entry point.
 
+// Atomic write: stage the new content in a sibling .tmp file then rename.
+// Guarantees the destination is either the old content or the full new
+// content — never a half-written file. Works because rename(2) is atomic
+// on the same filesystem.
+function writeIdentityAtomic(outPath: string, markdown: string): void {
+  const tmp = outPath + '.tmp';
+  writeFileSync(tmp, markdown, 'utf-8');
+  renameSync(tmp, outPath);
+}
+
 export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
   const outPath = resolveOutputPath(options);
 
@@ -290,6 +314,12 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
     process.stdout.write(markdown);
     process.stdout.write('\n  ────────────────────────────────────────────────\n');
     process.stdout.write(`  (would write to: ${outPath})\n\n`);
+    if (exceedsMaxL0(markdown)) {
+      process.stderr.write(
+        `  Warning: output is ${markdown.length} chars; SessionRecall truncates L0 at ${MAX_L0_CHARS}.\n` +
+        `  Consider trimming before writing.\n\n`,
+      );
+    }
     return;
   }
 
@@ -324,24 +354,17 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
     }
   }
 
-  // Ensure parent dir exists.
+  // Ensure parent dir exists, then write atomically (.tmp + rename).
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, markdown, 'utf-8');
+  writeIdentityAtomic(outPath, markdown);
 
   process.stdout.write('\n  ✓ Wrote identity.md\n');
-  process.stdout.write(`    ${outPath}\n\n`);
-  process.stdout.write('  Try it: `mem benchmark run B` should now show v2_l0_chars > 0.\n\n');
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// Read-existing helper — exposed for the doctor command in the future.
-
-export function readExistingIdentity(options: OnboardOptions = {}): { path: string; content: string } | null {
-  const p = resolveOutputPath(options);
-  if (!existsSync(p)) return null;
-  try {
-    return { path: p, content: readFileSync(p, 'utf-8') };
-  } catch {
-    return null;
+  process.stdout.write(`    ${outPath}\n`);
+  if (exceedsMaxL0(markdown)) {
+    process.stderr.write(
+      `  Warning: file is ${markdown.length} chars; SessionRecall truncates L0 at ${MAX_L0_CHARS}.\n` +
+      `  Edit the file to shorten or run \`mem onboard --print\` first to preview length.\n`,
+    );
   }
+  process.stdout.write('\n  Try it: `mem benchmark run B` should now show v2_l0_chars > 0.\n\n');
 }
