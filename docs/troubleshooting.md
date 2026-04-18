@@ -20,6 +20,26 @@ mem init
 
 Re-initializes the database. Safe to re-run — won't destroy existing data.
 
+### "L0 identity tier is empty at session start"
+
+The `SessionRecall` hook loads `identity.md` for the L0 tier. If you've never
+written one, the L0 section of your session-start context is empty.
+
+```bash
+mem onboard                 # Interactive interview — creates identity.md
+mem benchmark run B         # Confirm v2_l0_chars > 0 after onboarding
+```
+
+If onboard writes to the wrong location, check for `RECALL_IDENTITY_PATH` in
+your shell env and for a stale project-local `./.atlas-recall/identity.md`
+(which takes precedence over the global file).
+
+### "My identity.md was silently truncated"
+
+`SessionRecall` hard-caps L0 at `MAX_L0_CHARS = 1200` on read and appends
+`[identity truncated — edit <path> to shorten]`. Trim your identity file or
+re-run `mem onboard --print` to preview length before writing.
+
 ### "Bun install fails — unzip required" (Linux only)
 
 ```bash
