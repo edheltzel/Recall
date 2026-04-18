@@ -99,6 +99,7 @@ Add structured records during a session. Use this to capture decisions, learning
 | project | string | no | — | Project name |
 | tags | string | no | — | Comma-separated tags (applies to learnings) |
 | confidence | string | no | — | Confidence level: `"high"`, `"medium"`, or `"low"` — applies to decisions and learnings |
+| importance | number | no | 5 | Importance on a 1-10 scale. Surfaces higher-importance records earlier in L1 at session start. LoA has a floor of 5. (Added in v0.7.0.) |
 
 **Returns:** Confirmation with the new record's id and table.
 
@@ -106,6 +107,7 @@ Add structured records during a session. Use this to capture decisions, learning
 memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and JSONB indexing" })
 memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail: "Not :param like better-sqlite3", tags: "bun,sqlite" })
 memory_add({ type: "breadcrumb", content: "Auth refactor in progress — do not touch middleware until complete" })
+memory_add({ type: "decision", content: "Ship onboarding first", importance: 9 })
 ```
 
 ---

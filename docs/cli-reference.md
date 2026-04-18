@@ -157,6 +157,60 @@ Supported tables for backfill: `loa`, `decisions`, `learnings`, `breadcrumbs`, `
 
 ---
 
+## Identity & Onboarding
+
+```bash
+mem onboard                          # Interactive L0 identity interview (writes identity.md)
+mem onboard --print --yes            # Preview rendered markdown without writing
+mem onboard --project                # Write project-local (./.atlas-recall/identity.md)
+mem onboard --out /path/identity.md  # Write to an explicit path
+```
+
+`mem onboard` creates the L0 tier that `SessionRecall` injects at the top of every
+session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
+`--project` > global default (`~/.claude/MEMORY/identity.md`). If a file already
+exists, the command asks for confirmation and writes a `.bak` copy before
+overwriting.
+
+The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `SessionRecall`
+silently truncates beyond that threshold.
+
+## Importance
+
+The `importance` column (1-10) on `messages`, `decisions`, `learnings`, and
+`loa_entries` controls L1 tier ranking at session start.
+
+```bash
+# Backfill importance scores from confidence signals (dry-run by default)
+mem importance backfill
+mem importance backfill --execute
+mem importance backfill --execute --table decisions
+mem importance backfill --execute --force            # overwrite non-defaults too
+
+# Pin / unpin individual records
+mem pin decisions 42                 # Pin decision #42 to importance 10 (default)
+mem pin learnings 7 8                # Pin learning #7 to importance 8
+mem unpin decisions 42               # Reset to table default (5, or 8 for LoA)
+```
+
+LoA entries have a write-time floor of 5; `mem pin` will not drop them below that.
+
+## Benchmarks
+
+Phase 2 benchmark harness for measuring context efficiency.
+
+```bash
+mem benchmark list                   # Show available suites + build status
+mem benchmark run                    # Run all available suites
+mem benchmark run B                  # Run a specific suite (A-E)
+mem benchmark run B -p my-project    # Scope to a specific project
+mem benchmark report                 # Show the latest report
+```
+
+Suite B (token efficiency) compares the v2 wake-up bundle against v1 and the
+CLAUDE.md baseline. Results are written to `benchmarks/results/` as JSONL plus
+a human-readable `.md` alongside. See `benchmarks/README.md` for methodology.
+
 ## Admin
 
 ```bash

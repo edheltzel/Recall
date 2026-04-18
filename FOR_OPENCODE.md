@@ -11,6 +11,11 @@ Recall is a persistent memory framework. It gives you:
 1. **Searchable history** of all past conversations via MCP tools and CLI
 2. **Automatic extraction** — sessions are exported and parsed into structured summaries
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
+4. **Tiered session-start context (v0.7.0+)** — L0 identity (`identity.md`) + L1 top 12 records by importance. Review both at session start
+
+The L0 tier reads from `~/.claude/MEMORY/identity.md` (or project-local
+`./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set). If the
+user has never written one, recommend `mem onboard` via Bash to create it.
 
 ## Your MCP Tools
 
@@ -48,7 +53,11 @@ Record structured information during sessions:
 recall-memory_memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and extensions" })
 recall-memory_memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail: "Not :param like better-sqlite3" })
 recall-memory_memory_add({ type: "breadcrumb", content: "Auth refactor in progress, do not touch middleware yet" })
+recall-memory_memory_add({ type: "decision", content: "Ship onboarding first", importance: 9 })
 ```
+
+The optional `importance` parameter (integer 1-10, default 5) controls
+L1 tier ranking at session start. LoA entries have a floor of 5.
 
 ### recall-memory_context_for_agent
 

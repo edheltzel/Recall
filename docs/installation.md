@@ -161,6 +161,22 @@ mem doctor                 # Full health check — database, MCP, hooks, embeddi
 
 `mem doctor` is the authoritative health check. Run it first any time something seems wrong.
 
+### Recommended: seed your L0 identity tier
+
+Recall's `SessionRecall` hook injects a small user-authored identity file at
+the top of every session (the L0 tier). Without it, the L0 section is empty
+and the v2 tiered context is only half-populated.
+
+```bash
+mem onboard                 # Interactive 7-question interview
+mem onboard --print --yes   # Preview what would be written (no side effects)
+```
+
+This writes `~/.claude/MEMORY/identity.md` (global) or
+`./.atlas-recall/identity.md` (project-local with `--project`). Files
+exceeding 1200 characters are silently truncated at load; the command
+warns if your rendered output exceeds that limit.
+
 ---
 
 ## Session Extraction
@@ -197,6 +213,7 @@ crontab -e
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `MEM_DB_PATH` | `~/.claude/memory.db` | SQLite database file location |
+| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `SessionRecall` (read) and `mem onboard` (write). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used for embeddings (768-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
