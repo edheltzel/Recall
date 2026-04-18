@@ -35,6 +35,7 @@ graph LR
 
 - **Auto-extraction** — sessions are parsed into structured summaries when they end
 - **Full-text + semantic search** — find anything from any past session
+- **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically
 - **Zero friction** — no workflow changes, no manual steps
 - **MCP integration** — Claude Code searches your memory automatically
 
@@ -51,6 +52,7 @@ Verify it works:
 ```bash
 mem stats        # Database overview
 mem doctor       # Health check
+mem onboard      # One-time: seed your L0 identity tier (recommended)
 ```
 
 Restart Claude Code to load the MCP server and hooks.
@@ -148,6 +150,10 @@ Recall operates as three integrated layers — data flows in automatically, gets
 
 - **Session memory** — auto-extracted on every session end via Claude Haiku
 - **Full-text + semantic search** — FTS5 keyword search, Ollama vector embeddings, or hybrid with Reciprocal Rank Fusion
+- **Tiered session-start context (v0.7.0+)** — L0 identity (your `identity.md`) + L1 top 12 records ranked by importance (with 4 reserved slots for Library of Alexandria entries)
+- **Importance scoring (1-10)** — every record has an importance score; surfaces what matters most at session start. Manage with `mem pin` / `mem unpin` / `mem importance backfill`
+- **PreCompact hook** — flushes in-flight messages to SQLite before Claude compacts its context, so nothing is lost
+- **Benchmark harness** — measure your own context efficiency with `mem benchmark run B`
 - **Decision & learning tracking** — record architectural decisions with reasoning, capture problems solved; decisions support lifecycle management (supersede/revert) and confidence scoring (high/medium/low)
 - **Agent context** — spawned agents inherit relevant memory via `context_for_agent`
 - **Library of Alexandria** — curated knowledge entries with Fabric extract_wisdom analysis
@@ -157,9 +163,12 @@ Recall operates as three integrated layers — data flows in automatically, gets
 
 ```bash
 mem "kubernetes auth"          # Search your memory
+mem onboard                    # Seed your L0 identity tier (one-time)
 mem dump "Session Title"       # Save this session
 mem add decision "Use X" ...   # Record a decision
 mem decision list              # List decisions with status and confidence
+mem pin decisions 42           # Pin a record to high importance
+mem benchmark run B            # Measure wake-up context efficiency
 mem prune                      # Preview stale records for removal
 mem stats                      # See what's stored
 mem doctor                     # Health check
@@ -200,6 +209,7 @@ If you're an AI agent reading this repository:
 | [Slash Commands](docs/slash-commands.md) | `/recall:*` commands for Claude Code |
 | [Upgrading](docs/upgrading.md) | Update, backup, migration system |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [Changelog](CHANGELOG.md) | Release notes and breaking changes |
 
 ## License
 

@@ -29,6 +29,64 @@ cp hooks/BatchExtract.ts ~/.claude/hooks/
 cp -r hooks/lib/ ~/.claude/hooks/lib/
 ```
 
+## v0.7.0 Migration Notes
+
+### Schema changes (migration 7 → 8)
+
+Adds an `importance INTEGER` (1-10) column to `messages`, `decisions`,
+`learnings`, and `loa_entries`. Non-destructive — existing rows receive
+the default value (5 for most tables, 8 for LoA with a floor of 5). Runs
+automatically on `mem init` or `./install.sh`.
+
+### Recommended: run `mem onboard` post-upgrade
+
+v0.7.0 introduces a tiered session-start context (L0 identity + L1
+importance-ranked). The L0 tier reads from `~/.claude/MEMORY/identity.md`
+— if you don't have one, that tier is empty and you're only getting half
+the v2 design.
+
+```bash
+mem onboard               # Interactive 7-question interview
+mem benchmark run B       # Confirm v2_l0_chars > 0 after onboarding
+```
+
+### New hooks
+
+v0.7.0 adds two hooks copied into `~/.claude/hooks/` by the installer:
+
+| Hook | Type | Purpose |
+|------|------|---------|
+| `SessionRecall.ts` | SessionStart | Injects L0 + L1 tiers at session start |
+| `SessionPreCompact.ts` | PreCompact | Flushes in-flight messages before compaction |
+
+If you update hooks manually, copy these alongside `SessionExtract.ts` and
+`BatchExtract.ts`:
+
+```bash
+cp hooks/SessionRecall.ts ~/.claude/hooks/
+cp hooks/SessionPreCompact.ts ~/.claude/hooks/
+```
+
+### New commands
+
+| Command | Purpose |
+|---------|---------|
+| `mem onboard` | Interactive L0 identity interview |
+| `mem importance backfill` | Backfill importance scores from confidence |
+| `mem pin <table> <id>` / `mem unpin <table> <id>` | Manual importance control |
+| `mem benchmark run/list/report` | Phase 2 benchmark harness |
+
+### New environment variable
+
+`RECALL_IDENTITY_PATH` overrides the L0 identity file path. Honored by
+both `SessionRecall` (read) and `mem onboard` (write).
+
+### MCP: `memory_add` accepts `importance`
+
+Optional integer 1-10 parameter. Defaults to 5 (or 8 for LoA, with floor 5).
+
+---
+
 ## v0.6.0 Migration Notes
 
 ### Schema changes (migration 5 → 6)

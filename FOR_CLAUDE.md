@@ -11,6 +11,7 @@ Recall is a persistent memory framework. It gives you:
 1. **Searchable history** of all past conversations via MCP tools and CLI
 2. **Automatic extraction** — sessions are parsed into structured summaries when they end
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
+4. **Tiered session-start context** — `SessionRecall` injects two tiers at the top of every session: **L0 identity** (who the user is) and **L1 top 12 records** ranked by importance. Read the L0 and L1 content at the start of every session — it is authoritative baseline context
 
 ## Your MCP Tools
 
@@ -48,6 +49,7 @@ Record structured information during sessions:
 memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and extensions" })
 memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail: "Not :param like better-sqlite3" })
 memory_add({ type: "breadcrumb", content: "Auth refactor in progress, do not touch middleware yet" })
+memory_add({ type: "decision", content: "Ship onboarding command first", importance: 9 })
 ```
 
 Parameters:
@@ -56,6 +58,7 @@ Parameters:
   - MEDIUM = implied or reasonably inferred
   - LOW = speculative or uncertain
   - Note: Low-confidence decisions are filtered from session context to save context budget
+- `importance` (optional, integer 1-10, default: 5) — How load-bearing is this record? Higher importance surfaces the record earlier in the L1 tier at session start. LoA entries have a floor of 5 and cannot be pinned lower.
 
 ### decision_update
 
@@ -124,11 +127,20 @@ mem search "deployment pipeline"    # Search memory
 mem stats                           # Database statistics
 mem loa list                        # Browse curated knowledge
 mem dump "Session title"            # Capture current session
+mem onboard                         # Interactive L0 identity setup (run once per user)
+mem pin decisions 42 10             # Pin a record to high importance
 ```
+
+### L0 identity file
+
+The L0 tier reads from `~/.claude/MEMORY/identity.md` by default, with
+`./.atlas-recall/identity.md` taking precedence if present. The `RECALL_IDENTITY_PATH`
+env var overrides both. If the user has never created this file, the L0 section of
+session context is empty — recommend running `mem onboard` to fix it.
 
 ## Core Rules
 
-1. **Memory-first at session start** — A `SessionStart` hook automatically loads recent decisions, breadcrumbs, and learnings. Review that context before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`.
+1. **Memory-first at session start** — A `SessionStart` hook (`SessionRecall.ts`) automatically loads two tiers: **L0 identity** (user-authored `identity.md`, always on, capped at 1200 chars) and **L1 top 12** (messages/decisions/learnings/LoA ranked by importance, with 4 slots reserved for LoA). Review both before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`. L2/L3 tiers are documented in the preamble but NOT injected — fetch them on demand.
 2. **Search memory before git** — When you need context about past work, **always search Recall first** (`memory_search` or `memory_hybrid_search`) before falling back to `git log`, `git show`, or commit history. Recall contains structured decisions, learnings, and session summaries that are richer than commit messages.
 3. **Search before asking** — Before asking the user to repeat information, search memory first
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
