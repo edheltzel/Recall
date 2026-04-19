@@ -13,7 +13,7 @@ dist/
 .idea/
 
 # Coding Agents
-.atlas-plans/
+.atlas/
 .worktrees/
 .claude/worktrees
 .maestro/

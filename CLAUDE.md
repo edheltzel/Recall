@@ -94,12 +94,13 @@ tsconfig.json          # TypeScript config
 
 ## Plans Directory (MANDATORY)
 
-**All plans, specs, and design documents MUST be stored in `.atlas-plans/` at the project root.** This applies to every agent, skill, plugin, and extension — no exceptions.
+**All plans, specs, and design documents MUST be stored in `.atlas/` at the project root.** This applies to every agent, skill, plugin, and extension — no exceptions.
 
-- Claude Code `EnterPlanMode` plans → `.atlas-plans/`
-- Superpowers plugin plans and specs → `.atlas-plans/plans/` and `.atlas-plans/specs/`
-- Any skill or extension that generates planning artifacts → `.atlas-plans/`
-- Handoff documents → `.atlas-plans/`
+- Claude Code `EnterPlanMode` plans → `.atlas/plans/`
+- Superpowers plugin plans and specs → `.atlas/plans/` and `.atlas/specs/`
+- Any skill or extension that generates planning artifacts → `.atlas/plans/`
+- Handoff documents → `.atlas/handoffs/`
+- Completed plans → `.atlas/plans/archive/`
 
 **Never store plans in `docs/`.** The `docs/` directory is exclusively for user-facing published documentation.
 

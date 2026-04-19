@@ -52,12 +52,45 @@ Verify it works:
 ```bash
 mem stats        # Database overview
 mem doctor       # Health check
-mem onboard      # One-time: seed your L0 identity tier (recommended)
 ```
 
 Restart Claude Code to load the MCP server and hooks.
 
-> [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup
+### First run: set your identity
+
+Recall's tiered SessionRecall injects a small identity file at the top
+of every session (the L0 tier — your role, projects, tools, and working
+preferences). Without it, L0 is empty and every new session has to
+re-learn the basics.
+
+```bash
+mem onboard
+```
+
+A 7-question interview that writes `~/.claude/MEMORY/identity.md`. Run
+it once. Re-run whenever your role, active projects, or working
+preferences change. Use `|` (not `,`) to separate values so a phrase
+like `no force-push, ever` survives as a single entry.
+
+### Updating
+
+From inside Claude Code, `/recall:update` prints the current vs. latest
+release and the exact command to run. From a shell:
+
+```bash
+./update.sh --check   # version check only
+./update.sh           # full update: pull, build, migrate, re-register hooks
+```
+
+### Uninstalling
+
+```bash
+./uninstall.sh --dry-run   # preview, touch nothing
+./uninstall.sh             # surgical remove; preserves memory.db + backups
+./uninstall.sh --purge     # also destroy memory.db + backup tree (confirmed)
+```
+
+> [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
 
 ## How Recall Works
 

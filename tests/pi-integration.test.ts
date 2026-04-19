@@ -173,7 +173,8 @@ describe('installer Pi integration', () => {
 
   test('install.sh includes Pi config in backup list', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('PI_CONFIG_DIR');
     expect(content).toContain('mcp.json');
     expect(content).toContain('AGENTS.md');
@@ -181,21 +182,24 @@ describe('installer Pi integration', () => {
 
   test('install.sh detects Pi platform', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('PI_DETECTED');
     expect(content).toContain('command -v pi');
   });
 
   test('install.sh has pi-mcp-adapter installation', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('pi-mcp-adapter');
     expect(content).toContain('install_pi_adapter');
   });
 
   test('install.sh has Pi MCP configuration', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('configure_pi_mcp');
     expect(content).toContain('recall-memory');
     expect(content).toContain('lifecycle');
@@ -203,7 +207,8 @@ describe('installer Pi integration', () => {
 
   test('install.sh copies Pi extensions', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('install_pi_extensions');
     expect(content).toContain('recall-extract.ts');
     expect(content).toContain('recall-compaction.ts');

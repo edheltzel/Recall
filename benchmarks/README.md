@@ -1,6 +1,6 @@
 # Recall Benchmarks (Phase 2)
 
-> Status: Suite B (token efficiency) implemented. Suites A / C / D / E are scaffolded in the runner but not yet built. See `.atlas-plans/2026-04-17-mempalace-research-borrow-list.md` for the full Phase 2 design.
+> Status: Suite B (token efficiency) implemented. Suites A / C / D / E are scaffolded in the runner but not yet built. See `.atlas/plans/2026-04-17-mempalace-research-borrow-list.md` for the full Phase 2 design.
 
 ## Why this exists
 

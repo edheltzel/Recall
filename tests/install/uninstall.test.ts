@@ -1,0 +1,297 @@
+// Regression: uninstall.sh must remove Recall surgically, preserving user
+// data by default and scrubbing only Recall's entries from settings.json.
+//
+// The script is driven against a tmpdir-scoped CLAUDE_DIR populated with a
+// realistic mix of Recall files + unrelated user content. We shell out to
+// `bash uninstall.sh --no-confirm [--purge]` with CLAUDE_DIR overridden.
+
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+const REPO = process.cwd();
+const UNINSTALL = join(REPO, 'uninstall.sh');
+
+interface RunResult {
+  stdout: string;
+  stderr: string;
+  status: number;
+}
+
+function runUninstall(
+  claudeDir: string,
+  backupBase: string,
+  extraArgs: string[] = [],
+): RunResult {
+  const r = spawnSync(
+    'bash',
+    [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', ...extraArgs],
+    {
+      encoding: 'utf-8',
+      cwd: REPO,
+      env: {
+        ...process.env,
+        CLAUDE_DIR: claudeDir,
+        BACKUP_BASE: backupBase,
+        HOME: claudeDir, // ~ -> tmp (avoids touching real $HOME binaries)
+      },
+    },
+  );
+  return {
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+    status: r.status ?? 1,
+  };
+}
+
+describe('uninstall.sh', () => {
+  let tempRoot: string;
+  let claudeDir: string;
+  let backupBase: string;
+  let settingsFile: string;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'recall-uninstall-'));
+    claudeDir = join(tempRoot, '.claude');
+    backupBase = join(claudeDir, 'backups', 'recall');
+
+    mkdirSync(join(claudeDir, 'hooks', 'lib'), { recursive: true });
+    mkdirSync(join(claudeDir, 'commands', 'recall'), { recursive: true });
+    mkdirSync(join(claudeDir, 'MEMORY'), { recursive: true });
+    mkdirSync(backupBase, { recursive: true });
+
+    // Drop a faux installed payload.
+    writeFileSync(join(claudeDir, 'hooks', 'SessionExtract.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'BatchExtract.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'TelosSync.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'SessionRecall.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'SessionPreCompact.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-lock.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-migration.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-quality.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-semaphore.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-tracker.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'pid-utils.ts'), '// stub');
+
+    // Unrelated user hook file — MUST survive
+    writeFileSync(join(claudeDir, 'hooks', 'lib', 'my-own-helper.ts'), '// user');
+    writeFileSync(join(claudeDir, 'hooks', 'MyHook.ts'), '// user hook');
+
+    // Slash commands + guide
+    writeFileSync(join(claudeDir, 'commands', 'recall', 'search.md'), '# search');
+    writeFileSync(join(claudeDir, 'Recall_GUIDE.md'), '# guide');
+
+    // MEMORY directory — preserved
+    writeFileSync(join(claudeDir, 'MEMORY', 'identity.md'), '# Ed');
+    writeFileSync(join(claudeDir, 'MEMORY', 'DISTILLED.md'), '# distilled');
+
+    // Matching extract_prompt.md in CLAUDE_DIR/MEMORY and repo/hooks/
+    const promptSrc = readFileSync(join(REPO, 'hooks', 'extract_prompt.md'));
+    writeFileSync(join(claudeDir, 'MEMORY', 'extract_prompt.md'), promptSrc);
+
+    // memory.db stub
+    writeFileSync(join(claudeDir, 'memory.db'), '\x00stubdb');
+
+    // Backup
+    mkdirSync(join(backupBase, '20260101_000000'), { recursive: true });
+    writeFileSync(join(backupBase, '20260101_000000', 'manifest.txt'), 'stub');
+
+    // settings.json with Recall entries + unrelated user entries
+    settingsFile = join(claudeDir, 'settings.json');
+    writeFileSync(
+      settingsFile,
+      JSON.stringify(
+        {
+          hooks: {
+            Stop: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/SessionExtract.ts' }],
+              },
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/MyHook.ts' }],
+              },
+            ],
+            SessionStart: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/SessionRecall.ts' }],
+              },
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/TelosSync.ts' }],
+              },
+            ],
+            PreCompact: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/SessionPreCompact.ts' }],
+              },
+            ],
+            UserPromptSubmit: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/UserHook.ts' }],
+              },
+            ],
+          },
+          mcpServers: {
+            'recall-memory': { command: 'bun', args: ['run', '/path/mem-mcp'] },
+            'other-server': { command: 'other', args: [] },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    // CLAUDE.md with user content + MEMORY section
+    writeFileSync(
+      join(claudeDir, 'CLAUDE.md'),
+      `# Ed's global instructions
+
+## Style
+
+Terse, surgical, precise.
+
+## MEMORY
+
+You have persistent memory via Recall. Stuff.
+
+## After-memory section
+
+This content must be preserved across an uninstall.
+`,
+    );
+  });
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  test('preserve-default: removes Recall artifacts, keeps user data', () => {
+    const r = runUninstall(claudeDir, backupBase);
+    expect(r.status).toBe(0);
+
+    // Recall files removed
+    expect(existsSync(join(claudeDir, 'hooks', 'SessionExtract.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'SessionRecall.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'TelosSync.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'SessionPreCompact.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'BatchExtract.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'lib', 'extraction-lock.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'lib', 'pid-utils.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'commands', 'recall'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'Recall_GUIDE.md'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'MEMORY', 'extract_prompt.md'))).toBe(false);
+
+    // User files preserved
+    expect(existsSync(join(claudeDir, 'hooks', 'MyHook.ts'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'hooks', 'lib', 'my-own-helper.ts'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'MEMORY', 'identity.md'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'MEMORY', 'DISTILLED.md'))).toBe(true);
+
+    // Preserved by default
+    expect(existsSync(join(claudeDir, 'memory.db'))).toBe(true);
+    expect(existsSync(backupBase)).toBe(true);
+    expect(existsSync(join(backupBase, '20260101_000000'))).toBe(true);
+  });
+
+  test('surgical settings.json filter: removes only Recall entries', () => {
+    runUninstall(claudeDir, backupBase);
+
+    const s = JSON.parse(readFileSync(settingsFile, 'utf-8')) as {
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+      mcpServers?: Record<string, unknown>;
+    };
+
+    const commands = (event: string): string[] =>
+      (s.hooks?.[event] ?? []).flatMap(e => (e.hooks ?? []).map(h => h.command ?? ''));
+
+    // Recall commands filtered
+    expect(commands('Stop').some(c => c.includes('SessionExtract'))).toBe(false);
+    expect(commands('SessionStart').some(c => c.includes('SessionRecall'))).toBe(false);
+    expect(commands('SessionStart').some(c => c.includes('TelosSync'))).toBe(false);
+    // PreCompact key removed entirely (all entries were Recall)
+    expect(s.hooks?.PreCompact).toBeUndefined();
+
+    // User commands preserved
+    expect(commands('Stop').some(c => c.includes('MyHook'))).toBe(true);
+    expect(commands('UserPromptSubmit').some(c => c.includes('UserHook'))).toBe(true);
+
+    // mcpServers: recall-memory removed, other-server kept
+    expect(s.mcpServers?.['recall-memory']).toBeUndefined();
+    expect(s.mcpServers?.['other-server']).toBeDefined();
+  });
+
+  test('CLAUDE.md: MEMORY section removed, other sections preserved', () => {
+    runUninstall(claudeDir, backupBase);
+    const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
+    expect(content).not.toContain('## MEMORY');
+    expect(content).toContain("# Ed's global instructions");
+    expect(content).toContain('## Style');
+    expect(content).toContain('## After-memory section');
+    expect(content).toContain('This content must be preserved');
+  });
+
+  test('--purge: destroys memory.db and backups, keeps MEMORY/', () => {
+    // Interactive purge confirmation: pipe "PURGE\n" via stdin.
+    const r = spawnSync(
+      'bash',
+      [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
+      {
+        encoding: 'utf-8',
+        cwd: REPO,
+        input: 'PURGE\n',
+        env: {
+          ...process.env,
+          CLAUDE_DIR: claudeDir,
+          BACKUP_BASE: backupBase,
+          HOME: claudeDir,
+        },
+      },
+    );
+    expect(r.status).toBe(0);
+
+    expect(existsSync(join(claudeDir, 'memory.db'))).toBe(false);
+
+    // Pre-purge snapshot was written under BACKUP_BASE
+    const entries = require('fs').readdirSync(backupBase) as string[];
+    expect(entries.some(e => e.startsWith('pre_purge_'))).toBe(true);
+
+    // Old backup dir gone
+    expect(existsSync(join(backupBase, '20260101_000000'))).toBe(false);
+
+    // MEMORY/ preserved even on --purge
+    expect(existsSync(join(claudeDir, 'MEMORY', 'identity.md'))).toBe(true);
+  });
+
+  test('--dry-run: narrates but does not mutate', () => {
+    const r = runUninstall(claudeDir, backupBase, ['--dry-run']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('DRY-RUN');
+
+    // Everything still present
+    expect(existsSync(join(claudeDir, 'hooks', 'SessionExtract.ts'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'hooks', 'SessionRecall.ts'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'commands', 'recall'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'Recall_GUIDE.md'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'memory.db'))).toBe(true);
+
+    // settings.json untouched
+    const s = JSON.parse(readFileSync(settingsFile, 'utf-8')) as {
+      mcpServers?: Record<string, unknown>;
+    };
+    expect(s.mcpServers?.['recall-memory']).toBeDefined();
+  });
+});

@@ -217,6 +217,7 @@ a human-readable `.md` alongside. See `benchmarks/README.md` for methodology.
 mem init                             # Initialize the database (safe to re-run)
 mem doctor                           # Health check all subsystems
 mem stats                            # Database statistics
+mem onboard                          # Interactive L0 identity interview (see Onboard)
 ```
 
 `mem init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
@@ -224,6 +225,20 @@ mem stats                            # Database statistics
 `mem doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, and Ollama availability. Run this first when troubleshooting.
 
 `mem stats` reports row counts per table and total database size.
+
+### Onboard
+
+```bash
+mem onboard                          # Interactive 7-question identity interview
+mem onboard --yes                    # Non-interactive (accept all defaults)
+mem onboard --dry-run                # Show the proposed identity.md, write nothing
+```
+
+`mem onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered SessionRecall. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
+
+Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `mem onboard` (write) and the SessionRecall hook (read).
+
+Inputs are separated with `|` (not `,` or `;`) to avoid silent data loss when a value itself contains a comma: e.g. `no force-push, ever | always use worktrees`.
 
 ### Prune
 

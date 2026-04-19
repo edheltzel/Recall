@@ -55,6 +55,16 @@ Health check all subsystems — database, MCP registration, hooks, extraction, e
 
 Run this first when troubleshooting any issue.
 
+### /recall:update
+
+Check whether a newer Recall release is available on GitHub.
+
+**Usage:** `/recall:update`
+
+Check-only — prints the current version, the latest release tag, a short excerpt of the release notes, and the exact `cd <path> && ./update.sh` recipe. It never runs `update.sh` inline because rebuilding the `mem` binary mid-session can corrupt in-flight hook invocations. Exit Claude Code, run the recipe, and restart.
+
+Rate limit: GitHub's anonymous API is 60 requests/hour per IP. On throttle, the command falls back to pointing at <https://github.com/edheltzel/Recall/releases>.
+
 ### /recall:loa
 
 Browse and view Library of Alexandria entries.
