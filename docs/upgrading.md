@@ -2,32 +2,101 @@
 
 [← Back to README](../README.md)
 
-## Update Recall
+## Check for a new release
+
+From inside Claude Code:
+
+```
+/recall:update
+```
+
+This is a **check-only** command — it prints the current vs. latest
+version and the exact command to run. It never rebuilds mid-session
+(that would corrupt hooks tied to the running `mem` binary).
+
+From a shell:
+
+```bash
+cd /path/to/Recall
+./update.sh --check
+```
+
+## Using `update.sh` (recommended)
+
+Exit Claude Code first, then:
+
+```bash
+cd /path/to/Recall
+./update.sh
+```
+
+`update.sh` performs the full lifecycle:
+
+1. Fetches the latest release tag from GitHub and compares to
+   `package.json`. Exits 0 if already current (unless `--force`).
+2. Creates a timestamped backup of `settings.json`, `memory.db`,
+   `CLAUDE.md`, OpenCode/Pi configs, and `.mcp.json` at
+   `~/.claude/backups/recall/<TIMESTAMP>/`. Records the git `PRE_SHA`
+   in the manifest.
+3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
+   dirty tree; resolve manually and re-run).
+4. `bun install && bun run build`.
+5. `mem init` applies any pending SQLite migrations
+   (`PRAGMA user_version`-driven, non-destructive).
+6. Copies refreshed hooks, shared lib files, slash commands, and
+   `FOR_CLAUDE.md`. `extract_prompt.md` gets a drift check — if you
+   edited it, the new version lands at `extract_prompt.md.new` and
+   your edits are preserved.
+7. Forces re-registration of all four hooks (SessionExtract,
+   TelosSync, SessionRecall, SessionPreCompact) — this permanently
+   prevents the pre-0.7.1 bug class where a partial install could
+   leave hooks missing.
+8. Verifies via `mem --version` and `mem stats`.
+
+### Update flags
+
+| Flag | Purpose |
+|------|---------|
+| `--check` | Version check only; print recipe and exit |
+| `--dry-run` | Narrate every step with `[dry-run]` markers, touch nothing |
+| `--force` | Run even if already at latest (repair path) |
+| `--no-migrate` | Skip `mem init` migration step |
+| `--no-confirm` | Non-interactive |
+| `--help` | Show usage |
+
+### Rollback
+
+If `update.sh` fails at any step, it writes a rollback recipe to
+`~/.claude/backups/recall/<TIMESTAMP>/ROLLBACK.txt` with the exact
+commands to revert:
+
+```
+git reset --hard <PRE_SHA>
+bun install && bun run build
+./install.sh restore <TIMESTAMP>
+```
+
+**DB schema downgrades are not supported.** If a migration applied to
+your DB, reverting the repo alone does not revert the DB. Delete
+`~/.claude/memory.db` and restore it from the backup dir if you need
+to fully roll back.
+
+## Manual update
+
+If you prefer to run each step yourself (or `update.sh` is not
+available on older installs):
 
 ```bash
 cd /path/to/Recall
 git pull
-./install.sh
-```
-
-The installer handles everything: dependencies, build, linking, database migrations, hook updates, and guide updates. Your database and memory files are preserved across updates.
-
-If you prefer a manual update:
-
-```bash
-git pull
 bun install
 bun run build
 bun link
+mem init
 ```
 
-To also update the hooks manually:
-
-```bash
-cp hooks/SessionExtract.ts ~/.claude/hooks/
-cp hooks/BatchExtract.ts ~/.claude/hooks/
-cp -r hooks/lib/ ~/.claude/hooks/lib/
-```
+Then re-run `./install.sh` to refresh hooks and slash commands — it's
+idempotent.
 
 ## v0.7.0 Migration Notes
 
