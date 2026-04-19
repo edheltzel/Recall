@@ -302,7 +302,7 @@ describe('gatherContext', () => {
   // HOT_RECALL.md integration was removed in Sprint #1 (tiered SessionRecall).
   // Historical rationale: HOT_RECALL was a pre-SQLite legacy store; tiered L0/L1
   // assembly from the structured tables makes it redundant. See
-  // .atlas-plans/2026-04-17-mempalace-research-borrow-list.md.
+  // .atlas/plans/2026-04-17-mempalace-research-borrow-list.md.
 
   // The v1 "Recall is active" behavioral reminder was removed as part of the
   // red-team review: embedding model-directed instructions in tool output /

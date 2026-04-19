@@ -13,6 +13,92 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.7.2] — 2026-04-19 — "install lifecycle"
+
+The lifecycle release originally scoped against 0.7.1. Slot kept open
+through 0.7.11 (see the 0.7.11 note below); shipping here as 0.7.2 to
+honor the plan. Note: `0.7.2 < 0.7.11` in semver ordering — this is a
+deliberate back-fill of the gap, not a downgrade. Users already on
+0.7.11 already have the Bug 1 and Bug 2 fixes; this release is
+purely additive scaffolding (uninstall/update/shared-lib/docs) and
+does not touch runtime behavior.
+
+### Added
+
+- **`uninstall.sh`** — surgical removal with preserve-default. Strips
+  Recall's hook entries and `mcpServers["recall-memory"]` out of
+  `settings.json` (other hooks/servers untouched), removes the six
+  Recall-owned files in `~/.claude/hooks/lib/` (never `rm -rf` on the
+  shared directory), AST-aware removal of the `## MEMORY` section from
+  `~/.claude/CLAUDE.md`, diff-checked removal of `extract_prompt.md`
+  (preserves user edits), `bun unlink`, and an optional `--purge` flag
+  (double-confirmed) that destroys `memory.db` and the backup tree.
+  `--dry-run` narrates without touching. `MEMORY/` is preserved even
+  on `--purge`. Covers OpenCode + Pi by default; `--skip-opencode` /
+  `--skip-pi` available.
+- **`update.sh`** — automated update flow. Version check against GitHub
+  Releases API, timestamped backup with `PRE_SHA` recorded in the
+  manifest, `git pull --ff-only`, `bun install && bun run build`,
+  `mem init` migrations, refresh of hooks + slash commands + guide,
+  forced re-registration of all four hooks (permanently prevents the
+  Bug 1 class), verification via `mem stats`. On failure, writes a
+  `ROLLBACK.txt` recipe to the backup dir with the exact
+  `git reset --hard <PRE_SHA>` + rebuild + `install.sh restore`
+  commands. Flags: `--check`, `--dry-run`, `--force`, `--no-migrate`,
+  `--no-confirm`.
+- **`/recall:update` slash command** — check-only. Resolves the Recall
+  source via `readlink -f "$(which mem)"`, delegates to
+  `./update.sh --check`, prints the exact `cd <path> && ./update.sh`
+  recipe. Never runs `update.sh` inline — rebuilding the `mem` binary
+  mid-session can corrupt `bun link`'s process tree.
+- **`lib/install-lib.sh`** — shared library sourced by `install.sh`,
+  `update.sh`, and `uninstall.sh`. Contains backup/log helpers, OS and
+  platform detection, MCP registration, `recall_register_hook` (single
+  generic idempotent hook writer), `recall_register_all_hooks`, and
+  `recall_copy_runtime_files`. Globals use `: "${VAR:=default}"` so
+  callers can override before sourcing.
+- **`docs/releasing.md`** — maintainer-facing release recipe. Reads
+  notes from this CHANGELOG (no drift between release and file).
+- **`## Uninstalling` section** in `docs/installation.md` covering the
+  preserve-default behavior and flag matrix.
+- **`### Onboard` subsection** in `docs/cli-reference.md` documenting
+  `mem onboard`, the `|` (pipe) separator rule, and L0-tier rationale.
+
+### Changed
+
+- **`install.sh`** reorganized from 1078 lines to 225 lines. All shared
+  logic moved to `lib/install-lib.sh`. External behavior is identical;
+  the installer still produces the same `settings.json` and the same
+  filesystem layout.
+- **`docs/upgrading.md`** restructured into "Check for a new release"
+  → "Using update.sh (recommended)" → "Rollback" → "Manual update".
+  The previous `./install.sh`-based update path is preserved as the
+  manual fallback.
+- **`README.md`** — new "First run: set your identity", "Updating",
+  and "Uninstalling" subsections under Quick Start.
+- **`FOR_CLAUDE.md`** — new Core Rule 7 (suggest `mem onboard` once
+  per session if the L0 tier is empty); added `/recall:update` to the
+  slash-commands table.
+
+### Fixed
+
+- **Stale `.atlas-plans/` references** swept to `.atlas/` in `CLAUDE.md`
+  (project), `.gitignore`, `benchmarks/README.md`, and
+  `tests/hooks/SessionRecall.test.ts`. CHANGELOG history untouched.
+
+### Notes for developers
+
+- Top-level `return` statements inside `bun -e` inline scripts are a
+  `SyntaxError`. Use `process.exit(0)` instead. All `catch { return; }`
+  patterns in the new scripts use `catch { process.exit(0); }`.
+- New test files:
+  - `tests/install/uninstall.test.ts` (5 tests)
+  - `tests/install/update.test.ts` (5 tests)
+  - `tests/install/configure-hooks.test.ts` updated to source
+    `lib/install-lib.sh` directly instead of `awk`-extracting from
+    `install.sh`
+- 317 tests pass on this branch (up from 307 pre-M2).
+
 ## [0.7.11] — 2026-04-18 — "initDb ordering hotfix"
 
 Second surgical fix of the day. `install.sh` now succeeds end-to-end for

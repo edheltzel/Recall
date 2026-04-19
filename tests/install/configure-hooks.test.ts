@@ -16,7 +16,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const INSTALL_SCRIPT = join(process.cwd(), 'install.sh');
+const INSTALL_LIB = join(process.cwd(), 'lib', 'install-lib.sh');
 const HOOK_NAMES = [
   'SessionExtract',
   'BatchExtract',
@@ -61,10 +61,10 @@ describe('install.sh configure_hooks()', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  // Source configure_hooks() out of install.sh without running the rest of the
-  // installer. The awk slice runs from the function header through the first
-  // line that is exactly `}` — which, for this function, is its own closing
-  // brace (there are no other lines of just `}` inside it).
+  // Source lib/install-lib.sh and drive configure_hooks() against a
+  // tmpdir-scoped CLAUDE_DIR + fake repo layout. The library respects
+  // pre-set CLAUDE_DIR and pre-existing log_* function definitions, so we
+  // stub the loggers to no-ops first and then source.
   //
   // Write the driver to a file and invoke it with `bash <path>` to keep shell
   // quoting predictable across Bun's spawnSync and platforms.
@@ -78,11 +78,8 @@ describe('install.sh configure_hooks()', () => {
       'log_success() { :; }',
       'log_warn()    { :; }',
       'log_info()    { :; }',
-      'export -f log_success log_warn log_info',
-      // macOS ships bash 3.2 which has a process-substitution bug where
-      // `source <(...)` does not persist function definitions in the current
-      // shell. `eval "$(...)"` is the portable workaround.
-      `eval "$(awk '/^configure_hooks\\(\\) \\{$/,/^\\}$/' "${INSTALL_SCRIPT}")"`,
+      'log_error()   { :; }',
+      `source "${INSTALL_LIB}"`,
       'configure_hooks',
     ].join('\n');
     writeFileSync(driverPath, driver, { mode: 0o755 });

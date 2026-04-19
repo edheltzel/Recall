@@ -300,14 +300,16 @@ describe('installer', () => {
 
   test('install.sh includes OpenCode config in backup list', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('OPENCODE_CONFIG_DIR');
     expect(content).toContain('opencode.json');
   });
 
   test('install.sh detects both platforms', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('detect_platforms');
     expect(content).toContain('OPENCODE_DETECTED');
     expect(content).toContain('CLAUDE_CODE_DETECTED');
@@ -315,7 +317,8 @@ describe('installer', () => {
 
   test('install.sh has JSONC-safe config parsing', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     // Verify comment stripping regex is present
     expect(content).toContain('.replace(/\\/\\/.*$/gm, "")');
     expect(content).toContain('.replace(/\\/\\*[\\s\\S]*?\\*\\//g, "")');
@@ -506,7 +509,8 @@ You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Reca
 
   test('installer backup list includes Pi config files', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     // Pi-specific paths should appear in the install.sh
     expect(content).toContain('PI_CONFIG_DIR');
     expect(content).toContain('AGENTS.md');
@@ -516,13 +520,15 @@ You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Reca
 
   test('install.sh detects Pi platform', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('PI_DETECTED');
   });
 
   test('install.sh has Pi MCP configuration function', () => {
     const installPath = join(__dirname, '..', 'install.sh');
-    const content = readFileSync(installPath, 'utf-8');
+    const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
+    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('configure_pi_mcp');
     expect(content).toContain('recall-memory');
   });

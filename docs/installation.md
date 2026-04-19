@@ -240,4 +240,51 @@ cp ~/.claude/memory.db ~/.claude/memory.db.backup
 
 ---
 
+## Uninstalling
+
+Recall ships an `uninstall.sh` that removes its integration surgically while preserving your memory by default. Exit Claude Code first, then:
+
+```bash
+cd /path/to/Recall
+./uninstall.sh --dry-run        # preview what will change, touch nothing
+./uninstall.sh                  # remove integration; preserve memory.db + backups
+./uninstall.sh --purge          # also destroy memory.db + backup tree (confirmed)
+```
+
+### What gets removed (default)
+
+- `~/.claude/commands/recall/` (slash commands)
+- `~/.claude/Recall_GUIDE.md`
+- Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact) — other hooks are preserved
+- `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved
+- `~/.claude/hooks/{SessionExtract,BatchExtract,TelosSync,SessionRecall,SessionPreCompact}.ts`
+- `~/.claude/hooks/lib/{extraction-*,pid-utils}.ts` — only Recall-owned files, never the whole `hooks/lib/` directory
+- The `## MEMORY` section in `~/.claude/CLAUDE.md` — the rest of your CLAUDE.md is preserved (AST-aware removal)
+- `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
+- OpenCode MCP entry + plugins + agent (unless `--skip-opencode`)
+- Pi MCP entry + extensions + `AGENTS.md` MEMORY section (unless `--skip-pi`)
+- `bun unlink` (removes `mem` and `mem-mcp` from your PATH)
+
+### What is preserved (default)
+
+- `~/.claude/memory.db` — your persistent memory database
+- `~/.claude/backups/recall/` — the backup tree written by install/update
+- `~/.claude/MEMORY/` — identity.md, DISTILLED.md, session subdirs
+- This source directory (remove with `rm -rf /path/to/Recall`)
+
+### Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--dry-run` | Narrate every change, touch nothing |
+| `--purge` | Also destroy `memory.db` + backup tree. Requires interactive `PURGE` confirmation. Writes a `pre_purge_<TS>/` snapshot before deleting. |
+| `--no-confirm` | Non-interactive (still requires PURGE confirmation for `--purge`) |
+| `--skip-opencode` | Leave OpenCode integration alone |
+| `--skip-pi` | Leave Pi integration alone |
+| `--help` | Show usage |
+
+Even with `--purge`, `~/.claude/MEMORY/` is preserved — it's user-authored content, not Recall-owned state.
+
+---
+
 *Next: [CLI Reference](cli-reference.md) | [MCP Tools](mcp-tools.md) | [Troubleshooting](troubleshooting.md)*
