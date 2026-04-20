@@ -313,6 +313,16 @@ automatically. **Recommended post-upgrade:** run `mem onboard` once to
 seed the L0 identity tier (otherwise `v2_l0_chars` stays at 0 in
 benchmarks and the L0 section of session context is empty).
 
+### Acknowledgments
+The L0/L1 tiered SessionRecall, PreCompact hook, and importance
+scoring features shipped in this release were inspired by — and
+heavily reshaped from — [MemPalace](https://github.com/MemPalace/mempalace)
+(MIT). No MemPalace code is used; see
+[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for the full what-we-took,
+what-we-rejected (PALACE_PROTOCOL behavioral injection, KG triples),
+and credits to the independent critics (lhl, roman-rr, danilchenko,
+tentenco) whose analyses shaped our reshape decisions.
+
 ## [0.6.2] and earlier
 
 See git history and GitHub releases for earlier changelog entries. The

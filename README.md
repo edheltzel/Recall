@@ -243,6 +243,19 @@ If you're an AI agent reading this repository:
 | [Upgrading](docs/upgrading.md) | Update, backup, migration system |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Changelog](CHANGELOG.md) | Release notes and breaking changes |
+| [Acknowledgments](ACKNOWLEDGMENTS.md) | Ideas borrowed, reshaped, and rejected — with credits to original authors |
+
+## Acknowledgments
+
+Recall's tiered session-start context (L0 identity + L1 importance-ranked),
+PreCompact hook, and importance scoring were inspired by
+[MemPalace](https://github.com/MemPalace/mempalace) (Milla Jovovich,
+Ben Sigman — MIT). We reshaped every adopted idea to fit Recall's
+SQLite + FTS5 architecture and rejected others (PALACE_PROTOCOL
+behavioral injection, KG triples) where they didn't survive review.
+See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for the full what-we-took,
+what-we-rejected, and credits to the independent critics (lhl, roman-rr,
+danilchenko, tentenco) whose analyses shaped our reshape decisions.
 
 ## License
 
