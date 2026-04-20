@@ -249,6 +249,46 @@ step_install_and_build() {
   fi
 }
 
+# Re-link the global `mem` / `mem-mcp` binaries.
+#
+# bun install will drop a fresh `dist/` but does NOT touch ~/.bun/bin
+# symlinks, so stale links can linger — or, if a prior `bun unlink` /
+# `bun upgrade` / homedir pruning removed them, the symlinks are just
+# gone. Without active symlinks the MCP server entry in settings.json
+# (command: /Users/*/.bun/bin/mem-mcp) fails silently on the next
+# Claude Code / OpenCode / Pi restart. Re-running `bun link` every
+# update is cheap insurance.
+#
+# Mirrors install.sh Step 4: bun link, npm link fallback, warn on
+# macOS if both fail.
+step_link_global() {
+  log_info "Re-linking globally (bun link)..."
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "  [dry-run] would: bun link"
+    return
+  fi
+
+  if bun link 2>/dev/null; then
+    log_success "Re-linked: mem and mem-mcp"
+    return
+  fi
+
+  log_warn "bun link failed, trying npm link..."
+  local npm_link_ok=false
+  if [[ "$RECALL_OS" == "linux" ]]; then
+    sudo npm link && npm_link_ok=true
+  else
+    npm link && npm_link_ok=true
+  fi
+  if [[ "$npm_link_ok" != "true" ]]; then
+    log_error "Failed to re-link globally (bun + npm both declined)."
+    [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
+    log_error "Rebuild succeeded but mem/mem-mcp symlinks in ~/.bun/bin are"
+    log_error "missing or stale. Re-run ./install.sh to repair."
+    exit 1
+  fi
+}
+
 step_migrate() {
   if [[ "$NO_MIGRATE" == "true" ]]; then
     log_warn "--no-migrate: skipping database migrations"
@@ -359,6 +399,7 @@ main() {
   step_backup
   step_fetch_and_pull
   step_install_and_build
+  step_link_global
   step_migrate
   step_refresh_runtime
   step_reregister_hooks
