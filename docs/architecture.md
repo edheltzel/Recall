@@ -155,3 +155,58 @@ If Haiku is unavailable, falls back to a local Ollama model (configurable via `R
 efficiency) compares v2 wake-up context against v1 and the CLAUDE.md
 baseline. Methodology is locked in via 5 rules documented in
 `benchmarks/README.md`. Run suites via `mem benchmark run [suite]`.
+
+## Lifecycle scripts (v0.7.2+)
+
+Three shell scripts at the repo root manage the full install lifecycle.
+They share behavior via `lib/install-lib.sh` so every path (fresh
+install, update, uninstall) handles settings.json, hooks, MCP
+registration, and global-link state identically.
+
+| Script | Purpose | Key characteristics |
+|---|---|---|
+| `install.sh` | Fresh install or repair | Idempotent, creates a timestamped backup first, per-hook registration (not blanket), supports `restore` and `list` subcommands |
+| `update.sh` | Pull + build + migrate + relink | Version check against GitHub Releases API; aborts cleanly if already current unless `--force`. Writes a `ROLLBACK.txt` recipe to the backup dir on any failure |
+| `uninstall.sh` | Surgical removal | Preserve-default (keeps `memory.db`, backups, `MEMORY/`). `--purge` destroys DB + backups after double-confirmation. AST-aware CLAUDE.md `## MEMORY` section removal; diff-checked removal of user-edited `extract_prompt.md` |
+
+All three accept `--dry-run` to narrate changes without touching anything.
+
+### Shared library: `lib/install-lib.sh`
+
+Sourced by all three scripts. Key functions:
+
+| Function | Purpose |
+|---|---|
+| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `memory.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
+| `recall_register_hook <event> <name> <command> [timeout]` | Idempotent single-hook writer for `settings.json`. Every hook is registered independently — no blanket early-return (fixes the pre-0.7.1 bug class structurally) |
+| `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`SessionExtract`, `TelosSync`, `SessionRecall`, `SessionPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
+| `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/mem` / `mem-mcp` (added in 0.7.22) |
+| `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/mem` and `mem-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
+| `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |
+| `recall_configure_claude_md` | Appends a `## MEMORY` section to `~/.claude/CLAUDE.md` only if absent; uninstall's counterpart removes it via an AST-aware node script that preserves everything before and after the section |
+
+### Globals (overridable via env)
+
+Callers can override these before sourcing `lib/install-lib.sh`:
+
+```bash
+CLAUDE_DIR="$HOME/.claude"
+BACKUP_BASE="$CLAUDE_DIR/backups/recall"
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
+OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+PI_CONFIG_DIR="$HOME/.pi/agent"
+```
+
+All use `: "${VAR:=default}"` so an override set *before* `source`
+sticks. The test harness uses this to drive the lib against a tmpdir
+`CLAUDE_DIR` without touching the real home.
+
+### Slash command: `/recall:update`
+
+Check-only. Reads the current version, polls GitHub Releases, and
+prints the exact `cd <path> && ./update.sh` recipe. **Never runs
+`update.sh` inline** — the `mem` binary lives in the same `bun link`
+process tree as the running Claude Code session, and rebuilding
+mid-session can corrupt in-flight hook invocations. The safe
+sequence is: exit Claude Code → `./update.sh` → restart.

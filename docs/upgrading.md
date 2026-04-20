@@ -98,6 +98,65 @@ mem init
 Then re-run `./install.sh` to refresh hooks and slash commands — it's
 idempotent.
 
+## v0.7.22 Migration Notes
+
+Purely additive hardening — no schema changes, no user action required.
+
+### Full version in `mem --help` and `mem stats`
+
+`DISPLAY_NAME` in `src/version.ts` was truncating the version to
+`major.minor` (showing "Recall 0.7" for any 0.7.x install). With
+meaningful patch cadence (0.7.11 → 0.7.2 → 0.7.21 → 0.7.22), the
+truncation hid which patch was actually running and made triage
+harder. `mem --help` and `mem stats` now show the full `X.Y.Z`.
+
+### Post-link symlink verification
+
+`recall_link_global` (new in `lib/install-lib.sh`) runs `bun link` →
+**verifies** that `~/.bun/bin/mem` and `mem-mcp` exist, are symlinks,
+and resolve to readable files → falls back to `npm link` on failure.
+`install.sh` Step 4 and `update.sh` `step_link_global` both delegate
+to it. Catches the silent-no-op case where `bun link` exits 0 without
+refreshing the bin symlinks, which was the root cause of the "I ran
+`./update.sh` and then `mem` wasn't executable" class of issue.
+
+## v0.7.21 Migration Notes
+
+Purely additive — no schema changes.
+
+### `update.sh` now re-runs `bun link` after rebuild
+
+v0.7.2's `update.sh` ran `bun install && bun run build` but never
+touched the global symlinks in `~/.bun/bin/`. If a prior `bun unlink`,
+`bun upgrade`, or homedir prune had removed them, rebuild didn't
+restore them — and the MCP server entry in `settings.json` (which
+points at `/Users/$USER/.bun/bin/mem-mcp`) failed silently on the
+next Claude Code / OpenCode / Pi restart. Especially insidious
+because a long-running `mem-mcp` process holds the deleted inode
+alive: the current session works, but the next restart drops the
+inode and MCP breaks with no diagnostic.
+
+v0.7.21 runs `step_link_global` between build and migrate. No user
+action needed — next `./update.sh` run self-heals.
+
+## v0.7.2 Migration Notes
+
+Additive — no schema changes. Introduces the shipping `uninstall.sh`
+and `update.sh` and the shared `lib/install-lib.sh` library.
+`install.sh` was refactored (1078 → 225 lines) to source the shared
+lib; external behavior is identical. See
+[architecture.md](architecture.md#lifecycle-scripts-v072) for the
+lifecycle-script anatomy and
+[`CHANGELOG.md`](../CHANGELOG.md#072--2026-04-19--install-lifecycle)
+for the full release notes.
+
+## v0.7.11 Migration Notes
+
+Hotfix — no user action required. `initDb()` now runs `applyMigrations`
+before `CREATE_INDEXES`, which fixes `install.sh` crashing for
+anyone upgrading from a 0.6.x database that still had
+`PRAGMA user_version = 7`.
+
 ## v0.7.0 Migration Notes
 
 ### Schema changes (migration 7 → 8)
