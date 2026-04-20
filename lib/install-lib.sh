@@ -781,3 +781,97 @@ recall_copy_runtime_files() {
     log_success "Installed recall: slash commands to $commands_dest"
   fi
 }
+
+# ── Global link verification ─────────────────────────────────────────────────
+#
+# Confirm that `bun link` (or `npm link`) actually created the bin-level
+# symlinks we need: ~/.bun/bin/mem and ~/.bun/bin/mem-mcp, each pointing at
+# a target file that exists and is readable.
+#
+# 0.7.22 hardening: `bun link` without args REGISTERS the package globally and
+# SHOULD create bin symlinks for package.json's `bin` entries, but if that
+# symlink step silently no-ops (e.g., a race with an in-use file, an edge
+# case in bun's linking semantics, or the bin dir being non-writable at the
+# moment of the call), install/update would report "[OK] Re-linked" while
+# the bin dir stayed stale. This function catches that failure mode.
+#
+# Returns 0 if both symlinks exist and resolve to readable targets; non-zero
+# otherwise. Prints a diagnostic block on failure.
+recall_verify_global_link() {
+  local bun_bin_dir="${HOME}/.bun/bin"
+  local mem_link="$bun_bin_dir/mem"
+  local mcp_link="$bun_bin_dir/mem-mcp"
+  local failed=0
+
+  _recall_check_one_link() {
+    local link="$1"
+    local name="$2"
+    if [[ ! -L "$link" ]]; then
+      log_error "Missing symlink: $link (expected: $name)"
+      failed=1
+      return 1
+    fi
+    local target
+    target="$(readlink -f "$link" 2>/dev/null || readlink "$link" 2>/dev/null)"
+    if [[ -z "$target" ]] || [[ ! -r "$target" ]]; then
+      log_error "Dangling symlink: $link → ${target:-<unresolved>}"
+      failed=1
+      return 1
+    fi
+    return 0
+  }
+
+  _recall_check_one_link "$mem_link" "mem" || true
+  _recall_check_one_link "$mcp_link" "mem-mcp" || true
+
+  if [[ $failed -ne 0 ]]; then
+    echo ""
+    log_error "Global link verification failed."
+    log_error "Expected both of these symlinks to resolve to built dist/ files:"
+    log_error "  $mem_link"
+    log_error "  $mcp_link"
+    log_error ""
+    log_error "Current ~/.bun/bin listing for mem*:"
+    ls -la "$bun_bin_dir"/mem* 2>&1 | sed 's/^/  /' || true
+    return 1
+  fi
+  return 0
+}
+
+# Re-link the global `mem` and `mem-mcp` binaries with verification.
+#
+# Flow: bun link → verify → (on failure) npm link → verify → (on failure)
+# exit 1 with diagnostic. Used by both install.sh Step 4 and update.sh
+# step_link_global for consistent behavior.
+recall_link_global() {
+  log_info "Linking globally (bun link)..."
+  if bun link 2>&1 | grep -v '^$' | sed 's/^/  /'; then
+    if recall_verify_global_link; then
+      log_success "Linked: mem and mem-mcp verified"
+      return 0
+    fi
+    log_warn "bun link reported success but bin symlinks are missing/stale."
+  else
+    log_warn "bun link exited non-zero."
+  fi
+
+  log_warn "Falling back to npm link..."
+  local npm_link_ok=false
+  if [[ "$RECALL_OS" == "linux" ]]; then
+    sudo npm link && npm_link_ok=true
+  else
+    npm link && npm_link_ok=true
+  fi
+
+  if [[ "$npm_link_ok" == "true" ]] && recall_verify_global_link; then
+    log_success "Linked via npm: mem and mem-mcp verified"
+    return 0
+  fi
+
+  log_error "Failed to establish working global link (bun + npm both declined)."
+  [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
+  log_error "Recovery: exit Claude Code / OpenCode / Pi, then run:"
+  log_error "  cd $(pwd) && bun install && bun run build && bun link"
+  log_error "  ls -la ~/.bun/bin/mem ~/.bun/bin/mem-mcp"
+  return 1
+}
