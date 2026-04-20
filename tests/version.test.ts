@@ -13,12 +13,15 @@ describe("VERSION", () => {
 });
 
 describe("DISPLAY_NAME", () => {
-	test('starts with "Recall"', () => {
-		expect(DISPLAY_NAME.startsWith("Recall")).toBe(true);
+	test('starts with "Recall "', () => {
+		expect(DISPLAY_NAME.startsWith("Recall ")).toBe(true);
 	});
 
-	test("contains the major.minor version derived from VERSION", () => {
-		const majorMinor = VERSION.split(".").slice(0, 2).join(".");
-		expect(DISPLAY_NAME).toContain(majorMinor);
+	test("contains the full version derived from VERSION", () => {
+		// 0.7.22 regression: DISPLAY_NAME was truncating to major.minor
+		// ("Recall 0.7"), which hid patch-level state in `mem --help`
+		// and `mem stats`. Must be the full X.Y.Z now.
+		expect(DISPLAY_NAME).toBe(`Recall ${VERSION}`);
+		expect(DISPLAY_NAME).toContain(VERSION);
 	});
 });

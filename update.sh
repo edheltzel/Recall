@@ -261,30 +261,18 @@ step_install_and_build() {
 #
 # Mirrors install.sh Step 4: bun link, npm link fallback, warn on
 # macOS if both fail.
+# Delegates to recall_link_global from lib/install-lib.sh, which does
+# bun link → verify bin symlinks → npm link fallback → verify again →
+# fail loudly with diagnostic. The verification step (added in 0.7.22)
+# catches the silent-no-op case where bun link exits 0 but doesn't
+# actually refresh ~/.bun/bin/mem{,-mcp}.
 step_link_global() {
-  log_info "Re-linking globally (bun link)..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: bun link"
+    echo "  [dry-run] would: bun link (+ verify ~/.bun/bin/mem, mem-mcp)"
     return
   fi
 
-  if bun link 2>/dev/null; then
-    log_success "Re-linked: mem and mem-mcp"
-    return
-  fi
-
-  log_warn "bun link failed, trying npm link..."
-  local npm_link_ok=false
-  if [[ "$RECALL_OS" == "linux" ]]; then
-    sudo npm link && npm_link_ok=true
-  else
-    npm link && npm_link_ok=true
-  fi
-  if [[ "$npm_link_ok" != "true" ]]; then
-    log_error "Failed to re-link globally (bun + npm both declined)."
-    [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
-    log_error "Rebuild succeeded but mem/mem-mcp symlinks in ~/.bun/bin are"
-    log_error "missing or stale. Re-run ./install.sh to repair."
+  if ! recall_link_global; then
     exit 1
   fi
 }
