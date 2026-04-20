@@ -13,6 +13,54 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.7.21] — 2026-04-20 — "painless lifecycle"
+
+Same-day follow-up to 0.7.2. Closes the last gap in the three-script
+lifecycle goal — _install, update, uninstall should all be painless
+and self-healing_. This is the newest stable release; `update.sh --check`
+and `/recall:update` should treat it as latest.
+
+### Fixed
+
+- **`update.sh` now re-runs `bun link` after rebuild.** The 0.7.2
+  `step_install_and_build` ran `bun install && bun run build` but
+  never touched the global symlinks in `~/.bun/bin/`. If a previous
+  `bun unlink`, `bun upgrade`, or homedir prune had removed the
+  symlinks, rebuild did not restore them. Symptom: `mem` and
+  `mem-mcp` vanished from PATH; the `mcpServers["recall-memory"]`
+  entry in `settings.json` (which points at
+  `/Users/$USER/.bun/bin/mem-mcp`) failed silently on the next Claude
+  Code / OpenCode / Pi restart. A long-running MCP process could mask
+  the failure because Unix keeps deleted-but-open inodes alive — the
+  next restart dropped the inode and MCP broke with no diagnostic.
+
+  `update.sh` now runs `step_link_global` between `step_install_and_build`
+  and `step_migrate`, mirroring `install.sh` Step 4: `bun link`, with
+  `npm link` (`sudo npm link` on Linux) as fallback. Aborts with a
+  clear "re-run ./install.sh to repair" message if both fail.
+
+### Coverage audit — all three scripts now handle link state
+
+| Script | Link action | Location |
+|---|---|---|
+| `install.sh` | `bun link` → `npm link` fallback | Step 4 (unchanged) |
+| `update.sh` | `bun link` → `npm link` fallback | NEW `step_link_global` |
+| `uninstall.sh` | `bun unlink` → `npm unlink -g recall-memory` fallback | `run_bun_unlink` (unchanged) |
+
+### Tests
+
+- `tests/install/update.test.ts` — regression assertion on the
+  `--dry-run` output (expects `would: bun link`).
+- All 317 existing tests still pass.
+
+### Note on version ordering
+
+`0.7.21 > 0.7.2` in semver. This release **does** supersede 0.7.2 and
+should be marked Latest on GitHub — every 0.7.2 install is one
+missing-symlink away from silently losing MCP on restart. Users on
+0.7.11 should upgrade to 0.7.21 directly (0.7.11 → 0.7.21 via
+`./update.sh` works end-to-end with this release).
+
 ## [0.7.2] — 2026-04-19 — "install lifecycle"
 
 The lifecycle release originally scoped against 0.7.1. Slot kept open

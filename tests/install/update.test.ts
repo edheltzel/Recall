@@ -68,5 +68,10 @@ describe('update.sh', () => {
     expect(r.stdout).toMatch(/would: git pull/);
     expect(r.stdout).toMatch(/would: bun install/);
     expect(r.stdout).toMatch(/would: bun run build/);
+    // Regression for 0.7.21: update.sh was missing `bun link` after
+    // rebuild. Without it, a stale or vanished ~/.bun/bin/mem-mcp
+    // symlink is never repaired and MCP fails silently on next
+    // Claude Code restart.
+    expect(r.stdout).toMatch(/would: bun link/);
   });
 });
