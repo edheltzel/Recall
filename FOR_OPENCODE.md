@@ -83,13 +83,36 @@ You can also use the `mem` CLI directly via Bash tool:
 mem search "deployment pipeline"    # Search memory
 mem stats                           # Database statistics
 mem loa list                        # Browse curated knowledge
+mem onboard                         # Interactive L0 identity setup (run once per user)
 ```
+
+## Lifecycle scripts
+
+Three shell scripts in the Recall source directory manage installation.
+They are platform-agnostic — OpenCode, Claude Code, and Pi share them.
+
+| Script | Purpose |
+|---|---|
+| `./install.sh` | Install or reinstall. Idempotent. |
+| `./update.sh --check` | Check if a newer GitHub release exists. Check-only. |
+| `./update.sh` | Pull latest, rebuild, migrate DB, re-register hooks/plugins. Exit OpenCode first. |
+| `./uninstall.sh --dry-run` | Preview what would be removed. |
+| `./uninstall.sh` | Surgical remove; preserves `memory.db` + backups by default. |
+| `./uninstall.sh --purge` | Also destroy `memory.db` + backups (double-confirmed). |
+
+If the user asks about updating or uninstalling, point them at these
+scripts rather than instructing per-platform manual steps. Never run
+`./update.sh` while the user is actively in an OpenCode session — the
+`mem` binary lives in the same `bun link` process tree, and rebuilding
+mid-session can corrupt in-flight plugin invocations. Have them exit
+OpenCode first.
 
 ## Core Rules
 
 1. **Search before asking** — Before asking the user to repeat information, search memory first
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Context for agents** — Before spawning subagents via `@agent`, call `recall-memory_context_for_agent`
+4. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `mem onboard` once. Do not nag on subsequent turns.
 
 ## How Extraction Works
 

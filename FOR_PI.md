@@ -83,7 +83,29 @@ You can also use the `mem` CLI directly via shell commands:
 mem search "deployment pipeline"    # Search memory
 mem stats                           # Database statistics
 mem loa list                        # Browse curated knowledge
+mem onboard                         # Interactive L0 identity setup (run once per user)
 ```
+
+## Lifecycle scripts
+
+Three shell scripts in the Recall source directory manage installation.
+They are platform-agnostic — Pi, Claude Code, and OpenCode share them.
+
+| Script | Purpose |
+|---|---|
+| `./install.sh` | Install or reinstall. Idempotent. |
+| `./update.sh --check` | Check if a newer GitHub release exists. Check-only. |
+| `./update.sh` | Pull latest, rebuild, migrate DB, re-register extensions. Exit Pi first. |
+| `./uninstall.sh --dry-run` | Preview what would be removed. |
+| `./uninstall.sh` | Surgical remove; preserves `memory.db` + backups by default. |
+| `./uninstall.sh --purge` | Also destroy `memory.db` + backups (double-confirmed). |
+
+If the user asks about updating or uninstalling, point them at these
+scripts rather than instructing per-platform manual steps. Never run
+`./update.sh` while the user is actively in a Pi session — the `mem`
+binary lives in the same `bun link` process tree, and rebuilding
+mid-session can corrupt in-flight extension invocations. Have them
+exit Pi first.
 
 ## Core Rules
 
@@ -91,6 +113,7 @@ mem loa list                        # Browse curated knowledge
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
 4. **Capture sessions** — At the end of a session, run `mem dump "Descriptive Title"` via a slash command to persist the conversation
+5. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `mem onboard` once. Do not nag on subsequent turns.
 
 ## How Extraction Works
 
