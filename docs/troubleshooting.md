@@ -70,6 +70,45 @@ If Fabric isn't installed, Recall falls back to an inline extraction prompt (low
 
 The MCP server is registered in `~/.claude/settings.json` under `mcpServers` (user scope).
 
+### "MCP worked yesterday but broke after I restarted Claude Code"
+
+The MCP entry in `settings.json` is an absolute path to
+`~/.claude/install/global/node_modules/recall/dist/mcp-server.js`
+(via a symlink at `~/.bun/bin/mem-mcp`). If the symlink is gone or
+stale, the running `mem-mcp` process keeps the deleted inode open —
+so the current session works, but the next Claude Code restart can't
+spawn a fresh MCP server and it silently fails.
+
+Common causes:
+- `bun unlink`, `bun upgrade`, or `npm` clean-up removed the symlink
+- An older `./update.sh` (pre-0.7.21) didn't re-run `bun link` after
+  rebuild, leaving the symlink stale after `bun install` pruning
+- `./update.sh` was run from a git worktree instead of the main
+  checkout, redirecting the global `recall` registry to the worktree
+  — which then vanished when the worktree was removed
+
+**Repair:**
+
+```bash
+cd /path/to/Recall       # the MAIN checkout, not a worktree
+bun install && bun run build && bun link
+ls -la ~/.bun/bin/mem ~/.bun/bin/mem-mcp    # verify symlinks exist
+# Restart Claude Code
+```
+
+Or, from a shell:
+
+```bash
+cd /path/to/Recall
+./update.sh --force --no-confirm
+```
+
+Starting in **0.7.21**, `./update.sh` runs `bun link` after every
+rebuild. Starting in **0.7.22**, it also *verifies* that the bin
+symlinks resolve to readable files after linking — so a silent
+`bun link` no-op now surfaces with a diagnostic instead of reporting
+"[OK] Re-linked" while the bin dir stayed stale.
+
 ### "Session extraction not running"
 
 1. Run diagnostics: `mem doctor`
@@ -95,15 +134,40 @@ Set `OLLAMA_URL` environment variable if Ollama runs on a different host (defaul
 
 ### "Command not found: mem"
 
-The `mem` CLI is linked globally via `bun link`. If the link broke:
+The `mem` CLI is linked globally via `bun link`, producing a symlink
+at `~/.bun/bin/mem` → the Recall checkout's `dist/index.js`. If that
+symlink is missing or stale:
 
 ```bash
-cd /path/to/Recall
-bun link
+cd /path/to/Recall       # the MAIN checkout, not a worktree
+bun install && bun run build && bun link
+ls -la ~/.bun/bin/mem    # verify
+mem --version            # should print X.Y.Z (e.g. "0.7.22")
 ```
 
-Or check that bun's global bin directory is on your PATH:
+If `mem --version` still fails, confirm `~/.bun/bin` is on your PATH:
 
 ```bash
 echo $PATH | tr ':' '\n' | grep bun
 ```
+
+Add to your shell init if missing:
+
+```bash
+# fish
+set -U fish_user_paths $HOME/.bun/bin $fish_user_paths
+
+# bash/zsh
+export PATH="$HOME/.bun/bin:$PATH"
+```
+
+**Recovery via update.sh** (0.7.22+ verifies the symlink
+post-rebuild and fails loudly if linking silently no-ops):
+
+```bash
+cd /path/to/Recall
+./update.sh --force --no-confirm
+```
+
+See also: ["MCP worked yesterday but broke after I restarted Claude Code"](#mcp-worked-yesterday-but-broke-after-i-restarted-claude-code)
+for the `mem-mcp` counterpart — same root cause, same repair path.
