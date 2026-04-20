@@ -74,21 +74,15 @@ do_install() {
   echo ""
 
   log_info "Step 4: Linking globally..."
-  if ! bun link; then
-    log_warn "bun link failed, trying npm link..."
-    local npm_link_ok=false
-    if [[ "$RECALL_OS" == "linux" ]]; then
-      sudo npm link && npm_link_ok=true
-    else
-      npm link && npm_link_ok=true
-    fi
-    if [[ "$npm_link_ok" != "true" ]]; then
-      log_error "Failed to link globally"
-      [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
-      exit 1
-    fi
+  # recall_link_global (in lib/install-lib.sh) does bun link → verify
+  # bin symlinks → npm link fallback → verify again. 0.7.22 hardening:
+  # the verify step catches the silent-no-op case where `bun link`
+  # exits 0 but doesn't actually refresh ~/.bun/bin/mem{,-mcp}, which
+  # was the root cause of the "mem not on PATH after install" class
+  # of failures.
+  if ! recall_link_global; then
+    exit 1
   fi
-  log_success "Linked: mem and mem-mcp now available globally"
   echo ""
 
   log_info "Step 5: Initializing database..."

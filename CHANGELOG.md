@@ -13,6 +13,63 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.7.22] — 2026-04-20 — "display + link verification"
+
+Two fixes. Minor, but both were real papercuts.
+
+### Fixed
+
+- **`mem --help` and `mem stats` showed "Recall 0.7"** instead of the
+  actual patch version. `src/version.ts` was truncating `DISPLAY_NAME`
+  to `major.minor`. With the 0.7.11 → 0.7.2 → 0.7.21 → 0.7.22
+  patch-level cadence, truncation hid real state and made install
+  triage harder. `DISPLAY_NAME` now contains the full `X.Y.Z` version.
+  `tests/version.test.ts` updated to assert equality, not substring.
+- **`bun link` silent no-op was undetectable.** Prior install/update
+  ran `bun link 2>/dev/null` and trusted the exit code. In edge
+  cases `bun link` can exit 0 while failing to refresh
+  `~/.bun/bin/mem` / `mem-mcp` (e.g., race with an in-use file,
+  a bin dir timing glitch, a bun quirk). The script would report
+  "[OK] Re-linked" while the bin dir stayed stale — and MCP would
+  silently break on the next Claude Code restart. Root cause of the
+  "I ran `./update.sh` and then `mem` wasn't executable" class of
+  issue.
+
+### Added
+
+- **`recall_verify_global_link`** in `lib/install-lib.sh`. Confirms
+  both `~/.bun/bin/mem` and `~/.bun/bin/mem-mcp` exist, are symlinks,
+  and resolve to readable dist files. Returns non-zero with a
+  diagnostic `ls -la` dump of `~/.bun/bin/mem*` on failure.
+- **`recall_link_global`** in `lib/install-lib.sh`. Shared hardened
+  link flow used by both `install.sh` Step 4 and `update.sh`
+  `step_link_global`. Path: bun link → verify → (on failure) npm
+  link → verify → (on failure) exit 1 with a recovery recipe
+  (`cd <path> && bun install && bun run build && bun link`).
+  The verify step is what catches the silent-no-op.
+
+### Changed
+
+- `install.sh` Step 4 replaces its inline link block with a call to
+  `recall_link_global`. Behavior is strictly additive — every case
+  the old block handled is still handled, and the silent-no-op case
+  now surfaces instead of being swallowed.
+- `update.sh` `step_link_global` same — delegates to `recall_link_global`.
+  `--dry-run` now narrates `would: bun link (+ verify ~/.bun/bin/mem, mem-mcp)`.
+
+### Tests
+
+- `tests/version.test.ts` — asserts `DISPLAY_NAME === \`Recall \${VERSION}\``.
+- 317 tests pass. No new test files — the shell-level verification is
+  exercised implicitly by every install/update flow.
+
+### Note on 0.7.22 vs 0.7.21
+
+`0.7.22 > 0.7.21` in semver. This release supersedes 0.7.21 and
+should be marked Latest on GitHub. Users on 0.7.21 should update to
+0.7.22 so future `./update.sh` runs benefit from the hardened link
+verification.
+
 ## [0.7.21] — 2026-04-20 — "painless lifecycle"
 
 Same-day follow-up to 0.7.2. Closes the last gap in the three-script
