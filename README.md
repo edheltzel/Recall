@@ -192,6 +192,18 @@ Recall operates as three integrated layers — data flows in automatically, gets
 - **Library of Alexandria** — curated knowledge entries with Fabric extract_wisdom analysis
 - **Breadcrumbs** — quick context notes for future sessions
 
+## Measured wake-up efficiency
+
+Suite B measures the byte cost of session-start memory injection. Latest tracked run ([2026-04-18, scope `atlas-recall`](benchmarks/results/2026-04-18T20-13-59-suite-B.md)):
+
+| Variant | Chars | Tokens (est, 4 ch/tok) |
+|---|---:|---:|
+| **v2 tiered SessionRecall** (L0 + L1 top 12) | **5,306** | **~1,327** |
+| v1 flat-blob SessionRecall (simulated) | 8,020 | ~2,005 |
+| CLAUDE.md static baseline | 8,760 | ~2,190 |
+
+v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `mem benchmark run B`. Methodology and caveats live in [`benchmarks/README.md`](benchmarks/README.md).
+
 ## CLI at a Glance
 
 ```bash
