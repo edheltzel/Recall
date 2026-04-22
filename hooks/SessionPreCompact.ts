@@ -33,6 +33,7 @@
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
+import { encodeProjectDir } from './lib/path-encoding';
 
 // ─── Path resolution (call-time, not load-time) ─────────────────────
 // Paths are resolved on every call rather than at module load so tests can
@@ -166,12 +167,8 @@ function releaseExtractLock(convPath: string): void {
 }
 
 // ─── Conversation finder ────────────────────────────────────────────
-// Mirrors SessionExtract.findCurrentConversation — encoding rules must stay
-// in sync. The hook is self-contained per repo convention so we duplicate
-// rather than import.
 export function findCurrentConversation(cwd: string): string | null {
-  const encodedPath = '-' + cwd.replace(/^\//, '').replace(/[/_]/g, '-');
-  const projectDir = join(getProjectsDir(), encodedPath);
+  const projectDir = join(getProjectsDir(), encodeProjectDir(cwd));
   if (!existsSync(projectDir)) return null;
 
   try {
