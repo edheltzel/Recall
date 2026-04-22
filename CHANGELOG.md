@@ -13,6 +13,47 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.7.23] — 2026-04-22 — "worktree & dotfile capture"
+
+A single-character regex miss silently killed session capture for every
+worktree project, every dotfile root, and every iCloud path. Extraction
+logged `NO_CONVERSATION` and nothing was written to the DB. Hooks are now
+aligned with Claude Code's actual project-folder encoding rule.
+
+### Fixed
+
+- **Hooks now match Claude Code's project-folder encoding exactly.**
+  `SessionExtract` and `SessionPreCompact` previously encoded the cwd
+  with `/[\/\_]/g` — only slash and underscore became `-`. Claude Code
+  actually replaces every character outside `[a-zA-Z0-9-]` (dot, space,
+  tilde, plus, Unicode) with `-`. The narrower rule produced folder
+  names that didn't exist under `~/.claude/projects/` for:
+  - any worktree path containing `.claude/worktrees/...`
+  - any dotfile root (`.dotfiles`, `.config/...`)
+  - any project with a dot in its name (`alianza.health`)
+  - any iCloud-style path with spaces, tildes, or Unicode
+  The hook logged `NO_CONVERSATION: <cwd>` and the session was dropped.
+  Observed in `~/.claude/MEMORY/EXTRACT_LOG.txt`: 544 misses across
+  PeptideHub worktrees, `.dotfiles`, `alianza.health`, iCloud
+  FieldNotes, and others. Now recover to real JSONLs.
+
+### Added
+
+- **`hooks/lib/path-encoding.ts`** — single source of truth for
+  `encodeProjectDir(cwd)`. Both hook files import it; avoids future
+  drift between `SessionExtract` and `SessionPreCompact`.
+- **`tests/hooks/path-encoding.test.ts`** — 9 regression cases covering
+  worktree paths, dotfile roots, in-name dots, underscores, plus signs,
+  iCloud spaces+tildes+Unicode, hyphens+digits preservation, and
+  multiple dots.
+
+### Verification
+
+Encoding rule (`[^a-zA-Z0-9-]` → `-`) was confirmed empirically by
+scanning all real folders under `~/.claude/projects/` (88 entries): the
+only characters present are `[a-zA-Z0-9-]`. The broader regex is a
+faithful match, not a guess.
+
 ## [0.7.22] — 2026-04-20 — "display + link verification"
 
 Two fixes. Minor, but both were real papercuts.
