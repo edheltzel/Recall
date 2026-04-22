@@ -31,6 +31,7 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, s
 import { join } from 'path';
 import { execSync, spawn } from 'child_process';
 import { evaluateQuality, shouldSkipExtraction } from './lib/extraction-quality';
+import { encodeProjectDir } from './lib/path-encoding';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
@@ -124,9 +125,7 @@ interface HookInput {
  * Find the most recent conversation file for the current working directory
  */
 function findCurrentConversation(cwd: string): string | null {
-  // Encode the path like Claude Code does (slashes AND underscores become hyphens)
-  const encodedPath = '-' + cwd.replace(/^\//, '').replace(/[\/\_]/g, '-');
-  const projectDir = join(PROJECTS_DIR, encodedPath);
+  const projectDir = join(PROJECTS_DIR, encodeProjectDir(cwd));
 
   if (!existsSync(projectDir)) {
     return null;
