@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "mcp__recall-memory__memory_add"
+      "mcp__recall-memory__memory_add",
+      "Bash(mkdir -p ~/.claude/MEMORY)",
+      "Bash(bun -e ' *)",
+      "Bash(cp ~/.claude/memory.db ~/.claude/memory.db.pre-migration-0.7.1-backup)",
+      "Read(//Users/ed/.claude/**)"
     ]
   }
 }
