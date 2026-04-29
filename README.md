@@ -20,17 +20,12 @@ Claude Code has no memory between sessions. Context is lost. You repeat yourself
 
 Install once, then forget about it. Recall runs silently in the background:
 
-```mermaid
-graph LR
-    A[You Work] --> B[Session Ends]
-    B --> C[Auto-Extract]
-    C --> D[SQLite + FTS5]
-    D --> E[Next Session]
-    E -->|Memory Available| A
-
-    style A fill:#3B82F6,color:#fff
-    style C fill:#10B981,color:#fff
-    style D fill:#F59E0B,color:#fff
+```
+┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
+│ You Work │───▶│ Session Ends │───▶│ Auto-Extract │───▶│ SQLite + FTS5 │───▶│ Next Session │
+└─────▲────┘    └──────────────┘    └──────────────┘    └───────────────┘    └──────┬───────┘
+      │                                                                             │
+      └───────────────────────────── Memory Available ──────────────────────────────┘
 ```
 
 - **Auto-extraction** — sessions are parsed into structured summaries when they end
