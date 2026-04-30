@@ -37,11 +37,12 @@ recall_detect_os
 # ── Main install orchestration ───────────────────────────────────────────────
 
 do_install() {
+  # Best-effort gum install. Honors RECALL_NO_GUM=1; silently falls back to
+  # bash mode on any failure (timeout, network, missing tar/curl, etc.).
+  _try_install_gum
+
   echo ""
-  printf '%b╔══════════════════════════════════════════════════════════╗%b\n' "$YELLOW" "$NC"
-  printf '%b║%b                     Recall Installer                     %b║%b\n' "$YELLOW" "$NC" "$YELLOW" "$NC"
-  printf '%b║%b           Persistent Memory for Coding Agents            %b║%b\n' "$YELLOW" "$NC" "$YELLOW" "$NC"
-  printf '%b╚══════════════════════════════════════════════════════════╝%b\n' "$YELLOW" "$NC"
+  _banner info "Recall Installer" "Persistent Memory for Coding Agents"
   echo ""
 
   log_info "Checking prerequisites..."
@@ -143,9 +144,7 @@ do_install() {
   fi
   echo ""
 
-  printf '%b╔══════════════════════════════════════════════════════════╗%b\n' "$GREEN" "$NC"
-  printf '%b║%b                  Installation Complete                   %b║%b\n' "$GREEN" "$NC" "$GREEN" "$NC"
-  printf '%b╚══════════════════════════════════════════════════════════╝%b\n' "$GREEN" "$NC"
+  _banner success "Installation Complete"
   echo ""
   log_success "Recall installed successfully!"
   echo ""
@@ -201,10 +200,24 @@ help | --help | -h)
   echo "Usage:"
   echo "  ./install.sh                   Install Recall (creates backup first)"
   echo "  ./install.sh --yes | -y        Install non-interactively (configure all detected agents)"
+  echo "  ./install.sh --no-gum          Skip gum auto-install; use bash UX for this run"
   echo "  ./install.sh restore           Restore from most recent backup"
   echo "  ./install.sh restore TIMESTAMP Restore specific backup"
   echo "  ./install.sh list              List available backups"
   echo "  ./install.sh help              Show this help"
+  echo ""
+  echo "Environment:"
+  echo "  RECALL_NO_GUM=1                Permanently disable gum (same as --no-gum)"
+  echo "  NO_COLOR=1                     Disable ANSI colors"
+  echo "  RECALL_VERBOSE=1               Show full output of bun install/build"
+  ;;
+--yes | -y)
+  export NO_CONFIRM=true
+  do_install
+  ;;
+--no-gum)
+  export RECALL_NO_GUM=1
+  do_install
   ;;
 --yes | -y)
   export NO_CONFIRM=true

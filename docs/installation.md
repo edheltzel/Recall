@@ -218,6 +218,9 @@ crontab -e
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used for embeddings (768-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
 | `RECALL_BASE_DIR` | `~/.claude` | Base directory for document imports |
+| `RECALL_NO_GUM` | `0` | Set to `1` to skip the optional [`gum`](https://github.com/charmbracelet/gum) auto-install and use the bash UI for installer/update/uninstall. Same effect as the `--no-gum` flag, but persistent across all runs. |
+| `RECALL_VERBOSE` | `0` | Set to `1` to bypass output capture for `bun install` / `bun run build` (useful when debugging install failures). |
+| `NO_COLOR` | — | Standard; set to `1` to disable ANSI colors across all installer scripts. |
 
 Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`) if you need non-default values. The `MEM_DB_PATH` variable is the most commonly changed — useful if you want to keep the database outside `~/.claude`.
 
