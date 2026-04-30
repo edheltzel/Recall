@@ -38,10 +38,10 @@ recall_detect_os
 
 do_install() {
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                      Recall INSTALLER                      ║"
-  echo "║      RECALL - Persistent Memory for Coding Agents           ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  printf '%b╔══════════════════════════════════════════════════════════╗%b\n' "$YELLOW" "$NC"
+  printf '%b║%b                     Recall Installer                     %b║%b\n' "$YELLOW" "$NC" "$YELLOW" "$NC"
+  printf '%b║%b           Persistent Memory for Coding Agents            %b║%b\n' "$YELLOW" "$NC" "$YELLOW" "$NC"
+  printf '%b╚══════════════════════════════════════════════════════════╝%b\n' "$YELLOW" "$NC"
   echo ""
 
   log_info "Checking prerequisites..."
@@ -52,41 +52,38 @@ do_install() {
   recall_select_platforms
   echo ""
 
-  log_info "Step 1: Creating backup of existing files..."
-  recall_create_backup
-  echo ""
+  # Step counter — 10 always-run steps; +1 each for OpenCode/Pi when detected.
+  STEP_NUM=0
+  STEP_TOTAL=10
+  [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
+  [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
-  log_info "Step 2: Installing dependencies..."
-  if ! bun install; then
-    log_error "Failed to install dependencies"
+  _step "Backup" "Creating backup of existing files"
+  recall_create_backup
+
+  _step "Installing" "Bun dependencies"
+  if ! _run_quiet "bun install" bun install; then
     log_info "Try running: bun install (manually to see errors)"
     exit 1
   fi
-  log_success "Dependencies installed"
-  echo ""
 
-  log_info "Step 3: Building..."
-  if ! bun run build; then
-    log_error "Build failed"
+  _step "Building" "Compiling bundles"
+  if ! _run_quiet "bun run build" bun run build; then
     log_info "Try running: bun run build (manually to see errors)"
     exit 1
   fi
-  log_success "Build complete"
-  echo ""
 
-  log_info "Step 4: Linking globally..."
-  # recall_link_global (in lib/install-lib.sh) does bun link → verify
-  # bin symlinks → npm link fallback → verify again. 0.7.22 hardening:
-  # the verify step catches the silent-no-op case where `bun link`
-  # exits 0 but doesn't actually refresh ~/.bun/bin/mem{,-mcp}, which
-  # was the root cause of the "mem not on PATH after install" class
+  _step "Linking" "Linking mem + mem-mcp globally"
+  # recall_link_global does bun link → verify → npm link fallback → verify.
+  # 0.7.22 hardening: the verify step catches the silent-no-op case where
+  # `bun link` exits 0 but doesn't actually refresh ~/.bun/bin/mem{,-mcp},
+  # which was the root cause of the "mem not on PATH after install" class
   # of failures.
   if ! recall_link_global; then
     exit 1
   fi
-  echo ""
 
-  log_info "Step 5: Initializing database..."
+  _step "Database" "Initializing memory database"
   mkdir -p "$CLAUDE_DIR/MEMORY"
   local mem_bin="$HOME/.bun/bin/mem"
   if [[ ! -x "$mem_bin" ]]; then
@@ -97,24 +94,20 @@ do_install() {
     exit 1
   fi
   "$mem_bin" init
-  log_success "MEMORY directory created at $CLAUDE_DIR/MEMORY"
-  echo ""
+  log_success "MEMORY directory at $CLAUDE_DIR/MEMORY"
 
-  log_info "Step 6: Configuring MCP server..."
+  _step "MCP" "Configuring MCP server"
   recall_configure_mcp
-  echo ""
 
-  log_info "Step 7: Setting up session extraction hooks..."
+  _step "Hooks" "Installing session extraction hooks"
   _recall_copy_hook_files
   recall_register_all_hooks
-  echo ""
 
-  log_info "Step 8: Installing Claude guide..."
+  _step "Guide" "Installing Recall guide"
   cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/Recall_GUIDE.md"
-  log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
-  echo ""
+  log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
 
-  log_info "Step 8b: Installing slash commands..."
+  _step "Commands" "Installing slash commands"
   local commands_src="$(pwd)/commands/Recall"
   local commands_dest="$CLAUDE_DIR/commands/Recall"
   local commands_legacy="$CLAUDE_DIR/commands/recall"
@@ -129,35 +122,30 @@ do_install() {
   else
     log_warn "Slash commands directory not found at $commands_src — skipping"
   fi
-  echo ""
 
-  log_info "Step 9: Configuring CLAUDE.md..."
+  _step "CLAUDE.md" "Configuring CLAUDE.md"
   recall_configure_claude_md
-  echo ""
 
   if [[ "$OPENCODE_DETECTED" == "true" ]]; then
-    echo ""
-    log_info "Step 10: Configuring OpenCode integration..."
+    _step "OpenCode" "Configuring OpenCode integration"
     recall_configure_opencode_mcp
     recall_install_opencode_plugins
     recall_install_opencode_agent
     recall_install_opencode_guide
-    echo ""
   fi
 
   if [[ "$PI_DETECTED" == "true" ]]; then
-    echo ""
-    log_info "Step 11: Configuring Pi integration..."
+    _step "Pi" "Configuring Pi integration"
     recall_install_pi_adapter
     recall_configure_pi_mcp
     recall_install_pi_extensions
     recall_install_pi_guide
-    echo ""
   fi
+  echo ""
 
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                  INSTALLATION COMPLETE                   ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  printf '%b╔══════════════════════════════════════════════════════════╗%b\n' "$GREEN" "$NC"
+  printf '%b║%b                  Installation Complete                   %b║%b\n' "$GREEN" "$NC" "$GREEN" "$NC"
+  printf '%b╚══════════════════════════════════════════════════════════╝%b\n' "$GREEN" "$NC"
   echo ""
   log_success "Recall installed successfully!"
   echo ""

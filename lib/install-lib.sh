@@ -23,12 +23,34 @@
 : "${TIMESTAMP:=$(date +%Y%m%d_%H%M%S)}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
 
-# Colors (only defined if not already set)
-: "${RED:=$'\033[0;31m'}"
-: "${GREEN:=$'\033[0;32m'}"
-: "${YELLOW:=$'\033[1;33m'}"
-: "${BLUE:=$'\033[0;34m'}"
-: "${NC:=$'\033[0m'}"
+# Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
+# output stay clean). Tests can override by exporting RED/GREEN/etc. before
+# sourcing — those overrides win because of the := default operator.
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+  : "${RED:=$'\033[0;31m'}"
+  : "${GREEN:=$'\033[0;32m'}"
+  : "${YELLOW:=$'\033[1;33m'}"
+  : "${BLUE:=$'\033[0;34m'}"
+  : "${CYAN:=$'\033[0;36m'}"
+  : "${MAGENTA:=$'\033[0;35m'}"
+  : "${BOLD:=$'\033[1m'}"
+  : "${DIM:=$'\033[2m'}"
+  : "${NC:=$'\033[0m'}"
+else
+  : "${RED:=}"
+  : "${GREEN:=}"
+  : "${YELLOW:=}"
+  : "${BLUE:=}"
+  : "${CYAN:=}"
+  : "${MAGENTA:=}"
+  : "${BOLD:=}"
+  : "${DIM:=}"
+  : "${NC:=}"
+fi
+
+# Step counter — set STEP_TOTAL up front in install.sh, _step() increments STEP_NUM
+: "${STEP_NUM:=0}"
+: "${STEP_TOTAL:=0}"
 
 # OS detection (populated by recall_detect_os; can be overridden in tests)
 : "${RECALL_OS:=}"
@@ -62,18 +84,94 @@ if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
 fi
 
 # ── Log helpers (respect pre-existing definitions) ───────────────────────────
+#
+# Glyph-prefixed status lines, inspired by Starship's installer. Each level
+# has a distinct character + color; the prefix is single-glyph so the rest of
+# the line reads as natural prose.
+#
+#   →  info       (blue)    routine progress
+#   ✓  success    (green)   step completed
+#   ⚠  warn       (yellow)  non-fatal degradation
+#   ✗  error      (red)     fatal; exit imminent
+#
 
 if ! declare -F log_info >/dev/null 2>&1; then
-  log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+  log_info() { printf '%b→%b %s\n' "$BLUE" "$NC" "$1"; }
 fi
 if ! declare -F log_success >/dev/null 2>&1; then
-  log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+  log_success() { printf '%b✓%b %s\n' "$GREEN" "$NC" "$1"; }
 fi
 if ! declare -F log_warn >/dev/null 2>&1; then
-  log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+  log_warn() { printf '%b⚠%b %s\n' "$YELLOW" "$NC" "$1"; }
 fi
 if ! declare -F log_error >/dev/null 2>&1; then
-  log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+  log_error() { printf '%b✗%b %s\n' "$RED" "$NC" "$1" >&2; }
+fi
+
+# _step "verb" "detail" — render a numbered step with right-aligned 12-char
+# verb in bold green and a detail string. Increments STEP_NUM. Volta-inspired.
+#
+#   [3/9]   Installing  bun dependencies
+#
+if ! declare -F _step >/dev/null 2>&1; then
+  _step() {
+    STEP_NUM=$((STEP_NUM + 1))
+    local verb="${1:-}"
+    local detail="${2:-}"
+    if [[ "$STEP_TOTAL" -gt 0 ]]; then
+      printf '\n%b[%d/%d]%b %b%12s%b  %s\n' \
+        "$DIM" "$STEP_NUM" "$STEP_TOTAL" "$NC" \
+        "${BOLD}${GREEN}" "$verb" "$NC" "$detail"
+    else
+      printf '\n%b%12s%b  %s\n' "${BOLD}${GREEN}" "$verb" "$NC" "$detail"
+    fi
+  }
+fi
+
+# ── Captured-output runner ──────────────────────────────────────────────────
+#
+# _run_quiet "label" command [args...] — runs command with stdout+stderr
+# redirected to RECALL_INSTALL_LOG (default /tmp/recall-install.log). Renders
+# a single status line that flips from "→ label..." to "✓ label (Ns)" on
+# success or "✗ label (exit N)" + the last 10 log lines on failure.
+#
+# Set RECALL_VERBOSE=1 to bypass capture entirely (stdout passthrough).
+#
+: "${RECALL_INSTALL_LOG:=/tmp/recall-install.log}"
+
+if ! declare -F _run_quiet >/dev/null 2>&1; then
+  _run_quiet() {
+    local label="${1:-running}"
+    shift
+    local logfile="$RECALL_INSTALL_LOG"
+
+    if [[ "${RECALL_VERBOSE:-0}" == "1" ]]; then
+      printf '  %b→%b  %s\n' "$BLUE" "$NC" "$label"
+      "$@"
+      return $?
+    fi
+
+    : >"$logfile" || logfile=/dev/null
+    local start_ts
+    start_ts=$(date +%s)
+    printf '  %b→%b  %s' "$BLUE" "$NC" "$label"
+
+    if "$@" >>"$logfile" 2>&1; then
+      local elapsed=$(( $(date +%s) - start_ts ))
+      printf '\r  %b✓%b  %s %b(%ds)%b\n' "$GREEN" "$NC" "$label" "$DIM" "$elapsed" "$NC"
+      return 0
+    else
+      local rc=$?
+      local elapsed=$(( $(date +%s) - start_ts ))
+      printf '\r  %b✗%b  %s %b(exit %d, %ds)%b\n' "$RED" "$NC" "$label" "$RED" "$rc" "$elapsed" "$NC"
+      if [[ -s "$logfile" ]]; then
+        echo ""
+        printf '  %blast 10 lines of %s:%b\n' "$DIM" "$logfile" "$NC"
+        tail -n 10 "$logfile" | sed 's/^/    /'
+      fi
+      return "$rc"
+    fi
+  }
 fi
 
 # ── OS detection ─────────────────────────────────────────────────────────────
@@ -317,9 +415,9 @@ recall_do_restore() {
   fi
 
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                       Recall RESTORE                       ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  printf '%b╔══════════════════════════════════════════════════════════╗%b\n' "$BLUE" "$NC"
+  printf '%b║%b                      Recall Restore                      %b║%b\n' "$BLUE" "$NC" "$BLUE" "$NC"
+  printf '%b╚══════════════════════════════════════════════════════════╝%b\n' "$BLUE" "$NC"
   echo ""
   log_info "Restoring from backup: $target_backup"
   echo ""
