@@ -13,6 +13,111 @@ releases are called out in the notes below.
 
 _No unreleased changes yet._
 
+## [0.8.0] — 2026-04-30 — "installer aesthetic overhaul"
+
+A polish pass on the install / update / uninstall lifecycle. The bash UX
+now uses glyph-prefixed status lines, fixed-alignment banners, and a
+captured-output mode that hides verbose `bun install` output unless the
+build actually fails. When `gum` ([Charmbracelet](https://github.com/charmbracelet/gum))
+is installed (or auto-installable), the same call sites switch to
+animated spinners, multi-select pickers, and styled bordered panels —
+falling back gracefully to bash mode whenever gum isn't available.
+
+The slash-command namespace was also capitalized to `Recall:*` (was
+`recall:*`) to match the product name in Claude Code's slash-command
+picker. Existing installs migrate automatically: every install / update
+script now removes the legacy lowercase `~/.claude/commands/recall/`
+directory if present.
+
+### Added
+
+- **`gum` auto-install layer** — `_detect_gum()` checks for gum ≥ 0.14;
+  `_try_install_gum()` runs a 30-second-bounded fallback chain:
+  `brew install gum` (macOS) → GitHub release tarball with SHA256
+  verification → `~/.local/bin`. Any failure silently flips
+  `HAS_GUM=false` so the install never blocks. `--no-gum` flag and
+  `RECALL_NO_GUM=1` env var force the bash path.
+- **UX wrapper functions** in `lib/install-lib.sh`: `_confirm`,
+  `_choose`, `_spin`, `_style`, `_banner`, `_panel`. Each branches on
+  `$HAS_GUM` so call sites stay agnostic.
+- **Pre-flight summary panel** — before any state changes, shows target
+  dir, platforms to configure, backup destination, and total step
+  count. `_confirm` to proceed; skipped on `--yes`.
+- **Post-flight self-check** — after install, runs `mem stats` and
+  `mem doctor` and surfaces a `✓` / `⚠` summary line inline so broken
+  installs are caught immediately.
+- **Structured error panel** — when the EXIT trap fires, renders a
+  bordered panel with the failing step name (auto-tracked via
+  `CURRENT_STEP`), last 10 lines of the captured log, exact restore
+  command, and a link to `docs/troubleshooting.md`. User-cancel cleanly
+  disarms the trap so cancellation doesn't trigger an error panel.
+- **Interactive multi-select platform picker** — three sequential Y/n
+  prompts collapse into a single `gum choose --no-limit` (or a per-
+  option Y/n loop in bash mode).
+- **`--yes` / `-y`** non-interactive flag on `install.sh`. **`--no-gum`**
+  flag on `install.sh`, `update.sh`, and `uninstall.sh`. Help text
+  refreshed across all three scripts to document new flags + env vars.
+
+### Changed
+
+- **Slash-command namespace** — `commands/recall/` → `commands/Recall/`
+  on disk, surfaced as `/Recall:add`, `/Recall:doctor`, `/Recall:dump`,
+  `/Recall:loa`, `/Recall:recent`, `/Recall:search`, `/Recall:stats`,
+  `/Recall:update` in Claude Code's picker (was lowercase `/recall:*`).
+  Landed in PR #23.
+- **Log format** — `[INFO] / [OK] / [WARN] / [ERROR]` replaced with
+  glyph prefixes `→ / ✓ / ⚠ / ✗`. Existing `log_info` / `log_success` /
+  `log_warn` / `log_error` call sites unchanged; only the function
+  bodies were rewritten. Inspired by Starship's installer.
+- **Step rendering** — hardcoded `Step 1 / Step 2 / Step 8b / Step 11`
+  replaced with `_step "Verb" "detail"` in a Volta-style right-aligned
+  12-character action column. `STEP_TOTAL` is computed from detected
+  platforms; `STEP_NUM` auto-increments. Output reads as
+  `[3/11]   Building  Compiling bundles`.
+- **Banner widths** — header, footer, and restore banners re-padded to
+  consistent 58-column inner width with consistent "Recall" casing.
+- **TTY-gated colors** — color escape codes are now defined inside an
+  `if [[ -t 1 ]]` block (and respect the standard `NO_COLOR` env var)
+  so curl-bash, CI, and piped output stay clean.
+- **`bun install` / `bun run build`** — output captured to
+  `/tmp/recall-install.log` by default. Renders a single status line
+  that flips from `→ label` to `✓ label (12s)` on success, or
+  `✗ label (exit N)` plus the last 10 log lines on failure. Set
+  `RECALL_VERBOSE=1` to bypass capture.
+
+### Fixed
+
+- **Lifecycle: `update.sh` verify hardened** — `step_verify` now fails
+  the run when `mem` is missing instead of warning-and-skipping. If
+  anything between `step_link_global` and the end of the script removes
+  the symlinks (parallel `bun upgrade`, homebrew cleanup, etc.),
+  update will now report failure rather than declaring success while
+  leaving the user broken.
+- **Lifecycle: uninstall tests no longer wipe host registration** —
+  `run_bun_unlink` honors a new `RECALL_SKIP_BUN_UNLINK` escape hatch.
+  The uninstall test suite drives `uninstall.sh` against a tmpdir
+  `CLAUDE_DIR`, but `bun unlink` was running globally regardless and
+  wiping the host's live `mem` / `mem-mcp` symlinks — leaving the next
+  Claude Code session unable to connect to the Recall MCP server.
+  Production uninstall behavior is unchanged.
+
+### Documentation
+
+- `docs/installation.md` documents `RECALL_NO_GUM`, `RECALL_VERBOSE`,
+  and `NO_COLOR` env vars.
+- README mermaid flow replaced with ASCII art for cross-platform
+  rendering on GitHub mobile and terminal preview tools (PR #22).
+
+### Notes
+
+- This is the first 0.8.x release. The 0.7.x series ran for 24 patch
+  versions over April 2026; the minor bump marks the meaningful
+  evolution of the install lifecycle as a stable surface.
+- Existing installs migrate automatically on the next `./install.sh`
+  or `./update.sh` run. The lowercase `~/.claude/commands/recall/`
+  directory is removed once the Title-case directory has been
+  populated.
+
 ## [0.7.23] — 2026-04-22 — "worktree & dotfile capture"
 
 A single-character regex miss silently killed session capture for every
