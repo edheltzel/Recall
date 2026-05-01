@@ -54,15 +54,15 @@ src/
   types/
     index.ts           # Shared TypeScript types
 commands/
-  recall/              # Slash commands (installed to ~/.claude/commands/recall/)
-    add.md             #   /recall:add — add breadcrumb/decision/learning
-    doctor.md          #   /recall:doctor — health checks
-    dump.md            #   /recall:dump — session flush + LoA capture
-    loa.md             #   /recall:loa — Library of Alexandria browser
-    recent.md          #   /recall:recent — recent records
-    search.md          #   /recall:search — FTS5 search
-    stats.md           #   /recall:stats — database statistics
-    update.md          #   /recall:update — version check + update instructions
+  Recall/              # Slash commands (installed to ~/.claude/commands/Recall/)
+    add.md             #   /Recall:add — add breadcrumb/decision/learning
+    doctor.md          #   /Recall:doctor — health checks
+    dump.md            #   /Recall:dump — session flush + LoA capture
+    loa.md             #   /Recall:loa — Library of Alexandria browser
+    recent.md          #   /Recall:recent — recent records
+    search.md          #   /Recall:search — FTS5 search
+    stats.md           #   /Recall:stats — database statistics
+    update.md          #   /Recall:update — version check + update instructions
 hooks/
   SessionExtract.ts     # Stop hook — extracts sessions via Claude Haiku on exit
   SessionRecall.ts      # SessionStart hook — tiered L0/L1 memory context injection
@@ -105,7 +105,7 @@ docs/
   OPENCODE_INTEGRATION.md  # OpenCode integration guide
   PI_INTEGRATION.md    # Pi integration guide
   releasing.md         # Release process (tagging, GitHub release, version bump)
-  slash-commands.md    # /recall:* command reference
+  slash-commands.md    # /Recall:* command reference
   troubleshooting.md   # Common issues and fixes (start with mem doctor)
   upgrading.md         # Update, backup/restore, migration system
 lib/

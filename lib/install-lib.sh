@@ -37,10 +37,15 @@
 : "${OPENCODE_CONFIG_DIR:=${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
 : "${PI_CONFIG_DIR:=$HOME/.pi/agent}"
 
-# Platform detection flags (populated by recall_detect_platforms)
+# Platform detection flags (populated by recall_detect_platforms,
+# possibly cleared again by recall_select_platforms when the user opts out)
 : "${CLAUDE_CODE_DETECTED:=false}"
 : "${OPENCODE_DETECTED:=false}"
 : "${PI_DETECTED:=false}"
+
+# When true, recall_select_platforms skips its interactive prompts.
+# Set via install.sh --yes / -y, or implicitly when stdin is not a TTY.
+: "${NO_CONFIRM:=false}"
 
 # Files that install.sh / update.sh back up before modifying
 if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
@@ -165,6 +170,59 @@ recall_detect_platforms() {
     && [[ "$PI_DETECTED" == "false" ]]; then
     log_warn "No coding agents detected (Claude Code, OpenCode, Pi)"
     log_info "Recall will install core tools. Configure MCP manually later."
+  fi
+}
+
+# ── Interactive platform selection ───────────────────────────────────────────
+#
+# Asks the user which detected agents should actually be configured. Default
+# is "yes" for each — pressing Enter keeps the platform; typing n/N skips it
+# (the corresponding *_DETECTED flag is flipped to false so downstream steps
+# in install.sh skip the platform-specific configuration).
+#
+# Skipped entirely when NO_CONFIRM=true or stdin is not a TTY (CI, curl|bash).
+recall_select_platforms() {
+  if [[ "$NO_CONFIRM" == "true" ]] || [[ ! -t 0 ]]; then
+    return 0
+  fi
+
+  if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
+    && [[ "$OPENCODE_DETECTED" == "false" ]] \
+    && [[ "$PI_DETECTED" == "false" ]]; then
+    return 0
+  fi
+
+  log_info "Select which agents to configure (Enter = yes):"
+
+  if [[ "$CLAUDE_CODE_DETECTED" == "true" ]]; then
+    read -p "  Configure Claude Code? [Y/n] " -r
+    if [[ "$REPLY" =~ ^[Nn] ]]; then
+      CLAUDE_CODE_DETECTED=false
+      log_info "  Skipping Claude Code"
+    fi
+  fi
+
+  if [[ "$OPENCODE_DETECTED" == "true" ]]; then
+    read -p "  Configure OpenCode? [Y/n] " -r
+    if [[ "$REPLY" =~ ^[Nn] ]]; then
+      OPENCODE_DETECTED=false
+      log_info "  Skipping OpenCode"
+    fi
+  fi
+
+  if [[ "$PI_DETECTED" == "true" ]]; then
+    read -p "  Configure Pi? [Y/n] " -r
+    if [[ "$REPLY" =~ ^[Nn] ]]; then
+      PI_DETECTED=false
+      log_info "  Skipping Pi"
+    fi
+  fi
+
+  if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
+    && [[ "$OPENCODE_DETECTED" == "false" ]] \
+    && [[ "$PI_DETECTED" == "false" ]]; then
+    log_warn "All agents skipped — Recall will install core tools only."
+    log_info "Re-run ./install.sh later to configure agent integrations."
   fi
 }
 
@@ -543,7 +601,7 @@ Core rules:
 2. Before asking user to repeat anything → search first with \`memory_search\` or \`memory_hybrid_search\`
 3. Before spawning agents (Task tool) → call \`context_for_agent\`
 4. When decisions are made → record with \`memory_add\`
-5. End of session when user says \`/dump\` or \`/recall:dump\` → call \`memory_dump({ title: \"Descriptive Title\" })\`
+5. End of session when user says \`/dump\` or \`/Recall:dump\` → call \`memory_dump({ title: \"Descriptive Title\" })\`
 
 Context resolution order:
 1. SessionStart hook output (already loaded)
@@ -759,7 +817,7 @@ Tool syntax:
 
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────
 #
-# Copies hooks/, hooks/lib/, commands/recall/, FOR_CLAUDE.md → Recall_GUIDE.md,
+# Copies hooks/, hooks/lib/, commands/Recall/, FOR_CLAUDE.md → Recall_GUIDE.md,
 # and extract_prompt.md (with drift preservation). Called by install.sh Step 7+8b
 # and update.sh Step 7 to keep runtime artifacts in sync with the source tree.
 
@@ -773,12 +831,17 @@ recall_copy_runtime_files() {
   fi
 
   # Slash commands
-  local commands_src="$(pwd)/commands/recall"
-  local commands_dest="$CLAUDE_DIR/commands/recall"
+  local commands_src="$(pwd)/commands/Recall"
+  local commands_dest="$CLAUDE_DIR/commands/Recall"
+  local commands_legacy="$CLAUDE_DIR/commands/recall"
   if [[ -d "$commands_src" ]]; then
     mkdir -p "$commands_dest"
     cp "$commands_src"/*.md "$commands_dest/" 2>/dev/null || true
-    log_success "Installed recall: slash commands to $commands_dest"
+    if [[ -d "$commands_legacy" && "$commands_legacy" != "$commands_dest" ]]; then
+      rm -rf "$commands_legacy"
+      log_info "Removed legacy lowercase slash commands at $commands_legacy"
+    fi
+    log_success "Installed Recall: slash commands to $commands_dest"
   fi
 }
 
