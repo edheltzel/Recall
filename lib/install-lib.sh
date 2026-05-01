@@ -23,12 +23,34 @@
 : "${TIMESTAMP:=$(date +%Y%m%d_%H%M%S)}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
 
-# Colors (only defined if not already set)
-: "${RED:=$'\033[0;31m'}"
-: "${GREEN:=$'\033[0;32m'}"
-: "${YELLOW:=$'\033[1;33m'}"
-: "${BLUE:=$'\033[0;34m'}"
-: "${NC:=$'\033[0m'}"
+# Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
+# output stay clean). Tests can override by exporting RED/GREEN/etc. before
+# sourcing — those overrides win because of the := default operator.
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+  : "${RED:=$'\033[0;31m'}"
+  : "${GREEN:=$'\033[0;32m'}"
+  : "${YELLOW:=$'\033[1;33m'}"
+  : "${BLUE:=$'\033[0;34m'}"
+  : "${CYAN:=$'\033[0;36m'}"
+  : "${MAGENTA:=$'\033[0;35m'}"
+  : "${BOLD:=$'\033[1m'}"
+  : "${DIM:=$'\033[2m'}"
+  : "${NC:=$'\033[0m'}"
+else
+  : "${RED:=}"
+  : "${GREEN:=}"
+  : "${YELLOW:=}"
+  : "${BLUE:=}"
+  : "${CYAN:=}"
+  : "${MAGENTA:=}"
+  : "${BOLD:=}"
+  : "${DIM:=}"
+  : "${NC:=}"
+fi
+
+# Step counter — set STEP_TOTAL up front in install.sh, _step() increments STEP_NUM
+: "${STEP_NUM:=0}"
+: "${STEP_TOTAL:=0}"
 
 # OS detection (populated by recall_detect_os; can be overridden in tests)
 : "${RECALL_OS:=}"
@@ -43,9 +65,10 @@
 : "${OPENCODE_DETECTED:=false}"
 : "${PI_DETECTED:=false}"
 
-# When true, recall_select_platforms skips its interactive prompts.
+# When true, recall_select_platforms / _confirm skip their interactive prompts.
 # Set via install.sh --yes / -y, or implicitly when stdin is not a TTY.
 : "${NO_CONFIRM:=false}"
+
 
 # Files that install.sh / update.sh back up before modifying
 if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
@@ -62,19 +85,466 @@ if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
 fi
 
 # ── Log helpers (respect pre-existing definitions) ───────────────────────────
+#
+# Glyph-prefixed status lines, inspired by Starship's installer. Each level
+# has a distinct character + color; the prefix is single-glyph so the rest of
+# the line reads as natural prose.
+#
+#   →  info       (blue)    routine progress
+#   ✓  success    (green)   step completed
+#   ⚠  warn       (yellow)  non-fatal degradation
+#   ✗  error      (red)     fatal; exit imminent
+#
 
 if ! declare -F log_info >/dev/null 2>&1; then
-  log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+  log_info() { printf '%b→%b %s\n' "$BLUE" "$NC" "$1"; }
 fi
 if ! declare -F log_success >/dev/null 2>&1; then
-  log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+  log_success() { printf '%b✓%b %s\n' "$GREEN" "$NC" "$1"; }
 fi
 if ! declare -F log_warn >/dev/null 2>&1; then
-  log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+  log_warn() { printf '%b⚠%b %s\n' "$YELLOW" "$NC" "$1"; }
 fi
 if ! declare -F log_error >/dev/null 2>&1; then
-  log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+  log_error() { printf '%b✗%b %s\n' "$RED" "$NC" "$1" >&2; }
 fi
+
+# _step "verb" "detail" — render a numbered step with right-aligned 12-char
+# verb in bold green and a detail string. Increments STEP_NUM. Volta-inspired.
+#
+#   [3/9]   Installing  bun dependencies
+#
+if ! declare -F _step >/dev/null 2>&1; then
+  _step() {
+    STEP_NUM=$((STEP_NUM + 1))
+    local verb="${1:-}"
+    local detail="${2:-}"
+    # CURRENT_STEP is read by the error trap (yellow-3.3) so failure messages
+    # name the right step automatically.
+    CURRENT_STEP="${verb} · ${detail}"
+    if [[ "$STEP_TOTAL" -gt 0 ]]; then
+      printf '\n%b[%d/%d]%b %b%12s%b  %s\n' \
+        "$DIM" "$STEP_NUM" "$STEP_TOTAL" "$NC" \
+        "${BOLD}${GREEN}" "$verb" "$NC" "$detail"
+    else
+      printf '\n%b%12s%b  %s\n' "${BOLD}${GREEN}" "$verb" "$NC" "$detail"
+    fi
+  }
+fi
+
+# ── Captured-output runner ──────────────────────────────────────────────────
+#
+# _run_quiet "label" command [args...] — runs command with stdout+stderr
+# redirected to RECALL_INSTALL_LOG (default /tmp/recall-install.log). Renders
+# a single status line that flips from "→ label..." to "✓ label (Ns)" on
+# success or "✗ label (exit N)" + the last 10 log lines on failure.
+#
+# Set RECALL_VERBOSE=1 to bypass capture entirely (stdout passthrough).
+#
+: "${RECALL_INSTALL_LOG:=/tmp/recall-install.log}"
+
+if ! declare -F _run_quiet >/dev/null 2>&1; then
+  _run_quiet() {
+    local label="${1:-running}"
+    shift
+    local logfile="$RECALL_INSTALL_LOG"
+
+    if [[ "${RECALL_VERBOSE:-0}" == "1" ]]; then
+      printf '  %b→%b  %s\n' "$BLUE" "$NC" "$label"
+      "$@"
+      return $?
+    fi
+
+    : >"$logfile" || logfile=/dev/null
+    local start_ts
+    start_ts=$(date +%s)
+    printf '  %b→%b  %s' "$BLUE" "$NC" "$label"
+
+    if "$@" >>"$logfile" 2>&1; then
+      local elapsed=$(( $(date +%s) - start_ts ))
+      printf '\r  %b✓%b  %s %b(%ds)%b\n' "$GREEN" "$NC" "$label" "$DIM" "$elapsed" "$NC"
+      return 0
+    else
+      local rc=$?
+      local elapsed=$(( $(date +%s) - start_ts ))
+      printf '\r  %b✗%b  %s %b(exit %d, %ds)%b\n' "$RED" "$NC" "$label" "$RED" "$rc" "$elapsed" "$NC"
+      if [[ -s "$logfile" ]]; then
+        echo ""
+        printf '  %blast 10 lines of %s:%b\n' "$DIM" "$logfile" "$NC"
+        tail -n 10 "$logfile" | sed 's/^/    /'
+      fi
+      return "$rc"
+    fi
+  }
+fi
+
+# ── Gum integration ─────────────────────────────────────────────────────────
+#
+# Charmbracelet's gum gives us animated spinners, multi-select pickers, and
+# styled banners — but it's an optional Go binary, not a hard dep. The flow:
+#
+#   1. _detect_gum()       — sets HAS_GUM=true|false based on what's present.
+#   2. _try_install_gum()  — attempts brew (mac) then GitHub release binary.
+#                            30s timeout per path; silent failure → bash mode.
+#   3. _confirm/_choose/_spin/_style/_banner wrappers branch on $HAS_GUM.
+#
+# Opt-out: set RECALL_NO_GUM=1 or pass --no-gum. We never install gum without
+# explicit consent given by the user running install.sh.
+#
+# Required minimum gum version: 0.14 (released 2024-09; first stable spin API).
+
+: "${HAS_GUM:=}"
+: "${RECALL_NO_GUM:=0}"
+: "${RECALL_GUM_MIN_MAJOR:=0}"
+: "${RECALL_GUM_MIN_MINOR:=14}"
+
+_detect_gum() {
+  if [[ "$RECALL_NO_GUM" == "1" ]]; then
+    HAS_GUM=false
+    return 0
+  fi
+  if ! command -v gum &>/dev/null; then
+    HAS_GUM=false
+    return 1
+  fi
+  local v major minor
+  v=$(gum --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [[ -z "$v" ]]; then
+    HAS_GUM=false
+    return 1
+  fi
+  major=${v%%.*}
+  minor=${v#*.}; minor=${minor%%.*}
+  if (( major > RECALL_GUM_MIN_MAJOR )) || \
+     (( major == RECALL_GUM_MIN_MAJOR && minor >= RECALL_GUM_MIN_MINOR )); then
+    HAS_GUM=true
+    return 0
+  fi
+  HAS_GUM=false
+  return 1
+}
+
+# Auto-install fallback chain. Each path is timeout-bounded; on any failure
+# (including timeout), falls through. After exhausting paths, HAS_GUM stays
+# false and the install continues in bash mode.
+_try_install_gum() {
+  if [[ "$RECALL_NO_GUM" == "1" ]]; then
+    HAS_GUM=false
+    return 0
+  fi
+
+  # Already installed and meets minimum?
+  if _detect_gum; then return 0; fi
+
+  # brew on macOS
+  if [[ "$RECALL_OS" == "macos" ]] && command -v brew &>/dev/null; then
+    if _run_quiet "Installing gum via brew" \
+       bash -c 'timeout 30 brew install gum >/dev/null 2>&1'; then
+      _detect_gum && return 0
+    fi
+  fi
+
+  # GitHub release binary — universal fallback
+  if _run_quiet "Installing gum from GitHub releases" _install_gum_binary; then
+    # Make sure the new binary is on PATH for this session
+    case ":$PATH:" in
+      *":$HOME/.local/bin:"*) ;;
+      *) export PATH="$HOME/.local/bin:$PATH" ;;
+    esac
+    _detect_gum && return 0
+  fi
+
+  HAS_GUM=false
+  return 1
+}
+
+_install_gum_binary() {
+  local os arch version asset
+  case "$(uname -s)" in
+    Darwin) os="Darwin" ;;
+    Linux)  os="Linux" ;;
+    *) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    arm64|aarch64) arch="arm64" ;;
+    x86_64|amd64)  arch="x86_64" ;;
+    *) return 1 ;;
+  esac
+
+  # Discover latest version. Cap at 10s — we don't want to block the install.
+  version=$(timeout 10 curl -fsSL \
+    "https://api.github.com/repos/charmbracelet/gum/releases/latest" 2>/dev/null \
+    | grep '"tag_name"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  [[ -z "$version" ]] && return 1
+
+  asset="gum_${version}_${os}_${arch}.tar.gz"
+  local dl="https://github.com/charmbracelet/gum/releases/download/v${version}/${asset}"
+  local sumurl="https://github.com/charmbracelet/gum/releases/download/v${version}/checksums.txt"
+
+  local tmpdir
+  tmpdir=$(mktemp -d 2>/dev/null) || return 1
+
+  if ! timeout 25 curl -fsSL "$dl" -o "$tmpdir/$asset" 2>/dev/null; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # SHA256 verify (best-effort: skip if checksum file unreachable)
+  if timeout 10 curl -fsSL "$sumurl" -o "$tmpdir/checksums.txt" 2>/dev/null; then
+    local expected actual
+    expected=$(grep "  $asset\$" "$tmpdir/checksums.txt" 2>/dev/null | awk '{print $1}' | head -1)
+    if [[ -n "$expected" ]]; then
+      if command -v shasum &>/dev/null; then
+        actual=$(shasum -a 256 "$tmpdir/$asset" | awk '{print $1}')
+      elif command -v sha256sum &>/dev/null; then
+        actual=$(sha256sum "$tmpdir/$asset" | awk '{print $1}')
+      fi
+      if [[ -n "$actual" ]] && [[ "$expected" != "$actual" ]]; then
+        log_warn "gum checksum mismatch — refusing to install (expected $expected, got $actual)"
+        rm -rf "$tmpdir"
+        return 1
+      fi
+    fi
+  fi
+
+  if ! tar xzf "$tmpdir/$asset" -C "$tmpdir" 2>/dev/null; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # The release tarball extracts into a versioned subdir; the binary may
+  # also be at the tarball root depending on Charm's packaging.
+  local bin
+  bin=$(find "$tmpdir" -name gum -type f -perm -u+x 2>/dev/null | head -1)
+  if [[ -z "$bin" ]]; then
+    bin=$(find "$tmpdir" -name gum -type f 2>/dev/null | head -1)
+  fi
+  if [[ -z "$bin" ]] || [[ ! -f "$bin" ]]; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  mkdir -p "$HOME/.local/bin"
+  cp "$bin" "$HOME/.local/bin/gum"
+  chmod +x "$HOME/.local/bin/gum"
+  rm -rf "$tmpdir"
+  return 0
+}
+
+# ── UX wrapper functions ────────────────────────────────────────────────────
+#
+# Every interactive primitive routes through one of these. Each branches on
+# $HAS_GUM. Bash fallbacks are cyan-1.x compatible: glyphs, gated colors,
+# captured stdout for slow ops.
+
+# _confirm "question" [default=Y]
+# Returns 0 for yes, 1 for no. Honors NO_CONFIRM=true (bypasses prompt and
+# returns the default).
+_confirm() {
+  local q="${1:-Continue?}"
+  local default="${2:-Y}"
+
+  if [[ "${NO_CONFIRM:-}" == "true" ]] || [[ ! -t 0 ]]; then
+    [[ "$default" == "Y" ]] && return 0 || return 1
+  fi
+
+  if [[ "$HAS_GUM" == "true" ]]; then
+    if [[ "$default" == "Y" ]]; then
+      gum confirm --default=true "$q"
+    else
+      gum confirm --default=false "$q"
+    fi
+    return $?
+  fi
+
+  local prompt
+  if [[ "$default" == "Y" ]]; then prompt="$q [Y/n] "; else prompt="$q [y/N] "; fi
+  read -p "$prompt" -r
+  if [[ "$default" == "Y" ]]; then
+    [[ "$REPLY" =~ ^[Nn] ]] && return 1 || return 0
+  else
+    [[ "$REPLY" =~ ^[Yy] ]] && return 0 || return 1
+  fi
+}
+
+# _choose "title" "opt1" "opt2" ... — multi-select picker.
+# Prints selected options to stdout, one per line. NO_CONFIRM/non-TTY selects
+# all options.
+_choose() {
+  local title="${1:-Select}"
+  shift
+  if [[ $# -eq 0 ]]; then return 0; fi
+
+  if [[ "${NO_CONFIRM:-}" == "true" ]] || [[ ! -t 0 ]]; then
+    printf '%s\n' "$@"
+    return 0
+  fi
+
+  if [[ "$HAS_GUM" == "true" ]]; then
+    local selected=""
+    selected=$(IFS=,; echo "$*")
+    gum choose --no-limit --selected="$selected" --header="$title" "$@"
+    return $?
+  fi
+
+  # Bash fallback: per-option Y/n
+  printf '%b→%b %s\n' "$BLUE" "$NC" "$title"
+  local opt
+  for opt in "$@"; do
+    read -p "    Configure $opt? [Y/n] " -r
+    if [[ ! "$REPLY" =~ ^[Nn] ]]; then
+      echo "$opt"
+    fi
+  done
+}
+
+# _spin "label" -- command [args...]
+# gum: animated spinner around the command. bash fallback: _run_quiet's
+# captured-output path.
+_spin() {
+  local label="${1:-Working...}"
+  shift
+  [[ "${1:-}" == "--" ]] && shift
+
+  if [[ "$HAS_GUM" == "true" ]] && [[ -t 1 ]]; then
+    if gum spin --spinner dot --title "$label" --show-output -- "$@" \
+        >>"$RECALL_INSTALL_LOG" 2>&1; then
+      printf '  %b✓%b  %s\n' "$GREEN" "$NC" "$label"
+      return 0
+    else
+      local rc=$?
+      printf '  %b✗%b  %s %b(exit %d)%b\n' "$RED" "$NC" "$label" "$RED" "$rc" "$NC"
+      tail -n 10 "$RECALL_INSTALL_LOG" 2>/dev/null | sed 's/^/    /'
+      return "$rc"
+    fi
+  fi
+
+  _run_quiet "$label" "$@"
+}
+
+# _style "text" — render a styled bordered text block (single line).
+_style() {
+  local text="${1:-}"
+  if [[ "$HAS_GUM" == "true" ]]; then
+    gum style --border rounded --padding "1 2" --foreground 214 "$text"
+    return 0
+  fi
+  printf '%b┌─%b %s\n%b└──%b\n' "$YELLOW" "$NC" "$text" "$YELLOW" "$NC"
+}
+
+# _panel <tone> "TITLE" "line1" "line2" ...
+#
+# Multi-line bordered panel. Used for pre-flight summary, post-flight
+# self-check, and error reports. gum: rounded styled box. bash: 60-col
+# left-aligned ASCII box.
+_panel() {
+  local tone="${1:-info}"
+  shift
+  local title="${1:-}"
+  shift
+  local ansi gum_color
+  case "$tone" in
+    success) ansi="$GREEN";  gum_color=46  ;;
+    warn)    ansi="$BLUE";   gum_color=39  ;;
+    error)   ansi="$RED";    gum_color=196 ;;
+    info|*)  ansi="$YELLOW"; gum_color=214 ;;
+  esac
+
+  if [[ "$HAS_GUM" == "true" ]]; then
+    {
+      [[ -n "$title" ]] && { printf '%s\n' "$title"; printf '\n'; }
+      printf '%s\n' "$@"
+    } | gum style --border rounded --padding "1 2" --width 60 \
+                  --foreground "$gum_color" --border-foreground "$gum_color"
+    return 0
+  fi
+
+  # Bash fallback: 60-col panel (58 inner) with left-aligned content
+  local width=58
+  local hr="──────────────────────────────────────────────────────────"
+  printf '%b╭%s╮%b\n' "$ansi" "$hr" "$NC"
+  if [[ -n "$title" ]]; then
+    _panel_line "$ansi" "$width" "${BOLD}${title}${NC}" 1
+    _panel_line "$ansi" "$width" "" 0
+  fi
+  local line
+  for line in "$@"; do
+    _panel_line "$ansi" "$width" "$line" 0
+  done
+  printf '%b╰%s╯%b\n' "$ansi" "$hr" "$NC"
+}
+
+# _panel_line color width text has-bold-codes — internal helper. When
+# has-bold-codes=1, we strip ANSI before measuring length so padding lines up.
+_panel_line() {
+  local color="$1"
+  local width="$2"
+  local text="$3"
+  local has_codes="${4:-0}"
+  local visible="$text"
+  if [[ "$has_codes" == "1" ]]; then
+    # Strip ANSI escape sequences for length measurement
+    visible=$(printf '%s' "$text" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')
+  fi
+  local plen=${#visible}
+  local pad=$(( width - plen - 2 ))
+  [[ $pad -lt 0 ]] && pad=0
+  printf '%b│%b  %b%*s%b│%b\n' "$color" "$NC" "$text" "$pad" '' "$color" "$NC"
+}
+
+# _banner <tone> "title" [subtitle ...]
+#
+#   tone: info | success | warn | error (controls border color)
+#
+# gum: rounded styled box. bash: 60-col ASCII box matching cyan-1.3 width.
+_banner() {
+  local tone="${1:-info}"
+  shift
+  local title="${1:-}"
+  shift
+  local ansi gum_color
+  case "$tone" in
+    success) ansi="$GREEN";  gum_color=46  ;;
+    warn)    ansi="$BLUE";   gum_color=39  ;;
+    error)   ansi="$RED";    gum_color=196 ;;
+    info|*)  ansi="$YELLOW"; gum_color=214 ;;
+  esac
+
+  if [[ "$HAS_GUM" == "true" ]]; then
+    if [[ $# -gt 0 ]]; then
+      gum style --border double --padding "1 4" --align center \
+                --width 60 --foreground "$gum_color" --border-foreground "$gum_color" \
+                "$title" "$@"
+    else
+      gum style --border double --padding "1 4" --align center \
+                --width 60 --foreground "$gum_color" --border-foreground "$gum_color" \
+                "$title"
+    fi
+    return 0
+  fi
+
+  printf '%b╔══════════════════════════════════════════════════════════╗%b\n' "$ansi" "$NC"
+  _banner_line "$ansi" "$title"
+  local line
+  for line in "$@"; do
+    _banner_line "$ansi" "$line"
+  done
+  printf '%b╚══════════════════════════════════════════════════════════╝%b\n' "$ansi" "$NC"
+}
+
+_banner_line() {
+  local color="${1:-}"
+  local text="${2:-}"
+  local width=58
+  local plen=${#text}
+  if (( plen > width )); then
+    text="${text:0:$width}"
+    plen=$width
+  fi
+  local left=$(( (width - plen) / 2 ))
+  local right=$(( width - plen - left ))
+  printf '%b║%b%*s%s%*s%b║%b\n' "$color" "$NC" "$left" "" "$text" "$right" "" "$color" "$NC"
+}
 
 # ── OS detection ─────────────────────────────────────────────────────────────
 
@@ -175,48 +645,39 @@ recall_detect_platforms() {
 
 # ── Interactive platform selection ───────────────────────────────────────────
 #
-# Asks the user which detected agents should actually be configured. Default
-# is "yes" for each — pressing Enter keeps the platform; typing n/N skips it
-# (the corresponding *_DETECTED flag is flipped to false so downstream steps
-# in install.sh skip the platform-specific configuration).
-#
-# Skipped entirely when NO_CONFIRM=true or stdin is not a TTY (CI, curl|bash).
+# Asks the user which detected agents should actually be configured. Uses
+# the _choose wrapper — gum multi-select picker if available, bash Y/n loop
+# otherwise. Skipped entirely when NO_CONFIRM=true or stdin is not a TTY.
 recall_select_platforms() {
   if [[ "$NO_CONFIRM" == "true" ]] || [[ ! -t 0 ]]; then
     return 0
   fi
 
-  if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
-    && [[ "$OPENCODE_DETECTED" == "false" ]] \
-    && [[ "$PI_DETECTED" == "false" ]]; then
+  local options=()
+  [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && options+=("Claude Code")
+  [[ "$OPENCODE_DETECTED" == "true" ]] && options+=("OpenCode")
+  [[ "$PI_DETECTED" == "true" ]] && options+=("Pi")
+
+  if [[ ${#options[@]} -eq 0 ]]; then
     return 0
   fi
 
-  log_info "Select which agents to configure (Enter = yes):"
+  local selected
+  selected=$(_choose "Select which agents to configure" "${options[@]}")
 
-  if [[ "$CLAUDE_CODE_DETECTED" == "true" ]]; then
-    read -p "  Configure Claude Code? [Y/n] " -r
-    if [[ "$REPLY" =~ ^[Nn] ]]; then
-      CLAUDE_CODE_DETECTED=false
-      log_info "  Skipping Claude Code"
-    fi
-  fi
-
-  if [[ "$OPENCODE_DETECTED" == "true" ]]; then
-    read -p "  Configure OpenCode? [Y/n] " -r
-    if [[ "$REPLY" =~ ^[Nn] ]]; then
-      OPENCODE_DETECTED=false
-      log_info "  Skipping OpenCode"
-    fi
-  fi
-
-  if [[ "$PI_DETECTED" == "true" ]]; then
-    read -p "  Configure Pi? [Y/n] " -r
-    if [[ "$REPLY" =~ ^[Nn] ]]; then
-      PI_DETECTED=false
-      log_info "  Skipping Pi"
-    fi
-  fi
+  local was_cc="$CLAUDE_CODE_DETECTED"
+  local was_oc="$OPENCODE_DETECTED"
+  local was_pi="$PI_DETECTED"
+  CLAUDE_CODE_DETECTED=false
+  OPENCODE_DETECTED=false
+  PI_DETECTED=false
+  while IFS= read -r line; do
+    case "$line" in
+      "Claude Code") [[ "$was_cc" == "true" ]] && CLAUDE_CODE_DETECTED=true ;;
+      "OpenCode")    [[ "$was_oc" == "true" ]] && OPENCODE_DETECTED=true ;;
+      "Pi")          [[ "$was_pi" == "true" ]] && PI_DETECTED=true ;;
+    esac
+  done <<<"$selected"
 
   if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
     && [[ "$OPENCODE_DETECTED" == "false" ]] \
@@ -225,6 +686,7 @@ recall_select_platforms() {
     log_info "Re-run ./install.sh later to configure agent integrations."
   fi
 }
+
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 
@@ -317,9 +779,7 @@ recall_do_restore() {
   fi
 
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                       Recall RESTORE                       ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  _banner warn "Recall Restore"
   echo ""
   log_info "Restoring from backup: $target_backup"
   echo ""
@@ -328,10 +788,7 @@ recall_do_restore() {
   ls -la "$restore_dir" | grep -v manifest.txt | tail -n +2
   echo ""
 
-  read -p "Proceed with restore? (y/N) " -n 1 -r
-  echo ""
-
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  if ! _confirm "Proceed with restore?" "N"; then
     log_warn "Restore cancelled"
     return 0
   fi

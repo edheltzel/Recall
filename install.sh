@@ -18,15 +18,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/install-lib.sh
 source "$SCRIPT_DIR/lib/install-lib.sh"
 
-# Error trap — guide user to restore on failure
+# Error trap — render structured failure panel with the failing step,
+# captured log tail, and the exact restore command. yellow-3.3 of the
+# installer aesthetic overhaul.
 cleanup() {
-  if [[ $? -ne 0 ]]; then
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
     echo ""
-    log_error "Installation failed!"
-    if [[ -n "${BACKUP_DIR:-}" ]] && [[ -d "${BACKUP_DIR:-}" ]]; then
-      log_info "Your backup is safe at: $BACKUP_DIR"
-      log_info "To restore: ./install.sh restore"
+    local lines=(
+      "Step:    ${CURRENT_STEP:-(setup phase)}"
+      "Status:  exited with code $rc"
+      ""
+    )
+
+    if [[ -s "${RECALL_INSTALL_LOG:-}" ]]; then
+      lines+=("Last 10 lines of $RECALL_INSTALL_LOG:" "")
+      while IFS= read -r line; do
+        lines+=("  $line")
+      done < <(tail -n 10 "$RECALL_INSTALL_LOG")
+      lines+=("")
     fi
+
+    if [[ -n "${BACKUP_DIR:-}" ]] && [[ -d "${BACKUP_DIR:-}" ]]; then
+      lines+=(
+        "Backup preserved at:"
+        "  $BACKUP_DIR"
+        ""
+        "To recover:"
+        "  ./install.sh restore"
+        ""
+      )
+    fi
+    lines+=("Troubleshooting: docs/troubleshooting.md")
+
+    _panel error "INSTALL FAILED" "${lines[@]}"
   fi
 }
 trap cleanup EXIT
@@ -37,11 +62,12 @@ recall_detect_os
 # ── Main install orchestration ───────────────────────────────────────────────
 
 do_install() {
+  # Best-effort gum install. Honors RECALL_NO_GUM=1; silently falls back to
+  # bash mode on any failure (timeout, network, missing tar/curl, etc.).
+  _try_install_gum
+
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                      Recall INSTALLER                      ║"
-  echo "║      RECALL - Persistent Memory for Coding Agents           ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  _banner info "Recall Installer" "Persistent Memory for Coding Agents"
   echo ""
 
   log_info "Checking prerequisites..."
@@ -52,41 +78,67 @@ do_install() {
   recall_select_platforms
   echo ""
 
-  log_info "Step 1: Creating backup of existing files..."
-  recall_create_backup
-  echo ""
+  # Step counter — 10 always-run steps; +1 each for OpenCode/Pi when detected.
+  STEP_NUM=0
+  STEP_TOTAL=10
+  [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
+  [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
-  log_info "Step 2: Installing dependencies..."
-  if ! bun install; then
-    log_error "Failed to install dependencies"
+  # Pre-flight summary panel — shows what's about to happen and asks the
+  # user to confirm before any state changes. Skipped when --yes / non-TTY
+  # / NO_CONFIRM=true (yellow-3.1).
+  if [[ "$NO_CONFIRM" != "true" ]] && [[ -t 0 ]]; then
+    local _platforms=()
+    [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && _platforms+=("Claude Code")
+    [[ "$OPENCODE_DETECTED" == "true" ]] && _platforms+=("OpenCode")
+    [[ "$PI_DETECTED" == "true" ]] && _platforms+=("Pi")
+    local _plist
+    _plist=$(IFS=", "; echo "${_platforms[*]:-(none — core install only)}")
+
+    # Tildify long paths so they fit inside the 58-col panel
+    local _target_short="${CLAUDE_DIR/#$HOME/\~}"
+    local _backup_short="${BACKUP_DIR/#$HOME/\~}"
+
+    _panel info "Pre-flight summary" \
+      "Target:     $_target_short" \
+      "Platforms:  $_plist" \
+      "Backup:     $_backup_short" \
+      "Steps:      $STEP_TOTAL total"
+    echo ""
+
+    if ! _confirm "Continue with installation?" "Y"; then
+      log_warn "Install cancelled"
+      trap - EXIT  # don't trigger error panel for user cancel
+      exit 0
+    fi
+  fi
+
+  _step "Backup" "Creating backup of existing files"
+  recall_create_backup
+
+  _step "Installing" "Bun dependencies"
+  if ! _run_quiet "bun install" bun install; then
     log_info "Try running: bun install (manually to see errors)"
     exit 1
   fi
-  log_success "Dependencies installed"
-  echo ""
 
-  log_info "Step 3: Building..."
-  if ! bun run build; then
-    log_error "Build failed"
+  _step "Building" "Compiling bundles"
+  if ! _run_quiet "bun run build" bun run build; then
     log_info "Try running: bun run build (manually to see errors)"
     exit 1
   fi
-  log_success "Build complete"
-  echo ""
 
-  log_info "Step 4: Linking globally..."
-  # recall_link_global (in lib/install-lib.sh) does bun link → verify
-  # bin symlinks → npm link fallback → verify again. 0.7.22 hardening:
-  # the verify step catches the silent-no-op case where `bun link`
-  # exits 0 but doesn't actually refresh ~/.bun/bin/mem{,-mcp}, which
-  # was the root cause of the "mem not on PATH after install" class
+  _step "Linking" "Linking mem + mem-mcp globally"
+  # recall_link_global does bun link → verify → npm link fallback → verify.
+  # 0.7.22 hardening: the verify step catches the silent-no-op case where
+  # `bun link` exits 0 but doesn't actually refresh ~/.bun/bin/mem{,-mcp},
+  # which was the root cause of the "mem not on PATH after install" class
   # of failures.
   if ! recall_link_global; then
     exit 1
   fi
-  echo ""
 
-  log_info "Step 5: Initializing database..."
+  _step "Database" "Initializing memory database"
   mkdir -p "$CLAUDE_DIR/MEMORY"
   local mem_bin="$HOME/.bun/bin/mem"
   if [[ ! -x "$mem_bin" ]]; then
@@ -97,24 +149,20 @@ do_install() {
     exit 1
   fi
   "$mem_bin" init
-  log_success "MEMORY directory created at $CLAUDE_DIR/MEMORY"
-  echo ""
+  log_success "MEMORY directory at $CLAUDE_DIR/MEMORY"
 
-  log_info "Step 6: Configuring MCP server..."
+  _step "MCP" "Configuring MCP server"
   recall_configure_mcp
-  echo ""
 
-  log_info "Step 7: Setting up session extraction hooks..."
+  _step "Hooks" "Installing session extraction hooks"
   _recall_copy_hook_files
   recall_register_all_hooks
-  echo ""
 
-  log_info "Step 8: Installing Claude guide..."
+  _step "Guide" "Installing Recall guide"
   cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/Recall_GUIDE.md"
-  log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
-  echo ""
+  log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
 
-  log_info "Step 8b: Installing slash commands..."
+  _step "Commands" "Installing slash commands"
   local commands_src="$(pwd)/commands/Recall"
   local commands_dest="$CLAUDE_DIR/commands/Recall"
   local commands_legacy="$CLAUDE_DIR/commands/recall"
@@ -129,37 +177,54 @@ do_install() {
   else
     log_warn "Slash commands directory not found at $commands_src — skipping"
   fi
-  echo ""
 
-  log_info "Step 9: Configuring CLAUDE.md..."
+  _step "CLAUDE.md" "Configuring CLAUDE.md"
   recall_configure_claude_md
-  echo ""
 
   if [[ "$OPENCODE_DETECTED" == "true" ]]; then
-    echo ""
-    log_info "Step 10: Configuring OpenCode integration..."
+    _step "OpenCode" "Configuring OpenCode integration"
     recall_configure_opencode_mcp
     recall_install_opencode_plugins
     recall_install_opencode_agent
     recall_install_opencode_guide
-    echo ""
   fi
 
   if [[ "$PI_DETECTED" == "true" ]]; then
-    echo ""
-    log_info "Step 11: Configuring Pi integration..."
+    _step "Pi" "Configuring Pi integration"
     recall_install_pi_adapter
     recall_configure_pi_mcp
     recall_install_pi_extensions
     recall_install_pi_guide
-    echo ""
   fi
-
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                  INSTALLATION COMPLETE                   ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
   echo ""
-  log_success "Recall installed successfully!"
+
+  # Post-flight self-check — confirms the install is actually working before
+  # we declare victory (yellow-3.2). Failures are surfaced inline; they don't
+  # abort the install but they do warn the user something is off.
+  CURRENT_STEP="Self-check"
+  log_info "Running self-check..."
+  local _check_ok=true
+  if "$mem_bin" stats >/dev/null 2>&1; then
+    log_success "Database initialized"
+  else
+    log_warn "mem stats failed — DB may not be initialized"
+    _check_ok=false
+  fi
+  if "$mem_bin" doctor >/dev/null 2>&1; then
+    log_success "mem doctor — all checks passing"
+  else
+    log_warn "mem doctor reports issues — run 'mem doctor' to investigate"
+    _check_ok=false
+  fi
+  echo ""
+
+  _banner success "Installation Complete"
+  echo ""
+  if [[ "$_check_ok" == "true" ]]; then
+    log_success "Recall installed successfully — all systems operational."
+  else
+    log_success "Recall installed (with self-check warnings; see above)."
+  fi
   echo ""
   echo "Backup location: $BACKUP_DIR"
   echo "To restore:      ./install.sh restore"
@@ -213,10 +278,24 @@ help | --help | -h)
   echo "Usage:"
   echo "  ./install.sh                   Install Recall (creates backup first)"
   echo "  ./install.sh --yes | -y        Install non-interactively (configure all detected agents)"
+  echo "  ./install.sh --no-gum          Skip gum auto-install; use bash UX for this run"
   echo "  ./install.sh restore           Restore from most recent backup"
   echo "  ./install.sh restore TIMESTAMP Restore specific backup"
   echo "  ./install.sh list              List available backups"
   echo "  ./install.sh help              Show this help"
+  echo ""
+  echo "Environment:"
+  echo "  RECALL_NO_GUM=1                Permanently disable gum (same as --no-gum)"
+  echo "  NO_COLOR=1                     Disable ANSI colors"
+  echo "  RECALL_VERBOSE=1               Show full output of bun install/build"
+  ;;
+--yes | -y)
+  export NO_CONFIRM=true
+  do_install
+  ;;
+--no-gum)
+  export RECALL_NO_GUM=1
+  do_install
   ;;
 --yes | -y)
   export NO_CONFIRM=true
