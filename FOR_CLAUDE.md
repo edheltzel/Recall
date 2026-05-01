@@ -110,14 +110,14 @@ These slash commands are available in any Claude Code session:
 
 | Command | What it does |
 |---------|-------------|
-| `/recall:dump <title>` | Flush session to DB + capture LoA entry. Run at end of every session. |
-| `/recall:search <query>` | FTS5 search across all memory. Example: `/recall:search kubernetes auth` |
-| `/recall:recent [table]` | Recent records. Example: `/recall:recent decisions` |
-| `/recall:stats` | Database statistics at a glance |
-| `/recall:add` | Add a record. Example: `/recall:add breadcrumb "Auth refactor in progress"` |
-| `/recall:doctor` | Health check all subsystems |
-| `/recall:update` | Check-only: prints current vs. latest GitHub release + `cd <path> && ./update.sh` recipe. Never rebuilds mid-session. |
-| `/recall:loa` | Browse Library of Alexandria entries |
+| `/Recall:dump <title>` | Flush session to DB + capture LoA entry. Run at end of every session. |
+| `/Recall:search <query>` | FTS5 search across all memory. Example: `/Recall:search kubernetes auth` |
+| `/Recall:recent [table]` | Recent records. Example: `/Recall:recent decisions` |
+| `/Recall:stats` | Database statistics at a glance |
+| `/Recall:add` | Add a record. Example: `/Recall:add breadcrumb "Auth refactor in progress"` |
+| `/Recall:doctor` | Health check all subsystems |
+| `/Recall:update` | Check-only: prints current vs. latest GitHub release + `cd <path> && ./update.sh` recipe. Never rebuilds mid-session. |
+| `/Recall:loa` | Browse Library of Alexandria entries |
 
 ## The CLI
 
@@ -146,7 +146,7 @@ session context is empty — recommend running `mem onboard` to fix it.
 3. **Search before asking** — Before asking the user to repeat information, search memory first
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
-6. **Session capture** — When the user says `/dump` or `/recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
+6. **Session capture** — When the user says `/dump` or `/Recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
 7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the SessionRecall preamble is missing or empty), suggest the user run `mem onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `mem onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
 
 ### Context Resolution Order

@@ -95,7 +95,7 @@ print_summary() {
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   echo ""
   echo "Will REMOVE:"
-  echo "  • ~/.claude/commands/recall/"
+  echo "  • ~/.claude/commands/Recall/ (and legacy ~/.claude/commands/recall/)"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json"
@@ -152,11 +152,13 @@ confirm_purge_or_exit() {
 # ── Removal steps ────────────────────────────────────────────────────────────
 
 remove_slash_commands() {
-  local dir="$CLAUDE_DIR/commands/recall"
-  if [[ -d "$dir" ]]; then
-    run rm -rf "$dir"
-    log_success "Removed $dir"
-  fi
+  local dir
+  for dir in "$CLAUDE_DIR/commands/Recall" "$CLAUDE_DIR/commands/recall"; do
+    if [[ -d "$dir" ]]; then
+      run rm -rf "$dir"
+      log_success "Removed $dir"
+    fi
+  done
 }
 
 remove_guide() {

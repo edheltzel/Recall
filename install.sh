@@ -49,6 +49,7 @@ do_install() {
   echo ""
   log_info "Detecting platforms..."
   recall_detect_platforms
+  recall_select_platforms
   echo ""
 
   log_info "Step 1: Creating backup of existing files..."
@@ -114,12 +115,17 @@ do_install() {
   echo ""
 
   log_info "Step 8b: Installing slash commands..."
-  local commands_src="$(pwd)/commands/recall"
-  local commands_dest="$CLAUDE_DIR/commands/recall"
+  local commands_src="$(pwd)/commands/Recall"
+  local commands_dest="$CLAUDE_DIR/commands/Recall"
+  local commands_legacy="$CLAUDE_DIR/commands/recall"
   if [[ -d "$commands_src" ]]; then
     mkdir -p "$commands_dest"
     cp "$commands_src"/*.md "$commands_dest/"
-    log_success "Installed recall: slash commands to $commands_dest"
+    if [[ -d "$commands_legacy" && "$commands_legacy" != "$commands_dest" ]]; then
+      rm -rf "$commands_legacy"
+      log_info "Removed legacy lowercase slash commands at $commands_legacy"
+    fi
+    log_success "Installed Recall: slash commands to $commands_dest"
   else
     log_warn "Slash commands directory not found at $commands_src — skipping"
   fi
@@ -206,10 +212,15 @@ help | --help | -h)
   echo ""
   echo "Usage:"
   echo "  ./install.sh                   Install Recall (creates backup first)"
+  echo "  ./install.sh --yes | -y        Install non-interactively (configure all detected agents)"
   echo "  ./install.sh restore           Restore from most recent backup"
   echo "  ./install.sh restore TIMESTAMP Restore specific backup"
   echo "  ./install.sh list              List available backups"
   echo "  ./install.sh help              Show this help"
+  ;;
+--yes | -y)
+  export NO_CONFIRM=true
+  do_install
   ;;
 *)
   do_install

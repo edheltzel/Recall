@@ -304,7 +304,7 @@ step_migrate() {
 step_refresh_runtime() {
   log_info "Refreshing runtime files (hooks, lib, commands, guide)..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: copy hooks/, hooks/lib/, commands/recall/, FOR_CLAUDE.md"
+    echo "  [dry-run] would: copy hooks/, hooks/lib/, commands/Recall/, FOR_CLAUDE.md"
     return
   fi
 

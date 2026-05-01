@@ -7,7 +7,7 @@
 From inside Claude Code:
 
 ```
-/recall:update
+/Recall:update
 ```
 
 This is a **check-only** command — it prints the current vs. latest
