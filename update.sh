@@ -12,8 +12,14 @@
 #   ./update.sh --dry-run      # show plan, touch nothing
 #   ./update.sh --force        # skip "already current" guard, still confirm
 #   ./update.sh --no-migrate   # skip mem init migration step
-#   ./update.sh --no-confirm   # non-interactive
+#   ./update.sh --no-confirm   # non-interactive (same as install.sh --yes)
+#   ./update.sh --no-gum       # skip gum auto-install; use bash UX this run
 #   ./update.sh --help         # this message
+#
+# Environment:
+#   RECALL_NO_GUM=1   Permanent gum opt-out (same as --no-gum)
+#   NO_COLOR=1        Disable ANSI colors
+#   RECALL_VERBOSE=1  Show full output of bun install/build (no stdout capture)
 #
 # Repository is expected to be a clone of github.com/edheltzel/Recall with
 # `main` as the primary branch. DB schema downgrades are not supported.
@@ -44,8 +50,9 @@ while [[ $# -gt 0 ]]; do
   --force) FORCE=true ;;
   --no-migrate) NO_MIGRATE=true ;;
   --no-confirm) NO_CONFIRM=true ;;
+  --no-gum) export RECALL_NO_GUM=1 ;;
   --help | -h)
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   *)
@@ -197,9 +204,7 @@ step_confirm() {
   if [[ "$NO_CONFIRM" == "true" ]] || [[ "$DRY_RUN" == "true" ]]; then return; fi
   log_warn "Update will pull, rebuild, and reload hooks."
   log_warn "If Claude Code / OpenCode / Pi is running, exit them BEFORE continuing."
-  read -p "Proceed? (y/N) " -n 1 -r
-  echo ""
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  if ! _confirm "Proceed?" "N"; then
     log_warn "Update cancelled"
     exit 0
   fi
@@ -368,9 +373,7 @@ step_verify() {
 
 step_report() {
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                    UPDATE COMPLETE                       ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  _banner success "Update Complete"
   echo ""
   log_success "Recall updated to v$(normalize "$(current_version)")"
   echo ""
@@ -390,10 +393,11 @@ step_report() {
 main() {
   trap rollback_on_failure ERR
 
+  # Best-effort gum install (gated on RECALL_NO_GUM=1) for consistent UX.
+  _try_install_gum
+
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                       Recall UPDATE                        ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  _banner info "Recall Update"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
   [[ "$FORCE" == "true" ]] && echo "Force: YES (will rerun even if already current)"

@@ -119,6 +119,9 @@ if ! declare -F _step >/dev/null 2>&1; then
     STEP_NUM=$((STEP_NUM + 1))
     local verb="${1:-}"
     local detail="${2:-}"
+    # CURRENT_STEP is read by the error trap (yellow-3.3) so failure messages
+    # name the right step automatically.
+    CURRENT_STEP="${verb} · ${detail}"
     if [[ "$STEP_TOTAL" -gt 0 ]]; then
       printf '\n%b[%d/%d]%b %b%12s%b  %s\n' \
         "$DIM" "$STEP_NUM" "$STEP_TOTAL" "$NC" \
@@ -419,7 +422,7 @@ _spin() {
   _run_quiet "$label" "$@"
 }
 
-# _style "text" — render a styled bordered text block.
+# _style "text" — render a styled bordered text block (single line).
 _style() {
   local text="${1:-}"
   if [[ "$HAS_GUM" == "true" ]]; then
@@ -427,6 +430,66 @@ _style() {
     return 0
   fi
   printf '%b┌─%b %s\n%b└──%b\n' "$YELLOW" "$NC" "$text" "$YELLOW" "$NC"
+}
+
+# _panel <tone> "TITLE" "line1" "line2" ...
+#
+# Multi-line bordered panel. Used for pre-flight summary, post-flight
+# self-check, and error reports. gum: rounded styled box. bash: 60-col
+# left-aligned ASCII box.
+_panel() {
+  local tone="${1:-info}"
+  shift
+  local title="${1:-}"
+  shift
+  local ansi gum_color
+  case "$tone" in
+    success) ansi="$GREEN";  gum_color=46  ;;
+    warn)    ansi="$BLUE";   gum_color=39  ;;
+    error)   ansi="$RED";    gum_color=196 ;;
+    info|*)  ansi="$YELLOW"; gum_color=214 ;;
+  esac
+
+  if [[ "$HAS_GUM" == "true" ]]; then
+    {
+      [[ -n "$title" ]] && { printf '%s\n' "$title"; printf '\n'; }
+      printf '%s\n' "$@"
+    } | gum style --border rounded --padding "1 2" --width 60 \
+                  --foreground "$gum_color" --border-foreground "$gum_color"
+    return 0
+  fi
+
+  # Bash fallback: 60-col panel (58 inner) with left-aligned content
+  local width=58
+  local hr="──────────────────────────────────────────────────────────"
+  printf '%b╭%s╮%b\n' "$ansi" "$hr" "$NC"
+  if [[ -n "$title" ]]; then
+    _panel_line "$ansi" "$width" "${BOLD}${title}${NC}" 1
+    _panel_line "$ansi" "$width" "" 0
+  fi
+  local line
+  for line in "$@"; do
+    _panel_line "$ansi" "$width" "$line" 0
+  done
+  printf '%b╰%s╯%b\n' "$ansi" "$hr" "$NC"
+}
+
+# _panel_line color width text has-bold-codes — internal helper. When
+# has-bold-codes=1, we strip ANSI before measuring length so padding lines up.
+_panel_line() {
+  local color="$1"
+  local width="$2"
+  local text="$3"
+  local has_codes="${4:-0}"
+  local visible="$text"
+  if [[ "$has_codes" == "1" ]]; then
+    # Strip ANSI escape sequences for length measurement
+    visible=$(printf '%s' "$text" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')
+  fi
+  local plen=${#visible}
+  local pad=$(( width - plen - 2 ))
+  [[ $pad -lt 0 ]] && pad=0
+  printf '%b│%b  %b%*s%b│%b\n' "$color" "$NC" "$text" "$pad" '' "$color" "$NC"
 }
 
 # _banner <tone> "title" [subtitle ...]

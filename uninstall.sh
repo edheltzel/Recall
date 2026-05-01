@@ -13,7 +13,12 @@
 #   ./uninstall.sh --no-confirm     # non-interactive; prints what was removed
 #   ./uninstall.sh --skip-opencode  # leave OpenCode integration alone
 #   ./uninstall.sh --skip-pi        # leave Pi integration alone
+#   ./uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
 #   ./uninstall.sh --help           # show this help
+#
+# Environment:
+#   RECALL_NO_GUM=1   Permanent gum opt-out (same as --no-gum)
+#   NO_COLOR=1        Disable ANSI colors
 #
 
 set -euo pipefail
@@ -38,8 +43,9 @@ while [[ $# -gt 0 ]]; do
   --no-confirm) NO_CONFIRM=true ;;
   --skip-opencode) SKIP_OPENCODE=true ;;
   --skip-pi) SKIP_PI=true ;;
+  --no-gum) export RECALL_NO_GUM=1 ;;
   --help | -h)
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   *)
@@ -85,9 +91,7 @@ RECALL_HOOK_NAMES=(SessionExtract TelosSync SessionRecall SessionPreCompact)
 
 print_summary() {
   echo ""
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                     Recall UNINSTALL                       ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  _banner warn "Recall Uninstall"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
   [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy memory.db + backup tree)"
@@ -95,7 +99,7 @@ print_summary() {
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   echo ""
   echo "Will REMOVE:"
-  echo "  • ~/.claude/commands/Recall/ (and legacy ~/.claude/commands/recall/)"
+  echo "  • ~/.claude/commands/Recall/ (and legacy ~/.claude/commands/recall/ if present)"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json"
@@ -127,9 +131,7 @@ confirm_or_exit() {
   if [[ "$NO_CONFIRM" == "true" ]] || [[ "$DRY_RUN" == "true" ]]; then
     return
   fi
-  read -p "Proceed? (y/N) " -n 1 -r
-  echo ""
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  if ! _confirm "Proceed?" "N"; then
     log_warn "Uninstall cancelled"
     exit 0
   fi
@@ -152,6 +154,7 @@ confirm_purge_or_exit() {
 # ── Removal steps ────────────────────────────────────────────────────────────
 
 remove_slash_commands() {
+  # Remove both Title-case (current) and legacy lowercase if present
   local dir
   for dir in "$CLAUDE_DIR/commands/Recall" "$CLAUDE_DIR/commands/recall"; do
     if [[ -d "$dir" ]]; then
@@ -502,9 +505,7 @@ main() {
     echo ""
   fi
 
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║                   UNINSTALL COMPLETE                    ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
+  _banner success "Uninstall Complete"
   echo ""
   if [[ "$DRY_RUN" == "true" ]]; then
     log_info "Dry-run: no files were modified."

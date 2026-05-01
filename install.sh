@@ -18,15 +18,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/install-lib.sh
 source "$SCRIPT_DIR/lib/install-lib.sh"
 
-# Error trap — guide user to restore on failure
+# Error trap — render structured failure panel with the failing step,
+# captured log tail, and the exact restore command. yellow-3.3 of the
+# installer aesthetic overhaul.
 cleanup() {
-  if [[ $? -ne 0 ]]; then
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
     echo ""
-    log_error "Installation failed!"
-    if [[ -n "${BACKUP_DIR:-}" ]] && [[ -d "${BACKUP_DIR:-}" ]]; then
-      log_info "Your backup is safe at: $BACKUP_DIR"
-      log_info "To restore: ./install.sh restore"
+    local lines=(
+      "Step:    ${CURRENT_STEP:-(setup phase)}"
+      "Status:  exited with code $rc"
+      ""
+    )
+
+    if [[ -s "${RECALL_INSTALL_LOG:-}" ]]; then
+      lines+=("Last 10 lines of $RECALL_INSTALL_LOG:" "")
+      while IFS= read -r line; do
+        lines+=("  $line")
+      done < <(tail -n 10 "$RECALL_INSTALL_LOG")
+      lines+=("")
     fi
+
+    if [[ -n "${BACKUP_DIR:-}" ]] && [[ -d "${BACKUP_DIR:-}" ]]; then
+      lines+=(
+        "Backup preserved at:"
+        "  $BACKUP_DIR"
+        ""
+        "To recover:"
+        "  ./install.sh restore"
+        ""
+      )
+    fi
+    lines+=("Troubleshooting: docs/troubleshooting.md")
+
+    _panel error "INSTALL FAILED" "${lines[@]}"
   fi
 }
 trap cleanup EXIT
@@ -58,6 +83,35 @@ do_install() {
   STEP_TOTAL=10
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
+
+  # Pre-flight summary panel — shows what's about to happen and asks the
+  # user to confirm before any state changes. Skipped when --yes / non-TTY
+  # / NO_CONFIRM=true (yellow-3.1).
+  if [[ "$NO_CONFIRM" != "true" ]] && [[ -t 0 ]]; then
+    local _platforms=()
+    [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && _platforms+=("Claude Code")
+    [[ "$OPENCODE_DETECTED" == "true" ]] && _platforms+=("OpenCode")
+    [[ "$PI_DETECTED" == "true" ]] && _platforms+=("Pi")
+    local _plist
+    _plist=$(IFS=", "; echo "${_platforms[*]:-(none — core install only)}")
+
+    # Tildify long paths so they fit inside the 58-col panel
+    local _target_short="${CLAUDE_DIR/#$HOME/\~}"
+    local _backup_short="${BACKUP_DIR/#$HOME/\~}"
+
+    _panel info "Pre-flight summary" \
+      "Target:     $_target_short" \
+      "Platforms:  $_plist" \
+      "Backup:     $_backup_short" \
+      "Steps:      $STEP_TOTAL total"
+    echo ""
+
+    if ! _confirm "Continue with installation?" "Y"; then
+      log_warn "Install cancelled"
+      trap - EXIT  # don't trigger error panel for user cancel
+      exit 0
+    fi
+  fi
 
   _step "Backup" "Creating backup of existing files"
   recall_create_backup
@@ -144,9 +198,33 @@ do_install() {
   fi
   echo ""
 
+  # Post-flight self-check — confirms the install is actually working before
+  # we declare victory (yellow-3.2). Failures are surfaced inline; they don't
+  # abort the install but they do warn the user something is off.
+  CURRENT_STEP="Self-check"
+  log_info "Running self-check..."
+  local _check_ok=true
+  if "$mem_bin" stats >/dev/null 2>&1; then
+    log_success "Database initialized"
+  else
+    log_warn "mem stats failed — DB may not be initialized"
+    _check_ok=false
+  fi
+  if "$mem_bin" doctor >/dev/null 2>&1; then
+    log_success "mem doctor — all checks passing"
+  else
+    log_warn "mem doctor reports issues — run 'mem doctor' to investigate"
+    _check_ok=false
+  fi
+  echo ""
+
   _banner success "Installation Complete"
   echo ""
-  log_success "Recall installed successfully!"
+  if [[ "$_check_ok" == "true" ]]; then
+    log_success "Recall installed successfully — all systems operational."
+  else
+    log_success "Recall installed (with self-check warnings; see above)."
+  fi
   echo ""
   echo "Backup location: $BACKUP_DIR"
   echo "To restore:      ./install.sh restore"
