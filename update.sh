@@ -294,8 +294,9 @@ step_migrate() {
     mem_bin="$(which mem 2>/dev/null || echo "")"
   fi
   if [[ -z "$mem_bin" ]]; then
-    log_warn "mem binary not found — skipping migrations. Run './install.sh' to relink."
-    return
+    log_error "mem binary not found after step_link_global — symlinks must have been removed."
+    log_error "Recovery: cd $(pwd) && bun link"
+    exit 1
   fi
   "$mem_bin" init
 }
@@ -332,18 +333,37 @@ step_reregister_hooks() {
 step_verify() {
   log_info "Verifying..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: mem --version && mem stats"
+    echo "  [dry-run] would: mem --version && mem stats && verify ~/.bun/bin/mem{,-mcp}"
     return
+  fi
+
+  # Re-verify symlinks. step_link_global verified them earlier, but a parallel
+  # process (bun upgrade, homebrew cleanup, package manager) could have removed
+  # them in the interim. The MCP server entry in settings.json points directly
+  # at ~/.bun/bin/mem-mcp, so a missing symlink here means the next Claude
+  # Code / OpenCode / Pi restart will silently fail to load Recall.
+  if ! recall_verify_global_link; then
+    log_error "Verification failed: bin symlinks missing or stale at end of update."
+    log_error "Recovery: cd $(pwd) && bun link"
+    exit 1
   fi
 
   local mem_bin="$HOME/.bun/bin/mem"
   [[ ! -x "$mem_bin" ]] && mem_bin="$(which mem 2>/dev/null || echo "")"
-  if [[ -n "$mem_bin" ]]; then
-    "$mem_bin" --version
-    "$mem_bin" stats 2>/dev/null | head -10 || log_warn "mem stats output non-zero (db may be empty)"
-  else
-    log_warn "mem binary not found — skipping verification. Run './install.sh' to relink."
+  if [[ -z "$mem_bin" ]]; then
+    log_error "Verification failed: mem binary not found on PATH or at ~/.bun/bin/mem."
+    log_error "Recovery: cd $(pwd) && bun link"
+    exit 1
   fi
+
+  if ! "$mem_bin" --version >/dev/null 2>&1; then
+    log_error "Verification failed: '$mem_bin --version' did not run cleanly."
+    log_error "Recovery: cd $(pwd) && bun install && bun run build && bun link"
+    exit 1
+  fi
+
+  "$mem_bin" --version
+  "$mem_bin" stats 2>/dev/null | head -10 || log_warn "mem stats output non-zero (db may be empty)"
 }
 
 step_report() {
