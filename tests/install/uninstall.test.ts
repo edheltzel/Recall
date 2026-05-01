@@ -43,6 +43,10 @@ function runUninstall(
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir, // ~ -> tmp (avoids touching real $HOME binaries)
+        // bun unlink / npm unlink -g operate on the host's global registry
+        // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
+        // the developer's live `recall` link.
+        RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
   );
@@ -258,6 +262,7 @@ This content must be preserved across an uninstall.
           CLAUDE_DIR: claudeDir,
           BACKUP_BASE: backupBase,
           HOME: claudeDir,
+          RECALL_SKIP_BUN_UNLINK: 'true',
         },
       },
     );

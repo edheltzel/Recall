@@ -295,6 +295,16 @@ remove_memory_section() {
 }
 
 run_bun_unlink() {
+  # Test escape hatch: `bun unlink` and `npm unlink -g` operate on the host's
+  # global registry regardless of CLAUDE_DIR. The uninstall test suite runs
+  # this script against a tmpdir CLAUDE_DIR, but without RECALL_SKIP_BUN_UNLINK
+  # the test would still wipe the developer's live `recall` link, breaking
+  # `mem` and the recall-memory MCP server on the host.
+  if [[ "${RECALL_SKIP_BUN_UNLINK:-false}" == "true" ]]; then
+    log_info "Skipping bun unlink (RECALL_SKIP_BUN_UNLINK=true)"
+    return
+  fi
+
   if command -v bun &>/dev/null; then
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would run: bun unlink"
