@@ -5,7 +5,11 @@
       "Bash(mkdir -p ~/.claude/MEMORY)",
       "Bash(bun -e ' *)",
       "Bash(cp ~/.claude/memory.db ~/.claude/memory.db.pre-migration-0.7.1-backup)",
-      "Read(//Users/ed/.claude/**)"
+      "Read(//Users/ed/.claude/**)",
+      "mcp__recall-memory__memory_hybrid_search",
+      "mcp__recall-memory__memory_search",
+      "Read(//Users/ed/.bun/bin/**)",
+      "Bash(bun install *)"
     ]
   }
 }
