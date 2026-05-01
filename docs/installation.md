@@ -124,7 +124,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 5. Init DB | Initializes the SQLite database at `~/.claude/memory.db` and creates `~/.claude/MEMORY/` |
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
 | 7. Setup hooks | Copies `SessionExtract.ts` and `BatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
-| 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs slash commands to `~/.claude/commands/recall/` |
+| 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs slash commands to `~/.claude/commands/Recall/` |
 | 9. Update CLAUDE.md | Appends a MEMORY section to `~/.claude/CLAUDE.md` with core usage rules |
 
 **After install:** Restart Claude Code to load the MCP server and hooks.
@@ -253,7 +253,7 @@ cd /path/to/Recall
 
 ### What gets removed (default)
 
-- `~/.claude/commands/recall/` (slash commands)
+- `~/.claude/commands/Recall/` (slash commands; legacy `~/.claude/commands/recall/` is also removed if present)
 - `~/.claude/Recall_GUIDE.md`
 - Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact) — other hooks are preserved
 - `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved

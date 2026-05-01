@@ -69,7 +69,7 @@ like `no force-push, ever` survives as a single entry.
 
 ### Updating
 
-From inside Claude Code, `/recall:update` prints the current vs. latest
+From inside Claude Code, `/Recall:update` prints the current vs. latest
 release and the exact command to run. From a shell:
 
 ```bash
@@ -246,7 +246,7 @@ If you're an AI agent reading this repository:
 | [CLI Reference](docs/cli-reference.md) | All commands and options |
 | [MCP Tools](docs/mcp-tools.md) | Tools available to AI agents |
 | [Architecture](docs/architecture.md) | Database, search, extraction pipeline |
-| [Slash Commands](docs/slash-commands.md) | `/recall:*` commands for Claude Code |
+| [Slash Commands](docs/slash-commands.md) | `/Recall:*` commands for Claude Code |
 | [Upgrading](docs/upgrading.md) | Update, backup, migration system |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Changelog](CHANGELOG.md) | Release notes and breaking changes |

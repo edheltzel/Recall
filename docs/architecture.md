@@ -182,7 +182,7 @@ Sourced by all three scripts. Key functions:
 | `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`SessionExtract`, `TelosSync`, `SessionRecall`, `SessionPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/mem` / `mem-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/mem` and `mem-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
-| `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |
+| `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/Recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |
 | `recall_configure_claude_md` | Appends a `## MEMORY` section to `~/.claude/CLAUDE.md` only if absent; uninstall's counterpart removes it via an AST-aware node script that preserves everything before and after the section |
 
 ### Globals (overridable via env)
@@ -202,7 +202,7 @@ All use `: "${VAR:=default}"` so an override set *before* `source`
 sticks. The test harness uses this to drive the lib against a tmpdir
 `CLAUDE_DIR` without touching the real home.
 
-### Slash command: `/recall:update`
+### Slash command: `/Recall:update`
 
 Check-only. Reads the current version, polls GitHub Releases, and
 prints the exact `cd <path> && ./update.sh` recipe. **Never runs
