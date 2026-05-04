@@ -8,7 +8,7 @@ All coding agents forget when a session ends. Recall doesn't — it extracts, in
 
 Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. No phone-home. No vendor lock-in.
 
-> Stable on [Claude Code](https://claude.com/claude-code). Alpha on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/) (MCP works; lifecycle extensions are early). [Codex CLI](https://github.com/openai/codex) and [Gemini CLI](https://github.com/google-gemini/gemini-cli) on the roadmap. See [Roadmap](#roadmap).
+> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/) (MCP works; lifecycle extensions are early). [Codex CLI](https://github.com/openai/codex) and [Gemini CLI](https://github.com/google-gemini/gemini-cli) on the roadmap. See [Roadmap](#roadmap).
 
 ---
 
@@ -255,13 +255,13 @@ If you're an AI agent reading this repository:
 
 Recall is built around two integration surfaces: **MCP** (memory search and add, available from inside the agent) and **lifecycle hooks** (auto-extraction, session-start context injection, pre-compact flushes). Different agents support different surfaces — the table below tracks where each one stands.
 
-| Agent                                                         | MCP |                       Lifecycle hooks                       | Status                                |
-| ------------------------------------------------------------- | :-: | :---------------------------------------------------------: | ------------------------------------- |
-| [**Claude Code**](https://claude.com/claude-code)             | ✅  |             ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation |
-| [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Alpha — `recall-compaction` + `recall-extract` extensions | In progress                           |
-| [**OpenCode**](https://opencode.ai/)                          | ✅  |              ⚠ Alpha — `recall-extract` plugin              | In progress                           |
-| [**Codex CLI**](https://github.com/openai/codex)              |  —  |                              —                              | Coming soon                           |
-| [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                              —                              | Coming soon                           |
+| Agent                                                         | MCP |                      Lifecycle hooks                       | Status                                |
+| ------------------------------------------------------------- | :-: | :--------------------------------------------------------: | ------------------------------------- |
+| [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation |
+| [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — `recall-compaction` + `recall-extract` extensions | In progress                           |
+| [**OpenCode**](https://opencode.ai/)                          | ✅  |             ⚠ Alpha — `recall-extract` plugin              | In progress                           |
+| [**Codex CLI**](https://github.com/openai/codex)              |  —  |                             —                              | Coming soon                           |
+| [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                             —                              | Coming soon                           |
 
 **Candidate** — [Cursor](https://cursor.com): both `.cursor/hooks.json` and MCP are first-class; the integration model maps cleanly onto Recall's existing hook architecture. Tracked but not started.
 
