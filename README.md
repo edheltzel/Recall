@@ -1,20 +1,22 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Recall — Persistent Memory for Claude Code" width="100%">
+  <img src="assets/banner.png" alt="Recall — Persistent Memory for Coding Agents" width="100%">
 </p>
 
-# Recall — Persistent Memory for Claude Code
+# Recall — Persistent Memory for Coding Agents
 
-Claude Code forgets everything when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session.
+All coding agents forget when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session, across every agent you use.
 
-> [Opencode](https://opencode.ai/) and [Pi π](https://pi.dev/) are **very Alpha**
+Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. No phone-home. No vendor lock-in.
+
+> Stable on [Claude Code](https://claude.com/claude-code). Alpha on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/) (MCP works; lifecycle extensions are early). [Codex CLI](https://github.com/openai/codex) and [Gemini CLI](https://github.com/google-gemini/gemini-cli) on the roadmap. See [Roadmap](#roadmap).
 
 ---
 
-[Jump to the Docs](https://github.com/edheltzel/Recall/blob/main/README.md#documentation)
+[Jump to the Docs](#documentation)
 
 ## The Problem
 
-Claude Code has no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today.
+Coding agents have no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today. Every new session re-learns the basics.
 
 ## How Recall Fixes It
 
@@ -32,7 +34,16 @@ Install once, then forget about it. Recall runs silently in the background:
 - **Full-text + semantic search** — find anything from any past session
 - **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically
 - **Zero friction** — no workflow changes, no manual steps
-- **MCP integration** — Claude Code searches your memory automatically
+- **MCP integration** — your agent searches memory automatically through standard MCP tools
+
+## Why Recall
+
+Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
+
+- **Local-first, zero infrastructure.** One SQLite file at `~/.claude/memory.db`. WAL mode, `0600` perms. No vector database, no graph database, no agent server, no API keys for retrieval. Nothing leaves your machine — no telemetry, no phone-home. Optional Ollama for embeddings (also local).
+- **Multi-agent native.** One memory layer across the agents you actually use. Stable on Claude Code today; Pi and OpenCode connect via MCP; Codex CLI and Gemini CLI on the way. Memories captured by one agent are searchable from any other agent on the same machine.
+- **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and curated **Library of Alexandria** entries — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
+- **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
 
 ## Quick Start
 
@@ -49,7 +60,7 @@ mem stats        # Database overview
 mem doctor       # Health check
 ```
 
-Restart Claude Code to load the MCP server and hooks.
+Restart your agent (Claude Code, Pi, or OpenCode) to load the MCP server and hooks.
 
 ### First run: set your identity
 
@@ -151,26 +162,26 @@ Recall operates as three integrated layers — data flows in automatically, gets
                         │
                         ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  CONSUMERS:  Claude Code (MCP)  ·  CLI User (mem)  ·  Sub-agents     │
+│  CONSUMERS:  Coding agents (MCP)  ·  CLI user (mem)  ·  Sub-agents   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Session Lifecycle
 
 1. **Session starts** — A `SessionStart` hook loads recent decisions, breadcrumbs, and learnings from SQLite, giving Claude context from previous sessions immediately
-2. **During the session** — Claude searches memory via MCP tools (`memory_search`, `memory_hybrid_search`) before falling back to git history. Decisions and learnings are recorded in real-time with `memory_add`
+2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`) before falling back to git history. Decisions and learnings are recorded in real-time with `memory_add`
 3. **Session ends** — A `Stop` hook fires `SessionExtract.ts`, which spawns a background process (non-blocking) to extract the conversation via Claude Haiku
 4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to Claude Haiku (with chunking for large sessions >120K chars). A quality gate rejects low-quality extractions
 5. **Dual-write storage** — Results are written to both SQLite (structured, searchable) and markdown files (`DISTILLED.md`, `HOT_RECALL.md`, etc.)
-6. **Batch catchup** — A cron job (`BatchExtract.ts`) runs every 30 minutes to catch sessions missed during crashes or interruptions
+6. **Batch catchup (optional)** — A cron job (`BatchExtract.ts`) can catch sessions missed during crashes or interruptions. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled
 
 ### Search Strategies
 
-| Strategy | Command | How it works |
-|----------|---------|-------------|
-| **Keyword** | `mem search "query"` | FTS5 full-text search across all tables |
-| **Semantic** | `mem semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama) |
-| **Hybrid** (default) | `mem "query"` | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
+| Strategy             | Command                      | How it works                                                                                                            |
+| -------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Keyword**          | `mem search "query"`         | FTS5 full-text search across all tables                                                                                 |
+| **Semantic**         | `mem embed semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama)                                                                 |
+| **Hybrid** (default) | `mem "query"`                | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
 
 > [Architecture deep-dive](docs/architecture.md) — database tables, FTS5 indexes, extraction pipeline details
 
@@ -191,11 +202,11 @@ Recall operates as three integrated layers — data flows in automatically, gets
 
 Suite B measures the byte cost of session-start memory injection. Latest tracked run ([2026-04-18, scope `atlas-recall`](benchmarks/results/2026-04-18T20-13-59-suite-B.md)):
 
-| Variant | Chars | Tokens (est, 4 ch/tok) |
-|---|---:|---:|
-| **v2 tiered SessionRecall** (L0 + L1 top 12) | **5,306** | **~1,327** |
-| v1 flat-blob SessionRecall (simulated) | 8,020 | ~2,005 |
-| CLAUDE.md static baseline | 8,760 | ~2,190 |
+| Variant                                      |     Chars | Tokens (est, 4 ch/tok) |
+| -------------------------------------------- | --------: | ---------------------: |
+| **v2 tiered SessionRecall** (L0 + L1 top 12) | **5,306** |             **~1,327** |
+| v1 flat-blob SessionRecall (simulated)       |     8,020 |                 ~2,005 |
+| CLAUDE.md static baseline                    |     8,760 |                 ~2,190 |
 
 v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `mem benchmark run B`. Methodology and caveats live in [`benchmarks/README.md`](benchmarks/README.md).
 
@@ -217,12 +228,12 @@ mem doctor                     # Health check
 <details>
 <summary>See it in action</summary>
 
-| Search | Stats |
-|--------|-------|
+| Search                                | Stats                               |
+| ------------------------------------- | ----------------------------------- |
 | ![mem search](assets/demo-search.gif) | ![mem stats](assets/demo-stats.gif) |
 
-| Health Check | Recent Memory |
-|-------------|---------------|
+| Health Check                          | Recent Memory                         |
+| ------------------------------------- | ------------------------------------- |
 | ![mem doctor](assets/demo-doctor.gif) | ![mem recent](assets/demo-recent.gif) |
 
 </details>
@@ -233,24 +244,42 @@ mem doctor                     # Health check
 
 If you're an AI agent reading this repository:
 
-| What you need | Where to find it |
-|---------------|-----------------|
-| **Using Recall** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](FOR_CLAUDE.md) |
-| **Developing Recall** (build, test, conventions) | [`CLAUDE.md`](CLAUDE.md) |
+| What you need                                                  | Where to find it                     |
+| -------------------------------------------------------------- | ------------------------------------ |
+| **Using Recall from Claude Code** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](FOR_CLAUDE.md)     |
+| **Using Recall from OpenCode**                                 | [`FOR_OPENCODE.md`](FOR_OPENCODE.md) |
+| **Using Recall from Pi**                                       | [`FOR_PI.md`](FOR_PI.md)             |
+| **Developing Recall** (build, test, conventions)               | [`CLAUDE.md`](CLAUDE.md)             |
+
+## Roadmap
+
+Recall is built around two integration surfaces: **MCP** (memory search and add, available from inside the agent) and **lifecycle hooks** (auto-extraction, session-start context injection, pre-compact flushes). Different agents support different surfaces — the table below tracks where each one stands.
+
+| Agent                                                         | MCP |                       Lifecycle hooks                       | Status                                |
+| ------------------------------------------------------------- | :-: | :---------------------------------------------------------: | ------------------------------------- |
+| [**Claude Code**](https://claude.com/claude-code)             | ✅  |             ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation |
+| [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Alpha — `recall-compaction` + `recall-extract` extensions | In progress                           |
+| [**OpenCode**](https://opencode.ai/)                          | ✅  |              ⚠ Alpha — `recall-extract` plugin              | In progress                           |
+| [**Codex CLI**](https://github.com/openai/codex)              |  —  |                              —                              | Coming soon                           |
+| [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                              —                              | Coming soon                           |
+
+**Candidate** — [Cursor](https://cursor.com): both `.cursor/hooks.json` and MCP are first-class; the integration model maps cleanly onto Recall's existing hook architecture. Tracked but not started.
+
+Have an agent you'd like to see supported? [Open an issue](https://github.com/edheltzel/Recall/issues) — Recall is designed to be agent-agnostic, and any host that speaks MCP is a candidate.
 
 ## Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Installation](docs/installation.md) | Prerequisites, install, verify, session extraction |
-| [CLI Reference](docs/cli-reference.md) | All commands and options |
-| [MCP Tools](docs/mcp-tools.md) | Tools available to AI agents |
-| [Architecture](docs/architecture.md) | Database, search, extraction pipeline |
-| [Slash Commands](docs/slash-commands.md) | `/Recall:*` commands for Claude Code |
-| [Upgrading](docs/upgrading.md) | Update, backup, migration system |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-| [Changelog](CHANGELOG.md) | Release notes and breaking changes |
-| [Acknowledgments](ACKNOWLEDGMENTS.md) | Ideas borrowed, reshaped, and rejected — with credits to original authors |
+| Guide                                      | Description                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |
+| [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |
+| [MCP Tools](docs/mcp-tools.md)             | Tools available to AI agents                                              |
+| [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
+| [Slash Commands](docs/slash-commands.md)   | `/Recall:*` commands for Claude Code                                      |
+| [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
+| [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |
+| [Acknowledgments](ACKNOWLEDGMENTS.md)      | Ideas borrowed, reshaped, and rejected — with credits to original authors |
 
 ## Acknowledgments
 
