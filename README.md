@@ -2,13 +2,15 @@
   <img src="assets/banner.png" alt="Recall — Persistent Memory for Coding Agents" width="100%">
 </p>
 
-# Recall — Persistent Memory for Coding Agents
+> **Recall is a SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions as you work, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records at every session start. Works across Claude Code, OpenCode, and Pi from one local database.
+
+# Recall — Persistent Memory for Any Agent Harness
 
 All coding agents forget when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session, across every agent you use.
 
 Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. No phone-home. No vendor lock-in.
 
-> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/) (MCP works; lifecycle extensions are early). [Codex CLI](https://github.com/openai/codex) and [Gemini CLI](https://github.com/google-gemini/gemini-cli) on the roadmap. See [Roadmap](#roadmap).
+> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and Alpha for [OpenCode](https://opencode.ai/) (MCP works; lifecycle extensions are early). [Codex CLI](https://github.com/openai/codex) and [Gemini CLI](https://github.com/google-gemini/gemini-cli) on the roadmap. See [Roadmap](#roadmap).
 
 ---
 
@@ -16,21 +18,21 @@ Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLi
 
 ## The Problem
 
-Coding agents have no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today. Every new session re-learns the basics.
+AI agents have no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today. Every new session re-learns the basics.
 
 ## How Recall Fixes It
 
 Install once, then forget about it. Recall runs silently in the background:
 
 ```
-┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
-│ You Work │───▶│ Session Ends │───▶│ Auto-Extract │───▶│ SQLite + FTS5 │───▶│ Next Session │
-└─────▲────┘    └──────────────┘    └──────────────┘    └───────────────┘    └──────┬───────┘
-      │                                                                             │
-      └───────────────────────────── Memory Available ──────────────────────────────┘
+┌──────────┐    ┌────────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
+│ You Work │───▶│ Stop hook fires│───▶│ Auto-Extract │───▶│ SQLite + FTS5 │───▶│ Next Session │
+└─────▲────┘    │ (end of turn)  │    └──────────────┘    └───────────────┘    └──────┬───────┘
+      │         └────────────────┘                                                    │
+      └───────────────────────────── Memory Available ───────────────────────────────┘
 ```
 
-- **Auto-extraction** — sessions are parsed into structured summaries when they end
+- **Auto-extraction** — sessions are parsed into structured summaries incrementally as you work (Stop hook fires at the end of every turn, not only when you exit)
 - **Full-text + semantic search** — find anything from any past session
 - **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically
 - **Zero friction** — no workflow changes, no manual steps
@@ -168,12 +170,13 @@ Recall operates as three integrated layers — data flows in automatically, gets
 
 ### Session Lifecycle
 
-1. **Session starts** — A `SessionStart` hook loads recent decisions, breadcrumbs, and learnings from SQLite, giving Claude context from previous sessions immediately
-2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`) before falling back to git history. Decisions and learnings are recorded in real-time with `memory_add`
-3. **Session ends** — A `Stop` hook fires `SessionExtract.ts`, which spawns a background process (non-blocking) to extract the conversation via Claude Haiku
-4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to Claude Haiku (with chunking for large sessions >120K chars). A quality gate rejects low-quality extractions
-5. **Dual-write storage** — Results are written to both SQLite (structured, searchable) and markdown files (`DISTILLED.md`, `HOT_RECALL.md`, etc.)
-6. **Batch catchup (optional)** — A cron job (`BatchExtract.ts`) can catch sessions missed during crashes or interruptions. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled
+1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your `~/.claude/MEMORY/identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
+2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`) before falling back to git history. Decisions, learnings, and breadcrumbs are recorded in real-time with `memory_add`.
+3. **End of every turn** — A `Stop` hook fires `SessionExtract.ts`, which self-spawns a background process (non-blocking). It checks `.extraction_tracker.json` and only re-extracts if the conversation has grown meaningfully since last time — so capture is incremental, not just an "on exit" event.
+4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to the `claude` CLI running Haiku (with chunking for large sessions >120K chars). Optional Ollama fallback if the CLI fails. A quality gate rejects low-quality extractions before they're stored.
+5. **PreCompact flush** — When Claude Code is about to compact its context, a `PreCompact` hook (`SessionPreCompact.ts`) flushes the in-flight messages first, so the squashed window is never lost.
+6. **Dual-write storage** — Results are written to SQLite (the only query surface — every CLI/MCP read hits this) and to markdown artifacts (`DISTILLED.md`, `HOT_RECALL.md`, etc., write-only, human-readable).
+7. **Batch catchup (optional)** — A cron job (`BatchExtract.ts`) sweeps any sessions the Stop hook missed during crashes or interruptions, and ingests sessions dropped by the OpenCode plugin and Pi extension into `~/.claude/MEMORY/{opencode,pi}-sessions/`. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled.
 
 ### Search Strategies
 
@@ -187,16 +190,18 @@ Recall operates as three integrated layers — data flows in automatically, gets
 
 ## What You Get
 
-- **Session memory** — auto-extracted on every session end via Claude Haiku
-- **Full-text + semantic search** — FTS5 keyword search, Ollama vector embeddings, or hybrid with Reciprocal Rank Fusion
-- **Tiered session-start context (v0.7.0+)** — L0 identity (your `identity.md`) + L1 top 12 records ranked by importance (with 4 reserved slots for Library of Alexandria entries)
-- **Importance scoring (1-10)** — every record has an importance score; surfaces what matters most at session start. Manage with `mem pin` / `mem unpin` / `mem importance backfill`
-- **PreCompact hook** — flushes in-flight messages to SQLite before Claude compacts its context, so nothing is lost
-- **Benchmark harness** — measure your own context efficiency with `mem benchmark run B`
-- **Decision & learning tracking** — record architectural decisions with reasoning, capture problems solved; decisions support lifecycle management (supersede/revert) and confidence scoring (high/medium/low)
-- **Agent context** — spawned agents inherit relevant memory via `context_for_agent`
-- **Library of Alexandria** — curated knowledge entries with Fabric extract_wisdom analysis
-- **Breadcrumbs** — quick context notes for future sessions
+- **Auto-captured session memory** — extracted incrementally (Stop hook on every turn) via Claude Haiku, with `BatchExtract.ts` cron sweeper as a crash-recovery safety net
+- **MCP server (`mem-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session
+- **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working
+- **Tiered SessionRecall (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
+- **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `mem pin` / `mem unpin` / `mem importance backfill`
+- **PreCompact flush** — `SessionPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
+- **Decision lifecycle** — `mem decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
+- **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.claude/MEMORY/{opencode,pi}-sessions/`; BatchExtract pulls them into the same SQLite DB. One memory layer across agents
+- **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
+- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`mem add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
+- **Benchmark harness** — `mem benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
+- **Onboarding** — `mem onboard` runs a 7-question interview that writes your L0 identity file
 
 ## Measured wake-up efficiency
 
