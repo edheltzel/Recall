@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installer Aesthetic Overhaul — Feature Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Newsreader:ital,wght@0,500;0,600;1,400;1,500;1,600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-body: 'Inter Tight', system-ui, sans-serif;
+  --font-display: 'Newsreader', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  /* Blueprint editorial palette — warm cream + deep navy + ochre + sage */
+  --bg: #f6f1e7;
+  --surface: #fffdf8;
+  --surface-elevated: #ffffff;
+  --border: rgba(26, 37, 64, 0.10);
+  --border-bright: rgba(26, 37, 64, 0.20);
+  --text: #1a2540;
+  --text-bright: #0a1426;
+  --text-dim: #6b7184;
+  --accent: #a87742;
+  --accent-dim: rgba(168, 119, 66, 0.12);
+  --sage: #5e8a6e;
+  --sage-dim: rgba(94, 138, 110, 0.13);
+  --rose: #b06458;
+  --rose-dim: rgba(176, 100, 88, 0.13);
+  --gold: #b8924a;
+  --gold-dim: rgba(184, 146, 74, 0.13);
+  --amber: #c2843a;
+  --amber-dim: rgba(194, 132, 58, 0.13);
+  /* Sub-agent colors */
+  --cyan: #2f7f96;
+  --cyan-dim: rgba(47, 127, 150, 0.14);
+  --green: #5e8a6e;
+  --green-dim: rgba(94, 138, 110, 0.14);
+  --yellow: #b8924a;
+  --yellow-dim: rgba(184, 146, 74, 0.14);
+  --purple: #8a6bb0;
+  --purple-dim: rgba(138, 107, 176, 0.14);
+  /* Terminal */
+  --term-bg: #0e1622;
+  --term-fg: #e0d9c7;
+  --term-dim: #7a8095;
+  --term-bar: #1a2334;
+  --term-red: #e07a6e;
+  --term-green: #88b890;
+  --term-yellow: #e0b76a;
+  --term-blue: #6c9bd9;
+  --term-cyan: #6cc5d0;
+  --term-magenta: #b78bd9;
+}
+
+[data-theme="dark"] {
+  --bg: #0c1220;
+  --surface: #141a2a;
+  --surface-elevated: #1a2233;
+  --border: rgba(230, 230, 230, 0.08);
+  --border-bright: rgba(230, 230, 230, 0.16);
+  --text: #e7e3d6;
+  --text-bright: #f3efe3;
+  --text-dim: #8a90a3;
+  --accent: #d4a06a;
+  --accent-dim: rgba(212, 160, 106, 0.16);
+  --sage: #87b09a;
+  --sage-dim: rgba(135, 176, 154, 0.16);
+  --rose: #d28679;
+  --rose-dim: rgba(210, 134, 121, 0.16);
+  --gold: #d4af75;
+  --gold-dim: rgba(212, 175, 117, 0.16);
+  --amber: #d8a060;
+  --amber-dim: rgba(216, 160, 96, 0.16);
+  --cyan: #6cc5d0;
+  --cyan-dim: rgba(108, 197, 208, 0.18);
+  --green: #87b09a;
+  --green-dim: rgba(135, 176, 154, 0.18);
+  --yellow: #d4af75;
+  --yellow-dim: rgba(212, 175, 117, 0.18);
+  --purple: #b39bd0;
+  --purple-dim: rgba(179, 155, 208, 0.18);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  background-image:
+    radial-gradient(at 12% 0%, var(--accent-dim) 0%, transparent 45%),
+    radial-gradient(at 88% 8%, var(--sage-dim) 0%, transparent 45%);
+  color: var(--text);
+  line-height: 1.55;
+  font-size: 15px;
+  overflow-wrap: break-word;
+  min-height: 100vh;
+}
+body > * { min-width: 0; }
+a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+a:hover { color: var(--text-bright); }
+code { font-family: var(--font-mono); font-size: 0.92em; }
+
+.page {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 56px 32px 96px;
+}
+
+/* ── Theme toggle ───────────────────────────────────────────── */
+.theme-toggle {
+  position: fixed; top: 18px; right: 18px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-dim); z-index: 100;
+  transition: all .15s ease;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--border-bright); }
+
+/* ── Hero ───────────────────────────────────────────────────── */
+.hero { padding: 72px 0 48px; max-width: 980px; }
+.hero__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2.4px;
+  color: var(--accent);
+  margin-bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.hero__label::before {
+  content: '';
+  width: 28px; height: 1px;
+  background: var(--accent);
+}
+.hero__title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: clamp(44px, 6.4vw, 72px);
+  line-height: 0.98;
+  letter-spacing: -2px;
+  margin: 0 0 18px;
+  color: var(--text-bright);
+}
+.hero__title em {
+  font-style: italic;
+  color: var(--accent);
+  font-weight: 600;
+}
+.hero__subtitle {
+  font-size: 21px;
+  line-height: 1.45;
+  color: var(--text);
+  max-width: 680px;
+  margin: 0 0 28px;
+}
+.hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-top: 32px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.hero__meta strong { color: var(--text); font-weight: 600; }
+
+/* ── Section frame ──────────────────────────────────────────── */
+.section { margin: 64px 0; }
+.section__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--accent);
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 18px;
+}
+.section__label::before {
+  content: ''; width: 18px; height: 1px;
+  background: var(--accent);
+}
+.section__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-style: italic;
+  font-size: 36px;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  margin: 0 0 12px;
+  color: var(--text-bright);
+}
+.section__lede {
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  max-width: 680px;
+  margin: 0 0 32px;
+}
+
+/* ── Sub-agent legend ───────────────────────────────────────── */
+.agents {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+.agent-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+}
+.agent-card::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; bottom: 0; width: 3px;
+  background: var(--agent-color);
+}
+.agent-card__dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--agent-color);
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 4px var(--agent-dim);
+}
+.agent-card__name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--agent-color);
+  margin-bottom: 6px;
+  display: flex; align-items: center;
+}
+.agent-card__role {
+  font-weight: 600; font-size: 17px;
+  color: var(--text-bright);
+  margin: 4px 0;
+}
+.agent-card__scope {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.agent-card[data-color="cyan"]   { --agent-color: var(--cyan);   --agent-dim: var(--cyan-dim); }
+.agent-card[data-color="green"]  { --agent-color: var(--green);  --agent-dim: var(--green-dim); }
+.agent-card[data-color="yellow"] { --agent-color: var(--yellow); --agent-dim: var(--yellow-dim); }
+.agent-card[data-color="purple"] { --agent-color: var(--purple); --agent-dim: var(--purple-dim); }
+
+/* ── Diff panels (problem/solution) ─────────────────────────── */
+.diff-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.diff-panels > * { min-width: 0; overflow-wrap: break-word; }
+.diff-panel__header {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  padding: 12px 18px;
+  display: flex; align-items: center; gap: 10px;
+}
+.diff-panel__header--before {
+  background: var(--rose-dim);
+  color: var(--rose);
+  border-bottom: 1px solid var(--border);
+}
+.diff-panel__header--after {
+  background: var(--sage-dim);
+  color: var(--sage);
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+.diff-panel__body {
+  padding: 18px 20px;
+  font-size: 14px;
+  line-height: 1.55;
+  background: var(--surface);
+}
+.diff-panel__body--after { border-left: 1px solid var(--border); }
+.diff-panel__body ul {
+  list-style: none; padding: 0; margin: 0;
+}
+.diff-panel__body li {
+  padding-left: 18px; position: relative;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.diff-panel__body--before li::before {
+  content: '✗'; position: absolute; left: 0; color: var(--rose); font-weight: 700;
+}
+.diff-panel__body--after li::before {
+  content: '✓'; position: absolute; left: 0; color: var(--sage); font-weight: 700;
+}
+@media (max-width: 800px) {
+  .diff-panels { grid-template-columns: 1fr; }
+  .diff-panel__body--after { border-left: none; border-top: 1px solid var(--border); }
+}
+
+/* ── Phase cards ────────────────────────────────────────────── */
+.phases { display: flex; flex-direction: column; gap: 24px; }
+.phase {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 2px 14px rgba(26, 37, 64, 0.04);
+}
+.phase__bar {
+  height: 4px;
+  background: var(--phase-color);
+}
+.phase__head {
+  padding: 22px 28px 12px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+}
+.phase__num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--phase-color);
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.phase__dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--phase-color);
+}
+.phase__title {
+  font-family: var(--font-display); font-style: italic;
+  font-weight: 600; font-size: 26px;
+  margin: 0; color: var(--text-bright);
+  flex: 1; min-width: 200px;
+}
+.phase__effort {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-dim);
+  background: var(--phase-dim);
+  padding: 4px 10px; border-radius: 999px;
+}
+.phase__purpose {
+  padding: 0 28px 16px;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.6;
+  max-width: 880px;
+}
+.phase__todos {
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.todo {
+  display: grid;
+  grid-template-columns: 100px 1fr 200px;
+  gap: 16px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+.todo:last-child { border-bottom: none; }
+.todo__id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--phase-color);
+  background: var(--phase-dim);
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-block;
+  width: fit-content;
+}
+.todo__desc { font-size: 14px; line-height: 1.55; }
+.todo__files {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+  word-break: break-word;
+}
+@media (max-width: 760px) {
+  .todo { grid-template-columns: 1fr; }
+  .todo__files { text-align: left; }
+}
+.phase[data-color="cyan"]   { --phase-color: var(--cyan);   --phase-dim: var(--cyan-dim); }
+.phase[data-color="green"]  { --phase-color: var(--green);  --phase-dim: var(--green-dim); }
+.phase[data-color="yellow"] { --phase-color: var(--yellow); --phase-dim: var(--yellow-dim); }
+.phase[data-color="purple"] { --phase-color: var(--purple); --phase-dim: var(--purple-dim); }
+
+/* ── Mermaid container ──────────────────────────────────────── */
+.mermaid-wrap {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 24px;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+.mermaid-wrap--compact { min-height: 280px; }
+.mermaid svg { max-width: 100%; height: auto; }
+.mermaid .nodeLabel { color: var(--text) !important; font-family: var(--font-body) !important; }
+.mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--bg) !important; font-family: var(--font-mono) !important; font-size: 11px !important; }
+.mermaid .actor { fill: var(--surface-elevated) !important; stroke: var(--border-bright) !important; }
+.mermaid .messageLine0, .mermaid .messageLine1 { stroke: var(--accent) !important; }
+.mermaid .messageText { fill: var(--text) !important; }
+
+/* ── Terminal mockups ──────────────────────────────────────── */
+.scenes {
+  display: flex; flex-direction: column;
+  gap: 32px;
+}
+.scene {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.scene__head {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  background: var(--surface-elevated);
+}
+.scene__num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 3px 9px;
+  border-radius: 4px;
+  letter-spacing: 1px;
+}
+.scene__title {
+  font-family: var(--font-display); font-style: italic;
+  font-weight: 600; font-size: 19px;
+  color: var(--text-bright);
+  flex: 1; min-width: 200px;
+}
+.scene__caption {
+  font-size: 13px;
+  color: var(--text-dim);
+  width: 100%;
+}
+.scene__panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.scene__panels > * { min-width: 0; }
+.scene__col {
+  border-left: 1px solid var(--border);
+}
+.scene__col:first-child { border-left: none; }
+.scene__col-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.scene__col-head--gum { color: var(--sage); }
+.scene__col-head--gum::before { content: '◆'; color: var(--sage); }
+.scene__col-head--bash { color: var(--accent); }
+.scene__col-head--bash::before { content: '◇'; color: var(--accent); }
+.scene__col-head__hint {
+  margin-left: auto; font-weight: 400;
+  color: var(--text-dim); letter-spacing: 0.4px;
+  text-transform: none; font-size: 10px;
+}
+@media (max-width: 800px) {
+  .scene__panels { grid-template-columns: 1fr; }
+  .scene__col { border-left: none; border-top: 1px solid var(--border); }
+  .scene__col:first-child { border-top: none; }
+}
+
+.term {
+  background: var(--term-bg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--term-fg);
+  margin: 0;
+  padding: 18px 20px;
+  white-space: pre;
+  overflow-x: auto;
+  min-height: 220px;
+}
+.term .red     { color: var(--term-red); }
+.term .green   { color: var(--term-green); }
+.term .yellow  { color: var(--term-yellow); }
+.term .blue    { color: var(--term-blue); }
+.term .cyan    { color: var(--term-cyan); }
+.term .magenta { color: var(--term-magenta); }
+.term .dim     { color: var(--term-dim); }
+.term .bold    { font-weight: 700; color: #f5f1e3; }
+.term .b-on    { background: var(--term-bar); padding: 0 4px; border-radius: 2px; }
+.term .accent-on { background: rgba(212, 160, 106, 0.2); padding: 0 4px; border-radius: 2px; color: #d4a06a; }
+.term .focus-row { background: rgba(108, 197, 208, 0.12); display: inline-block; padding: 0 6px; border-radius: 3px; }
+.term .cursor::after { content: '▏'; animation: blink 1.1s steps(1) infinite; color: var(--term-fg); }
+
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Spinner glyph */
+.spinner {
+  display: inline-block;
+  animation: spin 1s steps(8) infinite;
+  color: var(--term-cyan);
+  font-weight: 700;
+}
+@keyframes spin {
+  0%   { content: '⠋'; }
+  12%  { content: '⠙'; }
+  25%  { content: '⠹'; }
+  37%  { content: '⠸'; }
+  50%  { content: '⠼'; }
+  62%  { content: '⠴'; }
+  75%  { content: '⠦'; }
+  87%  { content: '⠧'; }
+}
+.spinner::before {
+  content: '⠋';
+  animation: spinFrames 0.9s steps(8, end) infinite;
+}
+@keyframes spinFrames {
+  0%   { content: '⠋'; }
+  12%  { content: '⠙'; }
+  25%  { content: '⠸'; }
+  37%  { content: '⠴'; }
+  50%  { content: '⠦'; }
+  62%  { content: '⠧'; }
+  75%  { content: '⠇'; }
+  87%  { content: '⠏'; }
+}
+
+/* ── Tables ──────────────────────────────────────────────── */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.table-scroll { overflow-x: auto; }
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.data-table th {
+  background: var(--surface-elevated);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--border-bright);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text);
+}
+.data-table tbody tr:nth-child(even) { background: var(--accent-dim); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.data-table .id-cell {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.id-cell--cyan   { color: var(--cyan); }
+.id-cell--green  { color: var(--green); }
+.id-cell--yellow { color: var(--yellow); }
+.id-cell--purple { color: var(--purple); }
+
+/* ── Heartbeat sample ────────────────────────────────────── */
+.heartbeat-sample {
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  padding: 22px 26px;
+  border-radius: 12px;
+  white-space: pre;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+}
+.heartbeat-sample .accent { color: var(--term-yellow); font-weight: 700; }
+.heartbeat-sample .cyan { color: var(--term-cyan); }
+.heartbeat-sample .green { color: var(--term-green); }
+.heartbeat-sample .yellow { color: var(--term-yellow); }
+.heartbeat-sample .purple { color: var(--term-magenta); }
+.heartbeat-sample .dim { color: var(--term-dim); }
+.heartbeat-sample .bar { color: var(--term-cyan); }
+
+/* ── Acceptance ──────────────────────────────────────────── */
+.checklist {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 28px;
+}
+.checklist__item {
+  padding: 8px 0 8px 30px;
+  position: relative;
+  font-size: 14px;
+  border-bottom: 1px dashed var(--border);
+}
+.checklist__item:last-child { border-bottom: none; }
+.checklist__item::before {
+  content: '☐';
+  position: absolute;
+  left: 0;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+/* ── Callout ─────────────────────────────────────────────── */
+.callout {
+  padding: 18px 22px;
+  border-radius: 10px;
+  border-left: 4px solid var(--callout-border);
+  background: var(--callout-bg);
+  margin: 24px 0;
+}
+.callout--gold { --callout-border: var(--gold); --callout-bg: var(--gold-dim); }
+.callout--rose { --callout-border: var(--rose); --callout-bg: var(--rose-dim); }
+.callout--amber { --callout-border: var(--amber); --callout-bg: var(--amber-dim); }
+.callout__title {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  margin-bottom: 8px;
+  color: var(--callout-border);
+}
+
+/* ── Misc ────────────────────────────────────────────────── */
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  display: inline-block;
+}
+.tag--sage { background: var(--sage-dim); color: var(--sage); }
+.tag--rose { background: var(--rose-dim); color: var(--rose); }
+.tag--gold { background: var(--gold-dim); color: var(--gold); }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.section, .agent-card, .phase, .scene {
+  animation: fadeUp 0.5s ease-out both;
+  animation-delay: calc(var(--i, 0) * 0.04s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .page { padding: 32px 18px 64px; }
+}
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">[ light / dark ]</button>
+
+<div class="page">
+
+<!-- ─────────────────────────────────  HERO  ───────────────────────────────── -->
+<header class="hero">
+  <div class="hero__label">Feature Plan · Recall installer · 2026-04-30</div>
+  <h1 class="hero__title">Installer<br><em>Aesthetic Overhaul</em></h1>
+  <p class="hero__subtitle">
+    Replace the bland bash UX with a polished baseline plus an auto-installing
+    <code>gum</code> enhancement layer. Graceful fallback when gum isn't available.
+    Three phases, four colored sub-agents, one orchestrator emitting heartbeats.
+  </p>
+  <div class="hero__meta">
+    <span><strong>Files:</strong> install.sh · lib/install-lib.sh · update.sh · uninstall.sh</span>
+    <span><strong>Phases:</strong> 3 + cross-cutting validator</span>
+    <span><strong>Out of scope:</strong> npm runtime · compiled binary · TUI ncurses</span>
+  </div>
+</header>
+
+<!-- ─────────────────────────  SUB-AGENT LEGEND  ───────────────────────────── -->
+<section class="section" style="--i:1">
+  <div class="section__label">Sub-agent roster</div>
+  <h2 class="section__title">Four colors, one orchestrator</h2>
+  <p class="section__lede">
+    Each phase is owned by a colored sub-agent. The purple validator runs
+    cross-cutting in parallel, gating every action item before merge. The
+    primary (orchestrator) coordinates and emits heartbeat updates.
+  </p>
+  <div class="agents">
+    <div class="agent-card" data-color="cyan">
+      <div class="agent-card__name"><span class="agent-card__dot"></span>cyan-foundation</div>
+      <div class="agent-card__role">Bash polish baseline</div>
+      <div class="agent-card__scope">Phase 1 — log glyphs, TTY-gated colors, banner alignment, captured stdout, dynamic step counter.</div>
+    </div>
+    <div class="agent-card" data-color="green">
+      <div class="agent-card__name"><span class="agent-card__dot"></span>green-gum-integration</div>
+      <div class="agent-card__role">Auto-install gum + wrappers</div>
+      <div class="agent-card__scope">Phase 2 — detect, brew/apt/binary fallback chain, wrapper functions, RECALL_NO_GUM opt-out.</div>
+    </div>
+    <div class="agent-card" data-color="yellow">
+      <div class="agent-card__name"><span class="agent-card__dot"></span>yellow-trust-layer</div>
+      <div class="agent-card__role">Pre-flight, post-flight, errors</div>
+      <div class="agent-card__scope">Phase 3 — pre-flight summary panel, mem stats self-check, structured error panel, parity across update/uninstall.</div>
+    </div>
+    <div class="agent-card" data-color="purple">
+      <div class="agent-card__name"><span class="agent-card__dot"></span>purple-validator</div>
+      <div class="agent-card__role">Cross-cutting validation</div>
+      <div class="agent-card__scope">All phases — bash -n syntax, bun test, Docker smoke (Ubuntu, Alpine), HAS_GUM=true/false snapshots.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────  THE PROBLEM  ───────────────────────────── -->
+<section class="section" style="--i:2">
+  <div class="section__label">The problem</div>
+  <h2 class="section__title">Functional, but blah</h2>
+  <p class="section__lede">
+    The current installer works — but the UX is dated. ASCII boxes are
+    misaligned. Long steps go silent. Error feedback is a one-liner. Nothing
+    here is broken; everything here can be more legible, more trustworthy.
+  </p>
+  <div class="diff-panels">
+    <div class="diff-panel__header diff-panel__header--before">Today</div>
+    <div class="diff-panel__header diff-panel__header--after">After</div>
+    <div class="diff-panel__body diff-panel__body--before">
+      <ul>
+        <li>ASCII boxes off by 1–2 cols, casing inconsistent ("Recall" vs "RECALL")</li>
+        <li><code>[INFO]/[OK]/[WARN]/[ERROR]</code> tags read as bureaucratic logs</li>
+        <li><code>bun install</code> dumps full dependency tree on success</li>
+        <li>No spinner during 10–30s build steps — looks frozen</li>
+        <li>Step numbering hardcoded with awkward 8/8b/9/10 conditional</li>
+        <li>No pre-flight summary; no post-flight self-check</li>
+        <li>Error trap shows red "Installation failed!" with no context</li>
+        <li>Y/n prompts loop one-by-one for each platform</li>
+      </ul>
+    </div>
+    <div class="diff-panel__body diff-panel__body--after">
+      <ul>
+        <li>Aligned banners with consistent casing (gum or fixed bash)</li>
+        <li>Glyph prefixes <code>→ ✓ ⚠ ✗</code> with TTY-gated color</li>
+        <li>Slow steps captured silently; one-line status, log dumped only on failure</li>
+        <li>Animated spinner via <code>gum spin</code>; "12s elapsed" fallback in bash</li>
+        <li>Dynamic counter: "Step 3 of 9" reflects what actually runs</li>
+        <li>Pre-flight panel lists every change before proceeding</li>
+        <li>Post-flight runs <code>mem stats</code> + <code>mem doctor</code> automatically</li>
+        <li>Single multi-select prompt for all platforms (gum) with bash fallback</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────  PHASE 1  ───────────────────────────── -->
+<section class="section" style="--i:3">
+  <div class="section__label">Phase 1 of 3</div>
+  <h2 class="section__title">Bash foundation polish</h2>
+  <p class="section__lede">
+    No <code>gum</code> dependency yet — but the wrapper-function shape is
+    laid down so Phase 2 just slots gum in. After Phase 1, the installer
+    already looks better even when gum is unavailable. Ships value alone.
+  </p>
+  <div class="phases">
+    <article class="phase" data-color="cyan">
+      <div class="phase__bar"></div>
+      <div class="phase__head">
+        <span class="phase__dot"></span>
+        <span class="phase__num">cyan-foundation · phase 1</span>
+        <h3 class="phase__title">Bash polish baseline</h3>
+        <span class="phase__effort">~2 hrs</span>
+      </div>
+      <p class="phase__purpose">
+        Refactor the log helpers, fix banner alignment, quiet the noisy steps,
+        replace hardcoded step numbering. Establishes the visual baseline that
+        every later phase builds on.
+      </p>
+      <div class="phase__todos">
+        <div class="todo">
+          <span class="todo__id">cyan-1.1</span>
+          <span class="todo__desc">Replace <code>[INFO]/[OK]/[WARN]/[ERROR]</code> with glyph functions <code>→ ✓ ⚠ ✗</code>. Add <code>_step()</code> for numbered steps with right-aligned 12-char action labels (Volta-style).</span>
+          <span class="todo__files">lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">cyan-1.2</span>
+          <span class="todo__desc">TTY-gate all color escapes inside <code>if [[ -t 1 ]]</code>; empty-string fallback otherwise. Verify CI/non-TTY output is plain text.</span>
+          <span class="todo__files">lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">cyan-1.3</span>
+          <span class="todo__desc">Fix banner alignment in three places (header, footer, restore). Re-pad to actual content width. Standardize on "Recall" casing.</span>
+          <span class="todo__files">install.sh<br>lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">cyan-1.4</span>
+          <span class="todo__desc">Quiet noisy steps: capture <code>bun install</code> / <code>bun run build</code> / <code>bun link</code> stdout to a temp file. Show single status line. Dump captured log only on failure.</span>
+          <span class="todo__files">install.sh<br>lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">cyan-1.5</span>
+          <span class="todo__desc">Replace hardcoded step numbering (1/2/...8b/9/10/11) with a counter that increments based on what actually runs. Total step count rendered up front.</span>
+          <span class="todo__files">install.sh</span>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ─────────────────────────  PHASE 2  ───────────────────────────── -->
+<section class="section" style="--i:4">
+  <div class="section__label">Phase 2 of 3</div>
+  <h2 class="section__title">Auto-install gum + wrappers</h2>
+  <p class="section__lede">
+    Layer gum on top. Auto-install if missing — but every install path can
+    fail and we always degrade gracefully. Wrapper functions branch on
+    <code>HAS_GUM</code>; touch the wrapper once, every call site benefits.
+  </p>
+  <div class="phases">
+    <article class="phase" data-color="green">
+      <div class="phase__bar"></div>
+      <div class="phase__head">
+        <span class="phase__dot"></span>
+        <span class="phase__num">green-gum-integration · phase 2</span>
+        <h3 class="phase__title">Detect, install, wrap</h3>
+        <span class="phase__effort">~3 hrs</span>
+      </div>
+      <p class="phase__purpose">
+        The auto-install fallback chain is the longest part of this phase
+        because it has to be robust: timeout-bounded, checksum-verified,
+        and silent when it gives up.
+      </p>
+      <div class="phase__todos">
+        <div class="todo">
+          <span class="todo__id">green-2.1</span>
+          <span class="todo__desc"><code>_detect_gum()</code> sets <code>HAS_GUM=true</code> iff <code>command -v gum</code> AND <code>gum --version</code> ≥ 0.14.</span>
+          <span class="todo__files">lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">green-2.2</span>
+          <span class="todo__desc">Auto-install fallback chain: <code>brew install</code> (mac) → Charm APT (linux) → GitHub binary + SHA256 verify. 30s cap. On any failure, set <code>HAS_GUM=false</code> silently. Skipped entirely if <code>RECALL_NO_GUM=1</code>.</span>
+          <span class="todo__files">lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">green-2.3</span>
+          <span class="todo__desc">Wrapper functions: <code>_confirm</code>, <code>_choose</code>, <code>_spin</code>, <code>_style</code>, <code>_banner</code>. Each branches on <code>$HAS_GUM</code>.</span>
+          <span class="todo__files">lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">green-2.4</span>
+          <span class="todo__desc">Replace UX call sites: banners → <code>_banner</code>; <code>recall_select_platforms</code> Y/n loop → single <code>_choose</code> multi-select; long bun ops → <code>_spin</code>; restore confirmation → <code>_confirm</code>.</span>
+          <span class="todo__files">install.sh<br>lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">green-2.5</span>
+          <span class="todo__desc">Honor <code>RECALL_NO_GUM=1</code> env override and <code>--no-gum</code> flag. Document in <code>--help</code> and <code>docs/installation.md</code>.</span>
+          <span class="todo__files">install.sh<br>docs/installation.md</span>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ─────────────────────────  PHASE 3  ───────────────────────────── -->
+<section class="section" style="--i:5">
+  <div class="section__label">Phase 3 of 3</div>
+  <h2 class="section__title">Trust layer: pre-flight, post-flight, errors</h2>
+  <p class="section__lede">
+    The high-leverage UX polish that separates "looks nice" from "feels
+    trustworthy." These work identically with or without gum because they
+    use the wrappers from Phase 2.
+  </p>
+  <div class="phases">
+    <article class="phase" data-color="yellow">
+      <div class="phase__bar"></div>
+      <div class="phase__head">
+        <span class="phase__dot"></span>
+        <span class="phase__num">yellow-trust-layer · phase 3</span>
+        <h3 class="phase__title">Trust signals throughout</h3>
+        <span class="phase__effort">~2 hrs</span>
+      </div>
+      <p class="phase__purpose">
+        Show the user what's about to happen before we do anything. Confirm it
+        worked after we're done. When it fails, give them everything they need
+        to recover in a single panel.
+      </p>
+      <div class="phase__todos">
+        <div class="todo">
+          <span class="todo__id">yellow-3.1</span>
+          <span class="todo__desc">Pre-flight summary panel: target dir, platforms, backup destination, total step count. Confirm with <code>_confirm</code> (skipped on <code>--yes</code>).</span>
+          <span class="todo__files">install.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">yellow-3.2</span>
+          <span class="todo__desc">Post-flight self-check: run <code>mem stats</code> + <code>mem doctor --quiet</code>; surface a single ✓/✗ summary line.</span>
+          <span class="todo__files">install.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">yellow-3.3</span>
+          <span class="todo__desc">Error panel: failing step name, last 10 lines of captured log, exact restore command, link to <code>docs/troubleshooting.md</code>.</span>
+          <span class="todo__files">install.sh<br>lib/install-lib.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">yellow-3.4</span>
+          <span class="todo__desc">Apply Phase 1+2 styling consistently to <code>update.sh</code> and <code>uninstall.sh</code>. Most propagates via shared lib; verify visual parity.</span>
+          <span class="todo__files">update.sh<br>uninstall.sh</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">yellow-3.5</span>
+          <span class="todo__desc">Update <code>--help</code> across all three scripts to document <code>--yes</code>, <code>--no-gum</code>, <code>RECALL_NO_GUM=1</code>.</span>
+          <span class="todo__files">install.sh<br>update.sh<br>uninstall.sh</span>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ─────────────────────────  PURPLE VALIDATOR  ───────────────────────────── -->
+<section class="section" style="--i:6">
+  <div class="section__label">Cross-cutting</div>
+  <h2 class="section__title">Purple validator — runs after every action item</h2>
+  <p class="section__lede">
+    Purple sits beside all three phases, not after them. Each colored to-do
+    routes through purple before merging. No phase progresses until its
+    most recent action item is validated green.
+  </p>
+  <div class="phases">
+    <article class="phase" data-color="purple">
+      <div class="phase__bar"></div>
+      <div class="phase__head">
+        <span class="phase__dot"></span>
+        <span class="phase__num">purple-validator · cross-cutting</span>
+        <h3 class="phase__title">Continuous validation</h3>
+        <span class="phase__effort">parallel</span>
+      </div>
+      <div class="phase__todos">
+        <div class="todo">
+          <span class="todo__id">purple-V.1</span>
+          <span class="todo__desc"><code>bash -n install.sh lib/install-lib.sh update.sh uninstall.sh</code> — syntax check on every patch.</span>
+          <span class="todo__files">all .sh files</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">purple-V.2</span>
+          <span class="todo__desc"><code>bun test tests/install/ tests/opencode-integration.test.ts tests/pi-integration.test.ts</code></span>
+          <span class="todo__files">tests/install/<br>tests/*.test.ts</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">purple-V.3</span>
+          <span class="todo__desc">Smoke test in <code>docker run -it ubuntu:22.04</code> and <code>docker run -it alpine:edge</code>; native macOS for brew path.</span>
+          <span class="todo__files">manual</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">purple-V.4</span>
+          <span class="todo__desc">Force <code>HAS_GUM=false</code> snapshot on every Phase 2+3 task to verify graceful degradation.</span>
+          <span class="todo__files">manual</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">purple-V.5</span>
+          <span class="todo__desc">Force <code>RECALL_NO_GUM=1</code> env opt-out snapshot.</span>
+          <span class="todo__files">manual</span>
+        </div>
+        <div class="todo">
+          <span class="todo__id">purple-V.6</span>
+          <span class="todo__desc">Confirm <code>tests/opencode-integration.test.ts:314-315</code> + <code>tests/pi-integration.test.ts:187</code> still grep <code>*_DETECTED</code> flags successfully.</span>
+          <span class="todo__files">tests/*.test.ts</span>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ─────────────────────────  HEARTBEAT  ───────────────────────────── -->
+<section class="section" style="--i:7">
+  <div class="section__label">Heartbeat protocol</div>
+  <h2 class="section__title">Status updates from the orchestrator</h2>
+  <p class="section__lede">
+    The orchestrator emits a heartbeat to the user every 3 minutes (wall
+    clock) AND on every sub-agent completion. Sub-agents push status via
+    <code>SendMessage</code>; orchestrator aggregates and broadcasts upward.
+  </p>
+
+  <h3 style="font-family:var(--font-display);font-style:italic;font-weight:600;font-size:21px;margin:32px 0 12px;">Sequence</h3>
+  <div class="mermaid-wrap mermaid-wrap--compact">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant O as Orchestrator
+  participant C as cyan
+  participant G as green
+  participant Y as yellow
+  participant P as purple
+  Note over O: every 3 min OR on completion
+  O->>C: spawn Phase 1
+  C->>P: validate cyan-1.1
+  P-->>O: cyan-1.1 ✓
+  O-->>U: heartbeat (cyan 20%)
+  C->>P: validate cyan-1.4
+  P-->>O: cyan-1.4 ✓
+  O-->>U: heartbeat (cyan 80%)
+  C-->>O: phase 1 complete
+  O->>G: spawn Phase 2
+  G->>P: validate green-2.2 (gum auto-install)
+  P-->>O: green-2.2 ✓
+  O-->>U: heartbeat (green 40%)
+  G-->>O: phase 2 complete
+  O->>Y: spawn Phase 3
+  Y-->>O: phase 3 complete
+  O-->>U: heartbeat: ALL ✓
+    </div>
+  </div>
+
+  <h3 style="font-family:var(--font-display);font-style:italic;font-weight:600;font-size:21px;margin:32px 0 12px;">Sample heartbeat</h3>
+  <pre class="heartbeat-sample"><span class="bar">═══</span> <span class="accent">HEARTBEAT</span>  <span class="dim">@ 14:23:05  (elapsed 00:08:14)</span> <span class="bar">═══</span>
+<span class="cyan">●</span> cyan-foundation:        [████████░░] <span class="bold">80%</span>  <span class="dim">cyan-1.4 in progress (capture bun install stdout)</span>
+<span class="green">●</span> green-gum-integration:  [░░░░░░░░░░]  <span class="dim">0%  blocked on Phase 1</span>
+<span class="yellow">●</span> yellow-trust-layer:     [░░░░░░░░░░]  <span class="dim">0%  blocked on Phase 2</span>
+<span class="purple">●</span> purple-validator:       [██████░░░░] <span class="bold">60%</span>  <span class="dim">re-running tests on cyan-1.3 patch</span>
+<span class="dim">─── last completion: cyan-1.3 banner alignment (2m ago, validated ✓)</span>
+<span class="dim">─── next milestone:  cyan-1.4 expected ~3m</span></pre>
+
+  <div class="callout callout--gold">
+    <div class="callout__title">Trigger conditions</div>
+    Every 3 minutes (wall clock) while any agent is <code>in_progress</code>.
+    Immediately on any <code>completed</code> or <code>failed</code> status. On
+    every phase transition. On user interrupt or course correction.
+  </div>
+</section>
+
+<!-- ─────────────────────────  GUM AUTO-INSTALL  ───────────────────────────── -->
+<section class="section" style="--i:8">
+  <div class="section__label">Gum bootstrap</div>
+  <h2 class="section__title">Auto-install fallback chain</h2>
+  <p class="section__lede">
+    Three install paths, all bounded by a 30-second timeout. Any path
+    succeeding sets <code>HAS_GUM=true</code>. All paths failing — or the user
+    setting <code>RECALL_NO_GUM=1</code> — silently flips to bash mode.
+  </p>
+  <div class="mermaid-wrap">
+    <div class="mermaid">
+flowchart TD
+  Start([install.sh starts]) --> CheckEnv{"RECALL_NO_GUM=1?"}
+  CheckEnv -->|yes| Fallback["HAS_GUM=false<br/>(bash mode)"]
+  CheckEnv -->|no| Detect{"command -v gum<br/>AND version >= 0.14?"}
+  Detect -->|yes| Use["HAS_GUM=true<br/>(gum mode)"]
+  Detect -->|no| OS{"OS?"}
+  OS -->|macOS| TryBrew["brew install gum<br/>(30s cap)"]
+  OS -->|Linux apt| TryApt["Charm APT repo install<br/>(30s cap)"]
+  OS -->|other| TryBin["GitHub release binary<br/>+ SHA256 verify<br/>(30s cap)"]
+  TryBrew -->|success| Use
+  TryBrew -->|fail/timeout| TryBin
+  TryApt -->|success| Use
+  TryApt -->|fail/timeout| TryBin
+  TryBin -->|success| Use
+  TryBin -->|fail/timeout| Fallback
+  Use --> Continue(["continue install<br/>with gum wrappers"])
+  Fallback --> Continue2(["continue install<br/>with bash wrappers"])
+  classDef success fill:#5e8a6e22,stroke:#5e8a6e,color:#1a2540;
+  classDef fail fill:#b0645822,stroke:#b06458,color:#1a2540;
+  classDef neutral fill:#a8774222,stroke:#a87742,color:#1a2540;
+  class Use success
+  class Fallback fail
+  class TryBrew,TryApt,TryBin neutral
+    </div>
+  </div>
+  <div class="callout callout--rose">
+    <div class="callout__title">Critical: install never blocks</div>
+    Every gum install path is timeout-bounded at 30 seconds and any failure
+    silently sets <code>HAS_GUM=false</code>. The user never sees a gum error
+    — they just get the lower-fidelity bash experience.
+  </div>
+</section>
+
+<!-- ─────────────────────────  TERMINAL MOCKUPS  ───────────────────────────── -->
+<section class="section" style="--i:9">
+  <div class="section__label">Output mockups</div>
+  <h2 class="section__title">Side-by-side: gum mode vs bash fallback</h2>
+  <p class="section__lede">
+    Six scenes, two columns each. Left column shows what users with
+    <code>gum</code> available will see. Right column shows what bash-only
+    users will see. Same content, different fidelity.
+  </p>
+
+  <div class="scenes">
+
+    <!-- SCENE 1: Banner -->
+    <article class="scene">
+      <header class="scene__head">
+        <span class="scene__num">scene 01</span>
+        <h3 class="scene__title">Banner header</h3>
+        <p class="scene__caption">First thing the user sees. Sets the tone for the entire install.</p>
+      </header>
+      <div class="scene__panels">
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--gum">gum mode<span class="scene__col-head__hint">gum style --border double --foreground 212</span></div>
+<pre class="term"><span class="dim">┌────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>                                                    <span class="dim">│</span>
+<span class="dim">│</span>   <span class="yellow bold">▌</span> <span class="bold">RECALL</span>                                          <span class="dim">│</span>
+<span class="dim">│</span>     <span class="dim">Persistent memory for coding agents</span>            <span class="dim">│</span>
+<span class="dim">│</span>     <span class="dim">v0.7.0 · install starting</span>                      <span class="dim">│</span>
+<span class="dim">│</span>                                                    <span class="dim">│</span>
+<span class="dim">└────────────────────────────────────────────────────┘</span></pre>
+        </div>
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--bash">bash fallback<span class="scene__col-head__hint">printf with TTY-gated colors</span></div>
+<pre class="term"><span class="yellow">╔════════════════════════════════════════════════════╗</span>
+<span class="yellow">║</span>                                                    <span class="yellow">║</span>
+<span class="yellow">║</span>    <span class="bold">RECALL</span>                                          <span class="yellow">║</span>
+<span class="yellow">║</span>    <span class="dim">Persistent memory for coding agents</span>            <span class="yellow">║</span>
+<span class="yellow">║</span>    <span class="dim">v0.7.0 · install starting</span>                      <span class="yellow">║</span>
+<span class="yellow">║</span>                                                    <span class="yellow">║</span>
+<span class="yellow">╚════════════════════════════════════════════════════╝</span></pre>
+        </div>
+      </div>
+    </article>
+
+    <!-- SCENE 2: Multi-select -->
+    <article class="scene">
+      <header class="scene__head">
+        <span class="scene__num">scene 02</span>
+        <h3 class="scene__title">Platform multi-select</h3>
+        <p class="scene__caption">After detection: which agents to actually configure. Gum collapses three Y/n prompts into one tidy picker.</p>
+      </header>
+      <div class="scene__panels">
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--gum">gum mode<span class="scene__col-head__hint">gum choose --no-limit --selected=...</span></div>
+<pre class="term"><span class="cyan">→</span> Detecting platforms...
+<span class="green">  ✓</span> Claude Code     <span class="dim">(found ~/.claude)</span>
+<span class="green">  ✓</span> OpenCode        <span class="dim">(opencode in PATH)</span>
+<span class="green">  ✓</span> Pi              <span class="dim">(pi in PATH)</span>
+
+   <span class="bold">Select platforms to configure</span>
+
+<span class="cyan">▸</span>  <span class="green">[✓]</span> Claude Code
+   <span class="green">[✓]</span> OpenCode
+   <span class="dim">[ ]</span> Pi
+
+   <span class="dim">x/space toggle · enter submit · esc cancel</span></pre>
+        </div>
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--bash">bash fallback<span class="scene__col-head__hint">read -p [Y/n] loop, three rounds</span></div>
+<pre class="term"><span class="cyan">→</span> Detecting platforms...
+<span class="green">  ✓</span> Claude Code     <span class="dim">(found ~/.claude)</span>
+<span class="green">  ✓</span> OpenCode        <span class="dim">(opencode in PATH)</span>
+<span class="green">  ✓</span> Pi              <span class="dim">(pi in PATH)</span>
+
+<span class="cyan">→</span> Select which agents to configure (Enter = yes):
+   Configure Claude Code? <span class="dim">[Y/n]</span> <span class="bold">y</span>
+   Configure OpenCode?    <span class="dim">[Y/n]</span> <span class="bold">y</span>
+   Configure Pi?          <span class="dim">[Y/n]</span> <span class="bold">n</span>
+<span class="cyan">→</span>   Skipping Pi<span class="cursor"></span></pre>
+        </div>
+      </div>
+    </article>
+
+    <!-- SCENE 3: Spinner -->
+    <article class="scene">
+      <header class="scene__head">
+        <span class="scene__num">scene 03</span>
+        <h3 class="scene__title">Spinner during <code>bun install</code></h3>
+        <p class="scene__caption">10–30 second wait. Gum animates Braille frames; bash captures stdout and shows elapsed time.</p>
+      </header>
+      <div class="scene__panels">
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--gum">gum mode<span class="scene__col-head__hint">gum spin --spinner dot --title "..."</span></div>
+<pre class="term"><span class="cyan">→</span> Step 2 of 9 · <span class="bold">Installing dependencies</span>
+
+   <span class="cyan"><span class="spinner"></span></span>  bun install <span class="dim">(animated Braille frames)</span>
+
+<span class="dim">   ─── stdout captured to /tmp/recall-install.log ───</span>
+
+
+<span class="dim">(spinner replaced inline by ✓ when done)</span>
+
+<span class="green">   ✓</span>  bun install <span class="dim">complete · 12.3s · 47 packages</span></pre>
+        </div>
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--bash">bash fallback<span class="scene__col-head__hint">captured stdout + elapsed counter every 5s</span></div>
+<pre class="term"><span class="cyan">→</span> Step 2 of 9 · <span class="bold">Installing dependencies</span>
+
+   <span class="dim">→</span>  bun install <span class="dim">running... (10s elapsed)</span>
+
+<span class="dim">   ─── stdout captured to /tmp/recall-install.log ───</span>
+
+
+<span class="dim">(line redrawn every 5s with elapsed time)</span>
+
+<span class="green">   ✓</span>  bun install <span class="dim">complete · 12.3s · 47 packages</span></pre>
+        </div>
+      </div>
+    </article>
+
+    <!-- SCENE 4: Pre-flight -->
+    <article class="scene">
+      <header class="scene__head">
+        <span class="scene__num">scene 04</span>
+        <h3 class="scene__title">Pre-flight summary panel</h3>
+        <p class="scene__caption">Before any backup is taken, show what's about to happen. Skipped on <code>--yes</code>.</p>
+      </header>
+      <div class="scene__panels">
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--gum">gum mode<span class="scene__col-head__hint">gum style --border rounded --padding "1 2"</span></div>
+<pre class="term"><span class="dim">╭─</span> <span class="bold">Pre-flight summary</span> <span class="dim">────────────────────────────╮</span>
+<span class="dim">│</span>                                                   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="yellow">Target:</span>     <span class="bold">~/.claude</span>                          <span class="dim">│</span>
+<span class="dim">│</span>  <span class="yellow">Platforms:</span>  Claude Code, OpenCode               <span class="dim">│</span>
+<span class="dim">│</span>  <span class="yellow">Backup:</span>     ~/.claude/backups/recall/20260430   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="yellow">Steps:</span>      9 total                             <span class="dim">│</span>
+<span class="dim">│</span>                                                   <span class="dim">│</span>
+<span class="dim">│</span>  Continue?  <span class="green">[ Yes ]</span>  <span class="dim">[ No ]</span>                     <span class="dim">│</span>
+<span class="dim">│</span>                                                   <span class="dim">│</span>
+<span class="dim">╰───────────────────────────────────────────────────╯</span></pre>
+        </div>
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--bash">bash fallback<span class="scene__col-head__hint">printf rule lines + read -p</span></div>
+<pre class="term"><span class="yellow">─── Pre-flight summary ────────────────────────────</span>
+  <span class="bold">Target:</span>     ~/.claude
+  <span class="bold">Platforms:</span>  Claude Code, OpenCode
+  <span class="bold">Backup:</span>     ~/.claude/backups/recall/20260430
+  <span class="bold">Steps:</span>      9 total
+<span class="yellow">───────────────────────────────────────────────────</span>
+
+<span class="cyan">→</span> Continue? <span class="dim">[Y/n]</span> <span class="cursor"></span></pre>
+        </div>
+      </div>
+    </article>
+
+    <!-- SCENE 5: Self-check -->
+    <article class="scene">
+      <header class="scene__head">
+        <span class="scene__num">scene 05</span>
+        <h3 class="scene__title">Post-flight self-check</h3>
+        <p class="scene__caption">After install completes: run <code>mem stats</code> and <code>mem doctor</code>, surface result inline. No need to run them manually.</p>
+      </header>
+      <div class="scene__panels">
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--gum">gum mode<span class="scene__col-head__hint">gum style for the box, plain output for results</span></div>
+<pre class="term"><span class="green bold">✓</span> <span class="bold">Installation complete</span>  <span class="dim">(elapsed 00:00:42)</span>
+
+   <span class="bold">Self-check</span>
+<span class="green">   ✓</span> Database initialized · 0 records · 8 tables
+<span class="green">   ✓</span> MCP server registered  <span class="dim">(~/.claude/settings.json)</span>
+<span class="green">   ✓</span> Hooks active           <span class="dim">(SessionStart, Stop, PreCompact)</span>
+<span class="green">   ✓</span> mem doctor             <span class="dim">all checks passing</span>
+
+   <span class="bold">All systems operational.</span></pre>
+        </div>
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--bash">bash fallback<span class="scene__col-head__hint">identical — wrappers normalize this output</span></div>
+<pre class="term"><span class="green bold">✓</span> <span class="bold">Installation complete</span>  <span class="dim">(elapsed 00:00:42)</span>
+
+   <span class="bold">Self-check</span>
+<span class="green">   ✓</span> Database initialized · 0 records · 8 tables
+<span class="green">   ✓</span> MCP server registered  <span class="dim">(~/.claude/settings.json)</span>
+<span class="green">   ✓</span> Hooks active           <span class="dim">(SessionStart, Stop, PreCompact)</span>
+<span class="green">   ✓</span> mem doctor             <span class="dim">all checks passing</span>
+
+   <span class="bold">All systems operational.</span></pre>
+        </div>
+      </div>
+    </article>
+
+    <!-- SCENE 6: Error panel -->
+    <article class="scene">
+      <header class="scene__head">
+        <span class="scene__num">scene 06</span>
+        <h3 class="scene__title">Error panel on failure</h3>
+        <p class="scene__caption">When something breaks: show the failing step, last 10 lines of captured log, and the exact restore command. Single panel.</p>
+      </header>
+      <div class="scene__panels">
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--gum">gum mode<span class="scene__col-head__hint">gum style --border thick --border-foreground 1</span></div>
+<pre class="term"><span class="red">╭─</span> <span class="red bold">INSTALL FAILED</span> <span class="red">─────────────────────────────╮</span>
+<span class="red">│</span>                                                <span class="red">│</span>
+<span class="red">│</span>  <span class="yellow">Step:</span>    bun run build                        <span class="red">│</span>
+<span class="red">│</span>  <span class="yellow">Status:</span>  exited with code 1                   <span class="red">│</span>
+<span class="red">│</span>                                                <span class="red">│</span>
+<span class="red">│</span>  <span class="yellow">Last 5 lines of /tmp/recall-install.log:</span>      <span class="red">│</span>
+<span class="red">│</span>                                                <span class="red">│</span>
+<span class="red">│</span>   <span class="dim">$ bun build src/index.ts --outfile=...</span>      <span class="red">│</span>
+<span class="red">│</span>   <span class="red">✗ TypeError: Cannot read properties of</span>      <span class="red">│</span>
+<span class="red">│</span>   <span class="red">  undefined (reading 'plugins')</span>              <span class="red">│</span>
+<span class="red">│</span>   <span class="red">  at Object.&lt;anonymous&gt; (src/index.ts:5)</span>     <span class="red">│</span>
+<span class="red">│</span>   <span class="dim">error: script "build" exited with code 1</span>   <span class="red">│</span>
+<span class="red">│</span>                                                <span class="red">│</span>
+<span class="red">│</span>  <span class="yellow">Backup preserved at:</span>                          <span class="red">│</span>
+<span class="red">│</span>   ~/.claude/backups/recall/20260430_154212     <span class="red">│</span>
+<span class="red">│</span>                                                <span class="red">│</span>
+<span class="red">│</span>  <span class="yellow">To recover:</span>                                   <span class="red">│</span>
+<span class="red">│</span>   <span class="bold">./install.sh restore</span>                         <span class="red">│</span>
+<span class="red">│</span>                                                <span class="red">│</span>
+<span class="red">╰────────────────────────────────────────────────╯</span></pre>
+        </div>
+        <div class="scene__col">
+          <div class="scene__col-head scene__col-head--bash">bash fallback<span class="scene__col-head__hint">printf with red rule lines, identical content</span></div>
+<pre class="term"><span class="red">═══════════ INSTALL FAILED ════════════════════</span>
+
+  <span class="bold">Step:</span>    bun run build
+  <span class="bold">Status:</span>  exited with code 1
+
+  <span class="bold">Last 5 lines of /tmp/recall-install.log:</span>
+
+   <span class="dim">$ bun build src/index.ts --outfile=...</span>
+   <span class="red">✗ TypeError: Cannot read properties of</span>
+   <span class="red">  undefined (reading 'plugins')</span>
+   <span class="red">  at Object.&lt;anonymous&gt; (src/index.ts:5)</span>
+   <span class="dim">error: script "build" exited with code 1</span>
+
+  <span class="bold">Backup preserved at:</span>
+   ~/.claude/backups/recall/20260430_154212
+
+  <span class="bold">To recover:</span>
+   <span class="bold">./install.sh restore</span>
+
+<span class="red">═══════════════════════════════════════════════</span></pre>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- ─────────────────────────  EDGE CASES  ───────────────────────────── -->
+<section class="section" style="--i:10">
+  <div class="section__label">Edge cases</div>
+  <h2 class="section__title">What happens when reality bites</h2>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Scenario</th>
+          <th>Expected behavior</th>
+          <th>Owner</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Network down during gum install</td>
+          <td>Each path times out at 30s. After all paths fail, <code>HAS_GUM=false</code> silently. Install continues with bash UX.</td>
+          <td><span class="id-cell id-cell--green">green-2.2</span></td>
+        </tr>
+        <tr>
+          <td>gum installed but version &lt; 0.14</td>
+          <td>Detected as missing. Falls through to install chain (which will likely upgrade) or to bash mode.</td>
+          <td><span class="id-cell id-cell--green">green-2.1</span></td>
+        </tr>
+        <tr>
+          <td>Stdin not a TTY (curl|bash, CI)</td>
+          <td>All <code>_confirm</code>/<code>_choose</code> wrappers detect <code>[[ -t 0 ]]</code> and skip prompts; defaults applied.</td>
+          <td><span class="id-cell id-cell--green">green-2.3</span></td>
+        </tr>
+        <tr>
+          <td>Terminal width &lt; 70 cols</td>
+          <td>Banner widths detect via <code>tput cols</code>; drop borders, use plain title lines below 70.</td>
+          <td><span class="id-cell id-cell--cyan">cyan-1.3</span></td>
+        </tr>
+        <tr>
+          <td>User SIGINTs during <code>_spin</code></td>
+          <td>Trap catches; spinner killed; cursor restored; partial captured log preserved for debugging.</td>
+          <td><span class="id-cell id-cell--green">green-2.3</span></td>
+        </tr>
+        <tr>
+          <td><code>bun install</code> fails mid-install</td>
+          <td>Captured log dumped via error panel (yellow-3.3). Backup preserved. <code>./install.sh restore</code> printed.</td>
+          <td><span class="id-cell id-cell--yellow">yellow-3.3</span></td>
+        </tr>
+        <tr>
+          <td>Charm APT GPG key rotates and breaks Linux install</td>
+          <td>APT path is secondary; primary remains GitHub release binary download. APT failure falls through to binary path.</td>
+          <td><span class="id-cell id-cell--green">green-2.2</span></td>
+        </tr>
+        <tr>
+          <td>User ran <code>./install.sh --yes</code> non-interactively</td>
+          <td>Pre-flight summary skipped; all detected platforms configured; gum auto-install still attempted unless <code>RECALL_NO_GUM=1</code>.</td>
+          <td><span class="id-cell id-cell--yellow">yellow-3.1</span></td>
+        </tr>
+        <tr>
+          <td>Captured stdout for very large <code>bun install</code> hides progress</td>
+          <td>Background timer redraws status line every 5s with elapsed time; long stalls become visible.</td>
+          <td><span class="id-cell id-cell--cyan">cyan-1.4</span></td>
+        </tr>
+        <tr>
+          <td>System has gum but user wants bash UX anyway</td>
+          <td><code>RECALL_NO_GUM=1</code> env or <code>--no-gum</code> flag forces <code>HAS_GUM=false</code> at the top of detection.</td>
+          <td><span class="id-cell id-cell--green">green-2.5</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+</section>
+
+<!-- ─────────────────────────  FILES  ───────────────────────────── -->
+<section class="section" style="--i:11">
+  <div class="section__label">File map</div>
+  <h2 class="section__title">What gets touched</h2>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Phase 1</th>
+          <th>Phase 2</th>
+          <th>Phase 3</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>install.sh</code></td>
+          <td>banner alignment, dynamic step counter</td>
+          <td>UX call sites use wrappers, <code>--no-gum</code> flag</td>
+          <td>pre-flight panel, post-flight self-check, error trap</td>
+        </tr>
+        <tr>
+          <td><code>lib/install-lib.sh</code></td>
+          <td>glyph helpers, TTY-gating, captured-output utility</td>
+          <td>detect, auto-install chain, wrapper functions</td>
+          <td>error panel renderer (shared with install.sh)</td>
+        </tr>
+        <tr>
+          <td><code>update.sh</code></td>
+          <td>—</td>
+          <td>uses shared wrappers</td>
+          <td>same banner/error styling for visual parity</td>
+        </tr>
+        <tr>
+          <td><code>uninstall.sh</code></td>
+          <td>—</td>
+          <td>uses shared wrappers</td>
+          <td>same banner/confirm styling</td>
+        </tr>
+        <tr>
+          <td><code>docs/installation.md</code></td>
+          <td>—</td>
+          <td>document <code>RECALL_NO_GUM</code>, <code>--no-gum</code></td>
+          <td>document new <code>--yes</code> + error recovery</td>
+        </tr>
+        <tr>
+          <td><code>tests/install/</code></td>
+          <td>add glyph + alignment assertions</td>
+          <td>add <code>HAS_GUM=false</code> snapshot tests</td>
+          <td>add error-panel format tests</td>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+</section>
+
+<!-- ─────────────────────────  RISKS  ───────────────────────────── -->
+<section class="section" style="--i:12">
+  <div class="section__label">Risk register</div>
+  <h2 class="section__title">Things to watch</h2>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr><th>Risk</th><th>Mitigation</th><th>Owner</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>gum auto-install hangs on slow network</td>
+          <td>30s timeout per path, async fallback</td>
+          <td><span class="id-cell id-cell--green">green</span></td>
+        </tr>
+        <tr>
+          <td>Charm APT signature key rotates</td>
+          <td>GitHub releases binary download is the <em>primary</em> path; APT is opt-in</td>
+          <td><span class="id-cell id-cell--green">green</span></td>
+        </tr>
+        <tr>
+          <td>Captured stdout hides progress on huge <code>bun install</code></td>
+          <td>Background timer updates status line every 5s</td>
+          <td><span class="id-cell id-cell--cyan">cyan</span></td>
+        </tr>
+        <tr>
+          <td>Boxes look ugly on narrow terminals</td>
+          <td><code>tput cols</code> &lt; 70 → drop borders, plain titles</td>
+          <td><span class="id-cell id-cell--cyan">cyan</span></td>
+        </tr>
+        <tr>
+          <td>Existing test grep patterns break on log refactor</td>
+          <td><code>*_DETECTED</code> flag names preserved verbatim — tests verified pre-flight</td>
+          <td><span class="id-cell id-cell--purple">purple</span></td>
+        </tr>
+        <tr>
+          <td>Auto-install gum on shared/CI runner writes to system PATH</td>
+          <td>Default install location is <code>$HOME/.local/bin</code></td>
+          <td><span class="id-cell id-cell--green">green</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+</section>
+
+<!-- ─────────────────────────  ACCEPTANCE  ───────────────────────────── -->
+<section class="section" style="--i:13">
+  <div class="section__label">Acceptance</div>
+  <h2 class="section__title">Done means done</h2>
+  <div class="checklist">
+    <div class="checklist__item">All Phase 1 to-dos closed and validated by purple.</div>
+    <div class="checklist__item">All Phase 2 to-dos closed and validated by purple.</div>
+    <div class="checklist__item">All Phase 3 to-dos closed and validated by purple.</div>
+    <div class="checklist__item"><code>bun test</code> green across <code>tests/install/</code> + <code>tests/opencode-integration.test.ts</code> + <code>tests/pi-integration.test.ts</code>.</div>
+    <div class="checklist__item">Manual install on macOS — both with and without gum present.</div>
+    <div class="checklist__item">Manual install on Ubuntu 22.04 — both with and without gum present.</div>
+    <div class="checklist__item">Manual install on Alpine edge — both with and without gum present.</div>
+    <div class="checklist__item"><code>RECALL_NO_GUM=1</code> opt-out verified.</div>
+    <div class="checklist__item"><code>--yes</code> non-interactive flag verified.</div>
+    <div class="checklist__item">curl|bash path still works (no TTY on stdin).</div>
+    <div class="checklist__item">Plan moved to <code>.atlas/plans/archive/</code> after merge.</div>
+  </div>
+</section>
+
+<footer style="margin-top:80px;padding-top:24px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:11px;color:var(--text-dim);text-align:center;">
+  Recall · installer aesthetic overhaul · 2026-04-30 · plan source: <code>.atlas/plans/2026-04-30-installer-aesthetic-overhaul.md</code>
+</footer>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+  function initMermaid(dark) {
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        // Warm cream / deep navy palette — never violet/indigo
+        primaryColor: dark ? '#1e2a3a' : '#fdf6e9',
+        primaryBorderColor: dark ? '#d4a06a' : '#a87742',
+        primaryTextColor: dark ? '#e7e3d6' : '#1a2540',
+        secondaryColor: dark ? '#1e2d28' : '#ecf3ee',
+        secondaryBorderColor: dark ? '#87b09a' : '#5e8a6e',
+        secondaryTextColor: dark ? '#e7e3d6' : '#1a2540',
+        tertiaryColor: dark ? '#332419' : '#f4ecd8',
+        tertiaryBorderColor: dark ? '#d4af75' : '#b8924a',
+        tertiaryTextColor: dark ? '#e7e3d6' : '#1a2540',
+        lineColor: dark ? '#7a8095' : '#6b7184',
+        fontSize: '14px',
+        fontFamily: "'Inter Tight', system-ui, sans-serif",
+        actorBkg: dark ? '#1a2233' : '#fffdf8',
+        actorBorder: dark ? '#d4a06a' : '#a87742',
+        actorTextColor: dark ? '#e7e3d6' : '#1a2540',
+        signalColor: dark ? '#d4a06a' : '#a87742',
+        signalTextColor: dark ? '#e7e3d6' : '#1a2540',
+        noteBkgColor: dark ? '#1e2d28' : '#fdf6e9',
+        noteTextColor: dark ? '#e7e3d6' : '#1a2540',
+        noteBorderColor: dark ? '#d4a06a' : '#a87742',
+      }
+    });
+  }
+  initMermaid(isDark);
+
+  window.toggleTheme = function() {
+    const cur = document.documentElement.getAttribute('data-theme');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    // Re-render mermaid with new palette
+    document.querySelectorAll('.mermaid').forEach(el => {
+      if (el.dataset.source) {
+        el.removeAttribute('data-processed');
+        el.innerHTML = el.dataset.source;
+      } else {
+        el.dataset.source = el.innerHTML;
+      }
+    });
+    initMermaid(next === 'dark');
+    mermaid.run({ querySelector: '.mermaid' });
+  };
+
+  // Cache mermaid sources for theme toggle
+  document.querySelectorAll('.mermaid').forEach(el => {
+    if (!el.dataset.source) el.dataset.source = el.innerHTML;
+  });
+</script>
+
+</body>
+</html>
