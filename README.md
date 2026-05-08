@@ -102,7 +102,14 @@ release and the exact command to run. From a shell:
 
 ## How Recall Works
 
-Recall operates as three integrated layers — data flows in automatically, gets stored in a searchable database, and surfaces when you (or Claude) need it.
+Recall sits between your agent and a single SQLite database. A **WRITE path** captures sessions as you work; a **READ path** injects memory back into every new session. The diagram below shows both flows side-by-side, with the line styles in the legend distinguishing capture (solid), recall (dashed purple), and the write-only markdown mirror (dashed gray).
+
+<p align="center">
+  <img src="assets/how-recall-works.png" alt="How Recall Works — write path captures sessions into SQLite, read path injects them back into the agent on next session" width="100%">
+</p>
+
+<details>
+<summary>Text-only architecture diagram (for terminal viewers)</summary>
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -167,6 +174,10 @@ Recall operates as three integrated layers — data flows in automatically, gets
 │  CONSUMERS:  Coding agents (MCP)  ·  CLI user (mem)  ·  Sub-agents   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+</details>
+
+The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](assets/how-recall-works.excalidraw) — drop it onto [excalidraw.com](https://excalidraw.com) to edit.
 
 ### Session Lifecycle
 
