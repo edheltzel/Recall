@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Red Team Review · mem → recall</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --bg-elev: #12161b;
+    --bg-card: #161b22;
+    --bg-card-hover: #1b2129;
+    --line: #222a33;
+    --line-strong: #2e3a46;
+    --ink: #e8eef5;
+    --ink-dim: #8d9aa8;
+    --ink-mute: #5b6673;
+    --accent: #f2a65a;
+
+    --blocker: #ff5c5c;
+    --blocker-bg: rgba(255, 92, 92, 0.10);
+    --high: #ffa94d;
+    --high-bg: rgba(255, 169, 77, 0.10);
+    --medium: #ffd166;
+    --medium-bg: rgba(255, 209, 102, 0.10);
+    --low: #6cc2ff;
+    --low-bg: rgba(108, 194, 255, 0.10);
+    --nit: #8a93a0;
+    --nit-bg: rgba(138, 147, 160, 0.10);
+    --kept: #7bd88f;
+    --kept-bg: rgba(123, 216, 143, 0.10);
+
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --serif: "Tiempos Headline", "Iowan Old Style", "Georgia", serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: var(--sans);
+    font-feature-settings: "ss01", "cv11";
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 48px 32px 96px; }
+
+  header.hero {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: end;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 32px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(32px, 5vw, 52px);
+    line-height: 1.05;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+  }
+  h1 code {
+    font-family: var(--mono);
+    font-size: 0.72em;
+    font-weight: 400;
+    background: var(--bg-card);
+    border: 1px solid var(--line-strong);
+    padding: 2px 10px;
+    border-radius: 6px;
+    color: var(--accent);
+  }
+  .subtitle {
+    color: var(--ink-dim);
+    font-size: 17px;
+    max-width: 640px;
+    margin: 0;
+  }
+
+  .scorecard {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+  .stat {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .stat .n {
+    font-family: var(--serif);
+    font-size: 34px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .stat .l {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .stat.blocker .n { color: var(--blocker); }
+  .stat.high .n { color: var(--high); }
+  .stat.design .n { color: var(--low); }
+  .stat.kept .n { color: var(--kept); }
+
+  nav.controls {
+    position: sticky;
+    top: 0;
+    background: linear-gradient(to bottom, var(--bg) 85%, transparent);
+    padding: 16px 0 12px;
+    z-index: 10;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .filters .group-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-right: 6px;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--ink-dim);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--ink-mute); }
+  .chip.active {
+    background: var(--ink);
+    color: var(--bg);
+    border-color: var(--ink);
+  }
+  .chip .count {
+    opacity: 0.55;
+    margin-left: 4px;
+  }
+  .chip.active .count { opacity: 0.7; }
+  .sep { width: 1px; height: 18px; background: var(--line-strong); margin: 0 6px; }
+
+  section.group { margin-bottom: 48px; }
+  section.group > h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+  }
+  section.group > .lede {
+    color: var(--ink-dim);
+    font-size: 14px;
+    margin: 0 0 20px;
+    max-width: 640px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .finding {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+  }
+  .finding:hover { border-color: var(--line-strong); }
+  .finding[data-severity="BLOCKER"] { border-left: 3px solid var(--blocker); }
+  .finding[data-severity="HIGH"] { border-left: 3px solid var(--high); }
+  .finding[data-severity="MEDIUM"] { border-left: 3px solid var(--medium); }
+  .finding[data-severity="LOW"] { border-left: 3px solid var(--low); }
+  .finding[data-severity="KEPT"] { border-left: 3px solid var(--kept); }
+  .finding[data-severity="NITPICK"] { border-left: 3px solid var(--nit); }
+
+  .finding summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+    transition: background 0.15s ease;
+  }
+  .finding summary:hover { background: var(--bg-card-hover); }
+  .finding summary::-webkit-details-marker { display: none; }
+  .finding[open] summary { border-bottom: 1px solid var(--line); }
+
+  .sev {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .sev.BLOCKER { background: var(--blocker-bg); color: var(--blocker); }
+  .sev.HIGH { background: var(--high-bg); color: var(--high); }
+  .sev.MEDIUM { background: var(--medium-bg); color: var(--medium); }
+  .sev.LOW { background: var(--low-bg); color: var(--low); }
+  .sev.KEPT { background: var(--kept-bg); color: var(--kept); }
+  .sev.NITPICK { background: var(--nit-bg); color: var(--nit); }
+
+  .title {
+    font-weight: 500;
+    font-size: 15.5px;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+  }
+  .title em {
+    font-style: normal;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.94em;
+  }
+
+  .meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .source-chip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: var(--ink-mute);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    letter-spacing: 0.04em;
+  }
+  .source-chip.both {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(242, 166, 90, 0.08);
+  }
+  .caret {
+    color: var(--ink-mute);
+    font-family: var(--mono);
+    font-size: 12px;
+    transition: transform 0.18s ease;
+  }
+  .finding[open] .caret { transform: rotate(90deg); color: var(--ink); }
+
+  .body {
+    padding: 18px 20px 22px;
+    display: grid;
+    gap: 16px;
+  }
+  .body p { margin: 0; color: var(--ink-dim); font-size: 14.5px; }
+  .body p strong { color: var(--ink); font-weight: 500; }
+
+  .fact {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 12px;
+    align-items: start;
+    font-size: 13.5px;
+  }
+  .fact .k {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding-top: 2px;
+  }
+  .fact .v { color: var(--ink); }
+  .fact .v code { font-family: var(--mono); font-size: 12.5px; background: var(--bg); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+
+  pre.fix {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin: 0;
+  }
+  pre.fix .add { color: #7bd88f; }
+  pre.fix .del { color: #ff8080; }
+  pre.fix .cmt { color: var(--ink-mute); }
+  pre.fix .kw { color: var(--low); }
+
+  .convergent {
+    background: linear-gradient(135deg, rgba(242,166,90,0.06), rgba(242,166,90,0.01));
+    border: 1px solid rgba(242, 166, 90, 0.3);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 0 0 40px;
+  }
+  .convergent h3 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+  .convergent ul { margin: 0; padding-left: 18px; color: var(--ink); }
+  .convergent li { margin: 6px 0; font-size: 14.5px; }
+  .convergent li code { font-family: var(--mono); font-size: 12.5px; background: var(--bg); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+
+  .diff-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .diff-row > div {
+    background: var(--bg);
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+  .diff-row .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 6px;
+  }
+  .diff-row .before .label { color: #ff8080; }
+  .diff-row .after .label { color: #7bd88f; }
+  .diff-row code { font-family: var(--mono); font-size: 12.5px; }
+
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-mute);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer a { color: var(--ink-dim); text-decoration: none; border-bottom: 1px dotted var(--line-strong); }
+  footer a:hover { color: var(--ink); }
+
+  .hidden { display: none !important; }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 28px 18px 80px; }
+    header.hero { grid-template-columns: 1fr; }
+    .scorecard { grid-template-columns: repeat(2, 1fr); }
+    .finding summary { grid-template-columns: auto 1fr; }
+    .finding .meta { grid-column: 1 / -1; justify-content: flex-start; }
+    .fact { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div>
+    <div class="eyebrow">Red team · 2026-04-21</div>
+    <h1>Rename <code>mem</code> → <code>recall</code></h1>
+    <p class="subtitle">Two independent adversarial reviewers stress-tested the migration plan. Nineteen findings. Three blockers missed on first pass. Four design decisions corrected.</p>
+  </div>
+  <div style="font-family: var(--mono); font-size: 11px; color: var(--ink-mute); text-align: right; letter-spacing: 0.08em;">
+    PLAN<br>
+    <a href="../plans/2026-04-20-rename-mem-cli-to-recall.md" style="color:var(--ink-dim); text-decoration:none; border-bottom:1px dotted var(--line-strong);">2026-04-20-rename-mem-cli-to-recall.md</a>
+  </div>
+</header>
+
+<div class="scorecard">
+  <div class="stat blocker"><div class="n">3</div><div class="l">Blockers</div></div>
+  <div class="stat high"><div class="n">5</div><div class="l">High</div></div>
+  <div class="stat design"><div class="n">4</div><div class="l">Design corrections</div></div>
+  <div class="stat kept"><div class="n">7</div><div class="l">Plan upheld</div></div>
+</div>
+
+<div class="convergent">
+  <h3>Convergent findings — both reviewers flagged independently</h3>
+  <ul>
+    <li>Hooks at <code>hooks/SessionRecall.ts</code> and <code>hooks/SessionPreCompact.ts</code> read <code>MEM_DB_PATH</code> directly — completely missing from the original scope.</li>
+    <li>Worktree workflow is wrong for this task — <code>bun link</code> from inside the worktree leaves dangling symlinks when <code>ExitWorktree</code> removes it. Must merge to main first, then install from main.</li>
+    <li>The claim of “29 test files” is wrong by ~4× — actual count is 6 files with ~34 occurrences. Cosmetic, but would have confused the implementer.</li>
+  </ul>
+</div>
+
+<nav class="controls">
+  <div class="filters" id="filters">
+    <span class="group-label">Severity</span>
+    <button class="chip active" data-filter="all">All <span class="count">19</span></button>
+    <button class="chip" data-filter="BLOCKER">Blocker <span class="count">3</span></button>
+    <button class="chip" data-filter="HIGH">High <span class="count">5</span></button>
+    <button class="chip" data-filter="MEDIUM">Medium <span class="count">3</span></button>
+    <button class="chip" data-filter="LOW">Low <span class="count">2</span></button>
+    <button class="chip" data-filter="KEPT">Plan upheld <span class="count">6</span></button>
+    <span class="sep"></span>
+    <span class="group-label">Source</span>
+    <button class="chip" data-source="general">General red team</button>
+    <button class="chip" data-source="contrarian">Contrarian</button>
+    <button class="chip" data-source="both">Both</button>
+  </div>
+</nav>
+
+<section class="group">
+  <h2>Blockers</h2>
+  <p class="lede">Issues that would break the migration at runtime. Must land in the plan before execution.</p>
+  <div class="grid" data-group>
+
+    <details class="finding" data-severity="BLOCKER" data-source="both">
+      <summary>
+        <span class="sev BLOCKER">Blocker</span>
+        <span class="title">Hooks <em>SessionRecall.ts</em> and <em>SessionPreCompact.ts</em> read <code>MEM_DB_PATH</code> directly — missing from scope</span>
+        <span class="meta">
+          <span class="source-chip both">Both</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p>Both hook files carry their own <code>getDbPath()</code> implementation that reads the env var directly — they don't import from <code>src/</code>. They're copied verbatim to <code>~/.claude/hooks/</code> at install time.</p>
+        <div class="fact"><div class="k">Evidence</div><div class="v"><code>hooks/SessionRecall.ts:46</code> — <code>if (process.env.MEM_DB_PATH) return process.env.MEM_DB_PATH;</code><br><code>hooks/SessionPreCompact.ts:74</code> — identical pattern</div></div>
+        <div class="fact"><div class="k">Failure mode</div><div class="v">After rename + v1.1.0 removes the fallback, the CLI still works but SessionRecall / SessionPreCompact silently break — because the hooks were never updated.</div></div>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">New Commit 2 dedicated to hook updates. Each hook reads <code>RECALL_DB_PATH</code> first, <code>MEM_DB_PATH</code> as fallback, same chain as <code>src/db/connection.ts</code>.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="BLOCKER" data-source="general">
+      <summary>
+        <span class="sev BLOCKER">Blocker</span>
+        <span class="title"><em>uninstall.sh</em> + <em>tests/install/uninstall.test.ts</em> absent from scope</span>
+        <span class="meta">
+          <span class="source-chip">General</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p>The uninstaller references <code>mem</code> / <code>mem-mcp</code> in user-facing messages and log output. More consequential: its test fixture hardcodes <code>mem-mcp</code> in a mock <code>settings.json</code>.</p>
+        <div class="fact"><div class="k">Evidence</div><div class="v"><code>uninstall.sh:108, 303</code> — binary name references<br><code>tests/install/uninstall.test.ts:149</code> — mock MCP fixture hardcodes <code>mem-mcp</code></div></div>
+        <div class="fact"><div class="k">Consequence</div><div class="v">If the fixture isn't updated, the test becomes a <strong>false positive</strong> — it passes a stale fixture through and silently stops testing the real uninstaller path.</div></div>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">Added <code>uninstall.sh</code> and <code>tests/install/uninstall.test.ts</code> to Critical Files table. Covered in Commits 4 and 6.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="BLOCKER" data-source="general">
+      <summary>
+        <span class="sev BLOCKER">Blocker</span>
+        <span class="title"><em>tests/opencode-integration.test.ts</em> fixture and assertion hardcode <code>mem-mcp</code></span>
+        <span class="meta">
+          <span class="source-chip">General</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p>The test constructs a mock MCP config with <code>command: 'mem-mcp'</code> and asserts <code>toBe('mem-mcp')</code>. After rename, this test passes a stale fixture round-trip — the installer will stop being validated by this test.</p>
+        <div class="fact"><div class="k">Evidence</div><div class="v"><code>tests/opencode-integration.test.ts:484, 496</code></div></div>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">Both fixture string and assertion updated in Commit 6.</div></div>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<section class="group">
+  <h2>High severity</h2>
+  <p class="lede">Real issues with non-trivial blast radius. None are runtime-fatal, but each causes downstream pain.</p>
+  <div class="grid" data-group>
+
+    <details class="finding" data-severity="HIGH" data-source="both">
+      <summary>
+        <span class="sev HIGH">High</span>
+        <span class="title">Worktree workflow leaves dangling symlinks after <code>ExitWorktree</code></span>
+        <span class="meta">
+          <span class="source-chip both">Both</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p><strong>CLAUDE.md mandates worktrees</strong>, but this task is a real exception. <code>bun link</code> from inside <code>.claude/worktrees/rename-mem-to-recall/</code> symlinks <code>~/.bun/bin/recall</code> to the worktree's <code>dist/index.js</code>. When the worktree is removed, the symlink dangles and <code>recall</code> becomes a broken command.</p>
+        <div class="fact"><div class="k">Correct flow</div><div class="v">Commits inside worktree → merge to main → <code>ExitWorktree action: remove</code> → run <code>./install.sh</code> <strong>from main</strong>.</div></div>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">Explicit "Execution order" section now mandates merge-then-install from main, with <code>recall_verify_global_link()</code> catching regressions.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="HIGH" data-source="contrarian">
+      <summary>
+        <span class="sev HIGH">High</span>
+        <span class="title">Live MCP server dies when <code>tsup --clean</code> wipes <code>dist/</code> — not at restart</span>
+        <span class="meta">
+          <span class="source-chip">Contrarian</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p>The plan notes "restart Claude Code after <code>./install.sh</code>" but underestimates <em>when</em> breakage starts. <code>bun run build</code> (implicit in install) uses <code>tsup --clean</code>, which deletes <code>dist/</code> before rebuild. The live MCP server process holds the old file open via inode, but the new build creates a new inode. During the install → restart window, <code>memory_*</code> tools return connection errors.</p>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">CHANGELOG migration note rewritten: "Finish any in-progress <code>memory_dump</code> before running <code>./install.sh</code>, then restart Claude Code."</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="HIGH" data-source="general">
+      <summary>
+        <span class="sev HIGH">High</span>
+        <span class="title"><em>install.sh:90-98</em> hardcodes <code>~/.bun/bin/mem</code> as <code>mem_bin</code></span>
+        <span class="meta">
+          <span class="source-chip">General</span>
+          <span class="caret">›</span>
+        </summary>
+      <div class="body">
+        <p>Step 5 of the installer looks for the binary at the old path. After <code>recall_cleanup_legacy</code> removes it and <code>bun link</code> creates <code>recall</code> instead, the <code>"$mem_bin" init</code> call fails with "binary not found."</p>
+        <div class="fact"><div class="k">Dependency</div><div class="v">Tight: the cleanup (removes old symlink) and the variable rename (updates the lookup) must land in the same commit. They do — both in Commit 4.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="HIGH" data-source="general">
+      <summary>
+        <span class="sev HIGH">High</span>
+        <span class="title">Deprecation <code>console.warn</code> would pollute every test run</span>
+        <span class="meta">
+          <span class="source-chip">General</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p>If the fallback emits a <code>console.warn</code> when <code>MEM_DB_PATH</code> is the source, <code>setupTestDb()</code> triggers the warning on every test that uses the harness — noisy, and some CI runners fail on unexpected stderr.</p>
+        <div class="fact"><div class="k">Design correction</div><div class="v">Plan now uses <strong>silent fallback</strong> (no warning). Combined with moving the harness update to Commit 1, fallback is never exercised in tests.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="HIGH" data-source="both">
+      <summary>
+        <span class="sev HIGH">High</span>
+        <span class="title">"29 test files" claim is wrong — actual count is 6 files</span>
+        <span class="meta">
+          <span class="source-chip both">Both</span>
+          <span class="caret">›</span>
+        </span>
+      </summary>
+      <div class="body">
+        <p>The prior plan conflated occurrences with files. Real count: <strong>6 files</strong> directly reference <code>MEM_DB_PATH</code>, totaling ~34 occurrences.</p>
+        <div class="fact"><div class="k">Files</div><div class="v"><code>tests/helpers/setup.ts</code> (central — 2 occ.)<br><code>tests/hooks/SessionRecall.test.ts</code> (7)<br><code>tests/hooks/session-precompact.test.ts</code> (5)<br><code>tests/db/extraction-schema.test.ts</code> (2)<br><code>tests/db/connection.test.ts</code> (setup + descriptions)<br><code>tests/opencode-integration.test.ts:487</code> (1 fixture)</div></div>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<section class="group">
+  <h2>Medium severity</h2>
+  <p class="lede">Real bugs with contained blast radius — will cause minor surprise, but recovery is easy.</p>
+  <div class="grid" data-group>
+
+    <details class="finding" data-severity="MEDIUM" data-source="general">
+      <summary>
+        <span class="sev MEDIUM">Medium</span>
+        <span class="title"><code>teardownTestDb()</code> doesn't clear <code>RECALL_DB_PATH</code> after Commit 5</span>
+        <span class="meta"><span class="source-chip">General</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Once the harness sets <code>RECALL_DB_PATH</code>, teardown must also delete it. If only <code>MEM_DB_PATH</code> is cleared, stale <code>RECALL_DB_PATH</code> points at a deleted temp dir → false failures in subsequent <code>getDb()</code> tests.</p>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">Commit 1 (advanced from Commit 5) updates teardown to clear both variables.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="MEDIUM" data-source="general">
+      <summary>
+        <span class="sev MEDIUM">Medium</span>
+        <span class="title"><code>bun link</code> does NOT remove old symlinks when bin keys change</span>
+        <span class="meta"><span class="source-chip">General</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Changing <code>package.json</code> bin from <code>{mem, mem-mcp}</code> to <code>{recall, recall-mcp}</code> creates new symlinks but orphans the old ones. Both names work simultaneously until <code>recall_cleanup_legacy</code> runs during install.</p>
+        <div class="fact"><div class="k">Clarification added</div><div class="v">Commit 2 verification note now explicitly states: both binaries coexist until <code>./install.sh</code> cleanup phase.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="MEDIUM" data-source="general">
+      <summary>
+        <span class="sev MEDIUM">Medium</span>
+        <span class="title"><code>recall_configure_mcp</code> early-return could skip path rewrite</span>
+        <span class="meta"><span class="source-chip">General</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Function checks for existing <code>recall-memory</code> entry and returns early. Works correctly because <code>recall_cleanup_legacy</code> runs FIRST and fixes the stale <code>mem-mcp</code> command path — but the two functions are coupled in a non-obvious way.</p>
+        <div class="fact"><div class="k">Verdict</div><div class="v">Ordering is correct as specified. Plan notes the coupling explicitly so future refactors don't accidentally reorder.</div></div>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<section class="group">
+  <h2>Low / nitpick</h2>
+  <p class="lede">Minor issues. Worth fixing but wouldn't block the migration.</p>
+  <div class="grid" data-group>
+
+    <details class="finding" data-severity="LOW" data-source="general">
+      <summary>
+        <span class="sev LOW">Low</span>
+        <span class="title"><code>doctor.ts:427,429</code> runtime banner still prints <code>mem doctor</code></span>
+        <span class="meta"><span class="source-chip">General</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>The prior sweep scope said "help text and comments" — missed the <code>console.log</code> banner string. After rename, the banner reads <code>mem doctor — Memory Subsystem Health Check</code> which contradicts the renamed CLI.</p>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">Sweep scope broadened; final verification runs <code>rg 'mem\s+(stats|init|…)' src/</code> to catch all runtime strings.</div></div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="LOW" data-source="general">
+      <summary>
+        <span class="sev LOW">Low</span>
+        <span class="title"><code>bun -e</code> vs <code>node -e</code> inconsistency in <code>install-lib.sh</code></span>
+        <span class="meta"><span class="source-chip">General</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>The new <code>recall_cleanup_legacy</code> uses <code>bun -e</code> while <code>_recall_write_mcp_settings</code> uses <code>node -e</code>. Both work (bun is required for the install anyway) but the style mismatch is cosmetic.</p>
+        <div class="fact"><div class="k">Fix in plan</div><div class="v">Flagged as a non-blocking follow-up.</div></div>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<section class="group">
+  <h2>Design corrections</h2>
+  <p class="lede">Where the contrarian reviewer changed the shape of the plan — not by finding a bug, but by proposing a cleaner approach.</p>
+  <div class="grid" data-group>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian" open>
+      <summary>
+        <span class="sev KEPT">Corrected</span>
+        <span class="title">Drop <em>src/lib/env.ts</em> — <code>getDbPath()</code> already exists</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>The prior plan proposed a new shared helper file. But <code>getDbPath()</code> is already a named, exported function in <code>src/db/connection.ts:15-17</code> — with exactly one caller. A new module would add indirection for zero reuse.</p>
+        <div class="diff-row">
+          <div class="before">
+            <div class="label">Before (plan v1)</div>
+            <code>New file: src/lib/env.ts<br>export function getDbPath()<br>Callers: 1</code>
+          </div>
+          <div class="after">
+            <div class="label">After (plan v2)</div>
+            <code>Modify in place: connection.ts:15-17<br>No new file<br>Callers unchanged</code>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Corrected</span>
+        <span class="title">Kill the <code>console.warn</code> "once per process" guard — no call site justifies it</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>The guard protects against multiple warnings per run, but no command calls <code>getDbPath()</code> more than once. The guard is complexity for nothing. Combined with General's observation that the warning would pollute tests, the cleanest answer is: silent fallback for v1.0.x, hard removal in v1.1.0.</p>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Corrected</span>
+        <span class="title">Version bump → <code>1.0.0</code>, not <code>0.8.0</code></span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Semver for a single-user CLI is purely communicative. The v2 foundation (<code>decisions#49</code>) already shipped the architectural work 1.0.0 would represent. The rename is the name catching up to the architecture — this IS 1.0.0.</p>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Corrected</span>
+        <span class="title">Update test harness in Commit 1, not Commit 5</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Moving <code>setup.ts</code> env-var rename to Commit 1 means the fallback is never exercised by the test suite → zero deprecation noise, zero stderr pollution, cleanest path through all intermediate commits.</p>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<section class="group">
+  <h2>Decisions the plan held</h2>
+  <p class="lede">Red team challenged — plan stood its ground for the right reasons.</p>
+  <div class="grid" data-group>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Upheld</span>
+        <span class="title">MCP tool names (<code>memory_search</code>, etc.) stay unchanged</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Tool names are the stable public API. The <code>memory_</code> prefix is semantically accurate — these tools operate on memory regardless of project name. Agents call tools by bare name, so there's no renaming pressure from the CLI change.</p>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Upheld</span>
+        <span class="title">MCP server ID (<code>recall-memory</code>) stays unchanged</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Original rationale "breaks every agent prompt" overstated the cost, but the decision stands: cosmetic rename, zero user value. "Recall is the project, <em>memory</em> is what it stores" is still a coherent mental model.</p>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Upheld</span>
+        <span class="title">Atomic rename, not phased</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Two-phase (ship both names, then remove old) would need two releases, two changelogs, and bin coexistence complexity. For a single user with 6 tests (after correction), atomic is simpler and the fallback mitigates the test transition.</p>
+      </div>
+    </details>
+
+    <details class="finding" data-severity="KEPT" data-source="contrarian">
+      <summary>
+        <span class="sev KEPT">Upheld</span>
+        <span class="title"><code>recall_cleanup_legacy</code> placement (before <code>recall_link_global</code>)</span>
+        <span class="meta"><span class="source-chip">Contrarian</span><span class="caret">›</span></span>
+      </summary>
+      <div class="body">
+        <p>Cleanup first → link fresh → configure MCP. Both functions that touch <code>settings.json</code> are idempotent; running both is safe. The apparent coupling with <code>recall_configure_mcp</code> is benign: cleanup fixes stale path, configure skips (correctly) because the ID is already registered.</p>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<footer>
+  <div>Review executed 2026-04-21 · Reviewers: <code style="font-family:var(--mono);">general-purpose</code> + <code style="font-family:var(--mono);">CodexResearcher</code> · Pattern ref: <code style="font-family:var(--mono);">learnings#28</code></div>
+  <div><a href="../plans/2026-04-20-rename-mem-cli-to-recall.md">Open plan file ↗</a></div>
+</footer>
+
+</div>
+
+<script>
+  const filters = document.getElementById('filters');
+  const chips = filters.querySelectorAll('.chip');
+  const findings = document.querySelectorAll('.finding');
+  let activeSeverity = 'all';
+  let activeSource = null;
+
+  function apply() {
+    findings.forEach(f => {
+      const sevMatch = activeSeverity === 'all' || f.dataset.severity === activeSeverity;
+      const srcMatch = !activeSource || f.dataset.source === activeSource || (activeSource === 'both' && f.dataset.source === 'both');
+      f.classList.toggle('hidden', !(sevMatch && srcMatch));
+    });
+    document.querySelectorAll('section.group').forEach(g => {
+      const visible = [...g.querySelectorAll('.finding')].some(f => !f.classList.contains('hidden'));
+      g.style.display = visible ? '' : 'none';
+    });
+  }
+
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (chip.dataset.filter) {
+        chips.forEach(c => { if (c.dataset.filter) c.classList.remove('active'); });
+        chip.classList.add('active');
+        activeSeverity = chip.dataset.filter;
+      } else if (chip.dataset.source) {
+        if (chip.classList.contains('active')) {
+          chip.classList.remove('active');
+          activeSource = null;
+        } else {
+          chips.forEach(c => { if (c.dataset.source) c.classList.remove('active'); });
+          chip.classList.add('active');
+          activeSource = chip.dataset.source;
+        }
+      }
+      apply();
+    });
+  });
+
+  // Expand-all on Alt+E
+  document.addEventListener('keydown', e => {
+    if (e.altKey && e.key === 'e') {
+      const anyClosed = [...findings].some(f => !f.open);
+      findings.forEach(f => f.open = anyClosed);
+    }
+  });
+</script>
+</body>
+</html>
