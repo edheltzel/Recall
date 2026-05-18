@@ -6,6 +6,11 @@
  * identifies those not yet extracted (or significantly grown), and runs
  * the SessionExtract pipeline on each.
  *
+ * Tracker storage: SQLite `extraction_tracker` table (system of record).
+ * The legacy JSON tracker file is no longer read or written here —
+ * SessionExtract.ts handles the one-time JSON-to-SQLite migration + quarantine
+ * on first invocation. See .atlas/specs/sqlite-native-extraction-ISA.md.
+ *
  * Usage:
  *   bun run BatchExtract.ts              # Extract up to 10 un-extracted sessions
  *   bun run BatchExtract.ts --dry-run    # Show what would be extracted
@@ -13,20 +18,23 @@
  *   bun run BatchExtract.ts --all        # No limit (use with caution)
  *
  * Designed to run via cron every 30 minutes.
- * See install instructions in the cron setup section below.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
+import { Database } from 'bun:sqlite';
+import {
+  getAllTrackerRecords,
+  markAsExtracted as trackerMarkAsExtracted,
+  markAsFailed as trackerMarkAsFailed,
+} from './lib/extraction-tracker';
+import { getDbPath } from './lib/sqlite-writers';
 
 const CLAUDE_DIR = join(process.env.HOME!, '.claude');
 const PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
 const MEMORY_DIR = join(CLAUDE_DIR, 'MEMORY');
-mkdirSync(MEMORY_DIR, { recursive: true });
-const TRACKER_PATH = join(MEMORY_DIR, '.extraction_tracker.json');
 const SESSION_EXTRACT = join(CLAUDE_DIR, 'hooks', 'SessionExtract.ts');
-const LOG_PATH = join(MEMORY_DIR, 'batch_extract.log');
 
 // OpenCode drop directory — plugin exports markdown sessions here
 const OPENCODE_DROP_DIR = join(MEMORY_DIR, 'opencode-sessions');
@@ -56,43 +64,112 @@ const GROWTH_THRESHOLD = 0.5; // Re-extract if file grew >50%
 const DEFAULT_LIMIT = 10;     // Max extractions per run (cost control)
 const COOLDOWN_MS = 5000;     // 5 seconds between extractions (rate limiting)
 
-interface ExtractionRecord {
+export interface TrackerEntry {
   size: number;
   extractedAt?: string;
   failedAt?: string;
   retryAfter?: string;
 }
 
-// Parse args
+export type Tracker = Record<string, TrackerEntry>;
+
+// Parse args (top-level so main() and re-entrant tests share)
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const allMode = args.includes('--all');
 const limitIdx = args.indexOf('--limit');
 const limit = allMode ? Infinity : (limitIdx >= 0 ? parseInt(args[limitIdx + 1]) || DEFAULT_LIMIT : DEFAULT_LIMIT);
 
-function log(msg: string): void {
+export function log(msg: string): void {
   const ts = new Date().toISOString();
-  const line = `[${ts}] ${msg}`;
-  console.log(line);
+  console.log(`[${ts}] ${msg}`);
 }
 
-function loadTracker(): Record<string, ExtractionRecord> {
+/**
+ * Returns true if the SQLite DB exists and has the extraction_tracker table.
+ * Used as a precondition gate — if missing, BatchExtract degrades to a
+ * "nothing to do" run rather than throwing.
+ */
+export function hasExtractionTracker(dbPath: string): boolean {
+  if (!existsSync(dbPath)) return false;
+  let db: Database | null = null;
   try {
-    if (existsSync(TRACKER_PATH)) {
-      return JSON.parse(readFileSync(TRACKER_PATH, 'utf-8'));
-    }
-  } catch {}
-  return {};
+    db = new Database(dbPath);
+    const row = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='extraction_tracker'")
+      .get();
+    return !!row;
+  } catch {
+    return false;
+  } finally {
+    try { db?.close(); } catch {}
+  }
 }
 
-function saveTracker(tracker: Record<string, ExtractionRecord>): void {
-  writeFileSync(TRACKER_PATH, JSON.stringify(tracker, null, 2), 'utf-8');
+/**
+ * Load the SQLite-backed tracker into a path-keyed map.
+ * Returns {} (with a log line) if the DB is missing or the
+ * extraction_tracker table doesn't exist (pre-migration install).
+ */
+export function loadTracker(dbPath: string = getDbPath()): Tracker {
+  const tracker: Tracker = {};
+  if (!existsSync(dbPath)) {
+    log(`SQLite DB not found at ${dbPath}; treating tracker as empty`);
+    return tracker;
+  }
+  if (!hasExtractionTracker(dbPath)) {
+    log(`extraction_tracker table missing in ${dbPath}; treating tracker as empty (pre-migration install?)`);
+    return tracker;
+  }
+  try {
+    const rows = getAllTrackerRecords(dbPath);
+    for (const r of rows) {
+      tracker[r.conversation_path] = {
+        size: r.size,
+        extractedAt: r.extracted_at ?? undefined,
+        failedAt: r.failed_at ?? undefined,
+        retryAfter: r.retry_after ?? undefined,
+      };
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`WARN: failed to read extraction_tracker (${msg.slice(0, 160)}); treating tracker as empty`);
+  }
+  return tracker;
+}
+
+/**
+ * Persist a successful extraction. Best-effort: never throws.
+ */
+export function recordSuccess(dbPath: string, convPath: string, size: number): boolean {
+  try {
+    trackerMarkAsExtracted(dbPath, convPath, size);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`WARN: failed to mark extracted in SQLite for ${convPath}: ${msg.slice(0, 160)}`);
+    return false;
+  }
+}
+
+/**
+ * Persist a failed extraction with a 24h retry window. Best-effort: never throws.
+ */
+export function recordFailure(dbPath: string, convPath: string, size: number, error?: string): boolean {
+  try {
+    trackerMarkAsFailed(dbPath, convPath, size, error);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`WARN: failed to mark failed in SQLite for ${convPath}: ${msg.slice(0, 160)}`);
+    return false;
+  }
 }
 
 /**
  * Find all JSONL conversation files across all project directories
  */
-function findAllConversations(): { path: string; size: number; project: string; mtime: number }[] {
+export function findAllConversations(): { path: string; size: number; project: string; mtime: number }[] {
   const conversations: { path: string; size: number; project: string; mtime: number }[] = [];
 
   if (!existsSync(PROJECTS_DIR)) {
@@ -132,7 +209,7 @@ function findAllConversations(): { path: string; size: number; project: string; 
 /**
  * Find markdown session files in a drop directory for a given platform
  */
-function findMarkdownSessions(dir: string, project: string): { path: string; size: number; project: string; mtime: number }[] {
+export function findMarkdownSessions(dir: string, project: string): { path: string; size: number; project: string; mtime: number }[] {
   const sessions: { path: string; size: number; project: string; mtime: number }[] = [];
 
   if (!existsSync(dir)) return sessions;
@@ -156,9 +233,9 @@ function findMarkdownSessions(dir: string, project: string): { path: string; siz
 /**
  * Determine which conversations need extraction
  */
-function findCandidates(
+export function findCandidates(
   conversations: { path: string; size: number; project: string; mtime: number }[],
-  tracker: Record<string, ExtractionRecord>
+  tracker: Tracker
 ): { path: string; size: number; project: string; reason: string }[] {
   const candidates: { path: string; size: number; project: string; reason: string }[] = [];
 
@@ -182,7 +259,7 @@ function findCandidates(
     }
 
     // Check for significant growth
-    const growth = (conv.size - record.size) / record.size;
+    const growth = record.size > 0 ? (conv.size - record.size) / record.size : Infinity;
     if (growth > GROWTH_THRESHOLD) {
       candidates.push({
         ...conv,
@@ -263,7 +340,8 @@ function extractFile(convPath: string, cwd: string): boolean {
 async function main() {
   log(`=== BatchExtract starting (limit=${limit === Infinity ? 'unlimited' : limit}, dry-run=${dryRun}) ===`);
 
-  const tracker = loadTracker();
+  const dbPath = getDbPath();
+  const tracker = loadTracker(dbPath);
   const claudeConversations = findAllConversations();
   const opencodeConversations = findMarkdownSessions(OPENCODE_DROP_DIR, 'opencode');
   const piConversations = findMarkdownSessions(PI_DROP_DIR, 'pi');
@@ -306,26 +384,15 @@ async function main() {
 
     if (success) {
       extracted++;
-      // SessionExtract's markAsExtracted already updates the tracker on success
-      // But we also update here in case it didn't (belt and suspenders)
-      tracker[candidate.path] = {
-        size: candidate.size,
-        extractedAt: new Date().toISOString()
-      };
-      saveTracker(tracker);
+      // SessionExtract's own markAsExtracted already updates the tracker.
+      // Belt-and-suspenders: stamp it again here so dedup stays consistent
+      // even if the child process exited before reaching its own writer.
+      recordSuccess(dbPath, candidate.path, candidate.size);
       log(`  SUCCESS: Extracted and tracked`);
     } else {
       failed++;
-      // Mark as failed with 24-hour retry window
-      const now = new Date();
-      const retryAfter = new Date(now.getTime() + 86400000);
-      tracker[candidate.path] = {
-        size: candidate.size,
-        failedAt: now.toISOString(),
-        retryAfter: retryAfter.toISOString()
-      };
-      saveTracker(tracker);
-      log(`  FAILED: Will retry after ${retryAfter.toISOString()}`);
+      recordFailure(dbPath, candidate.path, candidate.size, 'BatchExtract: quality gate or runtime failure');
+      log(`  FAILED: Will retry after 24h cooldown`);
     }
 
     // Rate limiting cooldown between extractions
@@ -337,7 +404,11 @@ async function main() {
   log(`=== BatchExtract complete: ${extracted} extracted, ${failed} failed, ${candidates.length - toProcess.length} remaining ===`);
 }
 
-main().catch(err => {
-  log(`FATAL: ${err.message}`);
-  process.exit(1);
-});
+// Only auto-run when invoked as a script, not when imported as a module
+// (tests import individual functions and shouldn't kick off a real scan).
+if (import.meta.main) {
+  main().catch(err => {
+    log(`FATAL: ${err.message}`);
+    process.exit(1);
+  });
+}
