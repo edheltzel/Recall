@@ -1,4 +1,4 @@
-// Import TELOS sections from the PAI TELOS directory into the telos table
+// Import TELOS from the TELOS directory into the telos table
 
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join, basename } from 'path';
@@ -10,13 +10,13 @@ const TELOS_MTIME_PATH = join(homedir(), '.claude', 'MEMORY', '.telos_last_impor
 
 // Map filenames to telos types (schema CHECK constraint)
 const TYPE_MAP: Record<string, string> = {
-  'GOALS': 'goal',
-  'PROBLEMS': 'problem',
-  'MISSION': 'mission',
-  'CHALLENGES': 'challenge',
-  'STRATEGIES': 'strategy',
-  'PROJECTS': 'project',
-  'TELOS': 'identity',
+  GOALS: 'goal',
+  PROBLEMS: 'problem',
+  MISSION: 'mission',
+  CHALLENGES: 'challenge',
+  STRATEGIES: 'strategy',
+  PROJECTS: 'project',
+  TELOS: 'identity',
 };
 
 interface TelosEntry {
@@ -309,17 +309,19 @@ export function runTelosList(options: { type?: string; limit?: number }): void {
 // Show a specific TELOS entry
 export function runTelosShow(code: string): void {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM telos WHERE code = ? COLLATE NOCASE').get(code) as {
-    id: number;
-    code: string;
-    type: string;
-    category: string | null;
-    title: string;
-    content: string;
-    parent_code: string | null;
-    created_at: string;
-    updated_at: string;
-  } | undefined;
+  const row = db.prepare('SELECT * FROM telos WHERE code = ? COLLATE NOCASE').get(code) as
+    | {
+        id: number;
+        code: string;
+        type: string;
+        category: string | null;
+        title: string;
+        content: string;
+        parent_code: string | null;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
 
   if (!row) {
     console.log(`TELOS entry '${code}' not found.`);
