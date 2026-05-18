@@ -27,11 +27,21 @@
  * - Runs asynchronously via self-spawn, non-blocking
  */
 
-import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, unlinkSync, openSync, closeSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { execSync, spawn } from 'child_process';
 import { evaluateQuality, shouldSkipExtraction } from './lib/extraction-quality';
 import { encodeProjectDir } from './lib/path-encoding';
+import {
+  wasAlreadyExtracted as trackerWasAlreadyExtracted,
+  markAsExtracted as trackerMarkAsExtracted,
+  markAsFailed as trackerMarkAsFailed,
+} from './lib/extraction-tracker';
+import { childAcquireLock, childReleaseLock } from './lib/extraction-lock';
+import { acquireSemaphore, releaseSemaphore } from './lib/extraction-semaphore';
+import { migrateTrackerJson } from './lib/extraction-migration';
+import { getDbPath } from './lib/sqlite-writers';
+import { dualWriteToSqlite } from './lib/extraction-parsers';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
@@ -48,53 +58,47 @@ const SESSION_FOLDERS_DIR = join(process.env.HOME!, '.claude', 'sessions');
 const DEDUP_PATH = join(MEMORY_DIR, '.last_extracted_hash');
 const HOT_RECALL_MAX_SESSIONS = 10;
 
-// Lock file for preventing concurrent extraction of the same conversation
-const EXTRACT_LOCK_DIR = join(MEMORY_DIR, '.extract_locks');
-mkdirSync(EXTRACT_LOCK_DIR, { recursive: true });
+// Legacy JSON tracker — read once for one-shot migration into SQLite, then never again.
+const LEGACY_TRACKER_PATH = join(MEMORY_DIR, '.extraction_tracker.json');
+
+// Maximum concurrent extractors (counting semaphore in extraction_locks).
+const EXTRACTION_MAX_CONCURRENT = parseInt(
+  process.env.EXTRACTION_MAX_CONCURRENT || '3',
+  10
+);
 
 /**
- * Try to acquire an exclusive lock for extracting a specific conversation.
- * Uses O_CREAT|O_EXCL (wx flag) for atomic file creation — only one process wins.
- * Returns true if lock acquired, false if another process holds it.
+ * One-shot import of legacy `.extraction_tracker.json` into the SQLite
+ * `extraction_tracker` table. Idempotent: after a successful import the JSON
+ * file is renamed `.extraction_tracker.json.imported-<ts>` so subsequent runs
+ * skip the import.
  */
-function tryAcquireExtractLock(convPath: string): boolean {
-  const lockName = convPath.replace(/[^a-zA-Z0-9]/g, '_') + '.lock';
-  const lockPath = join(EXTRACT_LOCK_DIR, lockName);
+function migrateLegacyTrackerOnce(dbPath: string): void {
+  if (!existsSync(LEGACY_TRACKER_PATH)) return;
+  if (!existsSync(dbPath)) return; // DB not initialized yet — nothing to import into
   try {
-    // O_CREAT|O_EXCL — fails atomically if file already exists
-    const fd = openSync(lockPath, 'wx');
-    closeSync(fd);
-    writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n${convPath}`);
-    return true;
-  } catch (err: any) {
-    if (err.code === 'EEXIST') {
-      // Lock file exists — check if it's stale (older than 10 minutes)
-      try {
-        const lockAge = Date.now() - statSync(lockPath).mtimeMs;
-        if (lockAge > 600_000) {
-          // Stale lock — remove and retry once
-          unlinkSync(lockPath);
-          try {
-            const fd = openSync(lockPath, 'wx');
-            closeSync(fd);
-            writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n${convPath}`);
-            return true;
-          } catch { return false; }
-        }
-      } catch {}
-      return false;
+    const { imported } = migrateTrackerJson(LEGACY_TRACKER_PATH, dbPath);
+    const renamed = `${LEGACY_TRACKER_PATH}.imported-${Date.now()}`;
+    try {
+      renameSync(LEGACY_TRACKER_PATH, renamed);
+    } catch {
+      // Rename can fail if the file vanished between the existsSync and the
+      // rename (concurrent hook). Non-fatal — the migration is idempotent.
     }
-    return false; // Other error — don't extract
+    logExtract(`TRACKER_MIGRATE: imported ${imported} rows from JSON tracker into SQLite`);
+  } catch (err: any) {
+    // Quarantine the file so we don't retry the same failing parse every run
+    // (Forge Finding 6). Common cause: malformed JSON.
+    try {
+      const quarantine = `${LEGACY_TRACKER_PATH}.corrupt-${Date.now()}`;
+      renameSync(LEGACY_TRACKER_PATH, quarantine);
+      logExtract(
+        `TRACKER_MIGRATE: corrupt JSON quarantined to ${quarantine} (${err?.message || err})`
+      );
+    } catch {
+      logExtract(`TRACKER_MIGRATE: skipped (${err?.message || err})`);
+    }
   }
-}
-
-/**
- * Release the extraction lock for a conversation.
- */
-function releaseExtractLock(convPath: string): void {
-  const lockName = convPath.replace(/[^a-zA-Z0-9]/g, '_') + '.lock';
-  const lockPath = join(EXTRACT_LOCK_DIR, lockName);
-  try { unlinkSync(lockPath); } catch {}
 }
 
 // Claude CLI extraction (uses Claude Code's existing auth — no API key needed)
@@ -215,110 +219,79 @@ function extractMessages(jsonlPath: string): string {
 }
 
 /**
- * Per-file dedup tracking — stores {filepath: {size, extractedAt}} in JSON
- * Re-extracts when file size grows by >50% since last extraction
- */
-const DEDUP_DB_PATH = join(MEMORY_DIR, '.extraction_tracker.json');
-
-interface ExtractionRecord {
-  size: number;
-  extractedAt?: string;
-  failedAt?: string;
-  retryAfter?: string;
-}
-
-function loadExtractionTracker(): Record<string, ExtractionRecord> {
-  try {
-    if (existsSync(DEDUP_DB_PATH)) {
-      return JSON.parse(readFileSync(DEDUP_DB_PATH, 'utf-8'));
-    }
-  } catch {}
-  // Migrate from old single-hash format
-  try {
-    if (existsSync(DEDUP_PATH)) {
-      const oldPath = readFileSync(DEDUP_PATH, 'utf-8').trim();
-      if (oldPath && existsSync(oldPath)) {
-        const size = statSync(oldPath).size;
-        return { [oldPath]: { size, extractedAt: new Date().toISOString() } };
-      }
-    }
-  } catch {}
-  return {};
-}
-
-function saveExtractionTracker(tracker: Record<string, ExtractionRecord>): void {
-  try {
-    writeFileSync(DEDUP_DB_PATH, JSON.stringify(tracker, null, 2), 'utf-8');
-  } catch {}
-}
-
-/**
- * Check if this conversation needs (re-)extraction
- * Returns true if: never extracted, OR file grew >50% since last extraction
+ * Per-conversation dedup tracking — backed by SQLite `extraction_tracker` table
+ * (replaces the legacy `.extraction_tracker.json` file).
+ *
+ * Re-extract policy (preserved from the JSON-era code):
+ *   - Never extracted   → true (needs extraction)
+ *   - Extracted, grew ≤50% → false (skip)
+ *   - Extracted, grew >50% → true (re-extract)
+ *   - Failed within 24h → false (cooldown)
+ *   - Failed >24h ago   → true (retry)
  */
 function wasAlreadyExtracted(convPath: string): boolean {
-  const tracker = loadExtractionTracker();
-  const record = tracker[convPath];
-  if (!record) return false;
-
+  const dbPath = getDbPath();
+  if (!existsSync(dbPath)) {
+    // DB hasn't been initialized (`mem init` not run). Without the tracker
+    // table we can't dedup — return false so the caller proceeds. The lock
+    // primitive still prevents duplicate concurrent extractions.
+    return false;
+  }
   try {
     const currentSize = statSync(convPath).size;
-    const growth = (currentSize - record.size) / record.size;
-
-    // Re-extract if file grew by >50%
-    if (growth > 0.5) {
-      logExtract(`REGROWTH: ${convPath} grew ${Math.round(growth * 100)}% (${record.size} -> ${currentSize}), re-extracting`);
-      return false;
-    }
-
-    // If this was a failed extraction, retry after 24 hours
-    if (record.failedAt && !record.extractedAt) {
-      const failedTime = new Date(record.failedAt).getTime();
-      const retryTime = record.retryAfter ? new Date(record.retryAfter).getTime() : failedTime + 86400000;
-      if (Date.now() >= retryTime) {
-        logExtract(`RETRY: ${convPath} failed at ${record.failedAt}, retry window reached, re-extracting`);
-        return false;
-      }
-      return true; // Still within retry cooldown
-    }
-
-    return true;
+    return trackerWasAlreadyExtracted(dbPath, convPath, currentSize);
   } catch {
-    return true;
+    return false;
   }
 }
 
 /**
- * Mark conversation as extracted with current size
+ * Mark conversation as extracted at current size.
+ * Releases any held per-conversation lock + semaphore slot.
  */
 function markAsExtracted(convPath: string): void {
+  const dbPath = getDbPath();
   try {
-    const tracker = loadExtractionTracker();
-    tracker[convPath] = {
-      size: statSync(convPath).size,
-      extractedAt: new Date().toISOString()
-    };
-    saveExtractionTracker(tracker);
+    if (existsSync(dbPath)) {
+      const size = statSync(convPath).size;
+      trackerMarkAsExtracted(dbPath, convPath, size);
+    }
   } catch {}
-  releaseExtractLock(convPath);
+  releaseChildLockSafe(convPath);
 }
 
 /**
- * Mark conversation as failed extraction with 24-hour retry window
+ * Mark conversation as failed extraction with 24-hour retry window.
+ * Releases any held per-conversation lock + semaphore slot.
  */
-function markAsFailed(convPath: string): void {
+function markAsFailed(convPath: string, error?: string): void {
+  const dbPath = getDbPath();
   try {
-    const tracker = loadExtractionTracker();
-    const now = new Date();
-    const retryAfter = new Date(now.getTime() + 86400000); // 24 hours
-    tracker[convPath] = {
-      size: statSync(convPath).size,
-      failedAt: now.toISOString(),
-      retryAfter: retryAfter.toISOString()
-    };
-    saveExtractionTracker(tracker);
+    if (existsSync(dbPath)) {
+      let size = 0;
+      try { size = statSync(convPath).size; } catch {}
+      trackerMarkAsFailed(dbPath, convPath, size, error);
+    }
   } catch {}
-  releaseExtractLock(convPath);
+  releaseChildLockSafe(convPath);
+}
+
+/**
+ * Release the per-conversation lock + semaphore slot.
+ *
+ * The semaphore row (extraction_locks PK on conversation_path) doubles as
+ * the per-conv lock, so releasing the semaphore is sufficient regardless of
+ * whether the parent or the child inserted the row. We also call the
+ * pid-checked childReleaseLock as a defense — no-op if PIDs don't match,
+ * useful when --reextract* acquired the row under the current PID.
+ */
+function releaseChildLockSafe(convPath: string): void {
+  try {
+    const dbPath = getDbPath();
+    if (!existsSync(dbPath)) return;
+    childReleaseLock(dbPath, convPath, process.pid);
+    releaseSemaphore(dbPath, convPath);
+  } catch {}
 }
 
 // Legacy compat — getConversationHash now just returns path (used by --reextract)
@@ -865,6 +838,33 @@ async function extractWithClaudeChunked(messages: string): Promise<string | null
   return partials.map(p => p.replace(/^--- Chunk \d+\/\d+ ---\n/, '')).join('\n\n');
 }
 
+function runDualWrite(ctx: {
+  sessionId: string;
+  sessionLabel: string;
+  project: string;
+  timestamp: string;
+  conversationPath: string;
+  topics: string[];
+  summary: string;
+  extracted: string;
+}): void {
+  try {
+    const result = dualWriteToSqlite(getDbPath(), ctx);
+    if (Object.keys(result.failures).length > 0) {
+      for (const [where, msg] of Object.entries(result.failures)) {
+        logExtract(`SQLITE_WRITE_FAIL[${where}]: ${msg}`);
+      }
+    }
+    logExtract(
+      `SQLITE_WRITE: sessions=${result.sessions} decisions=${result.decisions} ` +
+        `learnings=${result.learnings} breadcrumbs=${result.breadcrumbs} ` +
+        `errors=${result.errors} loa=${result.loa}`
+    );
+  } catch (e: any) {
+    logExtract(`SQLITE_WRITE_OUTER_FAIL: ${e?.message || e}`);
+  }
+}
+
 /**
  * Run extraction and update all memory files
  * Priority: Anthropic API > Nano local LLM
@@ -875,6 +875,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     const convHash = getConversationHash(conversationPath);
     if (wasAlreadyExtracted(convHash)) {
       console.error('[FabricExtract] Already extracted this conversation, skipping');
+      releaseChildLockSafe(conversationPath);
       return;
     }
 
@@ -883,6 +884,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
 
     if (shouldSkipExtraction(messages.length)) {
       console.error('[FabricExtract] Conversation too short, skipping extraction');
+      releaseChildLockSafe(conversationPath);
       return;
     }
 
@@ -916,7 +918,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     if (!extracted) {
       console.error("[FabricExtract] All extraction methods failed, no extraction");
       logExtract("FAILURE: All extraction methods failed");
-      markAsFailed(convHash);
+      markAsFailed(convHash, 'all extraction methods failed');
       return;
     }
 
@@ -925,7 +927,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     if (!quality.pass) {
       console.error(`[FabricExtract] QUALITY GATE FAILED: ${quality.reason}. Discarding.`);
       logExtract(`QUALITY GATE FAILED: ${quality.reason}`);
-      markAsFailed(convHash);
+      markAsFailed(convHash, `quality gate failed: ${quality.reason}`);
       return;
     }
     logExtract("QUALITY GATE PASSED: extraction contains required sections");
@@ -987,7 +989,19 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     appendRejections(extracted, sessionLabel, timestamp);
     appendErrors(extracted, sessionLabel, timestamp);
 
-    // 6. Mark as extracted (dedup)
+    // 6. SQLite dual-write (additive, best-effort — failures logged, never thrown)
+    runDualWrite({
+      sessionId,
+      sessionLabel,
+      project: sessionLabel,
+      timestamp,
+      conversationPath,
+      topics,
+      summary,
+      extracted,
+    });
+
+    // 7. Mark as extracted (dedup)
     markAsExtracted(convHash);
 
     logExtract(`SUCCESS: All memory files updated for session=${sessionLabel}`);
@@ -995,6 +1009,8 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
   } catch (error: any) {
     console.error(`[FabricExtract] Extraction failed: ${error.message}`);
     logExtract(`FAILURE: Extraction crashed: ${error.message}`);
+    // Release the child lock + semaphore slot even on uncaught failure.
+    releaseChildLockSafe(conversationPath);
   }
 }
 
@@ -1019,12 +1035,14 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
   try {
     if (!existsSync(mdPath)) {
       logExtract(`REEXTRACT-MD: File not found: ${mdPath}`);
+      releaseChildLockSafe(mdPath);
       return;
     }
 
     const convHash = mdPath;
     if (wasAlreadyExtracted(convHash)) {
       console.error('[FabricExtract] Already extracted this markdown, skipping');
+      releaseChildLockSafe(mdPath);
       return;
     }
 
@@ -1032,6 +1050,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
 
     if (shouldSkipExtraction(messages.length)) {
       console.error('[FabricExtract] Markdown too short, skipping extraction');
+      releaseChildLockSafe(mdPath);
       return;
     }
 
@@ -1058,7 +1077,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     if (!extracted) {
       console.error("[FabricExtract] All extraction methods failed for markdown");
       logExtract("FAILURE: All extraction methods failed (markdown)");
-      markAsFailed(convHash);
+      markAsFailed(convHash, 'all extraction methods failed (markdown)');
       return;
     }
 
@@ -1067,7 +1086,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     if (!mdQuality.pass) {
       console.error(`[FabricExtract] QUALITY GATE FAILED: ${mdQuality.reason}.`);
       logExtract(`QUALITY GATE FAILED (markdown): ${mdQuality.reason}`);
-      markAsFailed(convHash);
+      markAsFailed(convHash, `quality gate failed (markdown): ${mdQuality.reason}`);
       return;
     }
     logExtract("QUALITY GATE PASSED (markdown)");
@@ -1110,7 +1129,19 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     appendRejections(extracted, sessionLabel, timestamp);
     appendErrors(extracted, sessionLabel, timestamp);
 
-    // 5. Mark as extracted
+    // 5. SQLite dual-write (additive, best-effort — failures logged, never thrown)
+    runDualWrite({
+      sessionId,
+      sessionLabel,
+      project: sessionLabel,
+      timestamp,
+      conversationPath: mdPath,
+      topics,
+      summary,
+      extracted,
+    });
+
+    // 6. Mark as extracted
     markAsExtracted(convHash);
 
     logExtract(`SUCCESS (markdown): All memory files updated for ${sessionLabel} (${sessionId})`);
@@ -1118,6 +1149,41 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
   } catch (error: any) {
     console.error(`[FabricExtract] Markdown extraction failed: ${error.message}`);
     logExtract(`FAILURE (markdown): ${error.message}`);
+    releaseChildLockSafe(mdPath);
+  }
+}
+
+/**
+ * Clear any prior tracker row for a conversation path so that a forced
+ * re-extraction (--reextract*) proceeds. Best-effort.
+ */
+function clearTrackerRow(convPath: string): void {
+  try {
+    const dbPath = getDbPath();
+    if (!existsSync(dbPath)) return;
+    const { Database } = require('bun:sqlite');
+    const db = new Database(dbPath);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.prepare('DELETE FROM extraction_tracker WHERE conversation_path = ?').run(convPath);
+    db.close();
+  } catch {}
+}
+
+/**
+ * Acquire the per-conversation slot for a child running standalone (i.e.
+ * --reextract / --reextract-md, where no parent has already taken a
+ * semaphore slot for this conv). Returns true on success.
+ *
+ * NOTE: NOT called from --extract mode — in that mode the parent's
+ * acquireSemaphore() already owns the row keyed on conversation_path.
+ */
+function standaloneChildAcquire(convPath: string): boolean {
+  try {
+    const dbPath = getDbPath();
+    if (!existsSync(dbPath)) return true; // No DB — nothing to lock against
+    return childAcquireLock(dbPath, convPath, process.pid);
+  } catch {
+    return true; // On lock-system failure, prefer running over silent skip
   }
 }
 
@@ -1128,16 +1194,17 @@ if (process.argv.includes('--reextract-md')) {
   const cwd = process.argv[idx + 2] || process.cwd();
   if (mdPath) {
     logExtract(`REEXTRACT-MD: Forcing re-extraction of markdown ${mdPath}`);
-    try {
-      const tracker = loadExtractionTracker();
-      delete tracker[mdPath];
-      saveExtractionTracker(tracker);
-    } catch {}
+    clearTrackerRow(mdPath);
+    if (!standaloneChildAcquire(mdPath)) {
+      logExtract(`REEXTRACT-MD: LOCK_BUSY ${mdPath} — extraction already in progress`);
+      process.exit(0);
+    }
     extractAndAppendMarkdown(mdPath, cwd).then(() => {
       logExtract(`REEXTRACT-MD: Complete`);
       process.exit(0);
     }).catch((err) => {
       logExtract(`REEXTRACT-MD: Failed: ${err}`);
+      releaseChildLockSafe(mdPath);
       process.exit(1);
     });
   } else {
@@ -1151,18 +1218,18 @@ if (process.argv.includes('--reextract-md')) {
   const cwd = process.argv[idx + 2] || process.cwd();
   if (convPath) {
     logExtract(`REEXTRACT: Forcing re-extraction of ${convPath}`);
-    // Clear both old and new dedup so extraction proceeds
     try { writeFileSync(DEDUP_PATH, '', 'utf-8'); } catch {}
-    try {
-      const tracker = loadExtractionTracker();
-      delete tracker[convPath];
-      saveExtractionTracker(tracker);
-    } catch {}
+    clearTrackerRow(convPath);
+    if (!standaloneChildAcquire(convPath)) {
+      logExtract(`REEXTRACT: LOCK_BUSY ${convPath} — extraction already in progress`);
+      process.exit(0);
+    }
     extractAndAppend(convPath, cwd).then(() => {
       logExtract(`REEXTRACT: Complete`);
       process.exit(0);
     }).catch((err) => {
       logExtract(`REEXTRACT: Failed: ${err}`);
+      releaseChildLockSafe(convPath);
       process.exit(1);
     });
   } else {
@@ -1176,11 +1243,15 @@ if (process.argv.includes('--reextract-md')) {
   const cwd = process.argv[idx + 2];
   if (convPath && cwd) {
     logExtract(`BACKGROUND: Starting extraction for ${convPath}`);
+    // Parent (main()) already acquired the semaphore slot keyed on convPath.
+    // The semaphore row IS the per-conv lock (extraction_locks PK is
+    // conversation_path), so no additional child-side acquire is needed.
     extractAndAppend(convPath, cwd).then(() => {
       logExtract(`BACKGROUND: Extraction complete`);
       process.exit(0);
     }).catch((err) => {
       logExtract(`BACKGROUND: Extraction failed: ${err}`);
+      releaseChildLockSafe(convPath);
       process.exit(1);
     });
   } else {
@@ -1231,16 +1302,45 @@ async function main() {
       process.exit(0);
     }
 
+    // One-shot legacy JSON tracker → SQLite migration (no-op after first run).
+    const parentDbPath = getDbPath();
+    migrateLegacyTrackerOnce(parentDbPath);
+
     // Early dedup check in parent — prevents spawning duplicate children
     if (wasAlreadyExtracted(conversationPath)) {
       logExtract(`DEDUP_PARENT: ${conversationPath} already extracted, skipping spawn`);
       process.exit(0);
     }
 
-    // Atomic lock — prevents concurrent extraction of the same conversation
-    if (!tryAcquireExtractLock(conversationPath)) {
-      logExtract(`LOCK_BUSY: ${conversationPath} extraction already in progress, skipping`);
-      process.exit(0);
+    // Counting semaphore — global cap on concurrent extractors. The row PK
+    // is conversation_path so this also serves as the per-conv lock.
+    //
+    // Degrade gracefully on pre-migration databases: if the DB exists but
+    // the extraction_locks table is missing (DB older than migration 4/5),
+    // skip the semaphore and proceed with legacy extraction. Without this
+    // guard the throw would bypass legacy markdown/JSON writes entirely.
+    let parentHoldsSlot = false;
+    if (existsSync(parentDbPath)) {
+      try {
+        const got = acquireSemaphore(
+          parentDbPath,
+          conversationPath,
+          process.pid,
+          EXTRACTION_MAX_CONCURRENT
+        );
+        if (!got) {
+          logExtract(
+            `SEMAPHORE_FULL: ${EXTRACTION_MAX_CONCURRENT} extractors already running, skipping spawn for ${conversationPath}`
+          );
+          process.exit(0);
+        }
+        parentHoldsSlot = true;
+      } catch (err: any) {
+        // extraction_locks table missing or DB unwritable — degrade silently.
+        logExtract(
+          `SEMAPHORE_UNAVAILABLE: ${err?.message || err} — proceeding without SQLite lock`
+        );
+      }
     }
 
     // Spawn self in background with --extract flag.
@@ -1258,12 +1358,21 @@ async function main() {
       }
       return 'bun'; // fallback to PATH lookup
     })();
-    const child = spawn(bunPath, ['run', import.meta.path, '--extract', conversationPath, cwd], {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, CLAUDECODE: '' },
-    });
-    child.unref();
+    let child;
+    try {
+      child = spawn(bunPath, ['run', import.meta.path, '--extract', conversationPath, cwd], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, CLAUDECODE: '' },
+      });
+      child.unref();
+    } catch (spawnErr: any) {
+      // Spawn failed AFTER we acquired the slot — release so capacity isn't
+      // wasted until TTL expiry (Forge Finding 4).
+      if (parentHoldsSlot) releaseChildLockSafe(conversationPath);
+      logExtract(`SPAWN_FAILED: ${spawnErr?.message || spawnErr}`);
+      process.exit(0);
+    }
 
     logExtract(`SPAWNED: Self-extract PID ${child.pid} for ${conversationPath}`);
     process.exit(0);

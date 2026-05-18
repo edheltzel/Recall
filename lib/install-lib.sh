@@ -934,7 +934,7 @@ _recall_copy_hook_files() {
   fi
 
   local hook
-  for hook in SessionExtract BatchExtract TelosSync SessionRecall SessionPreCompact; do
+  for hook in SessionExtract BatchExtract TelosSync SessionRecall SessionPreCompact ClearExtract; do
     if [[ -f "$src_dir/$hook.ts" ]]; then
       cp "$src_dir/$hook.ts" "$hooks_dir/$hook.ts"
       log_success "Copied $hook.ts to $hooks_dir"
@@ -955,17 +955,20 @@ _recall_copy_hook_files() {
   fi
 }
 
-# recall_register_hook <event> <hook_name> <command> [timeout_ms]
+# recall_register_hook <event> <hook_name> <command> [timeout_ms] [matcher]
 #
 # Registers ONE hook in settings.json if an entry for this hook name is not
 # already present. `hook_name` is the substring used to detect an existing
 # registration (e.g. "SessionExtract"). `event` is the settings.json key
-# (Stop, SessionStart, PreCompact, UserPromptSubmit).
+# (Stop, SessionStart, PreCompact, UserPromptSubmit). `matcher` defaults to
+# "" (matches all) — pass "clear" / "startup" / "resume" / "compact" to
+# restrict a SessionStart hook to a specific source.
 recall_register_hook() {
   local event="$1"
   local hook_name="$2"
   local command="$3"
   local timeout="${4:-}"
+  local matcher="${5:-}"
   local settings_file="$CLAUDE_DIR/settings.json"
 
   SETTINGS_FILE="$settings_file" \
@@ -973,6 +976,7 @@ recall_register_hook() {
     HOOK_NAME="$hook_name" \
     COMMAND="$command" \
     TIMEOUT="$timeout" \
+    MATCHER="$matcher" \
     bun -e '
       const fs = require("fs");
       const settingsFile = process.env.SETTINGS_FILE;
@@ -980,6 +984,7 @@ recall_register_hook() {
       const hookName = process.env.HOOK_NAME;
       const command = process.env.COMMAND;
       const timeout = process.env.TIMEOUT;
+      const matcher = process.env.MATCHER || "";
 
       let config = {};
       try { config = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch {}
@@ -993,7 +998,7 @@ recall_register_hook() {
 
       const hookObj = { type: "command", command };
       if (timeout) hookObj.timeout = Number(timeout);
-      config.hooks[event].push({ matcher: "", hooks: [hookObj] });
+      config.hooks[event].push({ matcher, hooks: [hookObj] });
 
       fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
     '
@@ -1031,6 +1036,12 @@ recall_register_all_hooks() {
     recall_register_hook "PreCompact" "SessionPreCompact" \
       "$bun_path run $hooks_dir/SessionPreCompact.ts" 10000
     log_success "Registered SessionPreCompact hook (PreCompact) in settings.json"
+  fi
+
+  if [[ -f "$hooks_dir/ClearExtract.ts" ]]; then
+    recall_register_hook "SessionStart" "ClearExtract" \
+      "$bun_path run $hooks_dir/ClearExtract.ts" "" "clear"
+    log_success "Registered ClearExtract hook (SessionStart matcher=clear) in settings.json"
   fi
 }
 

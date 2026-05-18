@@ -23,6 +23,7 @@ const HOOK_NAMES = [
   'TelosSync',
   'SessionRecall',
   'SessionPreCompact',
+  'ClearExtract',
 ] as const;
 
 interface RunResult {
@@ -169,5 +170,24 @@ describe('install.sh configure_hooks()', () => {
     expect(countIncludes('SessionStart', 'TelosSync')).toBe(1);
     expect(countIncludes('SessionStart', 'SessionRecall')).toBe(1);
     expect(countIncludes('PreCompact', 'SessionPreCompact')).toBe(1);
+    expect(countIncludes('SessionStart', 'ClearExtract')).toBe(1);
+  });
+
+  test('ClearExtract is registered on SessionStart with matcher="clear"', () => {
+    runConfigureHooks();
+    const s = readSettings();
+    const sessionStart = ((s as { hooks?: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>> }).hooks?.SessionStart) ?? [];
+    const clearEntry = sessionStart.find(entry =>
+      (entry.hooks ?? []).some(h => typeof h.command === 'string' && h.command.includes('ClearExtract'))
+    );
+    expect(clearEntry).toBeDefined();
+    expect(clearEntry!.matcher).toBe('clear');
+
+    // Sanity: the other SessionStart hooks have matcher="" so they fire on all sources.
+    const recallEntry = sessionStart.find(entry =>
+      (entry.hooks ?? []).some(h => typeof h.command === 'string' && h.command.includes('SessionRecall'))
+    );
+    expect(recallEntry).toBeDefined();
+    expect(recallEntry!.matcher).toBe('');
   });
 });
