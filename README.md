@@ -188,6 +188,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 5. **PreCompact flush** — When Claude Code is about to compact its context, a `PreCompact` hook (`SessionPreCompact.ts`) flushes the in-flight messages first, so the squashed window is never lost.
 6. **Dual-write storage** — Results are written to SQLite (the only query surface — every CLI/MCP read hits this) and to markdown artifacts (`DISTILLED.md`, `HOT_RECALL.md`, etc., write-only, human-readable).
 7. **Batch catchup (optional)** — A cron job (`BatchExtract.ts`) sweeps any sessions the Stop hook missed during crashes or interruptions, and ingests sessions dropped by the OpenCode plugin and Pi extension into `~/.claude/MEMORY/{opencode,pi}-sessions/`. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled.
+8. **TELOS auto-sync (PAI users)** — If you use [Personal AI Infrastructure (PAI)](https://github.com/danielmiessler/Personal_AI_Infrastructure), Recall ships a `TelosSync.ts` SessionStart hook that watches `~/.claude/skills/PAI/USER/TELOS/` for changes and silently runs `mem telos import --update` when any file is newer than the last import. This is **automatic** — no action required once Recall is installed and PAI's TELOS directory exists. You can also import manually at any time with `mem telos import --yes`. If you don't use PAI, the hook checks for the directory, finds nothing, and exits in under 1ms.
 
 ### Search Strategies
 
@@ -210,6 +211,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **Decision lifecycle** — `mem decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
 - **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.claude/MEMORY/{opencode,pi}-sessions/`; BatchExtract pulls them into the same SQLite DB. One memory layer across agents
 - **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
+- **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `TelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `mem telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`mem add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
 - **Benchmark harness** — `mem benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
 - **Onboarding** — `mem onboard` runs a 7-question interview that writes your L0 identity file
@@ -295,19 +297,12 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
 | [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |
-| [Acknowledgments](ACKNOWLEDGMENTS.md)      | Ideas borrowed, reshaped, and rejected — with credits to original authors |
-
 ## Acknowledgments
 
-Recall's tiered session-start context (L0 identity + L1 importance-ranked),
-PreCompact hook, and importance scoring were inspired by
-[MemPalace](https://github.com/MemPalace/mempalace) (Milla Jovovich,
-Ben Sigman — MIT). We reshaped every adopted idea to fit Recall's
-SQLite + FTS5 architecture and rejected others (PALACE_PROTOCOL
-behavioral injection, KG triples) where they didn't survive review.
-See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for the full what-we-took,
-what-we-rejected, and credits to the independent critics (lhl, roman-rr,
-danilchenko, tentenco) whose analyses shaped our reshape decisions.
+Graciously borrowing and features inspired by:
+
+- [MemPalace](https://github.com/MemPalace/mempalace) — tiered session-start context, PreCompact hook, importance scoring
+- [Personal AI Infrastructure (PAI)](https://github.com/danielmiessler/Personal_AI_Infrastructure) — TELOS framework integration
 
 ## License
 

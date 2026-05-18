@@ -302,7 +302,7 @@ const telosCmd = program
 
 telosCmd
   .command('import')
-  .description('Import TELOS files from ~/.claude/skills/PAI/USER/TELOS/')
+  .description('Import TELOS')
   .option('--dry-run', 'Preview what would be imported')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-y, --yes', 'Confirm import')
