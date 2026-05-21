@@ -74,11 +74,11 @@ describe('uninstall.sh', () => {
     mkdirSync(backupBase, { recursive: true });
 
     // Drop a faux installed payload.
-    writeFileSync(join(claudeDir, 'hooks', 'SessionExtract.ts'), '// stub');
-    writeFileSync(join(claudeDir, 'hooks', 'BatchExtract.ts'), '// stub');
-    writeFileSync(join(claudeDir, 'hooks', 'TelosSync.ts'), '// stub');
-    writeFileSync(join(claudeDir, 'hooks', 'SessionRecall.ts'), '// stub');
-    writeFileSync(join(claudeDir, 'hooks', 'SessionPreCompact.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'RecallExtract.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'RecallBatchExtract.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'RecallTelosSync.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'RecallStart.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'RecallPreCompact.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-lock.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-migration.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-quality.ts'), '// stub');
@@ -119,7 +119,7 @@ describe('uninstall.sh', () => {
             Stop: [
               {
                 matcher: '',
-                hooks: [{ type: 'command', command: 'bun run /path/SessionExtract.ts' }],
+                hooks: [{ type: 'command', command: 'bun run /path/RecallExtract.ts' }],
               },
               {
                 matcher: '',
@@ -129,17 +129,17 @@ describe('uninstall.sh', () => {
             SessionStart: [
               {
                 matcher: '',
-                hooks: [{ type: 'command', command: 'bun run /path/SessionRecall.ts' }],
+                hooks: [{ type: 'command', command: 'bun run /path/RecallStart.ts' }],
               },
               {
                 matcher: '',
-                hooks: [{ type: 'command', command: 'bun run /path/TelosSync.ts' }],
+                hooks: [{ type: 'command', command: 'bun run /path/RecallTelosSync.ts' }],
               },
             ],
             PreCompact: [
               {
                 matcher: '',
-                hooks: [{ type: 'command', command: 'bun run /path/SessionPreCompact.ts' }],
+                hooks: [{ type: 'command', command: 'bun run /path/RecallPreCompact.ts' }],
               },
             ],
             UserPromptSubmit: [
@@ -188,11 +188,11 @@ This content must be preserved across an uninstall.
     expect(r.status).toBe(0);
 
     // Recall files removed
-    expect(existsSync(join(claudeDir, 'hooks', 'SessionExtract.ts'))).toBe(false);
-    expect(existsSync(join(claudeDir, 'hooks', 'SessionRecall.ts'))).toBe(false);
-    expect(existsSync(join(claudeDir, 'hooks', 'TelosSync.ts'))).toBe(false);
-    expect(existsSync(join(claudeDir, 'hooks', 'SessionPreCompact.ts'))).toBe(false);
-    expect(existsSync(join(claudeDir, 'hooks', 'BatchExtract.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallExtract.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallStart.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallTelosSync.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallPreCompact.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallBatchExtract.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'lib', 'extraction-lock.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'lib', 'pid-utils.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'commands', 'recall'))).toBe(false);
@@ -223,9 +223,9 @@ This content must be preserved across an uninstall.
       (s.hooks?.[event] ?? []).flatMap(e => (e.hooks ?? []).map(h => h.command ?? ''));
 
     // Recall commands filtered
-    expect(commands('Stop').some(c => c.includes('SessionExtract'))).toBe(false);
-    expect(commands('SessionStart').some(c => c.includes('SessionRecall'))).toBe(false);
-    expect(commands('SessionStart').some(c => c.includes('TelosSync'))).toBe(false);
+    expect(commands('Stop').some(c => c.includes('RecallExtract'))).toBe(false);
+    expect(commands('SessionStart').some(c => c.includes('RecallStart'))).toBe(false);
+    expect(commands('SessionStart').some(c => c.includes('RecallTelosSync'))).toBe(false);
     // PreCompact key removed entirely (all entries were Recall)
     expect(s.hooks?.PreCompact).toBeUndefined();
 
@@ -287,8 +287,8 @@ This content must be preserved across an uninstall.
     expect(r.stdout).toContain('DRY-RUN');
 
     // Everything still present
-    expect(existsSync(join(claudeDir, 'hooks', 'SessionExtract.ts'))).toBe(true);
-    expect(existsSync(join(claudeDir, 'hooks', 'SessionRecall.ts'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallExtract.ts'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallStart.ts'))).toBe(true);
     expect(existsSync(join(claudeDir, 'commands', 'recall'))).toBe(true);
     expect(existsSync(join(claudeDir, 'Recall_GUIDE.md'))).toBe(true);
     expect(existsSync(join(claudeDir, 'memory.db'))).toBe(true);

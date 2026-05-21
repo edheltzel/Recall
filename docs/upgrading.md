@@ -34,7 +34,7 @@ cd /path/to/Recall
 
 1. Fetches the latest release tag from GitHub and compares to
    `package.json`. Exits 0 if already current (unless `--force`).
-2. Creates a timestamped backup of `settings.json`, `memory.db`,
+2. Creates a timestamped backup of `settings.json`, `recall.db`,
    `CLAUDE.md`, OpenCode/Pi configs, and `.mcp.json` at
    `~/.claude/backups/recall/<TIMESTAMP>/`. Records the git `PRE_SHA`
    in the manifest.
@@ -47,8 +47,8 @@ cd /path/to/Recall
    `FOR_CLAUDE.md`. `extract_prompt.md` gets a drift check — if you
    edited it, the new version lands at `extract_prompt.md.new` and
    your edits are preserved.
-7. Forces re-registration of all four hooks (SessionExtract,
-   TelosSync, SessionRecall, SessionPreCompact) — this permanently
+7. Forces re-registration of all four hooks (RecallExtract,
+   RecallTelosSync, RecallStart, RecallPreCompact) — this permanently
    prevents the pre-0.7.1 bug class where a partial install could
    leave hooks missing.
 8. Verifies via `mem --version` and `mem stats`.
@@ -78,7 +78,7 @@ bun install && bun run build
 
 **DB schema downgrades are not supported.** If a migration applied to
 your DB, reverting the repo alone does not revert the DB. Delete
-`~/.claude/memory.db` and restore it from the backup dir if you need
+`~/.agents/Recall/recall.db` and restore it from the backup dir if you need
 to fully roll back.
 
 ## Manual update
@@ -184,15 +184,15 @@ v0.7.0 adds two hooks copied into `~/.claude/hooks/` by the installer:
 
 | Hook | Type | Purpose |
 |------|------|---------|
-| `SessionRecall.ts` | SessionStart | Injects L0 + L1 tiers at session start |
-| `SessionPreCompact.ts` | PreCompact | Flushes in-flight messages before compaction |
+| `RecallStart.ts` | SessionStart | Injects L0 + L1 tiers at session start |
+| `RecallPreCompact.ts` | PreCompact | Flushes in-flight messages before compaction |
 
-If you update hooks manually, copy these alongside `SessionExtract.ts` and
-`BatchExtract.ts`:
+If you update hooks manually, copy these alongside `RecallExtract.ts` and
+`RecallBatchExtract.ts`:
 
 ```bash
-cp hooks/SessionRecall.ts ~/.claude/hooks/
-cp hooks/SessionPreCompact.ts ~/.claude/hooks/
+cp hooks/RecallStart.ts ~/.claude/hooks/
+cp hooks/RecallPreCompact.ts ~/.claude/hooks/
 ```
 
 ### New commands
@@ -207,7 +207,7 @@ cp hooks/SessionPreCompact.ts ~/.claude/hooks/
 ### New environment variable
 
 `RECALL_IDENTITY_PATH` overrides the L0 identity file path. Honored by
-both `SessionRecall` (read) and `mem onboard` (write).
+both `RecallStart` (read) and `mem onboard` (write).
 
 ### MCP: `memory_add` accepts `importance`
 
@@ -223,7 +223,7 @@ Migration 5→6 adds a `confidence` column (high/medium/low, DEFAULT 'medium') t
 
 ### New hooks/lib/ directory
 
-v0.6.0 introduces a `hooks/lib/` directory containing shared utilities imported by `SessionExtract.ts` and `BatchExtract.ts`. If you update the hooks manually rather than via `./install.sh`, you must copy this directory:
+v0.6.0 introduces a `hooks/lib/` directory containing shared utilities imported by `RecallExtract.ts` and `RecallBatchExtract.ts`. If you update the hooks manually rather than via `./install.sh`, you must copy this directory:
 
 ```bash
 cp -r hooks/lib/ ~/.claude/hooks/lib/
@@ -292,14 +292,14 @@ The installer automatically backs up existing files before making any changes. B
 ### Manual Backup
 
 ```bash
-cp ~/.claude/memory.db ~/.claude/memory.db.backup
+cp ~/.agents/Recall/recall.db ~/.agents/Recall/recall.db.backup
 ```
 
 ### What Gets Backed Up
 
 | File | Description |
 |------|-------------|
-| `memory.db` | The SQLite database |
+| `recall.db` | The SQLite database |
 | `settings.json` | Claude Code configuration (MCP + hooks) |
 | `CLAUDE.md` | Global Claude instructions |
 | `~/.claude/MEMORY/` | Memory files |

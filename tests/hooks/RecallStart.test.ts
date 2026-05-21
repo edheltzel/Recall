@@ -100,13 +100,13 @@ beforeEach(() => {
   hotRecallPath = join(memoryDir, 'HOT_RECALL.md');
   mkdirSync(memoryDir, { recursive: true });
 
-  // Set env vars so SessionRecall.ts uses our test paths
-  process.env.MEM_DB_PATH = dbPath;
+  // Set env vars so RecallStart.ts uses our test paths
+  process.env.RECALL_DB_PATH = dbPath;
   process.env.HOT_RECALL_PATH = hotRecallPath;
 });
 
 afterEach(() => {
-  delete process.env.MEM_DB_PATH;
+  delete process.env.RECALL_DB_PATH;
   delete process.env.HOT_RECALL_PATH;
   if (tempDir && existsSync(tempDir)) {
     rmSync(tempDir, { recursive: true, force: true });
@@ -115,11 +115,11 @@ afterEach(() => {
 
 // ─── Helper: run the hook script as a subprocess ─────────────────────
 async function runHookProcess(envOverrides: Record<string, string> = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'SessionRecall.ts');
+  const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'RecallStart.ts');
   const proc = Bun.spawn(['bun', 'run', hookPath], {
     env: {
       ...process.env,
-      MEM_DB_PATH: dbPath,
+      RECALL_DB_PATH: dbPath,
       HOT_RECALL_PATH: hotRecallPath,
       ...envOverrides,
     },
@@ -135,7 +135,7 @@ async function runHookProcess(envOverrides: Record<string, string> = {}): Promis
 // ─── Helper: import functions from the hook ──────────────────────────
 // We dynamically import to get the exported functions while env vars are set
 async function importHook() {
-  const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'SessionRecall.ts');
+  const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'RecallStart.ts');
   return await import(hookPath);
 }
 
@@ -149,7 +149,7 @@ const TEST_PROJECT = 'Recall';
 describe('queryDb', () => {
   test('returns empty array when DB does not exist', async () => {
     // Point to a non-existent DB
-    process.env.MEM_DB_PATH = join(tempDir, 'nonexistent.db');
+    process.env.RECALL_DB_PATH = join(tempDir, 'nonexistent.db');
     const { queryDb } = await importHook();
     const result = queryDb('SELECT 1');
     expect(result).toEqual([]);
@@ -299,7 +299,7 @@ describe('gatherContext', () => {
     expect(output).not.toContain(' → '); // No arrow when no solution
   });
 
-  // HOT_RECALL.md integration was removed in Sprint #1 (tiered SessionRecall).
+  // HOT_RECALL.md integration was removed in Sprint #1 (tiered RecallStart).
   // Historical rationale: HOT_RECALL was a pre-SQLite legacy store; tiered L0/L1
   // assembly from the structured tables makes it redundant. See
   // .atlas/plans/2026-04-17-mempalace-research-borrow-list.md.
@@ -345,7 +345,7 @@ describe('Schema correctness', () => {
 // =====================================================================
 describe('Edge cases: missing and empty state', () => {
   test('gracefully handles non-existent database', async () => {
-    process.env.MEM_DB_PATH = join(tempDir, 'no-such-file.db');
+    process.env.RECALL_DB_PATH = join(tempDir, 'no-such-file.db');
     const { gatherContext } = await importHook();
     const output = gatherContext();
 
@@ -449,7 +449,7 @@ describe('Safety: output bounds and runaway prevention', () => {
 
   test('process exits with code 0 even when DB is missing', async () => {
     const { exitCode, stdout } = await runHookProcess({
-      MEM_DB_PATH: join(tempDir, 'totally-missing.db'),
+      RECALL_DB_PATH: join(tempDir, 'totally-missing.db'),
     });
 
     expect(exitCode).toBe(0);
@@ -503,11 +503,11 @@ describe('End-to-end subprocess execution', () => {
   test('subprocess does not hang or spawn child processes', async () => {
     createTestDb().close();
 
-    const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'SessionRecall.ts');
+    const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'RecallStart.ts');
     const proc = Bun.spawn(['bun', 'run', hookPath], {
       env: {
         ...process.env,
-        MEM_DB_PATH: dbPath,
+        RECALL_DB_PATH: dbPath,
         HOT_RECALL_PATH: hotRecallPath,
       },
       stdout: 'pipe',
@@ -561,11 +561,11 @@ describe('Safety: no recursive spawning', () => {
   test('hook does not read stdin (non-blocking)', async () => {
     createTestDb().close();
 
-    const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'SessionRecall.ts');
+    const hookPath = join(import.meta.dir, '..', '..', 'hooks', 'RecallStart.ts');
     const proc = Bun.spawn(['bun', 'run', hookPath], {
       env: {
         ...process.env,
-        MEM_DB_PATH: dbPath,
+        RECALL_DB_PATH: dbPath,
         HOT_RECALL_PATH: hotRecallPath,
       },
       stdin: 'pipe', // Provide pipe but don't write to it

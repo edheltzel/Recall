@@ -22,7 +22,7 @@ Re-initializes the database. Safe to re-run — won't destroy existing data.
 
 ### "L0 identity tier is empty at session start"
 
-The `SessionRecall` hook loads `identity.md` for the L0 tier. If you've never
+The `RecallStart` hook loads `identity.md` for the L0 tier. If you've never
 written one, the L0 section of your session-start context is empty.
 
 ```bash
@@ -36,7 +36,7 @@ your shell env and for a stale project-local `./.atlas-recall/identity.md`
 
 ### "My identity.md was silently truncated"
 
-`SessionRecall` hard-caps L0 at `MAX_L0_CHARS = 1200` on read and appends
+`RecallStart` hard-caps L0 at `MAX_L0_CHARS = 1200` on read and appends
 `[identity truncated — edit <path> to shorten]`. Trim your identity file or
 re-run `mem onboard --print` to preview length before writing.
 
@@ -112,8 +112,8 @@ symlinks resolve to readable files after linking — so a silent
 ### "Session extraction not running"
 
 1. Run diagnostics: `mem doctor`
-2. Check hook registered: `grep SessionExtract ~/.claude/settings.json`
-3. Check hook file exists: `ls ~/.claude/hooks/SessionExtract.ts`
+2. Check hook registered: `grep RecallExtract ~/.claude/settings.json`
+3. Check hook file exists: `ls ~/.claude/hooks/RecallExtract.ts`
 4. Check bun accessible: `which bun` (hooks resolve bun dynamically — not hardcoded)
 5. Check claude CLI available: `which claude`
 

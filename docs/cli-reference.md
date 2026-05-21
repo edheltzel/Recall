@@ -2,7 +2,7 @@
 
 ← [Back to README](../README.md)
 
-The `mem` command is the primary interface for Recall. All subcommands operate on the SQLite database at `~/.claude/memory.db`.
+The `mem` command is the primary interface for Recall. All subcommands operate on the SQLite database at `~/.agents/Recall/recall.db`.
 
 ---
 
@@ -166,13 +166,13 @@ mem onboard --project                # Write project-local (./.atlas-recall/iden
 mem onboard --out /path/identity.md  # Write to an explicit path
 ```
 
-`mem onboard` creates the L0 tier that `SessionRecall` injects at the top of every
+`mem onboard` creates the L0 tier that `RecallStart` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
 `--project` > global default (`~/.claude/MEMORY/identity.md`). If a file already
 exists, the command asks for confirmation and writes a `.bak` copy before
 overwriting.
 
-The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `SessionRecall`
+The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `RecallStart`
 silently truncates beyond that threshold.
 
 ## Importance
@@ -216,15 +216,24 @@ a human-readable `.md` alongside. See `benchmarks/README.md` for methodology.
 ```bash
 mem init                             # Initialize the database (safe to re-run)
 mem doctor                           # Health check all subsystems
+mem doctor --fix                     # Re-create missing/drifted Recall symlinks
 mem stats                            # Database statistics
+mem path                             # Print resolved paths (DB, install root, symlinks)
+mem path --json                      # Same, as JSON
+mem migrate --to /new/path/recall.db # Relocate the database and rewrite MCP configs
+mem migrate --to ... --dry-run       # Preview the migration plan
 mem onboard                          # Interactive L0 identity interview (see Onboard)
 ```
 
 `mem init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
 
-`mem doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, and Ollama availability. Run this first when troubleshooting.
+`mem doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created; user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced.
 
 `mem stats` reports row counts per table and total database size.
+
+`mem path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
+
+`mem migrate` moves the database to a new path and rewrites MCP/hook configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `mem-mcp` process keeps reading from the right file. Refuses to overwrite a non-empty destination. Snapshots the source DB + sidecars + configs to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
 
 ### Onboard
 
@@ -234,9 +243,9 @@ mem onboard --yes                    # Non-interactive (accept all defaults)
 mem onboard --dry-run                # Show the proposed identity.md, write nothing
 ```
 
-`mem onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered SessionRecall. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
+`mem onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
 
-Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `mem onboard` (write) and the SessionRecall hook (read).
+Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `mem onboard` (write) and the RecallStart hook (read).
 
 Inputs are separated with `|` (not `,` or `;`) to avoid silent data loss when a value itself contains a comma: e.g. `no force-push, ever | always use worktrees`.
 

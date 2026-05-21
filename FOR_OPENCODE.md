@@ -84,6 +84,9 @@ mem search "deployment pipeline"    # Search memory
 mem stats                           # Database statistics
 mem loa list                        # Browse curated knowledge
 mem onboard                         # Interactive L0 identity setup (run once per user)
+mem path                            # Show DB + install paths (diagnostics)
+mem doctor --fix                    # Repair drifted/missing Recall symlinks
+mem migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 
 ## Lifecycle scripts
@@ -97,8 +100,8 @@ They are platform-agnostic — OpenCode, Claude Code, and Pi share them.
 | `./update.sh --check` | Check if a newer GitHub release exists. Check-only. |
 | `./update.sh` | Pull latest, rebuild, migrate DB, re-register hooks/plugins. Exit OpenCode first. |
 | `./uninstall.sh --dry-run` | Preview what would be removed. |
-| `./uninstall.sh` | Surgical remove; preserves `memory.db` + backups by default. |
-| `./uninstall.sh --purge` | Also destroy `memory.db` + backups (double-confirmed). |
+| `./uninstall.sh` | Surgical remove; preserves `~/.agents/Recall/` (DB + backups + canonicals) by default. |
+| `./uninstall.sh --purge` | Also destroy `~/.agents/Recall/` and any legacy DB (double-confirmed). |
 
 If the user asks about updating or uninstalling, point them at these
 scripts rather than instructing per-platform manual steps. Never run
@@ -116,7 +119,7 @@ OpenCode first.
 
 ## How Extraction Works
 
-A Recall plugin (`recall-extract.ts`) runs inside OpenCode:
+A Recall plugin (`RecallExtract.ts`) runs inside OpenCode:
 
 1. Hooks into the `session.idle` event (fires when the agent finishes responding)
 2. Exports the session as markdown via `opencode session export`
@@ -125,7 +128,7 @@ A Recall plugin (`recall-extract.ts`) runs inside OpenCode:
 
 ## Database Location
 
-The SQLite database is at `~/.claude/memory.db` (or wherever `MEM_DB_PATH` points). It uses:
+The SQLite database is at `~/.agents/Recall/recall.db` (or wherever `RECALL_DB_PATH` points; the legacy `MEM_DB_PATH` is still accepted). It uses:
 
 - **WAL mode** for concurrent reads
 - **FTS5** indexes on all text tables

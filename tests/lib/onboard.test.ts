@@ -134,7 +134,7 @@ describe('resolveOutputPath', () => {
   });
 
   test('RECALL_IDENTITY_PATH is honored over --project and default', () => {
-    // Guarantees onboard writes to the same file SessionRecall reads from.
+    // Guarantees onboard writes to the same file RecallStart reads from.
     const p = resolveOutputPath({ project: true }, { RECALL_IDENTITY_PATH: '/custom/identity.md' });
     expect(p).toBe('/custom/identity.md');
   });

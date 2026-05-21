@@ -4,13 +4,38 @@
 
 ## File Layout
 
+Canonical Recall files live under `~/.agents/Recall/`. Platform homes
+(`~/.claude/`, `~/.config/opencode/`, `~/.pi/agent/`) contain per-file
+symlinks back to those canonicals.
+
 ```
-~/.claude/
-├── memory.db                          # SQLite database (FTS5 + WAL mode)
-├── Recall_GUIDE.md                    # Guide for the Claude Code instance
+~/.agents/Recall/                       # Recall install root (canonical files)
+├── recall.db                           # SQLite database (FTS5 + WAL mode)
+├── recall.db-wal
+├── recall.db-shm
+├── shared/
+│   ├── hooks/                          # Canonical hook files (.ts)
+│   │   └── lib/                        # Hook helpers (.ts)
+│   └── extract_prompt.md               # Extraction prompt template
+├── claude/
+│   ├── commands/Recall/                # Slash-command files
+│   └── Recall_GUIDE.md                 # Guide for Claude Code
+├── opencode/
+│   ├── plugins/                        # OpenCode plugin canonicals
+│   └── Recall_GUIDE.md                 # Guide for OpenCode
+├── pi/
+│   ├── extensions/                     # Pi extension canonicals
+│   └── Recall_GUIDE.md                 # Guide for Pi
+├── MEMORY/                             # Migrated user-authored MEMORY files
+│   ├── identity.md                     # L0 identity (user-authored via mem onboard)
+│   └── DISTILLED.md                    # All extracted session summaries (full archive)
+└── backups/                            # Pre-install + pre-update snapshots
+
+~/.claude/                              # Claude Code home (mostly symlinks back)
+├── Recall_GUIDE.md                     # → ~/.agents/Recall/claude/Recall_GUIDE.md
 ├── MEMORY/
-│   ├── identity.md                    # L0 identity (user-authored via mem onboard)
-│   ├── DISTILLED.md                   # All extracted session summaries (full archive)
+│   ├── identity.md                     # → ~/.agents/Recall/MEMORY/identity.md
+│   ├── DISTILLED.md                    # → ~/.agents/Recall/MEMORY/DISTILLED.md
 │   ├── HOT_RECALL.md                  # Last 10 sessions (fast context loading)
 │   ├── SESSION_INDEX.json             # Searchable session metadata lookup
 │   ├── DECISIONS.log                  # Architectural decisions (deduplicated)
@@ -19,13 +44,13 @@
 │   ├── extract_prompt.md              # Extraction prompt template (used by hooks)
 │   ├── EXTRACT_LOG.txt                # Extraction run log (checked by mem doctor)
 │   └── .extraction_tracker.json       # Per-file extraction state (dedup + retry)
-├── hooks/
-│   ├── SessionRecall.ts               # SessionStart hook — injects L0 + L1 tiers
-│   ├── SessionPreCompact.ts           # PreCompact hook — flushes in-flight messages
-│   ├── SessionExtract.ts              # Stop hook — extracts sessions on exit
-│   ├── BatchExtract.ts                # Cron batch extractor for missed sessions
-│   └── lib/                           # Shared hook libraries (imported by hook scripts)
-└── settings.json                      # Hook registration + MCP server (recall-memory)
+├── hooks/                              # All entries below are symlinks
+│   ├── RecallStart.ts                # → ~/.agents/Recall/shared/hooks/RecallStart.ts
+│   ├── RecallPreCompact.ts            # → ~/.agents/Recall/shared/hooks/RecallPreCompact.ts
+│   ├── RecallExtract.ts               # → ~/.agents/Recall/shared/hooks/RecallExtract.ts
+│   ├── RecallBatchExtract.ts                 # → ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts
+│   └── lib/                            # → ~/.agents/Recall/shared/hooks/lib/
+└── settings.json                       # Hook registration + MCP server (recall-memory)
 ```
 
 Project-local L0 override: `./.atlas-recall/identity.md` takes precedence over
@@ -53,9 +78,9 @@ tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1
 tier ranking at session start. Manage manually with `mem pin` / `mem unpin`
 or backfill from confidence signals with `mem importance backfill`.
 
-## Tiered SessionRecall (v0.7.0+)
+## Tiered RecallStart (v0.7.0+)
 
-The `SessionRecall` hook injects two tiers at the top of every session:
+The `RecallStart` hook injects two tiers at the top of every session:
 
 | Tier | Source | Cap | Purpose |
 |------|--------|-----|---------|
@@ -73,7 +98,7 @@ Path resolution for `identity.md`:
 
 ## PreCompact hook (v0.7.0+)
 
-`hooks/SessionPreCompact.ts` fires before Claude Code compacts its own
+`hooks/RecallPreCompact.ts` fires before Claude Code compacts its own
 context. It flushes any in-flight messages to SQLite so nothing is lost
 during compaction. A byte-offset watermark prevents re-reading and it
 cooperates with the Stop hook's extraction lock to avoid races.
@@ -104,7 +129,7 @@ graph LR
 ```mermaid
 graph TD
     A[Session End] --> B[Stop Hook Fires]
-    B --> C[SessionExtract.ts]
+    B --> C[RecallExtract.ts]
     C --> D[Read JSONL Conversation]
     D --> E{Size > 120K chars?}
     E -->|Yes| F[Chunk + Meta-Extract]
@@ -135,7 +160,7 @@ If Haiku is unavailable, falls back to a local Ollama model (configurable via `R
 ### Lifecycle Management
 
 - **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `mem decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
-- **Breadcrumb sweep** — at session start, the `SessionRecall` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
+- **Breadcrumb sweep** — at session start, the `RecallStart` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
 - **Prune strategy** — `mem prune` removes stale records: superseded/reverted decisions older than a retention window, breadcrumbs below an importance threshold, and orphaned embeddings with no parent row. Prune is always dry-run by default; pass `--execute` to commit changes.
 
 - **WAL mode** for concurrent reads (no locking during MCP queries)
@@ -167,7 +192,7 @@ registration, and global-link state identically.
 |---|---|---|
 | `install.sh` | Fresh install or repair | Idempotent, creates a timestamped backup first, per-hook registration (not blanket), supports `restore` and `list` subcommands |
 | `update.sh` | Pull + build + migrate + relink | Version check against GitHub Releases API; aborts cleanly if already current unless `--force`. Writes a `ROLLBACK.txt` recipe to the backup dir on any failure |
-| `uninstall.sh` | Surgical removal | Preserve-default (keeps `memory.db`, backups, `MEMORY/`). `--purge` destroys DB + backups after double-confirmation. AST-aware CLAUDE.md `## MEMORY` section removal; diff-checked removal of user-edited `extract_prompt.md` |
+| `uninstall.sh` | Surgical removal | Preserve-default (keeps `recall.db`, backups, `MEMORY/`). `--purge` destroys DB + backups after double-confirmation. AST-aware CLAUDE.md `## MEMORY` section removal; diff-checked removal of user-edited `extract_prompt.md` |
 
 All three accept `--dry-run` to narrate changes without touching anything.
 
@@ -177,9 +202,9 @@ Sourced by all three scripts. Key functions:
 
 | Function | Purpose |
 |---|---|
-| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `memory.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
+| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
 | `recall_register_hook <event> <name> <command> [timeout]` | Idempotent single-hook writer for `settings.json`. Every hook is registered independently — no blanket early-return (fixes the pre-0.7.1 bug class structurally) |
-| `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`SessionExtract`, `TelosSync`, `SessionRecall`, `SessionPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
+| `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`RecallExtract`, `RecallTelosSync`, `RecallStart`, `RecallPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/mem` / `mem-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/mem` and `mem-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
 | `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/Recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |

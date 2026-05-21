@@ -8,7 +8,7 @@ import { CREATE_TABLES } from '../src/db/schema';
 
 // v2→v3 migration SQL (inlined — formerly exported from schema.ts, now in migrations.ts)
 const MIGRATE_V2_TO_V3 = "ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code'";
-import { linearizeSession } from '../pi/recall-extract';
+import { linearizeSession } from '../pi/RecallExtract';
 
 // ─── Schema v3 Migration Tests ───
 
@@ -451,7 +451,7 @@ describe('findPiSessions drop directory', () => {
     if (existsSync(nonExistentDir)) rmSync(nonExistentDir, { recursive: true });
 
     expect(existsSync(nonExistentDir)).toBe(false);
-    // findPiSessions in BatchExtract returns [] early when dir doesn't exist
+    // findPiSessions in RecallBatchExtract returns [] early when dir doesn't exist
   });
 
   test('excludes dotfiles from drop directory scan', () => {
@@ -484,7 +484,7 @@ describe('Installer: Pi Detection and MCP Config', () => {
           command: 'mem-mcp',
           args: [],
           environment: {
-            MEM_DB_PATH: '/Users/ed/.claude/memory.db'
+            RECALL_DB_PATH: '/Users/ed/.agents/Recall/recall.db'
           }
         }
       }
@@ -514,8 +514,8 @@ You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Reca
     // Pi-specific paths should appear in the install.sh
     expect(content).toContain('PI_CONFIG_DIR');
     expect(content).toContain('AGENTS.md');
-    expect(content).toContain('recall-extract.ts');
-    expect(content).toContain('recall-compaction.ts');
+    expect(content).toContain('RecallExtract.ts');
+    expect(content).toContain('RecallPreCompact.ts');
   });
 
   test('install.sh detects Pi platform', () => {

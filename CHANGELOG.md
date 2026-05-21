@@ -11,7 +11,91 @@ releases are called out in the notes below.
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Changed (BREAKING for fresh installs; existing installs auto-migrate)
+
+- **Install layout moved to `~/.agents/Recall/`.** Canonical hook files, slash
+  commands, agent guides, and the SQLite database now live under a Recall-owned
+  install root instead of being scattered across `~/.claude/`. Platform homes
+  (`~/.claude/`, `~/.config/opencode/`, `~/.pi/agent/`) receive **per-file
+  symlinks** back to the canonicals.
+- **Database renamed to `recall.db`.** Default path is now
+  `~/.agents/Recall/recall.db` (sidecars: `recall.db-wal`, `recall.db-shm`).
+- **New env var: `RECALL_DB_PATH`.** Primary database-path override. The legacy
+  `MEM_DB_PATH` is still honored as a fallback and prints a one-time
+  deprecation warning to stderr when used.
+
+### Added
+
+- **Auto-migration on update.** `update.sh` (and `install.sh` on existing
+  systems) detects a legacy `~/.claude/memory.db` (or any `MEM_DB_PATH`
+  override) and moves it to `~/.agents/Recall/recall.db` along with WAL/SHM
+  sidecars. User-authored MEMORY artifacts (`identity.md`, `DISTILLED.md`)
+  also migrate. A full pre-migration snapshot is preserved at
+  `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
+- **Interactive DB-path prompt.** `install.sh` asks where to put the
+  database, defaulting to `~/.agents/Recall/recall.db`. Skipped on
+  `--yes`/non-TTY.
+- **`./install.sh --db-path <path>`.** Non-interactive override for scripted
+  installs.
+- **Per-file collision rule.** When the installer creates a symlink at a path
+  that already exists, identical content is silently replaced; user-modified
+  files are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/collisions/`
+  before being replaced. Re-running install is idempotent.
+- **Shared DB-path resolver** at `hooks/lib/db-path.ts` so the CLI, MCP
+  server, and every hook agree on the resolution precedence.
+
+### Fixed
+
+- Claude Code MCP registration was previously written with `env: {}`, so the
+  spawned `mem-mcp` process couldn't see any database-path override. The
+  installer now patches `env.RECALL_DB_PATH` in whichever config file
+  (`~/.claude.json` or `~/.claude/settings.json`) holds the registration.
+
+### Migration notes
+
+- Auto-migration runs **once** on the next `update.sh`. If you've manually
+  relocated `memory.db`, set `RECALL_DB_PATH` (or keep `MEM_DB_PATH`) before
+  running update.
+- Users with custom MCP env configs may want to switch `MEM_DB_PATH` → `RECALL_DB_PATH`. Both work today; the legacy name will be removed in a future release.
+- The pre-migration snapshot at `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` is the recovery path if anything goes wrong.
+
+### Added (new CLI commands, Phase 3)
+
+- **`mem migrate --to <path>`** — relocate the SQLite database to a new path
+  and rewrite MCP/hook configs across all detected platforms. Refuses to
+  overwrite non-empty destinations and refuses to run while a process has
+  the source DB open. `--dry-run` prints the plan without mutation. A
+  pre-migration snapshot of the DB + sidecars + relevant configs is written
+  to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
+- **`mem path`** — print the resolved DB path, the install root, the active
+  env var source (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the
+  per-platform symlink state. `--json` for scripting.
+- **`mem doctor --fix`** — repair drifted or missing Recall-managed
+  symlinks. Missing → created. User-modified files at symlink targets →
+  backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` then
+  replaced. Identical-content regular files → silently converted to
+  symlinks.
+
+### Changed (hook + plugin renames, Phase 2)
+
+- **Hook source files renamed.** `SessionExtract.ts` → `RecallExtract.ts`,
+  `SessionRecall.ts` → `RecallStart.ts`, `SessionPreCompact.ts` →
+  `RecallPreCompact.ts`, `BatchExtract.ts` → `RecallBatchExtract.ts`,
+  `TelosSync.ts` → `RecallTelosSync.ts`, `ClearExtract.ts` →
+  `RecallClearExtract.ts`. The `Recall*` namespace prevents clashes when
+  other tools install hook files into `~/.claude/hooks/`.
+- **OpenCode + Pi plugins renamed** to match the PascalCase convention:
+  `recall-extract.ts` → `RecallExtract.ts`, `recall-compaction.ts` →
+  `RecallPreCompact.ts` in both `opencode/` and `pi/`.
+- **`update.sh` auto-migrates existing `settings.json` entries.** A new
+  `recall_rename_hooks_in_settings` function rewrites legacy hook command
+  paths (`/SessionExtract.ts` etc.) to their new equivalents, then a cleanup
+  pass removes stale Recall-managed symlinks at the old paths under
+  `~/.claude/hooks/`. Users see the rename happen automatically on next
+  update with no manual intervention.
+- **`uninstall.sh` cleans up both naming eras.** Hook-file arrays and
+  settings-filter patterns now match both `Recall*` and `Session*`/`Batch*`/
+  `Telos*`/`Clear*` names so half-migrated installs still uninstall cleanly.
 
 ## [0.8.0] — 2026-04-30 — "installer aesthetic overhaul"
 
@@ -128,7 +212,7 @@ aligned with Claude Code's actual project-folder encoding rule.
 ### Fixed
 
 - **Hooks now match Claude Code's project-folder encoding exactly.**
-  `SessionExtract` and `SessionPreCompact` previously encoded the cwd
+  `RecallExtract` and `RecallPreCompact` previously encoded the cwd
   with `/[\/\_]/g` — only slash and underscore became `-`. Claude Code
   actually replaces every character outside `[a-zA-Z0-9-]` (dot, space,
   tilde, plus, Unicode) with `-`. The narrower rule produced folder
@@ -146,7 +230,7 @@ aligned with Claude Code's actual project-folder encoding rule.
 
 - **`hooks/lib/path-encoding.ts`** — single source of truth for
   `encodeProjectDir(cwd)`. Both hook files import it; avoids future
-  drift between `SessionExtract` and `SessionPreCompact`.
+  drift between `RecallExtract` and `RecallPreCompact`.
 - **`tests/hooks/path-encoding.test.ts`** — 9 regression cases covering
   worktree paths, dotfile roots, in-name dots, underscores, plus signs,
   iCloud spaces+tildes+Unicode, hyphens+digits preservation, and
@@ -335,7 +419,7 @@ does not touch runtime behavior.
 
 - **Stale `.atlas-plans/` references** swept to `.atlas/` in `CLAUDE.md`
   (project), `.gitignore`, `benchmarks/README.md`, and
-  `tests/hooks/SessionRecall.test.ts`. CHANGELOG history untouched.
+  `tests/hooks/RecallStart.test.ts`. CHANGELOG history untouched.
 
 ### Notes for developers
 
@@ -406,11 +490,11 @@ Surgical fix release for two v0.7.0 regressions surfaced by live verification.
 
 ### Fixed
 - **`install.sh configure_hooks()` silently skipped three hooks on re-install.**
-  A blanket `grep -q SessionExtract … return` short-circuit fired after
-  copying hook files but before registering `TelosSync`, `SessionRecall`, and
-  `SessionPreCompact`. Any re-install where `SessionExtract` was already
+  A blanket `grep -q RecallExtract … return` short-circuit fired after
+  copying hook files but before registering `RecallTelosSync`, `RecallStart`, and
+  `RecallPreCompact`. Any re-install where `RecallExtract` was already
   present left the other three unregistered — which meant v0.7.0's tiered
-  SessionRecall and PreCompact flush were architecturally inactive for any
+  RecallStart and PreCompact flush were architecturally inactive for any
   user who had installed a prior Recall version. Fresh installs always hit
   the happy path, which is why the existing test suite did not catch it.
   Each per-hook `bun -e` block already has `.some(...includes(...))`
@@ -430,7 +514,7 @@ Surgical fix release for two v0.7.0 regressions surfaced by live verification.
 ### Notes
 - 306 tests pass (303 baseline + 3 new regression tests).
 - The `.atlas-plans/` stale-reference sweep across remaining files
-  (`benchmarks/README.md`, `.gitignore`, `tests/hooks/SessionRecall.test.ts`
+  (`benchmarks/README.md`, `.gitignore`, `tests/hooks/RecallStart.test.ts`
   comment, root `CLAUDE.md`) is deferred to the upcoming 0.7.2 release.
 - The broader install-lifecycle release originally scoped as 0.7.1 shifts
   to **0.7.2** — the hotfix claims the 0.7.1 slot to satisfy strict-semver
@@ -438,8 +522,8 @@ Surgical fix release for two v0.7.0 regressions surfaced by live verification.
 
 **After upgrading from 0.7.0:** re-run `./install.sh` to register the
 three hooks that the earlier installer skipped. Verify with
-`jq '.hooks' ~/.claude/settings.json` — all four of `SessionExtract`,
-`SessionRecall`, `TelosSync`, and `SessionPreCompact` should appear.
+`jq '.hooks' ~/.claude/settings.json` — all four of `RecallExtract`,
+`RecallStart`, `RecallTelosSync`, and `RecallPreCompact` should appear.
 
 ## [0.7.0] — 2026-04-18 — "v2 foundation"
 
@@ -450,7 +534,7 @@ efficiency measurable. An interactive onboarding command closes the UX gap
 for the new L0 tier.
 
 ### Added
-- **Tiered SessionRecall** (L0 + L1). `hooks/SessionRecall.ts` now loads
+- **Tiered RecallStart** (L0 + L1). `hooks/RecallStart.ts` now loads
   two distinct tiers at session start:
   - **L0 — Identity** — small user-authored markdown file
     (`~/.claude/MEMORY/identity.md` or project-local
@@ -463,7 +547,7 @@ for the new L0 tier.
   `messages`, `decisions`, `learnings`, and `loa_entries` tables.
   LoA entries have a write-time floor of 5 (enforced by `createLoaEntry`)
   and are never demoted by backfill.
-- **PreCompact hook** — `hooks/SessionPreCompact.ts` flushes in-flight
+- **PreCompact hook** — `hooks/RecallPreCompact.ts` flushes in-flight
   messages to SQLite before Claude Code compacts its own context, using a
   byte-offset watermark to avoid re-reading. Cooperates with the Stop
   hook's extraction lock so the two don't race.
@@ -484,7 +568,7 @@ for the new L0 tier.
   available suites, show the latest report.
 - **MCP `memory_add` `importance` param** — accepts 1-10 on insert.
 - **`RECALL_IDENTITY_PATH` environment variable** — override the L0
-  identity file location. Honored by both `hooks/SessionRecall.ts` (read)
+  identity file location. Honored by both `hooks/RecallStart.ts` (read)
   and `mem onboard` (write). Precedence order in `mem onboard`:
   `--out > RECALL_IDENTITY_PATH > --project > global default`.
 - **`install.sh` post-install recommendation** — installer now prints a
@@ -517,7 +601,7 @@ seed the L0 identity tier (otherwise `v2_l0_chars` stays at 0 in
 benchmarks and the L0 section of session context is empty).
 
 ### Acknowledgments
-The L0/L1 tiered SessionRecall, PreCompact hook, and importance
+The L0/L1 tiered RecallStart, PreCompact hook, and importance
 scoring features shipped in this release were inspired by — and
 heavily reshaped from — [MemPalace](https://github.com/MemPalace/mempalace)
 (MIT). No MemPalace code is used; see

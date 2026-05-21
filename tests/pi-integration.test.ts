@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { linearizeSession } from '../pi/recall-extract';
+import { linearizeSession } from '../pi/RecallExtract';
 
 // ─── Tree JSONL Linearization ───
 
@@ -111,9 +111,9 @@ describe('tree JSONL linearization', () => {
   });
 });
 
-// ─── BatchExtract Pi Session Scanning ───
+// ─── RecallBatchExtract Pi Session Scanning ───
 
-describe('BatchExtract Pi session scanning', () => {
+describe('RecallBatchExtract Pi session scanning', () => {
   let tempDir: string;
   let piDropDir: string;
 
@@ -210,8 +210,8 @@ describe('installer Pi integration', () => {
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('install_pi_extensions');
-    expect(content).toContain('recall-extract.ts');
-    expect(content).toContain('recall-compaction.ts');
+    expect(content).toContain('RecallExtract.ts');
+    expect(content).toContain('RecallPreCompact.ts');
   });
 });
 
