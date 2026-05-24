@@ -1,6 +1,6 @@
 // mem onboard — interactive interview that creates the L0 identity tier.
 //
-// The L0 tier is a small user-authored markdown file that SessionRecall
+// The L0 tier is a small user-authored markdown file that RecallStart
 // loads at the very top of every session. Without it, that tier is silently
 // empty and a meaningful chunk of the v2 design is invisible.
 //
@@ -23,7 +23,7 @@ import { homedir } from 'os';
 import { createInterface, type Interface } from 'readline';
 import { detectProject } from '../lib/project.js';
 
-// L0 identity files are silently truncated at load by hooks/SessionRecall.ts.
+// L0 identity files are silently truncated at load by hooks/RecallStart.ts.
 // Mirror that constant here so the onboarding UX can warn the user before the
 // truncation ever happens.
 const MAX_L0_CHARS = 1200;
@@ -57,7 +57,7 @@ export interface IdentityAnswers {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// Length check — mirrors SessionRecall's silent truncation threshold.
+// Length check — mirrors RecallStart's silent truncation threshold.
 
 export function exceedsMaxL0(markdown: string): boolean {
   return markdown.length > MAX_L0_CHARS;
@@ -154,9 +154,9 @@ function detectMachine(): string {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// Path resolution — mirror SessionRecall's identity-file lookup order.
+// Path resolution — mirror RecallStart's identity-file lookup order.
 // Precedence: --out > RECALL_IDENTITY_PATH env > --project > global default.
-// The env var is honored because SessionRecall reads it with highest
+// The env var is honored because RecallStart reads it with highest
 // precedence at load; without this, a user with the env set could write
 // to one path while the hook loads from another.
 
@@ -316,7 +316,7 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
     process.stdout.write(`  (would write to: ${outPath})\n\n`);
     if (exceedsMaxL0(markdown)) {
       process.stderr.write(
-        `  Warning: output is ${markdown.length} chars; SessionRecall truncates L0 at ${MAX_L0_CHARS}.\n` +
+        `  Warning: output is ${markdown.length} chars; RecallStart truncates L0 at ${MAX_L0_CHARS}.\n` +
         `  Consider trimming before writing.\n\n`,
       );
     }
@@ -362,7 +362,7 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
   process.stdout.write(`    ${outPath}\n`);
   if (exceedsMaxL0(markdown)) {
     process.stderr.write(
-      `  Warning: file is ${markdown.length} chars; SessionRecall truncates L0 at ${MAX_L0_CHARS}.\n` +
+      `  Warning: file is ${markdown.length} chars; RecallStart truncates L0 at ${MAX_L0_CHARS}.\n` +
       `  Edit the file to shorten or run \`mem onboard --print\` first to preview length.\n`,
     );
   }

@@ -3,8 +3,8 @@
 # Recall Uninstall Script
 #
 # Removes Recall integration from Claude Code, OpenCode, and Pi. By default
-# preserves user data (memory.db, identity.md, ~/.claude/MEMORY/ tree, and
-# ~/.claude/backups/recall/). Use --purge to destroy everything.
+# preserves user data (~/.agents/Recall/ tree — DB, canonical hooks/commands,
+# backups, MEMORY artifacts). Use --purge to destroy everything.
 #
 # Usage:
 #   ./uninstall.sh                  # preserve-everything default
@@ -69,11 +69,20 @@ run() {
 # ── Hard-coded inventory of files Recall owns ────────────────────────────────
 
 RECALL_HOOK_FILES=(
+  "$CLAUDE_DIR/hooks/RecallExtract.ts"
+  "$CLAUDE_DIR/hooks/RecallBatchExtract.ts"
+  "$CLAUDE_DIR/hooks/RecallTelosSync.ts"
+  "$CLAUDE_DIR/hooks/RecallStart.ts"
+  "$CLAUDE_DIR/hooks/RecallPreCompact.ts"
+  "$CLAUDE_DIR/hooks/RecallClearExtract.ts"
+  # Legacy names — kept here so uninstall still cleans up installs that
+  # haven't run a Phase-2-aware update.sh yet.
   "$CLAUDE_DIR/hooks/SessionExtract.ts"
   "$CLAUDE_DIR/hooks/BatchExtract.ts"
   "$CLAUDE_DIR/hooks/TelosSync.ts"
   "$CLAUDE_DIR/hooks/SessionRecall.ts"
   "$CLAUDE_DIR/hooks/SessionPreCompact.ts"
+  "$CLAUDE_DIR/hooks/ClearExtract.ts"
 )
 
 RECALL_HOOK_LIB_FILES=(
@@ -83,9 +92,21 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/extraction-semaphore.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-tracker.ts"
   "$CLAUDE_DIR/hooks/lib/pid-utils.ts"
+  "$CLAUDE_DIR/hooks/lib/db-path.ts"
+  "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
+  "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
+  "$CLAUDE_DIR/hooks/lib/path-encoding.ts"
+  "$CLAUDE_DIR/hooks/lib/pick-previous-jsonl.ts"
 )
 
-RECALL_HOOK_NAMES=(SessionExtract TelosSync SessionRecall SessionPreCompact)
+# Hook name patterns that identify Recall-owned entries in settings.json.
+# Includes both new (RecallExtract etc.) and legacy (SessionExtract etc.)
+# names so uninstall scrubs both. filter_claude_settings does substring
+# matching, so listing both eras is correct.
+RECALL_HOOK_NAMES=(
+  RecallExtract RecallBatchExtract RecallTelosSync RecallStart RecallPreCompact RecallClearExtract
+  SessionExtract BatchExtract TelosSync SessionRecall SessionPreCompact ClearExtract
+)
 
 # ── Summary + confirmation ───────────────────────────────────────────────────
 
@@ -94,35 +115,36 @@ print_summary() {
   _banner warn "Recall Uninstall"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
-  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy memory.db + backup tree)"
+  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy ~/.agents/Recall/ tree, including the DB)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   echo ""
-  echo "Will REMOVE:"
+  echo "Will REMOVE (symlinks back to ~/.agents/Recall/ — canonical files stay):"
   echo "  • ~/.claude/commands/Recall/ (and legacy ~/.claude/commands/recall/ if present)"
   echo "  • ~/.claude/Recall_GUIDE.md"
-  echo "  • Recall hook entries in ~/.claude/settings.json"
-  echo "  • Recall mcpServers entry in ~/.claude/settings.json"
-  echo "  • ~/.claude/hooks/{SessionExtract,BatchExtract,TelosSync,SessionRecall,SessionPreCompact}.ts"
-  echo "  • ~/.claude/hooks/lib/{extraction-*,pid-utils}.ts (Recall-owned only)"
+  echo "  • Recall hook entries in ~/.claude/settings.json and ~/.claude.json"
+  echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"
+  echo "  • ~/.claude/hooks/*.ts (Recall-managed symlinks only)"
+  echo "  • ~/.claude/hooks/lib/*.ts (Recall-managed symlinks only)"
   echo "  • ## MEMORY section in ~/.claude/CLAUDE.md (preserves everything else)"
-  echo "  • ~/.claude/MEMORY/extract_prompt.md (only if unmodified vs source)"
-  [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugins"
-  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extensions + AGENTS.md MEMORY section"
+  echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
+  [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
+  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + AGENTS.md MEMORY section"
   echo "  • bun unlink (removes mem/mem-mcp from PATH)"
   echo ""
   if [[ "$PURGE" == "true" ]]; then
     echo "Will DESTROY (--purge):"
-    echo "  • ~/.claude/memory.db  (your persistent memory database)"
-    echo "  • ~/.claude/backups/recall/  (all backup snapshots)"
+    echo "  • ~/.agents/Recall/recall.db  (your persistent memory database)"
+    echo "  • ~/.claude/memory.db  (legacy DB, if still present)"
+    echo "  • ~/.agents/Recall/  (canonical hooks, commands, guides, backups)"
     echo ""
   fi
   echo "Will PRESERVE:"
   if [[ "$PURGE" != "true" ]]; then
-    echo "  • ~/.claude/memory.db"
-    echo "  • ~/.claude/backups/recall/"
+    echo "  • ~/.agents/Recall/ (DB, canonical files, backups, MEMORY artifacts)"
+    echo "  • ~/.claude/memory.db (legacy DB if it exists)"
   fi
-  echo "  • ~/.claude/MEMORY/ (identity.md, DISTILLED.md, session subdirs)"
+  echo "  • ~/.claude/MEMORY/ (non-Recall artifacts in this Claude-owned directory)"
   echo "  • This source directory (remove with: rm -rf $SCRIPT_DIR)"
   echo ""
 }
@@ -237,22 +259,46 @@ unregister_claude_mcp_cli() {
 remove_hook_files() {
   local f removed=0
   for f in "${RECALL_HOOK_FILES[@]}" "${RECALL_HOOK_LIB_FILES[@]}"; do
-    if [[ -f "$f" ]]; then
+    # Symlinks resolve via -e (the underlying file). A Recall-managed symlink
+    # under $RECALL_DIR is removed by recall_unlink_if_managed. A regular file
+    # at the same path (legacy install, pre-symlink era) is removed outright
+    # — uninstall asked for it.
+    if [[ -L "$f" ]]; then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [dry-run] would unlink Recall-managed symlink: $f"
+      else
+        recall_unlink_if_managed "$f"
+      fi
+      removed=$((removed + 1))
+    elif [[ -f "$f" ]]; then
       run rm -f "$f"
       removed=$((removed + 1))
     fi
   done
-  log_success "Removed $removed Recall hook file(s) (surgical — other hooks/lib/ files untouched)"
+  log_success "Removed $removed Recall hook file(s)/symlink(s) (surgical — non-Recall hooks/lib untouched)"
 
   if [[ -d "$CLAUDE_DIR/hooks/lib" ]] && [[ -z "$(ls -A "$CLAUDE_DIR/hooks/lib" 2>/dev/null)" ]]; then
     run rmdir "$CLAUDE_DIR/hooks/lib"
   fi
 }
 
-# Diff-check: only remove extract_prompt.md if it matches the source exactly.
+# Remove extract_prompt.md at the platform home. With the symlink architecture
+# this is just a Recall-managed link; recall_unlink_if_managed handles the
+# safety check. Legacy installs may still have a regular file there — diff
+# against the source as before, only remove if unmodified.
 remove_extract_prompt_if_unmodified() {
   local installed="$CLAUDE_DIR/MEMORY/extract_prompt.md"
   local source_file="$SCRIPT_DIR/hooks/extract_prompt.md"
+
+  if [[ -L "$installed" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would unlink Recall-managed symlink: $installed"
+    else
+      recall_unlink_if_managed "$installed"
+    fi
+    log_success "Removed extract_prompt.md symlink at $installed"
+    return
+  fi
 
   [[ ! -f "$installed" ]] && return
 
@@ -358,9 +404,17 @@ remove_opencode() {
   local guide="$OPENCODE_CONFIG_DIR/Recall_GUIDE.md"
 
   local p
-  for p in recall-extract.ts recall-compaction.ts; do
-    if [[ -f "$plugin_dir/$p" ]]; then
-      run rm -f "$plugin_dir/$p"
+  for p in RecallExtract.ts RecallPreCompact.ts; do
+    local pf="$plugin_dir/$p"
+    if [[ -L "$pf" ]]; then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [dry-run] would unlink Recall-managed symlink: $pf"
+      else
+        recall_unlink_if_managed "$pf"
+      fi
+      log_success "Removed OpenCode plugin symlink: $p"
+    elif [[ -f "$pf" ]]; then
+      run rm -f "$pf"
       log_success "Removed OpenCode plugin: $p"
     fi
   done
@@ -368,7 +422,14 @@ remove_opencode() {
     run rm -f "$agent_dir/recall-memory.md"
     log_success "Removed OpenCode agent: recall-memory.md"
   fi
-  if [[ -f "$guide" ]]; then
+  if [[ -L "$guide" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would unlink Recall-managed symlink: $guide"
+    else
+      recall_unlink_if_managed "$guide"
+    fi
+    log_success "Removed $guide"
+  elif [[ -f "$guide" ]]; then
     run rm -f "$guide"
     log_success "Removed $guide"
   fi
@@ -405,13 +466,28 @@ remove_pi() {
   local agents_md="$PI_CONFIG_DIR/AGENTS.md"
 
   local e
-  for e in recall-extract.ts recall-compaction.ts; do
-    if [[ -f "$ext_dir/$e" ]]; then
-      run rm -f "$ext_dir/$e"
+  for e in RecallExtract.ts RecallPreCompact.ts; do
+    local ef="$ext_dir/$e"
+    if [[ -L "$ef" ]]; then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [dry-run] would unlink Recall-managed symlink: $ef"
+      else
+        recall_unlink_if_managed "$ef"
+      fi
+      log_success "Removed Pi extension symlink: $e"
+    elif [[ -f "$ef" ]]; then
+      run rm -f "$ef"
       log_success "Removed Pi extension: $e"
     fi
   done
-  if [[ -f "$guide" ]]; then
+  if [[ -L "$guide" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would unlink Recall-managed symlink: $guide"
+    else
+      recall_unlink_if_managed "$guide"
+    fi
+    log_success "Removed $guide"
+  elif [[ -f "$guide" ]]; then
     run rm -f "$guide"
     log_success "Removed $guide"
   fi
@@ -422,24 +498,73 @@ remove_pi() {
 # ── Purge ────────────────────────────────────────────────────────────────────
 
 do_purge() {
-  local db="$CLAUDE_DIR/memory.db"
-  if [[ -f "$db" ]]; then
-    local pre_purge_dir="$BACKUP_BASE/pre_purge_$TIMESTAMP"
+  # Snapshot every Recall-owned DB we can find before destroying it. Then
+  # remove the install root entirely (preserving the pre_purge_ snapshot
+  # under $BACKUP_BASE/pre_purge_$TIMESTAMP/, which lives outside the tree
+  # we're about to delete since we capture it first).
+  local pre_purge_dir="$BACKUP_BASE/pre_purge_$TIMESTAMP"
+
+  # Snapshot canonical DB + sidecars (new layout).
+  local canonical_db="$RECALL_DIR/recall.db"
+  if [[ -f "$canonical_db" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "  [dry-run] would snapshot $db to $pre_purge_dir/memory.db"
-      echo "  [dry-run] would rm $db"
+      echo "  [dry-run] would snapshot $canonical_db to $pre_purge_dir/"
     else
       mkdir -p "$pre_purge_dir"
-      cp "$db" "$pre_purge_dir/memory.db"
-      log_success "Snapshotted memory.db to $pre_purge_dir/memory.db"
-      rm -f "$db"
-      log_success "Removed $db"
+      cp "$canonical_db" "$pre_purge_dir/recall.db"
+      for ext in -wal -shm; do
+        [[ -f "${canonical_db}${ext}" ]] && cp "${canonical_db}${ext}" "$pre_purge_dir/recall.db${ext}"
+      done
+      log_success "Snapshotted recall.db to $pre_purge_dir/"
     fi
   fi
 
-  if [[ -d "$BACKUP_BASE" ]]; then
+  # Snapshot legacy DB + sidecars if still present (pre-migration installs).
+  local legacy_db="$CLAUDE_DIR/memory.db"
+  if [[ -f "$legacy_db" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "  [dry-run] would rm -rf $BACKUP_BASE (except pre_purge snapshot)"
+      echo "  [dry-run] would snapshot $legacy_db to $pre_purge_dir/"
+    else
+      mkdir -p "$pre_purge_dir"
+      cp "$legacy_db" "$pre_purge_dir/memory.db"
+      for ext in -wal -shm; do
+        [[ -f "${legacy_db}${ext}" ]] && cp "${legacy_db}${ext}" "$pre_purge_dir/memory.db${ext}"
+      done
+      log_success "Snapshotted legacy memory.db to $pre_purge_dir/"
+      run rm -f "$legacy_db" "${legacy_db}-wal" "${legacy_db}-shm"
+      log_success "Removed legacy DB at $legacy_db"
+    fi
+  fi
+
+  # Wipe the install root, but preserve the pre_purge snapshot we just made.
+  # Easiest: move snapshot out of $BACKUP_BASE before rm -rf, restore after.
+  if [[ -d "$RECALL_DIR" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would rm -rf $RECALL_DIR (keeping $pre_purge_dir)"
+    else
+      local snapshot_holding=""
+      if [[ -d "$pre_purge_dir" ]]; then
+        snapshot_holding="${TMPDIR:-/tmp}/recall-pre-purge-$TIMESTAMP"
+        mv "$pre_purge_dir" "$snapshot_holding"
+      fi
+      rm -rf "$RECALL_DIR"
+      log_success "Removed install root: $RECALL_DIR"
+      if [[ -n "$snapshot_holding" ]] && [[ -d "$snapshot_holding" ]]; then
+        mkdir -p "$BACKUP_BASE"
+        mv "$snapshot_holding" "$pre_purge_dir"
+        log_info "Preserved snapshot at: $pre_purge_dir"
+      fi
+    fi
+  fi
+
+  # Legacy backup tree cleanup. If $BACKUP_BASE lives outside $RECALL_DIR
+  # (which it does on pre-migration installs whose backups stayed under
+  # $CLAUDE_DIR/backups/recall/, or whenever the user/tests override
+  # BACKUP_BASE), remove the sibling snapshots — but not the pre_purge
+  # snapshot we just wrote.
+  if [[ -d "$BACKUP_BASE" ]] && [[ "$BACKUP_BASE" != "$RECALL_DIR/backups" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would rm legacy backups in $BACKUP_BASE (except pre_purge_$TIMESTAMP)"
     else
       local dir
       for dir in "$BACKUP_BASE"/*/; do
@@ -448,7 +573,7 @@ do_purge() {
         rm -rf "$dir"
       done
       [[ -f "$BACKUP_BASE/latest" ]] && rm -f "$BACKUP_BASE/latest"
-      log_success "Cleared $BACKUP_BASE (kept pre_purge_$TIMESTAMP snapshot)"
+      log_success "Cleared legacy backup snapshots in $BACKUP_BASE"
     fi
   fi
 }
@@ -500,7 +625,7 @@ main() {
   echo ""
 
   if [[ "$PURGE" == "true" ]]; then
-    log_info "Purging memory.db + backups..."
+    log_info "Purging install root + databases..."
     do_purge
     echo ""
   fi
@@ -514,13 +639,13 @@ main() {
     echo ""
     if [[ "$PURGE" != "true" ]]; then
       echo "Preserved (remove manually if desired):"
-      echo "  • ~/.claude/memory.db"
-      echo "  • ~/.claude/backups/recall/"
-      echo "  • ~/.claude/MEMORY/"
+      echo "  • ~/.agents/Recall/ (DB, canonical files, backups)"
+      echo "  • ~/.claude/memory.db (legacy DB if not migrated)"
+      echo "  • ~/.claude/MEMORY/ (non-Recall artifacts)"
     else
       echo "Preserved:"
-      echo "  • ~/.claude/MEMORY/ (identity.md, DISTILLED.md, session subdirs)"
-      echo "  • pre-purge snapshot at $BACKUP_BASE/pre_purge_$TIMESTAMP/"
+      echo "  • Pre-purge snapshot at $BACKUP_BASE/pre_purge_$TIMESTAMP/"
+      echo "  • ~/.claude/MEMORY/ (non-Recall artifacts only — our symlinks were removed)"
     fi
     echo "  • Source directory at $SCRIPT_DIR (remove with: rm -rf $SCRIPT_DIR)"
   fi

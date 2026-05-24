@@ -1,8 +1,8 @@
-// Integration + static tests for hooks/ClearExtract.ts
+// Integration + static tests for hooks/RecallClearExtract.ts
 //
 // Static: grep guarantees (CLAUDECODE='', self-containment, matcher='clear' wiring).
-// Integration: spawn ClearExtract as a subprocess against a tmp $HOME with stub
-//              SessionExtract.ts, assert the parent picks the previous JSONL and
+// Integration: spawn RecallClearExtract as a subprocess against a tmp $HOME with stub
+//              RecallExtract.ts, assert the parent picks the previous JSONL and
 //              acquires the semaphore.
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
@@ -23,7 +23,7 @@ import { spawnSync } from 'child_process';
 import { encodeProjectDir } from '../../hooks/lib/path-encoding';
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
-const HOOK_SOURCE = join(REPO_ROOT, 'hooks', 'ClearExtract.ts');
+const HOOK_SOURCE = join(REPO_ROOT, 'hooks', 'RecallClearExtract.ts');
 
 let tmp: string;
 let homeDir: string;
@@ -86,30 +86,30 @@ function initDbWithLocksTable(): void {
 }
 
 /**
- * Write a stub SessionExtract.ts that records its argv to a marker file
- * and exits. Used to assert ClearExtract spawned with the right arguments
+ * Write a stub RecallExtract.ts that records its argv to a marker file
+ * and exits. Used to assert RecallClearExtract spawned with the right arguments
  * without invoking the real LLM pipeline.
  */
-function installStubSessionExtract(): void {
+function installStubRecallExtract(): void {
   const stub = `#!/usr/bin/env bun
 import { appendFileSync } from 'fs';
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(stubMarkerPath)}, args.join('|') + '\\n');
 process.exit(0);
 `;
-  const stubPath = join(claudeHooksDir, 'SessionExtract.ts');
+  const stubPath = join(claudeHooksDir, 'RecallExtract.ts');
   writeFileSync(stubPath, stub);
   chmodSync(stubPath, 0o755);
 }
 
-function runClearExtract(
+function runRecallClearExtract(
   stdinPayload: string,
   envOverrides: Record<string, string> = {}
 ): { status: number; stdout: string; stderr: string } {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     HOME: homeDir,
-    MEM_DB_PATH: dbPath,
+    RECALL_DB_PATH: dbPath,
     ...envOverrides,
   };
   delete env.CLAUDECODE;
@@ -130,7 +130,7 @@ function runClearExtract(
 // Static / grep tests
 // ---------------------------------------------------------------------------
 
-describe('ClearExtract static guarantees', () => {
+describe('RecallClearExtract static guarantees', () => {
   test('hook source is self-contained — no imports from src/', async () => {
     const text = await Bun.file(HOOK_SOURCE).text();
     expect(/from ['"]\.\.\/src/.test(text)).toBe(false);
@@ -170,23 +170,23 @@ describe('ClearExtract static guarantees', () => {
 // Integration tests via subprocess spawn
 // ---------------------------------------------------------------------------
 
-describe('ClearExtract parent flow', () => {
+describe('RecallClearExtract parent flow', () => {
   test('with no JSONLs in project dir, exits 0 and does not spawn child', () => {
     initDbWithLocksTable();
-    installStubSessionExtract();
-    const r = runClearExtract(JSON.stringify({ cwd, source: 'clear' }));
+    installStubRecallExtract();
+    const r = runRecallClearExtract(JSON.stringify({ cwd, source: 'clear' }));
     expect(r.status).toBe(0);
     expect(existsSync(stubMarkerPath)).toBe(false);
   });
 
-  test('picks previous JSONL and spawns SessionExtract --extract', () => {
+  test('picks previous JSONL and spawns RecallExtract --extract', () => {
     initDbWithLocksTable();
-    installStubSessionExtract();
+    installStubRecallExtract();
     const now = Date.now();
     const oldPath = writeJsonl('old.jsonl', now - 60_000);
     writeJsonl('new.jsonl', now - 1_000); // suspect-in-progress
 
-    const r = runClearExtract(JSON.stringify({ cwd, source: 'clear' }));
+    const r = runRecallClearExtract(JSON.stringify({ cwd, source: 'clear' }));
     expect(r.status).toBe(0);
 
     // The stub records its argv; wait briefly for the detached spawn to write.
@@ -206,12 +206,12 @@ describe('ClearExtract parent flow', () => {
   });
 
   test('exits without spawn when DB is missing entirely', () => {
-    installStubSessionExtract();
+    installStubRecallExtract();
     const now = Date.now();
     writeJsonl('old.jsonl', now - 60_000);
     writeJsonl('new.jsonl', now - 1_000);
 
-    const r = runClearExtract(JSON.stringify({ cwd, source: 'clear' }));
+    const r = runRecallClearExtract(JSON.stringify({ cwd, source: 'clear' }));
     expect(r.status).toBe(0);
     expect(existsSync(stubMarkerPath)).toBe(false);
   });
@@ -223,31 +223,31 @@ describe('ClearExtract parent flow', () => {
     db.exec('CREATE TABLE other_table (id INTEGER)');
     db.close();
 
-    installStubSessionExtract();
+    installStubRecallExtract();
     const now = Date.now();
     writeJsonl('old.jsonl', now - 60_000);
     writeJsonl('new.jsonl', now - 1_000);
 
-    const r = runClearExtract(JSON.stringify({ cwd, source: 'clear' }));
+    const r = runRecallClearExtract(JSON.stringify({ cwd, source: 'clear' }));
     expect(r.status).toBe(0);
     expect(existsSync(stubMarkerPath)).toBe(false);
   });
 
   test('exits 0 with malformed stdin (no JSON)', () => {
     initDbWithLocksTable();
-    installStubSessionExtract();
-    const r = runClearExtract('this is not json');
+    installStubRecallExtract();
+    const r = runRecallClearExtract('this is not json');
     expect(r.status).toBe(0);
   });
 
   test('semaphore acquires correctly during run', () => {
     initDbWithLocksTable();
-    installStubSessionExtract();
+    installStubRecallExtract();
     const now = Date.now();
     writeJsonl('old.jsonl', now - 60_000);
     writeJsonl('new.jsonl', now - 1_000);
 
-    runClearExtract(JSON.stringify({ cwd, source: 'clear' }));
+    runRecallClearExtract(JSON.stringify({ cwd, source: 'clear' }));
 
     // Confirm a row was inserted in extraction_locks for the previous JSONL.
     // (The stub does not release; PID liveness sweep would clean up later.)
@@ -267,10 +267,10 @@ describe('ClearExtract parent flow', () => {
 // Logging / EXTRACT_LOG.txt assertions
 // ---------------------------------------------------------------------------
 
-describe('ClearExtract logging', () => {
+describe('RecallClearExtract logging', () => {
   test('logs NO_PREVIOUS_JSONL when project dir is empty', () => {
     initDbWithLocksTable();
-    runClearExtract(JSON.stringify({ cwd, source: 'clear' }));
+    runRecallClearExtract(JSON.stringify({ cwd, source: 'clear' }));
     const logPath = join(memoryDir, 'EXTRACT_LOG.txt');
     if (existsSync(logPath)) {
       const log = readFileSync(logPath, 'utf-8');

@@ -42,7 +42,7 @@ Install once, then forget about it. Recall runs silently in the background:
 
 Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
 
-- **Local-first, zero infrastructure.** One SQLite file at `~/.claude/memory.db`. WAL mode, `0600` perms. No vector database, no graph database, no agent server, no API keys for retrieval. Nothing leaves your machine — no telemetry, no phone-home. Optional Ollama for embeddings (also local).
+- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server, no API keys for retrieval. Nothing leaves your machine — no telemetry, no phone-home. Optional Ollama for embeddings (also local).
 - **Multi-agent native.** One memory layer across the agents you actually use. Stable on Claude Code today; Pi and OpenCode connect via MCP; Codex CLI and Gemini CLI on the way. Memories captured by one agent are searchable from any other agent on the same machine.
 - **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and curated **Library of Alexandria** entries — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
 - **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
@@ -66,7 +66,7 @@ Restart your agent (Claude Code, Pi, or OpenCode) to load the MCP server and hoo
 
 ### First run: set your identity
 
-Recall's tiered SessionRecall injects a small identity file at the top
+Recall's tiered RecallStart injects a small identity file at the top
 of every session (the L0 tier — your role, projects, tools, and working
 preferences). Without it, L0 is empty and every new session has to
 re-learn the basics.
@@ -94,8 +94,8 @@ release and the exact command to run. From a shell:
 
 ```bash
 ./uninstall.sh --dry-run   # preview, touch nothing
-./uninstall.sh             # surgical remove; preserves memory.db + backups
-./uninstall.sh --purge     # also destroy memory.db + backup tree (confirmed)
+./uninstall.sh             # surgical remove; preserves ~/.agents/Recall/ (DB + backups)
+./uninstall.sh --purge     # also destroy ~/.agents/Recall/ and any legacy DB (confirmed)
 ```
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
@@ -143,7 +143,7 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 ┌──────────────────────────────────────────────────────────────────────┐
 │                    STORAGE LAYER (Dual-Write)                        │
 │                                                                      │
-│  SQLite (~/.claude/memory.db)       Memory Files (~/.claude/MEMORY/) │
+│  SQLite (~/.agents/Recall/recall.db)  Memory Files (~/.agents/Recall/MEMORY/) │
 │  ┌────────────────────────────┐     ┌──────────────────────────────┐ │
 │  │ sessions ←── messages      │     │ DISTILLED.md    (archive)    │ │
 │  │ decisions    learnings     │     │ HOT_RECALL.md   (last 10)    │ │
@@ -183,12 +183,12 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your `~/.claude/MEMORY/identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
 2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`) before falling back to git history. Decisions, learnings, and breadcrumbs are recorded in real-time with `memory_add`.
-3. **End of every turn** — A `Stop` hook fires `SessionExtract.ts`, which self-spawns a background process (non-blocking). It checks `.extraction_tracker.json` and only re-extracts if the conversation has grown meaningfully since last time — so capture is incremental, not just an "on exit" event.
+3. **End of every turn** — A `Stop` hook fires `RecallExtract.ts`, which self-spawns a background process (non-blocking). It checks `.extraction_tracker.json` and only re-extracts if the conversation has grown meaningfully since last time — so capture is incremental, not just an "on exit" event.
 4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to the `claude` CLI running Haiku (with chunking for large sessions >120K chars). Optional Ollama fallback if the CLI fails. A quality gate rejects low-quality extractions before they're stored.
-5. **PreCompact flush** — When Claude Code is about to compact its context, a `PreCompact` hook (`SessionPreCompact.ts`) flushes the in-flight messages first, so the squashed window is never lost.
+5. **PreCompact flush** — When Claude Code is about to compact its context, a `PreCompact` hook (`RecallPreCompact.ts`) flushes the in-flight messages first, so the squashed window is never lost.
 6. **Dual-write storage** — Results are written to SQLite (the only query surface — every CLI/MCP read hits this) and to markdown artifacts (`DISTILLED.md`, `HOT_RECALL.md`, etc., write-only, human-readable).
-7. **Batch catchup (optional)** — A cron job (`BatchExtract.ts`) sweeps any sessions the Stop hook missed during crashes or interruptions, and ingests sessions dropped by the OpenCode plugin and Pi extension into `~/.claude/MEMORY/{opencode,pi}-sessions/`. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled.
-8. **TELOS auto-sync (PAI users)** — If you use [Personal AI Infrastructure (PAI)](https://github.com/danielmiessler/Personal_AI_Infrastructure), Recall ships a `TelosSync.ts` SessionStart hook that watches `~/.claude/skills/PAI/USER/TELOS/` for changes and silently runs `mem telos import --update` when any file is newer than the last import. This is **automatic** — no action required once Recall is installed and PAI's TELOS directory exists. You can also import manually at any time with `mem telos import --yes`. If you don't use PAI, the hook checks for the directory, finds nothing, and exits in under 1ms.
+7. **Batch catchup (optional)** — A cron job (`RecallBatchExtract.ts`) sweeps any sessions the Stop hook missed during crashes or interruptions, and ingests sessions dropped by the OpenCode plugin and Pi extension into `~/.claude/MEMORY/{opencode,pi}-sessions/`. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled.
+8. **TELOS auto-sync (PAI users)** — If you use [Personal AI Infrastructure (PAI)](https://github.com/danielmiessler/Personal_AI_Infrastructure), Recall ships a `RecallTelosSync.ts` SessionStart hook that watches `~/.claude/skills/PAI/USER/TELOS/` for changes and silently runs `mem telos import --update` when any file is newer than the last import. This is **automatic** — no action required once Recall is installed and PAI's TELOS directory exists. You can also import manually at any time with `mem telos import --yes`. If you don't use PAI, the hook checks for the directory, finds nothing, and exits in under 1ms.
 
 ### Search Strategies
 
@@ -202,16 +202,16 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ## What You Get
 
-- **Auto-captured session memory** — extracted incrementally (Stop hook on every turn) via Claude Haiku, with `BatchExtract.ts` cron sweeper as a crash-recovery safety net
+- **Auto-captured session memory** — extracted incrementally (Stop hook on every turn) via Claude Haiku, with `RecallBatchExtract.ts` cron sweeper as a crash-recovery safety net
 - **MCP server (`mem-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working
-- **Tiered SessionRecall (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
+- **Tiered RecallStart (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
 - **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `mem pin` / `mem unpin` / `mem importance backfill`
-- **PreCompact flush** — `SessionPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
+- **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `mem decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
-- **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.claude/MEMORY/{opencode,pi}-sessions/`; BatchExtract pulls them into the same SQLite DB. One memory layer across agents
+- **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.claude/MEMORY/{opencode,pi}-sessions/`; RecallBatchExtract pulls them into the same SQLite DB. One memory layer across agents
 - **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
-- **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `TelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `mem telos import --yes`
+- **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `mem telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`mem add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
 - **Benchmark harness** — `mem benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
 - **Onboarding** — `mem onboard` runs a 7-question interview that writes your L0 identity file
@@ -222,8 +222,8 @@ Suite B measures the byte cost of session-start memory injection. Latest tracked
 
 | Variant                                      |     Chars | Tokens (est, 4 ch/tok) |
 | -------------------------------------------- | --------: | ---------------------: |
-| **v2 tiered SessionRecall** (L0 + L1 top 12) | **5,306** |             **~1,327** |
-| v1 flat-blob SessionRecall (simulated)       |     8,020 |                 ~2,005 |
+| **v2 tiered RecallStart** (L0 + L1 top 12) | **5,306** |             **~1,327** |
+| v1 flat-blob RecallStart (simulated)       |     8,020 |                 ~2,005 |
 | CLAUDE.md static baseline                    |     8,760 |                 ~2,190 |
 
 v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `mem benchmark run B`. Methodology and caveats live in [`benchmarks/README.md`](benchmarks/README.md).

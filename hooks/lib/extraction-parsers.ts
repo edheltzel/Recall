@@ -1,5 +1,5 @@
 // Parse fabric-format extracted markdown into typed records the writers
-// can consume. Self-contained — no imports from src/ or from SessionExtract.
+// can consume. Self-contained — no imports from src/ or from RecallExtract.
 
 import type {
   DecisionInput,

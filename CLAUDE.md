@@ -64,11 +64,11 @@ commands/
     stats.md           #   /Recall:stats — database statistics
     update.md          #   /Recall:update — version check + update instructions
 hooks/
-  SessionExtract.ts     # Stop hook — extracts sessions via Claude Haiku on exit
-  SessionRecall.ts      # SessionStart hook — tiered L0/L1 memory context injection
-  SessionPreCompact.ts  # PreCompact hook — flush in-flight messages before compaction
-  BatchExtract.ts       # Cron job — batch extracts sessions missed during crashes
-  TelosSync.ts          # Cron job — sync Telos goals/projects into memory
+  RecallExtract.ts     # Stop hook — extracts sessions via Claude Haiku on exit
+  RecallStart.ts      # SessionStart hook — tiered L0/L1 memory context injection
+  RecallPreCompact.ts  # PreCompact hook — flush in-flight messages before compaction
+  RecallBatchExtract.ts       # Cron job — batch extracts sessions missed during crashes
+  RecallTelosSync.ts          # Cron job — sync Telos goals/projects into memory
   extract_prompt.md     # Extraction prompt template (copied to ~/.claude/MEMORY/)
   lib/                 # Shared hook libraries
     extraction-lock.ts      # Per-session extraction lock
@@ -124,7 +124,7 @@ FOR_OPENCODE.md        # Guide for OpenCode instances
 FOR_PI.md              # Guide for Pi instances
 install.sh             # Installer with backup/restore, OS detection, MCP + hook registration
 update.sh              # Updater: pull, rebuild, migrate, re-register hooks (--check for dry-run)
-uninstall.sh           # Surgical remove (preserves memory.db); --purge for full wipe
+uninstall.sh           # Surgical remove (preserves ~/.agents/Recall/); --purge for full wipe
 tsconfig.json          # TypeScript config
 ```
 
@@ -144,10 +144,11 @@ tsconfig.json          # TypeScript config
 
 - **Runtime**: Bun (not Node). Uses `bun:sqlite` directly. Shebangs are `#!/usr/bin/env bun`.
 - **Build**: tsup produces ESM. Build script replaces node shebang with bun shebang.
-- **Database**: SQLite at `~/.claude/memory.db`. WAL mode. FTS5 full-text search with sync triggers.
+- **Database**: SQLite at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`; legacy `MEM_DB_PATH` still accepted). WAL mode. FTS5 full-text search with sync triggers.
+- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `claude/commands/Recall/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/opencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. Existing user files at symlink targets get backed up before replacement (collision rule in `lib/install-lib.sh:recall_link`).
 - **MCP registration**: User scope in `~/.claude/settings.json` under `mcpServers` (not `.mcp.json`).
 - **Hook registration**: `Stop` event in `~/.claude/settings.json` under `hooks.Stop`.
-- **Hooks are self-contained**: `SessionExtract.ts` and `BatchExtract.ts` are standalone scripts copied to `~/.claude/hooks/`. They don't import from `src/`. Duplication of utilities (like bun path resolution) is intentional.
+- **Hooks are self-contained**: `RecallExtract.ts` and `RecallBatchExtract.ts` are standalone scripts copied to `~/.claude/hooks/`. They don't import from `src/`. Duplication of utilities (like bun path resolution) is intentional.
 - **Shell-to-JS safety**: `install.sh` passes variables to `bun -e` via environment variables, never shell interpolation in JS strings.
 - **Tests**: `bun:test` (not vitest, despite devDependency). Test files at `tests/**/*.test.ts`.
 - **No Fabric dependency**: Fabric is optional. Core functionality works without it.
@@ -156,7 +157,7 @@ tsconfig.json          # TypeScript config
 
 - **Add a CLI command**: Create `src/commands/foo.ts`, wire it in `src/index.ts`
 - **Add an MCP tool**: Add handler in `src/mcp-server.ts`
-- **Modify extraction**: Edit `hooks/SessionExtract.ts` (self-contained, no build step)
+- **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
 - **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.

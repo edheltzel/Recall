@@ -135,10 +135,14 @@ To roll back this repository and restore the pre-update runtime files:
   ./install.sh restore $TIMESTAMP
 
 Notes:
-  - memory.db is NOT overwritten by restore — it lives through the restore.
+  - The database file (~/.agents/Recall/recall.db, or legacy ~/.claude/memory.db
+    if not yet migrated) is NOT overwritten by restore — it survives.
   - DB schema downgrades are NOT supported. If migrations ran and applied
     a newer schema, you cannot revert the DB via ./install.sh restore
-    alone; you must delete ~/.claude/memory.db and re-init from backup.
+    alone; you must delete the DB file and re-init from a pre-update
+    snapshot under $BACKUP_DIR.
+  - If recall_auto_migrate ran, a pre-migration snapshot is preserved at
+    $BACKUP_DIR/pre-migrate/ — restore data from there.
   - Release tag fetched from: $RELEASES_API
 EOF
 
@@ -219,6 +223,26 @@ step_backup() {
     recall_create_backup
     PRE_SHA="$(git rev-parse HEAD)"
   fi
+}
+
+# Auto-migrate legacy install layout to ~/.agents/Recall/. Idempotent: no-op
+# when the database already lives at the canonical location.
+step_auto_migrate() {
+  log_info "Checking for legacy install layout..."
+  if [[ "$DRY_RUN" == "true" ]]; then
+    local _target
+    _target="$(recall_resolve_db_path)"
+    if [[ -f "$_target" ]]; then
+      echo "  [dry-run] DB already at canonical location: $_target — no migration needed"
+    elif [[ -f "$CLAUDE_DIR/memory.db" ]]; then
+      echo "  [dry-run] would migrate $CLAUDE_DIR/memory.db → $_target"
+    else
+      echo "  [dry-run] no legacy DB found"
+    fi
+    return
+  fi
+  recall_create_install_root
+  recall_auto_migrate
 }
 
 step_fetch_and_pull() {
@@ -307,32 +331,39 @@ step_migrate() {
 }
 
 step_refresh_runtime() {
-  log_info "Refreshing runtime files (hooks, lib, commands, guide)..."
+  log_info "Refreshing runtime files (canonical + symlinks)..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: copy hooks/, hooks/lib/, commands/Recall/, FOR_CLAUDE.md"
+    echo "  [dry-run] would: write canonicals to $RECALL_DIR and per-file symlinks into platform homes"
     return
   fi
-
-  # Check for drift on extract_prompt.md; write .new on drift.
-  local installed="$CLAUDE_DIR/MEMORY/extract_prompt.md"
-  local source_file="$SCRIPT_DIR/hooks/extract_prompt.md"
-  if [[ -f "$installed" ]] && [[ -f "$source_file" ]]; then
-    if ! diff -q "$installed" "$source_file" >/dev/null 2>&1; then
-      cp "$source_file" "$installed.new"
-      log_warn "User-modified $installed preserved. New version written to: $installed.new"
-    fi
-  fi
-
+  # The collision rule in recall_link backs up any user-modified file at the
+  # symlink target before replacing it, so the .new-suffix drift dance the
+  # legacy version did is no longer needed.
   recall_copy_runtime_files
 }
 
 step_reregister_hooks() {
   log_info "Re-registering all hooks (permanently fixes Bug 1 class)..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: recall_register_all_hooks"
+    echo "  [dry-run] would: rename legacy hook entries + recall_register_all_hooks + cleanup stale symlinks"
     return
   fi
+
+  # Phase 2 migration: rewrite legacy hook names (SessionExtract → RecallExtract
+  # etc.) inside settings.json BEFORE re-registering. recall_register_hook is
+  # idempotent on hook *name* matching, so without this step the new RecallExtract
+  # registration would be added alongside a stale SessionExtract entry.
+  recall_rename_hooks_in_settings
+
   recall_register_all_hooks
+
+  # Cleanup: remove stale Recall-managed symlinks at the legacy hook paths
+  # (~/.claude/hooks/SessionExtract.ts etc.). Only removes symlinks whose
+  # target resolves under $RECALL_DIR — user files at those paths are kept.
+  local stale
+  for stale in SessionExtract SessionRecall SessionPreCompact BatchExtract TelosSync ClearExtract; do
+    recall_unlink_if_managed "$CLAUDE_DIR/hooks/$stale.ts"
+  done
 }
 
 step_verify() {
@@ -364,6 +395,16 @@ step_verify() {
   if ! "$mem_bin" --version >/dev/null 2>&1; then
     log_error "Verification failed: '$mem_bin --version' did not run cleanly."
     log_error "Recovery: cd $(pwd) && bun install && bun run build && bun link"
+    exit 1
+  fi
+
+  # Walk every expected symlink and report any that are missing or wrong.
+  # Mirror of the install.sh self-check — see install-lib.sh:recall_verify_install
+  # for the rationale (catches mid-step interruptions that leave canonicals
+  # in place but no platform-home symlinks).
+  if ! recall_verify_install; then
+    log_error "Symlink verification failed after update."
+    log_error "Recovery: re-run ./update.sh, or run 'mem doctor --fix'."
     exit 1
   fi
 
@@ -409,6 +450,7 @@ main() {
 
   step_confirm
   step_backup
+  step_auto_migrate
   step_fetch_and_pull
   step_install_and_build
   step_link_global

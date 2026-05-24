@@ -1,31 +1,31 @@
 #!/usr/bin/env bun
 /**
- * ClearExtract.ts — SessionStart(clear) hook for Recall
+ * RecallClearExtract.ts — SessionStart(clear) hook for Recall
  *
  * PURPOSE:
  * When the user runs `/clear` in Claude Code, the prior session ends without
  * firing `Stop`. The old session's JSONL sits on disk un-extracted until
- * BatchExtract cron runs (~30 min later). ClearExtract closes that gap by
- * delegating the previous session's JSONL to the existing SessionExtract
+ * RecallBatchExtract cron runs (~30 min later). RecallClearExtract closes that gap by
+ * delegating the previous session's JSONL to the existing RecallExtract
  * `--extract` child path immediately.
  *
  * TRIGGER: SessionStart (matcher: "clear")
  *
  * INPUT:  stdin JSON with { session_id, transcript_path, cwd, source }
- * OUTPUT: spawns detached `SessionExtract.ts --extract <prevJsonl> <cwd>`;
+ * OUTPUT: spawns detached `RecallExtract.ts --extract <prevJsonl> <cwd>`;
  *         parent always exits 0.
  *
- * FLOW (mimics the Stop parent at SessionExtract.ts:1322-1377):
+ * FLOW (mimics the Stop parent at RecallExtract.ts:1322-1377):
  *   1. Read SessionStart stdin (5s timeout).
  *   2. Resolve previous JSONL via pickPreviousJsonl(PROJECTS_DIR, cwd).
  *   3. Dedup against SQLite extraction_tracker.
  *   4. Acquire extraction_locks semaphore (try/catch — degrade on
  *      pre-migration DB).
- *   5. Spawn SessionExtract --extract detached with CLAUDECODE=''.
+ *   5. Spawn RecallExtract --extract detached with CLAUDECODE=''.
  *   6. Parent exits 0.
  *
  * The spawned child does ALL the work (LLM, dual-write, tracker mark, lock
- * release). ClearExtract owns only the "find prev JSONL + capacity gate"
+ * release). RecallClearExtract owns only the "find prev JSONL + capacity gate"
  * decision.
  */
 
@@ -41,7 +41,7 @@ import { acquireSemaphore, releaseSemaphore } from './lib/extraction-semaphore';
 const PROJECTS_DIR = join(process.env.HOME!, '.claude', 'projects');
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 const HOOKS_DIR = join(process.env.HOME!, '.claude', 'hooks');
-const SESSION_EXTRACT_PATH = join(HOOKS_DIR, 'SessionExtract.ts');
+const SESSION_EXTRACT_PATH = join(HOOKS_DIR, 'RecallExtract.ts');
 
 const EXTRACTION_MAX_CONCURRENT = parseInt(
   process.env.EXTRACTION_MAX_CONCURRENT || '3',
@@ -61,7 +61,7 @@ interface HookInput {
 function logExtract(message: string): void {
   const timestamp = new Date().toISOString();
   try {
-    appendFileSync(EXTRACT_LOG, `[${timestamp}] [ClearExtract] ${message}\n`, 'utf-8');
+    appendFileSync(EXTRACT_LOG, `[${timestamp}] [RecallClearExtract] ${message}\n`, 'utf-8');
   } catch {
     // ignore logging errors
   }
@@ -161,16 +161,16 @@ async function main(): Promise<void> {
       semHeld = true;
     } catch (err: any) {
       logExtract(
-        `SEMAPHORE_UNAVAILABLE: ${err?.message || err} — cannot safely spawn, BatchExtract will catch up`
+        `SEMAPHORE_UNAVAILABLE: ${err?.message || err} — cannot safely spawn, RecallBatchExtract will catch up`
       );
       process.exit(0);
     }
   } else {
-    logExtract(`NO_DB: ${dbPath} missing — skip spawn (BatchExtract will catch up later)`);
+    logExtract(`NO_DB: ${dbPath} missing — skip spawn (RecallBatchExtract will catch up later)`);
     process.exit(0);
   }
 
-  // SessionExtract.ts must exist where the installer put it.
+  // RecallExtract.ts must exist where the installer put it.
   if (!existsSync(SESSION_EXTRACT_PATH)) {
     if (semHeld) releaseSemaphore(dbPath, prevPath);
     logExtract(`SESSION_EXTRACT_MISSING: expected ${SESSION_EXTRACT_PATH} — release slot, exit`);
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
 }
 
 // Only auto-run when executed as a script, not when imported for testing.
-// `bun run hooks/ClearExtract.ts` → import.meta.main === true.
+// `bun run hooks/RecallClearExtract.ts` → import.meta.main === true.
 if (import.meta.main) {
   main().catch((err) => {
     // Never throw past main — SessionStart hooks must not crash session start.

@@ -35,8 +35,8 @@ describe('Pre-migration DB resilience (Forge Finding 1)', () => {
     expect(() => acquireSemaphore(dbPath, '/some/conv', 12345, 3)).toThrow();
   });
 
-  test('the SessionExtract hook wraps acquireSemaphore in try/catch — verified by grep', async () => {
-    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'SessionExtract.ts')).text();
+  test('the RecallExtract hook wraps acquireSemaphore in try/catch — verified by grep', async () => {
+    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'RecallExtract.ts')).text();
     // The acquire site must be inside a try block
     const hasTry = /try\s*{[\s\S]{0,200}acquireSemaphore\(/.test(f);
     expect(hasTry).toBe(true);
@@ -60,16 +60,16 @@ describe('Corrupt tracker JSON quarantine (Forge Finding 6)', () => {
     expect(() => migrateTrackerJson(badJson, dbPath)).toThrow();
   });
 
-  test('the SessionExtract hook quarantines on parse failure — verified by grep', async () => {
-    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'SessionExtract.ts')).text();
+  test('the RecallExtract hook quarantines on parse failure — verified by grep', async () => {
+    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'RecallExtract.ts')).text();
     expect(f).toContain('.corrupt-');
     expect(f).toContain('TRACKER_MIGRATE: corrupt JSON quarantined');
   });
 });
 
 describe('Early-return lock release (Forge Finding 2)', () => {
-  test('SessionExtract calls releaseChildLockSafe on every early skip return — verified by grep', async () => {
-    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'SessionExtract.ts')).text();
+  test('RecallExtract calls releaseChildLockSafe on every early skip return — verified by grep', async () => {
+    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'RecallExtract.ts')).text();
     // Each early "skip" return must be preceded by releaseChildLockSafe within ~3 lines.
     const skipPatterns = [
       /Already extracted this conversation, skipping[\s\S]{0,150}releaseChildLockSafe/,
@@ -111,8 +111,8 @@ describe('Parent semaphore + idempotent release (Forge Finding 4)', () => {
     expect(getActiveLockCount(dbPath)).toBe(0);
   });
 
-  test('SessionExtract releases on spawn failure — verified by grep', async () => {
-    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'SessionExtract.ts')).text();
+  test('RecallExtract releases on spawn failure — verified by grep', async () => {
+    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'RecallExtract.ts')).text();
     expect(f).toContain('SPAWN_FAILED');
     // The release call and the SPAWN_FAILED log must be in the same catch block
     // (within ~200 chars of each other in either order).

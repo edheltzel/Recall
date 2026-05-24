@@ -8,7 +8,7 @@ Recall's core (SQLite DB, MCP server, CLI) is platform-agnostic. Pi connects to 
 
 The integration follows the same three-layer pattern as other platforms:
 1. **MCP registration** — `~/.pi/agent/mcp.json`
-2. **Session extraction** — tree JSONL → linearized markdown → drop dir → BatchExtract cron
+2. **Session extraction** — tree JSONL → linearized markdown → drop dir → RecallBatchExtract cron
 3. **Memory injection** — `before_agent_start` hook → `mem search` → system prompt append
 
 ## Architecture
@@ -17,7 +17,7 @@ The integration follows the same three-layer pattern as other platforms:
 ┌─────────────────────────────────────────────────────────┐
 │                 PLATFORM-AGNOSTIC CORE                   │
 │                                                          │
-│  memory.db (SQLite/FTS5)  ←  MCP Server (recall-memory) │
+│  recall.db (SQLite/FTS5)  ←  MCP Server (recall-memory) │
 │                               7 tools, stdio             │
 └─────────────────────────────────────┬───────────────────┘
                                       │
@@ -25,9 +25,9 @@ The integration follows the same three-layer pattern as other platforms:
               │                       │                   │
    Claude Code Adapter         OpenCode Adapter      Pi Adapter
    ~/.claude/settings.json     ~/.config/opencode/   ~/.pi/agent/mcp.json
-   hooks/SessionExtract.ts     plugins/              extensions/
-                                recall-extract.ts     recall-extract.ts
-                                recall-compaction.ts  recall-compaction.ts
+   hooks/RecallExtract.ts     plugins/              extensions/
+                                RecallExtract.ts     RecallExtract.ts
+                                RecallPreCompact.ts  RecallPreCompact.ts
 ```
 
 ## Session Extraction
@@ -37,11 +37,11 @@ Pi stores conversation history as a tree JSONL (branching structure from edits a
 1. **Linearize**: Read the tree JSONL and walk the active branch (most recent path from root to leaf)
 2. **Convert**: Render the active-branch messages as markdown (user/assistant turns)
 3. **Drop**: Write the markdown file to `~/.claude/MEMORY/pi-sessions/<sessionId>.md`
-4. **Extract**: The existing `BatchExtract.ts` cron job scans the drop directory every 30 minutes and processes new files via Claude Haiku
+4. **Extract**: The existing `RecallBatchExtract.ts` cron job scans the drop directory every 30 minutes and processes new files via Claude Haiku
 
-This reuses the BatchExtract infrastructure without modification — it already handles markdown input from the OpenCode drop dir.
+This reuses the RecallBatchExtract infrastructure without modification — it already handles markdown input from the OpenCode drop dir.
 
-The extraction logic lives in `~/.pi/agent/extensions/recall-extract.ts`, which hooks into Pi's session lifecycle.
+The extraction logic lives in `~/.pi/agent/extensions/RecallExtract.ts`, which hooks into Pi's session lifecycle.
 
 ### Deduplication
 
@@ -51,7 +51,7 @@ A JSON tracker at `~/.claude/MEMORY/pi-sessions/.extraction_tracker.json` record
 
 Before each agent turn, the `before_agent_start` hook runs `mem search <query>` and appends results to the system prompt. This is per-turn injection, not persistent session state — the context is re-fetched on every turn.
 
-The hook lives in `~/.pi/agent/extensions/recall-compaction.ts` (named for consistency with the OpenCode equivalent, though it handles injection rather than compaction context).
+The hook lives in `~/.pi/agent/extensions/RecallPreCompact.ts` (named for consistency with the OpenCode equivalent, though it handles injection rather than compaction context).
 
 Injection flow:
 ```
@@ -67,13 +67,13 @@ If `mem` is unavailable or times out (5s limit), the hook skips silently.
 
 | File | Purpose |
 |------|---------|
-| `~/.pi/agent/extensions/recall-extract.ts` | Session extraction hook |
-| `~/.pi/agent/extensions/recall-compaction.ts` | Memory injection hook |
+| `~/.pi/agent/extensions/RecallExtract.ts` | Session extraction hook |
+| `~/.pi/agent/extensions/RecallPreCompact.ts` | Memory injection hook |
 | `~/.pi/agent/mcp.json` | MCP server registration |
 | `~/.pi/agent/Recall_GUIDE.md` | Agent guide (installed from `FOR_PI.md` with Pi-specific tool names) |
 | `~/.pi/agent/AGENTS.md` | Pi agent config snippet enabling recall-memory tools |
 | `~/.claude/MEMORY/pi-sessions/` | Drop directory for extracted session markdown |
-| `~/.claude/memory.db` | Shared SQLite DB (same as Claude Code and OpenCode) |
+| `~/.agents/Recall/recall.db` | Shared SQLite DB (same as Claude Code and OpenCode) |
 
 ## Tool Name Mapping
 
@@ -106,7 +106,7 @@ call `recall-memory_context_for_agent`.
 
 ## Database
 
-Pi shares `~/.claude/memory.db` with Claude Code and OpenCode. WAL mode handles concurrent access. Pi session extractions go through the same markdown pipeline as OpenCode — they appear in flat memory files (DISTILLED.md, SESSION_INDEX.json, DECISIONS.log, etc.), labeled `pi/<sessionId>`. They do not insert into the SQLite `sessions` table with a `source` field (that column is only populated via `mem import` or `mem dump`, not the drop-dir extraction pipeline).
+Pi shares `~/.agents/Recall/recall.db` with Claude Code and OpenCode. WAL mode handles concurrent access. Pi session extractions go through the same markdown pipeline as OpenCode — they appear in flat memory files (DISTILLED.md, SESSION_INDEX.json, DECISIONS.log, etc.), labeled `pi/<sessionId>`. They do not insert into the SQLite `sessions` table with a `source` field (that column is only populated via `mem import` or `mem dump`, not the drop-dir extraction pipeline).
 
 No schema changes beyond what OpenCode already added (the `source` column in schema v3).
 
@@ -114,6 +114,6 @@ No schema changes beyond what OpenCode already added (the `source` column in sch
 
 1. **`ctx.sessionManager` verification needed**: The extraction hook assumes Pi exposes session state via `ctx.sessionManager` or equivalent. The actual API shape needs verification against Pi's extension docs before implementation.
 
-2. **Pi JSONL message structure**: The tree JSONL format (branching structure, node schema, active-branch pointer) needs real-world verification. The linearization logic in `recall-extract.ts` is written against an assumed structure and must be validated against actual Pi session files.
+2. **Pi JSONL message structure**: The tree JSONL format (branching structure, node schema, active-branch pointer) needs real-world verification. The linearization logic in `RecallExtract.ts` is written against an assumed structure and must be validated against actual Pi session files.
 
 3. **`before_agent_start` hook availability**: Pi's extension hook lifecycle needs confirmation that a pre-turn hook exists with system prompt mutation capability.

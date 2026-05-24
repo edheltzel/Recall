@@ -1,4 +1,4 @@
-// Tests for SessionPreCompact (Sprint #2).
+// Tests for RecallPreCompact (Sprint #2).
 // Covers the flush-only contract: imports messages from JSONL delta, advances
 // watermark, cooperates with the Stop hook's extract lock, never calls an LLM,
 // and degrades gracefully on missing/corrupt inputs.
@@ -63,11 +63,11 @@ function setupTestEnv(): void {
 
   // Hook reads MEMORY paths from $HOME — point it at our temp tree
   process.env.HOME = tempDir;
-  process.env.MEM_DB_PATH = dbPath;
+  process.env.RECALL_DB_PATH = dbPath;
 }
 
 function teardownTestEnv(): void {
-  delete process.env.MEM_DB_PATH;
+  delete process.env.RECALL_DB_PATH;
   // Don't delete HOME — restore is handled in afterEach.
   if (tempDir && existsSync(tempDir)) {
     rmSync(tempDir, { recursive: true, force: true });
@@ -96,7 +96,7 @@ function appendJsonlMessages(rows: Array<{ role: 'user' | 'assistant'; text: str
 }
 
 const originalHome = process.env.HOME;
-const originalMemPath = process.env.MEM_DB_PATH;
+const originalMemPath = process.env.RECALL_DB_PATH;
 
 beforeEach(() => {
   setupTestEnv();
@@ -105,13 +105,13 @@ beforeEach(() => {
 afterEach(() => {
   teardownTestEnv();
   process.env.HOME = originalHome;
-  if (originalMemPath) process.env.MEM_DB_PATH = originalMemPath;
-  else delete process.env.MEM_DB_PATH;
+  if (originalMemPath) process.env.RECALL_DB_PATH = originalMemPath;
+  else delete process.env.RECALL_DB_PATH;
 });
 
-describe('SessionPreCompact — parseMessagesFromSlice', () => {
+describe('RecallPreCompact — parseMessagesFromSlice', () => {
   test('parses well-formed JSONL into structured rows', async () => {
-    const { parseMessagesFromSlice } = await import('../../hooks/SessionPreCompact');
+    const { parseMessagesFromSlice } = await import('../../hooks/RecallPreCompact');
     const slice = [
       JSON.stringify({ message: { role: 'user', content: 'hello world how are you' }, sessionId: 's1' }),
       JSON.stringify({ message: { role: 'assistant', content: 'I am fine thanks' }, sessionId: 's1' }),
@@ -124,7 +124,7 @@ describe('SessionPreCompact — parseMessagesFromSlice', () => {
   });
 
   test('skips lines under 10 chars and tool-result fragments', async () => {
-    const { parseMessagesFromSlice } = await import('../../hooks/SessionPreCompact');
+    const { parseMessagesFromSlice } = await import('../../hooks/RecallPreCompact');
     const slice = [
       JSON.stringify({ message: { role: 'user', content: 'hi' } }), // too short
       JSON.stringify({ message: { role: 'assistant', content: '[{"tool_use_id":"x"}]' } }), // tool result
@@ -136,7 +136,7 @@ describe('SessionPreCompact — parseMessagesFromSlice', () => {
   });
 
   test('survives malformed JSON lines', async () => {
-    const { parseMessagesFromSlice } = await import('../../hooks/SessionPreCompact');
+    const { parseMessagesFromSlice } = await import('../../hooks/RecallPreCompact');
     const slice = [
       'this is not json',
       JSON.stringify({ message: { role: 'user', content: 'good message here' } }),
@@ -147,21 +147,21 @@ describe('SessionPreCompact — parseMessagesFromSlice', () => {
   });
 
   test('uses fallbackSessionId when JSONL row omits one', async () => {
-    const { parseMessagesFromSlice } = await import('../../hooks/SessionPreCompact');
+    const { parseMessagesFromSlice } = await import('../../hooks/RecallPreCompact');
     const slice = JSON.stringify({ message: { role: 'user', content: 'no session id here' } });
     const rows = parseMessagesFromSlice(slice, 'fallback-sess', null);
     expect(rows[0].session_id).toBe('fallback-sess');
   });
 });
 
-describe('SessionPreCompact — flushConversation', () => {
+describe('RecallPreCompact — flushConversation', () => {
   test('imports new messages and advances the watermark', async () => {
     writeJsonlMessages([
       { role: 'user', text: 'first user message in conversation' },
       { role: 'assistant', text: 'first assistant reply' },
     ]);
 
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     const result = flushConversation(convPath, '/Users/ed/test-project');
 
     expect(result.imported).toBe(2);
@@ -184,7 +184,7 @@ describe('SessionPreCompact — flushConversation', () => {
 
   test('only imports the delta on a second flush', async () => {
     writeJsonlMessages([{ role: 'user', text: 'message one initial flush' }]);
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     flushConversation(convPath, '/tmp/proj');
 
     appendJsonlMessages([
@@ -202,7 +202,7 @@ describe('SessionPreCompact — flushConversation', () => {
 
   test('returns skipped_no_new_data when nothing changed', async () => {
     writeJsonlMessages([{ role: 'user', text: 'only message present' }]);
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     flushConversation(convPath, '/tmp/proj');
     const second = flushConversation(convPath, '/tmp/proj');
     expect(second.skipped_no_new_data).toBe(true);
@@ -213,14 +213,14 @@ describe('SessionPreCompact — flushConversation', () => {
     writeJsonlMessages([{ role: 'user', text: 'message held back by stop' }]);
 
     // Manually take the same lock the hook would try to acquire (mirrors
-    // the lock encoding in SessionPreCompact and SessionExtract).
+    // the lock encoding in RecallPreCompact and RecallExtract).
     const lockName = convPath.replace(/[^a-zA-Z0-9]/g, '_') + '.lock';
     const lockPath = join(lockDir, lockName);
     const fd = openSync(lockPath, 'wx');
     closeSync(fd);
     writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\nstop:simulated`);
 
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     const result = flushConversation(convPath, '/tmp/proj');
 
     expect(result.skipped_lock_busy).toBe(true);
@@ -237,14 +237,14 @@ describe('SessionPreCompact — flushConversation', () => {
     rmSync(dbPath, { force: true });
     writeJsonlMessages([{ role: 'user', text: 'message with no db present' }]);
 
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     const result = flushConversation(convPath, '/tmp/proj');
 
     expect(result.imported).toBe(0);
   });
 
   test('graceful when transcript is missing', async () => {
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     const result = flushConversation('/nonexistent/transcript.jsonl', '/tmp/proj');
     expect(result.imported).toBe(0);
   });
@@ -254,7 +254,7 @@ describe('SessionPreCompact — flushConversation', () => {
       { role: 'user', text: 'message under brand new session', sessionId: 'brand-new-sess' },
     ]);
 
-    const { flushConversation } = await import('../../hooks/SessionPreCompact');
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
     flushConversation(convPath, '/tmp/proj');
 
     const db = new Database(dbPath, { readonly: true });
@@ -268,7 +268,7 @@ describe('SessionPreCompact — flushConversation', () => {
     // This is the most direct expression of the "flush-only" contract.
     // Strings split with concatenation so they do not appear as literal
     // tokens in this file (avoids tripping the repo's own security hooks).
-    const hookSource = readFileSync(join(import.meta.dir, '..', '..', 'hooks', 'SessionPreCompact.ts'), 'utf-8');
+    const hookSource = readFileSync(join(import.meta.dir, '..', '..', 'hooks', 'RecallPreCompact.ts'), 'utf-8');
     const subprocessImport = new RegExp(`from\\s+['"]child` + `_process['"]`);
     expect(hookSource).not.toMatch(subprocessImport);
     expect(hookSource).not.toMatch(/extractWithClaude|extractWithOllama|fetch\(|http\.request/);

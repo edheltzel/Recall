@@ -1,11 +1,16 @@
 // mem doctor — health check for all memory subsystems
 
-import { existsSync, statSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, statSync, readFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
+import { dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import { homedir } from 'os';
 import { getDb, getDbPath } from '../db/connection.js';
 import { VERSION } from '../version.js';
+
+export interface DoctorOptions {
+  fix?: boolean;
+}
 
 // ANSI color helpers
 const C = {
@@ -421,9 +426,170 @@ function checkGrowth(): CheckResult {
 }
 
 // ─────────────────────────────────────────
+// Check: Recall-managed symlinks resolve correctly
+// ─────────────────────────────────────────
+//
+// Returns an array of (CheckResult, optional repair fn). If --fix is set,
+// runDoctor invokes the repair fn for any non-PASS result and re-checks.
+export interface SymlinkProbe {
+  label: string;
+  target: string;     // path that should be the symlink (e.g. ~/.claude/hooks/X.ts)
+  canonical: string;  // path the symlink should point at
+}
+
+function buildSymlinkProbes(): SymlinkProbe[] {
+  const home = homedir();
+  const root = join(home, '.agents', 'Recall');
+  const probes: SymlinkProbe[] = [];
+
+  // Hooks — managed by install-lib.sh as per-file symlinks. Use the new
+  // Phase 2 names (RecallExtract.ts etc.) since fresh installs ship those.
+  const hooks = ['RecallExtract', 'RecallStart', 'RecallPreCompact', 'RecallBatchExtract', 'RecallTelosSync', 'RecallClearExtract'];
+  for (const h of hooks) {
+    probes.push({
+      label: `hook: ${h}.ts`,
+      target: join(home, '.claude', 'hooks', `${h}.ts`),
+      canonical: join(root, 'shared', 'hooks', `${h}.ts`),
+    });
+  }
+  probes.push({
+    label: 'extract_prompt.md',
+    target: join(home, '.claude', 'MEMORY', 'extract_prompt.md'),
+    canonical: join(root, 'shared', 'extract_prompt.md'),
+  });
+  probes.push({
+    label: 'Recall_GUIDE.md (Claude)',
+    target: join(home, '.claude', 'Recall_GUIDE.md'),
+    canonical: join(root, 'claude', 'Recall_GUIDE.md'),
+  });
+
+  // Slash commands — discovered dynamically from whatever canonicals exist
+  // under the install root, so doctor adapts as commands are added/removed.
+  // We hit this class of breakage in one user's install (install.sh ran
+  // recall_copy_canonical but never reached recall_link for the commands
+  // step); covering it here lets `mem doctor --fix` repair without reinstall.
+  const cmdCanonicalDir = join(root, 'claude', 'commands', 'Recall');
+  if (existsSync(cmdCanonicalDir)) {
+    let entries: string[] = [];
+    try { entries = readdirSync(cmdCanonicalDir); } catch { entries = []; }
+    for (const file of entries) {
+      if (!file.endsWith('.md')) continue;
+      probes.push({
+        label: `slash command: ${file}`,
+        target: join(home, '.claude', 'commands', 'Recall', file),
+        canonical: join(cmdCanonicalDir, file),
+      });
+    }
+  }
+
+  return probes;
+}
+
+function hashFile(path: string): string | null {
+  try {
+    const buf = readFileSync(path);
+    return createHash('sha256').update(buf).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+interface SymlinkCheck {
+  result: CheckResult;
+  repair?: () => CheckResult;
+}
+
+// Exported for unit tests. The probe is pure (state lives entirely in the
+// filesystem args, not in module globals); doctor's main loop iterates the
+// build-time list and accumulates results.
+export function probeSymlink(probe: SymlinkProbe): SymlinkCheck {
+  const { label, target, canonical } = probe;
+
+  if (!existsSync(canonical)) {
+    // The canonical file isn't present — this means the install root is
+    // incomplete or this hook isn't shipped on this platform. Treat as INFO
+    // (not a Recall-managed symlink to fix).
+    return {
+      result: { label, status: 'INFO', message: `Canonical not present at ${canonical}` },
+    };
+  }
+
+  let st;
+  try {
+    st = lstatSync(target);
+  } catch {
+    // Target missing — fixable.
+    return {
+      result: { label, status: 'WARN', message: `Target missing: ${target}` },
+      repair: () => {
+        mkdirSync(dirname(target), { recursive: true });
+        symlinkSync(canonical, target);
+        return { label, status: 'PASS', message: `Created symlink: ${target}` };
+      },
+    };
+  }
+
+  if (st.isSymbolicLink()) {
+    const current = readlinkSync(target);
+    if (current === canonical) {
+      return { result: { label, status: 'PASS', message: `Symlink OK: ${target}` } };
+    }
+    if (!existsSync(target)) {
+      return {
+        result: { label, status: 'FAIL', message: `Dangling symlink: ${target} → ${current}` },
+        repair: () => {
+          unlinkSync(target);
+          symlinkSync(canonical, target);
+          return { label, status: 'PASS', message: `Re-linked: ${target}` };
+        },
+      };
+    }
+    // Symlink points elsewhere (foreign symlink). Back up + relink.
+    return {
+      result: { label, status: 'WARN', message: `Foreign symlink: ${target} → ${current}` },
+      repair: () => {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
+        const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+        mkdirSync(backupDir, { recursive: true });
+        copyFileSync(target, join(backupDir, target.replace(/[/\\]/g, '_')));
+        unlinkSync(target);
+        symlinkSync(canonical, target);
+        return { label, status: 'PASS', message: `Backed up foreign link and re-linked: ${target}` };
+      },
+    };
+  }
+
+  // Regular file at the target — compare hashes.
+  const tHash = hashFile(target);
+  const cHash = hashFile(canonical);
+  if (tHash && cHash && tHash === cHash) {
+    return {
+      result: { label, status: 'WARN', message: `Regular file (identical to canonical): ${target}` },
+      repair: () => {
+        unlinkSync(target);
+        symlinkSync(canonical, target);
+        return { label, status: 'PASS', message: `Converted identical file to symlink: ${target}` };
+      },
+    };
+  }
+  return {
+    result: { label, status: 'WARN', message: `Drifted file (user-modified): ${target}` },
+    repair: () => {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
+      const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+      mkdirSync(backupDir, { recursive: true });
+      copyFileSync(target, join(backupDir, target.replace(/[/\\]/g, '_')));
+      unlinkSync(target);
+      symlinkSync(canonical, target);
+      return { label, status: 'PASS', message: `Backed up drifted file and re-linked: ${target}` };
+    },
+  };
+}
+
+// ─────────────────────────────────────────
 // Main entry point
 // ─────────────────────────────────────────
-export async function runDoctor(): Promise<void> {
+export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   console.log('');
   console.log(`${C.bold}mem doctor — Memory Subsystem Health Check${C.reset}`);
   console.log(`${C.dim}${'─'.repeat(50)}${C.reset}`);
@@ -446,6 +612,19 @@ export async function runDoctor(): Promise<void> {
   results.push(checkMcpServer());
   results.push(checkClaudeCli());
   results.push(checkGrowth());
+
+  // Symlink health checks (new in Phase 3 of the install-layout refactor).
+  // Each probe returns a result + optional repair fn; with --fix we apply
+  // repairs and substitute the post-repair result for the report.
+  const symlinkChecks = buildSymlinkProbes().map(probeSymlink);
+  for (const sc of symlinkChecks) {
+    if (opts.fix && sc.repair && sc.result.status !== 'PASS' && sc.result.status !== 'INFO') {
+      const fixed = sc.repair();
+      results.push(fixed);
+    } else {
+      results.push(sc.result);
+    }
+  }
 
   // Print all results
   for (const r of results) {

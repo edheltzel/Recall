@@ -20,7 +20,7 @@ The entire integration is **three thin adapter layers**:
 │                    (zero changes needed)                          │
 │                                                                  │
 │  ┌─────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
-│  │  memory.db   │  │  MCP Server      │  │  CLI (mem)         │  │
+│  │  recall.db   │  │  MCP Server      │  │  CLI (mem)         │  │
 │  │  (SQLite)    │←─│  (recall-memory)  │  │  search/add/stats  │  │
 │  │  FTS5 + Vec  │  │  7 tools, stdio  │  │  import/export     │  │
 │  └──────┬───────┘  └────────┬─────────┘  └────────────────────┘  │
@@ -42,11 +42,11 @@ The entire integration is **three thin adapter layers**:
   │  mcpServers.recall-mem │     │    opencode.json            │
   │                        │     │  mcp.recall-memory          │
   │ Extraction:            │     │                             │
-  │  hooks/SessionExtract  │     │ Extraction:                 │
-  │  (.ts, Stop hook)      │     │  plugins/recall-extract.ts  │
+  │  hooks/RecallExtract  │     │ Extraction:                 │
+  │  (.ts, Stop hook)      │     │  plugins/RecallExtract.ts  │
   │  reads JSONL transcript│     │  session.idle hook →        │
   │                        │     │  `opencode session export`  │
-  │ Instructions:          │     │  → drop dir for BatchExtract│
+  │ Instructions:          │     │  → drop dir for RecallBatchExtract│
   │  FOR_CLAUDE.md         │     │                             │
   │  → ~/.claude/          │     │ Instructions:               │
   │    Recall_GUIDE.md     │     │  FOR_OPENCODE.md            │
@@ -68,11 +68,11 @@ The entire integration is **three thin adapter layers**:
 atlas-recall/
 ├── src/                          # UNCHANGED
 ├── hooks/
-│   └── SessionExtract.ts         # UNCHANGED (Claude Code adapter)
-│   └── BatchExtract.ts           # MODIFIED — also scan opencode drop dir
+│   └── RecallExtract.ts         # UNCHANGED (Claude Code adapter)
+│   └── RecallBatchExtract.ts           # MODIFIED — also scan opencode drop dir
 ├── opencode/                     # NEW — OpenCode adapter
-│   ├── recall-extract.ts         # Plugin: session extraction via CLI export
-│   ├── recall-compaction.ts      # Plugin: context injection during compaction
+│   ├── RecallExtract.ts         # Plugin: session extraction via CLI export
+│   ├── RecallPreCompact.ts      # Plugin: context injection during compaction
 │   └── recall-memory.md          # Agent: memory-aware agent definition
 ├── docs/
 │   ├── FOR_CLAUDE.md             # EXISTING — guide for Claude Code agents
@@ -96,7 +96,7 @@ The installer writes this to `~/.config/opencode/opencode.json`:
       "command": ["bun", "run", "mem-mcp"],
       "enabled": true,
       "environment": {
-        "MEM_DB_PATH": "/Users/username/.claude/memory.db"
+        "RECALL_DB_PATH": "/Users/username/.agents/Recall/recall.db"
       }
     }
   }
@@ -106,19 +106,19 @@ The installer writes this to `~/.config/opencode/opencode.json`:
 **Key decisions:**
 - Uses `mem-mcp` symlink (created via `bun link`) — consistent with Recall codebase and works across users
 - Uses `bun run` to execute the symlinked binary
-- `MEM_DB_PATH` uses **absolute path** resolved at install time (not `~` — tilde doesn't expand in env vars)
+- `RECALL_DB_PATH` uses **absolute path** resolved at install time (not `~` — tilde doesn't expand in env vars)
 - Same binary, same tools — zero platform-specific MCP code
 
-### 2. Session Extraction Plugin (`opencode/recall-extract.ts`)
+### 2. Session Extraction Plugin (`opencode/RecallExtract.ts`)
 
-**Strategy:** Use `opencode session export` CLI (verified, stable) via the `$` Bun shell (verified in plugin context). Drop the exported markdown into a well-known directory. The existing `BatchExtract.ts` cron job picks it up — zero new CLI commands needed.
+**Strategy:** Use `opencode session export` CLI (verified, stable) via the `$` Bun shell (verified in plugin context). Drop the exported markdown into a well-known directory. The existing `RecallBatchExtract.ts` cron job picks it up — zero new CLI commands needed.
 
 ```typescript
-// opencode/recall-extract.ts
+// opencode/RecallExtract.ts
 // Recall session extraction plugin for OpenCode
 //
 // Hooks into session.idle to export completed sessions as markdown,
-// dropping them into a directory that BatchExtract.ts monitors.
+// dropping them into a directory that RecallBatchExtract.ts monitors.
 
 import type { Plugin } from "@opencode-ai/plugin"
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
@@ -179,8 +179,8 @@ export const RecallExtract: Plugin = async ({ $ }) => {
 - `ctx.$` Bun shell is **confirmed in plugin docs** with examples
 - Persistent dedup via JSON file at `~/.claude/MEMORY/opencode-sessions/.extracted.json` — survives plugin restarts
 - Defensive event property access covers all three known shapes: `event.sessionId`, `event.session_id`, `event.properties.sessionId`
-- Drop directory pattern: `BatchExtract.ts` already runs every 30 minutes and can scan this directory
-- No new CLI commands needed — `BatchExtract.ts` reads markdown files the same way it reads JSONL
+- Drop directory pattern: `RecallBatchExtract.ts` already runs every 30 minutes and can scan this directory
+- No new CLI commands needed — `RecallBatchExtract.ts` reads markdown files the same way it reads JSONL
 
 **Fallback:** If `session.idle` fires too frequently (every response), add a debounce:
 ```typescript
@@ -193,12 +193,12 @@ const debounceTimers = new Map<string, Timer>()
 }
 ```
 
-### 3. Compaction Context Injection (`opencode/recall-compaction.ts`)
+### 3. Compaction Context Injection (`opencode/RecallPreCompact.ts`)
 
 **Fixed to use verified hook signature:** `(input, output)` where `output.context` is an array you push strings into.
 
 ```typescript
-// opencode/recall-compaction.ts
+// opencode/RecallPreCompact.ts
 // Injects Recall memory context into OpenCode session compaction summaries.
 //
 // When OpenCode compresses a long session, this hook ensures persistent
@@ -288,7 +288,7 @@ detect_claude_code() {
 register_opencode_mcp() {
   local config="$OPENCODE_CONFIG_DIR/opencode.json"
   local resolved_db_path
-  resolved_db_path="$(eval echo "$MEM_DB_PATH_DEFAULT")"  # Resolve ~ to absolute
+  resolved_db_path="$(eval echo "$RECALL_DB_PATH_DEFAULT")"  # Resolve ~ to absolute
 
   # Use bun -e for safe JSON merge. Strip comments before parsing for JSONC safety.
   local mem_mcp_path
@@ -316,7 +316,7 @@ register_opencode_mcp() {
       command: ["bun", "run", process.env.INSTALL_MCP_PATH],
       enabled: true,
       environment: {
-        MEM_DB_PATH: process.env.DB_PATH_ABS
+        RECALL_DB_PATH: process.env.DB_PATH_ABS
       }
     };
     fs.writeFileSync(path, JSON.stringify(existing, null, 2));
@@ -327,8 +327,8 @@ register_opencode_mcp() {
 install_opencode_plugin() {
   local plugin_dir="$OPENCODE_CONFIG_DIR/plugins"
   mkdir -p "$plugin_dir"
-  cp opencode/recall-extract.ts "$plugin_dir/"
-  cp opencode/recall-compaction.ts "$plugin_dir/"
+  cp opencode/RecallExtract.ts "$plugin_dir/"
+  cp opencode/RecallPreCompact.ts "$plugin_dir/"
 }
 
 # Agent installation for OpenCode
@@ -345,7 +345,7 @@ install_opencode_guide() {
 ```
 
 **Changes from v1:**
-- Absolute path for `MEM_DB_PATH` — resolved via `eval echo` at install time
+- Absolute path for `RECALL_DB_PATH` — resolved via `eval echo` at install time
 - JSONC-safe parsing — strips `//` and `/* */` comments before `JSON.parse`
 - Environment variables passed to `bun -e` via env (no shell interpolation in JS)
 
@@ -362,12 +362,12 @@ The extraction pipeline tags OpenCode sessions with `source: 'opencode'`. Existi
 
 **No changes to MCP tools** — they return results from all sources. The `source` field is metadata for provenance, not filtering.
 
-## BatchExtract.ts Changes
+## RecallBatchExtract.ts Changes
 
 The existing cron job needs one addition: scan the OpenCode drop directory alongside Claude Code's JSONL sessions.
 
 ```typescript
-// In BatchExtract.ts — add to the session discovery logic:
+// In RecallBatchExtract.ts — add to the session discovery logic:
 const OPENCODE_DROP_DIR = join(homedir(), ".claude", "MEMORY", "opencode-sessions")
 
 function findOpenCodeSessions(): string[] {
@@ -384,10 +384,10 @@ The extraction prompt already handles markdown input — it processes conversati
 
 | Scenario | DB Path | How |
 |----------|---------|-----|
-| Claude Code only (current) | `~/.claude/memory.db` | Default |
-| OpenCode only | `~/.local/share/recall/memory.db` | `MEM_DB_PATH` env var |
-| Both platforms | `~/.claude/memory.db` | Shared, WAL mode handles concurrency |
-| Custom | Any path | `MEM_DB_PATH` env var |
+| Claude Code only (current) | `~/.agents/Recall/recall.db` | Default |
+| OpenCode only | `~/.local/share/recall/recall.db` | `RECALL_DB_PATH` env var (legacy `MEM_DB_PATH` also honored) |
+| Both platforms | `~/.agents/Recall/recall.db` | Shared, WAL mode handles concurrency |
+| Custom | Any path | `RECALL_DB_PATH` env var (legacy `MEM_DB_PATH` also honored) |
 
 All paths are **resolved to absolute** at install time. No tilde in stored config.
 
@@ -416,19 +416,19 @@ OpenCode prefixes MCP tools with the server name + underscore:
 - `source` column migration (schema v3)
 
 ### Phase 2: Extraction Plugin
-- `recall-extract.ts` plugin using `opencode session export` CLI via `$` shell
+- `RecallExtract.ts` plugin using `opencode session export` CLI via `$` shell
 - Persistent dedup tracker (`.extracted.json`)
 - Defensive `session.idle` event property access
 - Drop directory at `~/.claude/MEMORY/opencode-sessions/`
-- `BatchExtract.ts` updated to scan drop directory
+- `RecallBatchExtract.ts` updated to scan drop directory
 
 ### Phase 3: Context Injection
-- `recall-compaction.ts` plugin with verified `(input, output)` signature
+- `RecallPreCompact.ts` plugin with verified `(input, output)` signature
 - Pushes to `output.context[]` array
 - 5s timeout on `mem` CLI calls
 
 ### Phase 4: Testing + Polish
-- End-to-end test: OpenCode session → export → drop dir → BatchExtract → search → retrieval
+- End-to-end test: OpenCode session → export → drop dir → RecallBatchExtract → search → retrieval
 - Concurrent access testing (both platforms running simultaneously)
 - Installer rollback/restore for OpenCode configs
 - Verify `session.idle` firing frequency in real usage
@@ -441,8 +441,8 @@ OpenCode prefixes MCP tools with the server name + underscore:
 | In-memory Set dedup | HIGH | Persistent JSON file at `.extracted.json` |
 | `session.idle` wrong property name | MEDIUM-HIGH | Defensive access: 3 property paths |
 | Compacting return type fabricated | MEDIUM | Corrected to `output.context.push()` |
-| Tilde in MEM_DB_PATH | MEDIUM | Absolute path resolved at install |
-| `mem import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + BatchExtract |
+| Tilde in RECALL_DB_PATH | MEDIUM | Absolute path resolved at install |
+| `mem import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + RecallBatchExtract |
 | Bun not guaranteed | LOW-MEDIUM | Documented as requirement (same as Claude Code) |
 | JSONC parsing | LOW | Comment stripping before `JSON.parse` |
 

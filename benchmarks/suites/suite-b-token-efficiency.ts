@@ -68,7 +68,7 @@ export async function runSuiteB(options: SuiteBOptions = {}): Promise<SuiteResul
   });
 
   // ── v1 baseline (flat blob) ────────────────────────────────────────
-  // The v1 SessionRecall returned a flat decisions+breadcrumbs+learnings
+  // The v1 RecallStart returned a flat decisions+breadcrumbs+learnings
   // blob capped at 8000 chars. We simulate it from the same DB so the
   // comparison is fair (same corpus, same project filter).
   samples.push({
@@ -105,13 +105,13 @@ export async function runSuiteB(options: SuiteBOptions = {}): Promise<SuiteResul
   return {
     suite: 'B',
     name: 'Token efficiency',
-    description: 'Measures the byte cost of session-start memory injection across v2 (tiered SessionRecall), v1 (simulated flat blob), and CLAUDE.md (static baseline). All char counts; token estimates use 4 chars/token.',
+    description: 'Measures the byte cost of session-start memory injection across v2 (tiered RecallStart), v1 (simulated flat blob), and CLAUDE.md (static baseline). All char counts; token estimates use 4 chars/token.',
     ranAt: new Date().toISOString(),
     durationMs,
     samples,
     caveats: [
       'Token estimates use chars/4 — NOT a real tokenizer. Use only for relative comparison.',
-      'v1 baseline simulates the pre-tiered SessionRecall blob from the same DB. It is not a snapshot of historical output.',
+      'v1 baseline simulates the pre-tiered RecallStart blob from the same DB. It is not a snapshot of historical output.',
       'CLAUDE.md and Recall are complementary, not competitors. CLAUDE.md is static and hand-written; Recall is dynamic and auto-extracted. The comparison is a sanity check on relative budget, not a winner declaration.',
       'Scope = the project tag used to filter records. If absent, results vary with the directory the runner was invoked from.',
       'L0 size depends entirely on the user-edited identity.md. A larger L0 is not better — it is just larger.',

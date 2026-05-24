@@ -29,8 +29,22 @@ function openRead(): Database {
 }
 
 describe('getDbPath', () => {
-  test('honors MEM_DB_PATH override', () => {
+  test('honors RECALL_DB_PATH override (set by setupTestDb)', () => {
     expect(writerGetDbPath()).toBe(dbPath);
+  });
+
+  test('falls back to MEM_DB_PATH when RECALL_DB_PATH is unset (back-compat)', () => {
+    const originalRecall = process.env.RECALL_DB_PATH;
+    const originalMem = process.env.MEM_DB_PATH;
+    delete process.env.RECALL_DB_PATH;
+    process.env.MEM_DB_PATH = '/tmp/legacy-fallback.db';
+    try {
+      expect(writerGetDbPath()).toBe('/tmp/legacy-fallback.db');
+    } finally {
+      if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
+      if (originalMem !== undefined) process.env.MEM_DB_PATH = originalMem;
+      else delete process.env.MEM_DB_PATH;
+    }
   });
 });
 

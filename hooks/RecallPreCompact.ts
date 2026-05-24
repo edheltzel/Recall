@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * SessionPreCompact.ts — Flush in-flight messages to SQLite before compaction
+ * RecallPreCompact.ts — Flush in-flight messages to SQLite before compaction
  *
  * PURPOSE
  * Claude Code compacts the conversation context when it grows large. Without
@@ -34,6 +34,7 @@ import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
 import { encodeProjectDir } from './lib/path-encoding';
+import { resolveDbPath as getDbPath } from './lib/db-path';
 
 // ─── Path resolution (call-time, not load-time) ─────────────────────
 // Paths are resolved on every call rather than at module load so tests can
@@ -71,10 +72,8 @@ function getPrecompactLog(): string {
   return join(getMemoryDir(), 'PRECOMPACT_LOG.txt');
 }
 
-function getDbPath(): string {
-  if (process.env.MEM_DB_PATH) return process.env.MEM_DB_PATH;
-  return join(getHome(), '.claude', 'memory.db');
-}
+// DB-path resolution lives in hooks/lib/db-path.ts; resolveDbPath is imported
+// at the top of this file (see imports). Local alias kept for call-site clarity.
 
 function ensureDirs(): void {
   mkdirSync(getMemoryDir(), { recursive: true });
@@ -123,7 +122,7 @@ function saveWatermarks(watermarks: Record<string, WatermarkEntry>): void {
 }
 
 // ─── Lock cooperation with Stop hook ────────────────────────────────
-// Identical encoding to SessionExtract.tryAcquireExtractLock so both hooks
+// Identical encoding to RecallExtract.tryAcquireExtractLock so both hooks
 // fight over the same lock file. PreCompact loses gracefully — if Stop is
 // extracting, we skip this round and Stop's full pass picks up everything.
 function tryAcquireExtractLock(convPath: string): boolean {
@@ -137,7 +136,7 @@ function tryAcquireExtractLock(convPath: string): boolean {
   } catch (err) {
     const code = (err as { code?: string }).code;
     if (code === 'EEXIST') {
-      // Stale lock check — match the 10-minute window SessionExtract uses.
+      // Stale lock check — match the 10-minute window RecallExtract uses.
       try {
         const lockAge = Date.now() - statSync(lockPath).mtimeMs;
         if (lockAge > 600_000) {
@@ -214,7 +213,7 @@ function extractTextFromContent(content: unknown): string {
 
 // Parse a JSONL slice (already-decoded text starting at a clean line boundary)
 // into structured message rows. Drops noise (tool results, empty content,
-// short fragments) using the same filters SessionExtract uses.
+// short fragments) using the same filters RecallExtract uses.
 export function parseMessagesFromSlice(jsonlSlice: string, fallbackSessionId: string, project: string | null): ParsedMessage[] {
   const out: ParsedMessage[] = [];
   if (!jsonlSlice.trim()) return out;
@@ -241,7 +240,7 @@ export function parseMessagesFromSlice(jsonlSlice: string, fallbackSessionId: st
     const sessionId = (entry.sessionId as string | undefined) || fallbackSessionId;
     const timestamp = (entry.timestamp as string | undefined) || new Date().toISOString();
 
-    // Truncate long content same as SessionExtract — keeps DB row sizes sane.
+    // Truncate long content same as RecallExtract — keeps DB row sizes sane.
     const truncated = text.length > 4000 ? text.slice(0, 4000) + '...[truncated]' : text;
 
     out.push({
@@ -452,7 +451,7 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-const runsAsScript = process.argv[1]?.endsWith('SessionPreCompact.ts');
+const runsAsScript = process.argv[1]?.endsWith('RecallPreCompact.ts');
 if (runsAsScript) {
   main().catch((err) => {
     log(`MAIN_ERROR: ${err}`);

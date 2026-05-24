@@ -94,7 +94,7 @@ STEPS:
 ...`;
 
   try {
-    // Uses claude CLI with piped input — same pattern as SessionExtract.ts
+    // Uses claude CLI with piped input — same pattern as RecallExtract.ts
     // Input is generated from DB content, not user-supplied shell arguments
     const result = execSync(
       `echo ${JSON.stringify(prompt)} | claude -p --model claude-haiku-4-5-20251001 2>/dev/null`,

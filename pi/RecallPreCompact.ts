@@ -1,4 +1,4 @@
-// pi/recall-compaction.ts
+// pi/RecallPreCompact.ts
 // Pi extension: injects Recall memory into system prompt before every agent turn.
 //
 // VERIFIED APIs:

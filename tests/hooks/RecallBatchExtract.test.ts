@@ -1,11 +1,11 @@
-// Tests for hooks/BatchExtract.ts — verifies the SQLite-backed tracker
+// Tests for hooks/RecallBatchExtract.ts — verifies the SQLite-backed tracker
 // replacement for the legacy .extraction_tracker.json file.
 //
 // Covers:
 //   (a) When SQLite tracker says a path is already extracted with ≤50% growth → skip
 //   (b) When path is not in tracker → mark as candidate
 //   (c) When extraction_tracker table is missing → graceful skip with log line
-//   (d) Static grep: BatchExtract.ts no longer reads or writes
+//   (d) Static grep: RecallBatchExtract.ts no longer reads or writes
 //       .extraction_tracker.json (legacy JSON path retired).
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
@@ -20,14 +20,14 @@ import {
   recordSuccess,
   recordFailure,
   type Tracker,
-} from '../../hooks/BatchExtract';
+} from '../../hooks/RecallBatchExtract';
 import {
   markAsExtracted,
   getExtractionRecord,
 } from '../../hooks/lib/extraction-tracker';
 
 const BATCH_EXTRACT_SOURCE = readFileSync(
-  join(import.meta.dir, '..', '..', 'hooks', 'BatchExtract.ts'),
+  join(import.meta.dir, '..', '..', 'hooks', 'RecallBatchExtract.ts'),
   'utf-8'
 );
 
@@ -63,14 +63,14 @@ function releaseLogs(): void {
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'recall-batchextract-'));
   dbPath = join(tmp, 'memory.db');
-  originalMemDbPath = process.env.MEM_DB_PATH;
-  process.env.MEM_DB_PATH = dbPath;
+  originalMemDbPath = process.env.RECALL_DB_PATH;
+  process.env.RECALL_DB_PATH = dbPath;
 });
 
 afterEach(() => {
   releaseLogs();
-  if (originalMemDbPath === undefined) delete process.env.MEM_DB_PATH;
-  else process.env.MEM_DB_PATH = originalMemDbPath;
+  if (originalMemDbPath === undefined) delete process.env.RECALL_DB_PATH;
+  else process.env.RECALL_DB_PATH = originalMemDbPath;
   if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -195,18 +195,18 @@ describe('Graceful degrade when extraction_tracker is missing', () => {
 });
 
 describe('Static guarantees — legacy JSON tracker is retired', () => {
-  test('(d) BatchExtract.ts source does not reference .extraction_tracker.json', () => {
+  test('(d) RecallBatchExtract.ts source does not reference .extraction_tracker.json', () => {
     expect(BATCH_EXTRACT_SOURCE).not.toContain('.extraction_tracker.json');
   });
 
-  test('(d) BatchExtract.ts does not call writeFileSync or readFileSync', () => {
+  test('(d) RecallBatchExtract.ts does not call writeFileSync or readFileSync', () => {
     // Both are how the legacy JSON tracker was read/written. Neither should
     // appear in the refactored module — file I/O for state is now SQLite.
     expect(BATCH_EXTRACT_SOURCE).not.toContain('writeFileSync');
     expect(BATCH_EXTRACT_SOURCE).not.toContain('readFileSync');
   });
 
-  test('(d) BatchExtract.ts no longer defines saveTracker/loadTracker(JSON variants)', () => {
+  test('(d) RecallBatchExtract.ts no longer defines saveTracker/loadTracker(JSON variants)', () => {
     // The old saveTracker(tracker: Record<string,...>) wrote JSON; loadTracker()
     // (no args) read JSON. Refactored loadTracker takes a dbPath param.
     expect(BATCH_EXTRACT_SOURCE).not.toContain('function saveTracker(');
@@ -214,7 +214,7 @@ describe('Static guarantees — legacy JSON tracker is retired', () => {
     expect(BATCH_EXTRACT_SOURCE).toMatch(/loadTracker\(dbPath/);
   });
 
-  test('(d) BatchExtract.ts imports from extraction-tracker lib', () => {
+  test('(d) RecallBatchExtract.ts imports from extraction-tracker lib', () => {
     expect(BATCH_EXTRACT_SOURCE).toContain("from './lib/extraction-tracker'");
   });
 });

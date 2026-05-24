@@ -1,10 +1,10 @@
 // Regression: install.sh configure_hooks() must be per-hook idempotent.
 //
-// Pre-0.7.0.1 bug: a blanket `grep -q SessionExtract ... return` short-circuit
-// ran AFTER copying hook files but BEFORE registering TelosSync, SessionRecall,
-// and SessionPreCompact. Any re-install where SessionExtract was already in
+// Pre-0.7.0.1 bug: a blanket `grep -q RecallExtract ... return` short-circuit
+// ran AFTER copying hook files but BEFORE registering RecallTelosSync, RecallStart,
+// and RecallPreCompact. Any re-install where RecallExtract was already in
 // settings.json silently skipped the other three — leaving v0.7.0's tiered
-// SessionRecall architecturally inactive despite passing fresh-install tests.
+// RecallStart architecturally inactive despite passing fresh-install tests.
 //
 // These tests drive the bash function directly against a tmpdir-scoped
 // CLAUDE_DIR + fake repo layout, exercising both the fresh-install and
@@ -18,12 +18,12 @@ import { join } from 'path';
 
 const INSTALL_LIB = join(process.cwd(), 'lib', 'install-lib.sh');
 const HOOK_NAMES = [
-  'SessionExtract',
-  'BatchExtract',
-  'TelosSync',
-  'SessionRecall',
-  'SessionPreCompact',
-  'ClearExtract',
+  'RecallExtract',
+  'RecallBatchExtract',
+  'RecallTelosSync',
+  'RecallStart',
+  'RecallPreCompact',
+  'RecallClearExtract',
 ] as const;
 
 interface RunResult {
@@ -119,17 +119,17 @@ describe('install.sh configure_hooks()', () => {
     const start = hooksForEvent(s, 'SessionStart');
     const pre = hooksForEvent(s, 'PreCompact');
 
-    expect(stop.some(c => c.includes('SessionExtract'))).toBe(true);
-    expect(start.some(c => c.includes('TelosSync'))).toBe(true);
-    expect(start.some(c => c.includes('SessionRecall'))).toBe(true);
-    expect(pre.some(c => c.includes('SessionPreCompact'))).toBe(true);
+    expect(stop.some(c => c.includes('RecallExtract'))).toBe(true);
+    expect(start.some(c => c.includes('RecallTelosSync'))).toBe(true);
+    expect(start.some(c => c.includes('RecallStart'))).toBe(true);
+    expect(pre.some(c => c.includes('RecallPreCompact'))).toBe(true);
   });
 
-  test('re-install with SessionExtract present: the other three are still registered (regresses the pre-0.7.0.1 early-return bug)', () => {
+  test('re-install with RecallExtract present: the other three are still registered (regresses the pre-0.7.0.1 early-return bug)', () => {
     // First run gets everything into settings.json.
     runConfigureHooks();
 
-    // Simulate the drift state that the original bug produced: SessionExtract
+    // Simulate the drift state that the original bug produced: RecallExtract
     // is registered in Stop, but SessionStart / PreCompact were wiped (or
     // never made it in because a previous buggy install aborted before them).
     const pre = readSettings() as { hooks?: Record<string, unknown> };
@@ -139,7 +139,7 @@ describe('install.sh configure_hooks()', () => {
     writeFileSync(settingsFile, JSON.stringify(pre, null, 2));
 
     // Re-run configure_hooks(). Pre-0.7.0.1 this early-returned after finding
-    // SessionExtract, leaving the three below permanently unregistered.
+    // RecallExtract, leaving the three below permanently unregistered.
     const r = runConfigureHooks();
     expect(r.status).toBe(0);
 
@@ -150,12 +150,12 @@ describe('install.sh configure_hooks()', () => {
 
     // The critical assertions — these would ALL be empty/false under the
     // pre-fix behavior.
-    expect(start.some(c => c.includes('TelosSync'))).toBe(true);
-    expect(start.some(c => c.includes('SessionRecall'))).toBe(true);
-    expect(preCompact.some(c => c.includes('SessionPreCompact'))).toBe(true);
+    expect(start.some(c => c.includes('RecallTelosSync'))).toBe(true);
+    expect(start.some(c => c.includes('RecallStart'))).toBe(true);
+    expect(preCompact.some(c => c.includes('RecallPreCompact'))).toBe(true);
 
-    // SessionExtract still there (no regression on the happy path).
-    expect(stop.some(c => c.includes('SessionExtract'))).toBe(true);
+    // RecallExtract still there (no regression on the happy path).
+    expect(stop.some(c => c.includes('RecallExtract'))).toBe(true);
   });
 
   test('idempotent: running twice does not duplicate any hook entry', () => {
@@ -166,26 +166,26 @@ describe('install.sh configure_hooks()', () => {
     const countIncludes = (event: string, needle: string): number =>
       hooksForEvent(s, event).filter(c => c.includes(needle)).length;
 
-    expect(countIncludes('Stop', 'SessionExtract')).toBe(1);
-    expect(countIncludes('SessionStart', 'TelosSync')).toBe(1);
-    expect(countIncludes('SessionStart', 'SessionRecall')).toBe(1);
-    expect(countIncludes('PreCompact', 'SessionPreCompact')).toBe(1);
-    expect(countIncludes('SessionStart', 'ClearExtract')).toBe(1);
+    expect(countIncludes('Stop', 'RecallExtract')).toBe(1);
+    expect(countIncludes('SessionStart', 'RecallTelosSync')).toBe(1);
+    expect(countIncludes('SessionStart', 'RecallStart')).toBe(1);
+    expect(countIncludes('PreCompact', 'RecallPreCompact')).toBe(1);
+    expect(countIncludes('SessionStart', 'RecallClearExtract')).toBe(1);
   });
 
-  test('ClearExtract is registered on SessionStart with matcher="clear"', () => {
+  test('RecallClearExtract is registered on SessionStart with matcher="clear"', () => {
     runConfigureHooks();
     const s = readSettings();
     const sessionStart = ((s as { hooks?: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>> }).hooks?.SessionStart) ?? [];
     const clearEntry = sessionStart.find(entry =>
-      (entry.hooks ?? []).some(h => typeof h.command === 'string' && h.command.includes('ClearExtract'))
+      (entry.hooks ?? []).some(h => typeof h.command === 'string' && h.command.includes('RecallClearExtract'))
     );
     expect(clearEntry).toBeDefined();
     expect(clearEntry!.matcher).toBe('clear');
 
     // Sanity: the other SessionStart hooks have matcher="" so they fire on all sources.
     const recallEntry = sessionStart.find(entry =>
-      (entry.hooks ?? []).some(h => typeof h.command === 'string' && h.command.includes('SessionRecall'))
+      (entry.hooks ?? []).some(h => typeof h.command === 'string' && h.command.includes('RecallStart'))
     );
     expect(recallEntry).toBeDefined();
     expect(recallEntry!.matcher).toBe('');

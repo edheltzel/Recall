@@ -1,6 +1,6 @@
 // Pure helper: select the JSONL file representing the PREVIOUS session for a
-// given cwd. Used by ClearExtract.ts to find the just-cleared conversation's
-// transcript so it can be extracted before BatchExtract cron picks it up.
+// given cwd. Used by RecallClearExtract.ts to find the just-cleared conversation's
+// transcript so it can be extracted before RecallBatchExtract cron picks it up.
 //
 // Self-contained — no imports from src/. No filesystem side effects beyond
 // readdir + stat.

@@ -526,7 +526,7 @@ server.tool(
 			.min(1)
 			.max(10)
 			.optional()
-			.describe("Importance 1-10 (default: 5). Used by tiered SessionRecall to rank L1 records. Set 8-10 for explicit user decisions/preferences, 2-3 for routine context."),
+			.describe("Importance 1-10 (default: 5). Used by tiered RecallStart to rank L1 records. Set 8-10 for explicit user decisions/preferences, 2-3 for routine context."),
 	},
 	async ({ type, content, detail, project, tags, confidence, importance }) => {
 		try {

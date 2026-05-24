@@ -7,13 +7,29 @@ import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
 import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_VECTOR_TABLES } from './schema.js';
 import { applyMigrations } from './migrations.js';
 
-const DEFAULT_DB_PATH = join(homedir(), '.claude', 'memory.db');
+const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
 let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
+let warnedAboutMemDbPath = false;
 
+// Precedence:
+//   1. RECALL_DB_PATH (primary)
+//   2. MEM_DB_PATH    (deprecated, accepted with one-time stderr warning)
+//   3. DEFAULT_DB_PATH
 export function getDbPath(): string {
-  return process.env.MEM_DB_PATH || DEFAULT_DB_PATH;
+  if (process.env.RECALL_DB_PATH) return process.env.RECALL_DB_PATH;
+  if (process.env.MEM_DB_PATH) {
+    if (!warnedAboutMemDbPath) {
+      warnedAboutMemDbPath = true;
+      console.error(
+        '[recall] MEM_DB_PATH is deprecated; use RECALL_DB_PATH. ' +
+        'Both are accepted for now; MEM_DB_PATH will be removed in a future release.'
+      );
+    }
+    return process.env.MEM_DB_PATH;
+  }
+  return DEFAULT_DB_PATH;
 }
 
 export function getDb(): Database {

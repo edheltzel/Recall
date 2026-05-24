@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * SessionExtract.ts - Extract Context for Future Sessions (Recall)
+ * RecallExtract.ts - Extract Context for Future Sessions (Recall)
  *
  * PURPOSE:
  * Extracts structured context from Claude Code session transcripts using
@@ -1095,7 +1095,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     const timestamp = new Date().toISOString().split('T')[0];
     const fileName = mdPath.split('/').pop() || 'unknown';
     const sessionId = fileName.replace('.md', '');
-    // cwd is either a platform name ('opencode', 'pi') from BatchExtract,
+    // cwd is either a platform name ('opencode', 'pi') from RecallBatchExtract,
     // or a real path from --reextract-md CLI usage.
     const isRealPath = cwd.includes('/');
     const platform = isRealPath ? cwd.split('/').pop() || 'unknown' : cwd;
@@ -1208,7 +1208,7 @@ if (process.argv.includes('--reextract-md')) {
       process.exit(1);
     });
   } else {
-    console.error('Usage: bun run SessionExtract.ts --reextract-md <session.md> [cwd]');
+    console.error('Usage: bun run RecallExtract.ts --reextract-md <session.md> [cwd]');
     process.exit(1);
   }
 // If called with --reextract flag, force re-extraction bypassing dedup
@@ -1233,7 +1233,7 @@ if (process.argv.includes('--reextract-md')) {
       process.exit(1);
     });
   } else {
-    console.error('Usage: bun run SessionExtract.ts --reextract <conversation.jsonl> [cwd]');
+    console.error('Usage: bun run RecallExtract.ts --reextract <conversation.jsonl> [cwd]');
     process.exit(1);
   }
 // If called with --extract flag, run extraction directly (background mode)

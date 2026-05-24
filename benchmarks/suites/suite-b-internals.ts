@@ -1,6 +1,6 @@
 // Suite B internals — direct measurement helpers.
 //
-// We do not import from hooks/SessionRecall.ts directly because the hook is
+// We do not import from hooks/RecallStart.ts directly because the hook is
 // self-contained and writes paths from $HOME (which we don't want to override
 // during a benchmark run). Instead we re-implement the same SQL, scoped to a
 // single project, and report the bundle's character count.
@@ -25,8 +25,9 @@ const V1_BREADCRUMBS_LIMIT = 5;
 const V1_LEARNINGS_LIMIT = 3;
 
 function getDbPath(): string {
+  if (process.env.RECALL_DB_PATH) return process.env.RECALL_DB_PATH;
   if (process.env.MEM_DB_PATH) return process.env.MEM_DB_PATH;
-  return join(homedir(), '.claude', 'memory.db');
+  return join(homedir(), '.agents', 'Recall', 'recall.db');
 }
 
 function openReadonly(): Database | null {
@@ -61,7 +62,7 @@ const TABLE_PRIORITY: Record<Row['table'], number> = {
 };
 
 // ── v2 — tiered L0 + L1 ──────────────────────────────────────────────
-// Mirrors hooks/SessionRecall.ts assembleL1. We render the same way the hook
+// Mirrors hooks/RecallStart.ts assembleL1. We render the same way the hook
 // renders so the char count reflects the actual on-the-wire bundle.
 
 export interface V2Snapshot {
@@ -200,7 +201,7 @@ function readFile(path: string): string {
 }
 
 // ── v1 — flat blob baseline (simulated) ──────────────────────────────
-// Reconstructs the pre-tiered SessionRecall output from the same DB so the
+// Reconstructs the pre-tiered RecallStart output from the same DB so the
 // comparison is fair. Char count only; the actual content fidelity isn't
 // what we're measuring here.
 

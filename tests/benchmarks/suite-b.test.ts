@@ -107,12 +107,12 @@ function seed(): void {
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'recall-bench-'));
   dbPath = join(tempDir, 'memory.db');
-  process.env.MEM_DB_PATH = dbPath;
+  process.env.RECALL_DB_PATH = dbPath;
   seed();
 });
 
 afterEach(() => {
-  delete process.env.MEM_DB_PATH;
+  delete process.env.RECALL_DB_PATH;
   if (tempDir && existsSync(tempDir)) {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -198,7 +198,7 @@ describe('Suite B — runSuiteB', () => {
     // Use a fresh path — re-init at the same path leaves WAL files behind
     // and bun:sqlite produces SQLITE_IOERR_SHORT_READ on the second open.
     const emptyDbPath = join(tempDir, 'empty.db');
-    process.env.MEM_DB_PATH = emptyDbPath;
+    process.env.RECALL_DB_PATH = emptyDbPath;
     const db = new Database(emptyDbPath);
     db.prepare('PRAGMA journal_mode = WAL').run();
     for (const stmt of SCHEMA.split(';').map(s => s.trim()).filter(Boolean)) {

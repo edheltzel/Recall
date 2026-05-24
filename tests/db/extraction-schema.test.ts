@@ -8,7 +8,7 @@ let tempDir: string;
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'recall-schema-test-'));
   const dbPath = join(tempDir, 'test.db');
-  process.env.MEM_DB_PATH = dbPath;
+  process.env.RECALL_DB_PATH = dbPath;
 
   // Reset module-level db singleton so initDb() uses the new path
   const conn = await import('../../src/db/connection.js');
@@ -20,7 +20,7 @@ afterAll(() => {
   // Import is cached — just close and clean up
   import('../../src/db/connection.js').then((conn) => conn.closeDb());
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-  delete process.env.MEM_DB_PATH;
+  delete process.env.RECALL_DB_PATH;
 });
 
 describe('extraction_tracker table', () => {

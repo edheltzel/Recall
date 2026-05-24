@@ -17,6 +17,7 @@ dist/
 .worktrees/
 .claude/worktrees
 .maestro/
+.agents/
 
 # OS
 .DS_Store
