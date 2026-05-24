@@ -42,7 +42,7 @@ Each run writes two files to `benchmarks/results/`:
 1. **No composite scores.** Each suite reports per-metric numbers with explicit units. The reader interprets.
 2. **Retrieval-presence and answer-accuracy are reported separately.** They are different things. We don't blend them.
 3. **Caveats are part of the result.** Every suite emits a `caveats` array that is rendered alongside the metrics. No "this number means X is good" — let the reader decide.
-4. **Baselines are real, not strawmen.** v1 (flat-blob SessionRecall) and CLAUDE.md are the relevant comparisons. We don't compare against "no memory at all" to make ourselves look good.
+4. **Baselines are real, not strawmen.** v1 (flat-blob RecallStart) and CLAUDE.md are the relevant comparisons. We don't compare against "no memory at all" to make ourselves look good.
 5. **Token estimates are estimates.** We use chars/4 as a proxy. We do NOT call it a token count; we call it a token *estimate*.
 
 ## Suites

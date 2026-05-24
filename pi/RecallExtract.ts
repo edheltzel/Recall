@@ -1,9 +1,9 @@
-// pi/recall-extract.ts
+// pi/RecallExtract.ts
 // Pi extension: exports session as markdown to Recall's drop directory on shutdown.
 //
 // Pi sessions use tree-structured JSONL (id/parentId) unlike Claude Code's linear format.
 // This extension linearizes the active branch into flat markdown, then drops it into
-// ~/.claude/MEMORY/pi-sessions/ for BatchExtract to pick up.
+// ~/.claude/MEMORY/pi-sessions/ for RecallBatchExtract to pick up.
 //
 // VERIFIED APIs:
 //   - pi.on("session_shutdown", handler) — fires on exit (Ctrl+C, Ctrl+D, SIGTERM)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * SessionRecall.ts — Tiered memory load at session start (Recall v2)
+ * RecallStart.ts — Tiered memory load at session start (Recall v2)
  *
  * PURPOSE
  * Inject a compact, high-value memory bundle at every session start:
@@ -42,11 +42,9 @@ const L1_RESERVED_LOA_SLOTS = 4;        // ~30% reserved for the curated tier
 const L1_LOA_FALLBACK_CAP = 6;          // if no high-importance non-LoA exist, pull more LoA
 
 // ─── Path resolution ─────────────────────────────────────────────────
-function getDbPath(): string {
-  if (process.env.MEM_DB_PATH) return process.env.MEM_DB_PATH;
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  return join(home, '.claude', 'memory.db');
-}
+// DB-path resolution lives in hooks/lib/db-path.ts so the CLI and every
+// hook agree on the same precedence (RECALL_DB_PATH > MEM_DB_PATH > default).
+import { resolveDbPath as getDbPath } from './lib/db-path';
 
 function getIdentityPath(): string | undefined {
   // Precedence: env override > project-local > global.
@@ -344,7 +342,7 @@ export function gatherContext(): string {
 }
 
 // ─── Main ────────────────────────────────────────────────────────────
-const isDirectExecution = process.argv[1]?.endsWith('SessionRecall.ts');
+const isDirectExecution = process.argv[1]?.endsWith('RecallStart.ts');
 if (isDirectExecution) {
   try {
     console.log(gatherContext());

@@ -117,13 +117,13 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
 | Step | What happens |
 |------|-------------|
-| 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `memory.db`) to `~/.claude/backups/recall/` |
+| 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `recall.db`) to `~/.claude/backups/recall/` |
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `mem` and `mem-mcp` globally via `bun link` (falls back to `npm link` on failure) |
-| 5. Init DB | Initializes the SQLite database at `~/.claude/memory.db` and creates `~/.claude/MEMORY/` |
+| 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
-| 7. Setup hooks | Copies `SessionExtract.ts` and `BatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
+| 7. Setup hooks | Copies `RecallExtract.ts` and `RecallBatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
 | 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs slash commands to `~/.claude/commands/Recall/` |
 | 9. Update CLAUDE.md | Appends a MEMORY section to `~/.claude/CLAUDE.md` with core usage rules |
 
@@ -154,7 +154,7 @@ After the installer completes and you have restarted Claude Code, run these chec
 
 ```bash
 which mem mem-mcp          # Both CLIs should resolve to a path
-ls -la ~/.claude/memory.db # Database file should exist
+ls -la ~/.agents/Recall/recall.db # Database file should exist
 mem stats                  # Should return record counts (zeros on fresh install)
 mem doctor                 # Full health check — database, MCP, hooks, embeddings
 ```
@@ -163,7 +163,7 @@ mem doctor                 # Full health check — database, MCP, hooks, embeddi
 
 ### Recommended: seed your L0 identity tier
 
-Recall's `SessionRecall` hook injects a small user-authored identity file at
+Recall's `RecallStart` hook injects a small user-authored identity file at
 the top of every session (the L0 tier). Without it, the L0 section is empty
 and the v2 tiered context is only half-populated.
 
@@ -183,7 +183,7 @@ warns if your rendered output exceeds that limit.
 
 Session extraction runs automatically after every Claude Code session ends. No manual steps are required.
 
-When a session ends, the `Stop` hook triggers `SessionExtract.ts`, which:
+When a session ends, the `Stop` hook triggers `RecallExtract.ts`, which:
 
 1. Reads the session's JSONL conversation file from `~/.claude/projects/`
 2. Extracts the text content (skipping tool results and thinking blocks)
@@ -198,12 +198,12 @@ The hook self-spawns in the background so the session exits immediately — extr
 
 ### Optional: Batch Extraction (cron)
 
-The `BatchExtract.ts` script catches any sessions that the `Stop` hook missed (e.g. if Claude Code was force-quit). Set it up as a cron job:
+The `RecallBatchExtract.ts` script catches any sessions that the `Stop` hook missed (e.g. if Claude Code was force-quit). Set it up as a cron job:
 
 ```bash
 crontab -e
 # Add this line (runs every 30 minutes):
-*/30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/BatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1
+*/30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/RecallBatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1
 ```
 
 ---
@@ -212,8 +212,9 @@ crontab -e
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MEM_DB_PATH` | `~/.claude/memory.db` | SQLite database file location |
-| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `SessionRecall` (read) and `mem onboard` (write). |
+| `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
+| `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
+| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `mem onboard` (write). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used for embeddings (768-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
@@ -222,7 +223,7 @@ crontab -e
 | `RECALL_VERBOSE` | `0` | Set to `1` to bypass output capture for `bun install` / `bun run build` (useful when debugging install failures). |
 | `NO_COLOR` | — | Standard; set to `1` to disable ANSI colors across all installer scripts. |
 
-Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`) if you need non-default values. The `MEM_DB_PATH` variable is the most commonly changed — useful if you want to keep the database outside `~/.claude`.
+Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`) if you need non-default values. The `RECALL_DB_PATH` variable is the most commonly changed — useful if you want to keep the database outside `~/.agents/Recall/`. You can also pass `--db-path /custom/path/recall.db` to `./install.sh` for non-interactive overrides.
 
 ---
 
@@ -238,7 +239,7 @@ The installer automatically creates a timestamped backup before making any chang
 
 Manual database backup:
 ```bash
-cp ~/.claude/memory.db ~/.claude/memory.db.backup
+cp ~/.agents/Recall/recall.db ~/.agents/Recall/recall.db.backup
 ```
 
 ---
@@ -250,8 +251,8 @@ Recall ships an `uninstall.sh` that removes its integration surgically while pre
 ```bash
 cd /path/to/Recall
 ./uninstall.sh --dry-run        # preview what will change, touch nothing
-./uninstall.sh                  # remove integration; preserve memory.db + backups
-./uninstall.sh --purge          # also destroy memory.db + backup tree (confirmed)
+./uninstall.sh                  # remove integration; preserve ~/.agents/Recall/ (DB + backups)
+./uninstall.sh --purge          # also destroy ~/.agents/Recall/ tree (confirmed)
 ```
 
 ### What gets removed (default)
@@ -260,7 +261,7 @@ cd /path/to/Recall
 - `~/.claude/Recall_GUIDE.md`
 - Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact) — other hooks are preserved
 - `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved
-- `~/.claude/hooks/{SessionExtract,BatchExtract,TelosSync,SessionRecall,SessionPreCompact}.ts`
+- `~/.claude/hooks/{RecallExtract,RecallBatchExtract,RecallTelosSync,RecallStart,RecallPreCompact}.ts`
 - `~/.claude/hooks/lib/{extraction-*,pid-utils}.ts` — only Recall-owned files, never the whole `hooks/lib/` directory
 - The `## MEMORY` section in `~/.claude/CLAUDE.md` — the rest of your CLAUDE.md is preserved (AST-aware removal)
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
@@ -270,7 +271,7 @@ cd /path/to/Recall
 
 ### What is preserved (default)
 
-- `~/.claude/memory.db` — your persistent memory database
+- `~/.agents/Recall/recall.db` — your persistent memory database
 - `~/.claude/backups/recall/` — the backup tree written by install/update
 - `~/.claude/MEMORY/` — identity.md, DISTILLED.md, session subdirs
 - This source directory (remove with `rm -rf /path/to/Recall`)
@@ -280,7 +281,7 @@ cd /path/to/Recall
 | Flag | Purpose |
 |------|---------|
 | `--dry-run` | Narrate every change, touch nothing |
-| `--purge` | Also destroy `memory.db` + backup tree. Requires interactive `PURGE` confirmation. Writes a `pre_purge_<TS>/` snapshot before deleting. |
+| `--purge` | Also destroy `recall.db` + backup tree. Requires interactive `PURGE` confirmation. Writes a `pre_purge_<TS>/` snapshot before deleting. |
 | `--no-confirm` | Non-interactive (still requires PURGE confirmation for `--purge`) |
 | `--skip-opencode` | Leave OpenCode integration alone |
 | `--skip-pi` | Leave Pi integration alone |

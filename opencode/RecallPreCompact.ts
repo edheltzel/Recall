@@ -1,4 +1,4 @@
-// opencode/recall-compaction.ts
+// opencode/RecallPreCompact.ts
 // Injects Recall memory context into OpenCode session compaction summaries.
 //
 // When OpenCode compresses a long session, this hook ensures persistent

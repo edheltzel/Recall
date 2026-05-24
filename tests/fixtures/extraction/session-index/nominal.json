@@ -13,7 +13,7 @@
     "project": "atlas-recall",
     "branch": "feat/hooks",
     "timestamp": "2026-03-13T15:30:00.000Z",
-    "summary": "Fixed concurrency bugs in SessionExtract hook",
+    "summary": "Fixed concurrency bugs in RecallExtract hook",
     "topics": ["concurrency", "hooks", "bugfix"],
     "conversationPath": "/Users/ed/.claude/projects/project-a/conv2.jsonl"
   },

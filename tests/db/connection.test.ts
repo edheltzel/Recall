@@ -18,43 +18,86 @@ describe('connection', () => {
   });
 
   describe('getDbPath', () => {
-    test('returns MEM_DB_PATH when env var is set', () => {
-      // MEM_DB_PATH is already set by setupTestDb to the temp test DB path
+    test('returns RECALL_DB_PATH when set (set by setupTestDb)', () => {
+      // setupTestDb sets RECALL_DB_PATH to the temp test DB path.
       expect(getDbPath()).toBe(testDbPath);
     });
 
-    test('returns default path when MEM_DB_PATH is not set', () => {
-      const original = process.env.MEM_DB_PATH;
+    test('returns default path when neither env var is set', () => {
+      const originalRecall = process.env.RECALL_DB_PATH;
+      const originalMem = process.env.MEM_DB_PATH;
+      delete process.env.RECALL_DB_PATH;
       delete process.env.MEM_DB_PATH;
 
       try {
-        const expected = join(homedir(), '.claude', 'memory.db');
+        const expected = join(homedir(), '.agents', 'Recall', 'recall.db');
         expect(getDbPath()).toBe(expected);
       } finally {
-        process.env.MEM_DB_PATH = original;
+        if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
+        if (originalMem !== undefined) process.env.MEM_DB_PATH = originalMem;
+      }
+    });
+
+    test('falls back to MEM_DB_PATH when RECALL_DB_PATH is not set (back-compat)', () => {
+      const originalRecall = process.env.RECALL_DB_PATH;
+      const originalMem = process.env.MEM_DB_PATH;
+      delete process.env.RECALL_DB_PATH;
+      process.env.MEM_DB_PATH = '/tmp/legacy-mem-db-path.db';
+
+      try {
+        expect(getDbPath()).toBe('/tmp/legacy-mem-db-path.db');
+      } finally {
+        if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
+        if (originalMem !== undefined) {
+          process.env.MEM_DB_PATH = originalMem;
+        } else {
+          delete process.env.MEM_DB_PATH;
+        }
+      }
+    });
+
+    test('RECALL_DB_PATH takes precedence over MEM_DB_PATH', () => {
+      const originalRecall = process.env.RECALL_DB_PATH;
+      const originalMem = process.env.MEM_DB_PATH;
+      process.env.RECALL_DB_PATH = '/tmp/recall-primary.db';
+      process.env.MEM_DB_PATH = '/tmp/legacy-mem-db.db';
+
+      try {
+        expect(getDbPath()).toBe('/tmp/recall-primary.db');
+      } finally {
+        if (originalRecall !== undefined) {
+          process.env.RECALL_DB_PATH = originalRecall;
+        } else {
+          delete process.env.RECALL_DB_PATH;
+        }
+        if (originalMem !== undefined) {
+          process.env.MEM_DB_PATH = originalMem;
+        } else {
+          delete process.env.MEM_DB_PATH;
+        }
       }
     });
   });
 
   describe('initDb', () => {
     test('creates database file and returns { created: true }', () => {
-      // Temporarily point MEM_DB_PATH at a brand-new location so we can
+      // Temporarily point RECALL_DB_PATH at a brand-new location so we can
       // exercise the "first-time creation" code path without touching the
       // shared test DB managed by the setup helper.
       closeDb();
 
       const freshDir = mkdtempSync(join(tmpdir(), 'recall-test-init-'));
       const freshPath = join(freshDir, 'fresh.db');
-      const originalPath = process.env.MEM_DB_PATH;
+      const originalPath = process.env.RECALL_DB_PATH;
 
       try {
-        process.env.MEM_DB_PATH = freshPath;
+        process.env.RECALL_DB_PATH = freshPath;
         const result = initDb();
         expect(result.created).toBe(true);
         expect(result.path).toBe(freshPath);
       } finally {
         closeDb();
-        process.env.MEM_DB_PATH = originalPath;
+        process.env.RECALL_DB_PATH = originalPath;
         rmSync(freshDir, { recursive: true, force: true });
         // Restore the shared test DB connection for subsequent tests
         initDb();
@@ -79,7 +122,7 @@ describe('connection', () => {
 
       const freshDir = mkdtempSync(join(tmpdir(), 'recall-test-upgrade-'));
       const freshPath = join(freshDir, 'upgrade.db');
-      const originalPath = process.env.MEM_DB_PATH;
+      const originalPath = process.env.RECALL_DB_PATH;
 
       try {
         // Seed a v7 DB fixture with just the messages table WITHOUT the
@@ -107,7 +150,7 @@ describe('connection', () => {
         for (const stmt of seedStmts) seed.prepare(stmt).run();
         seed.close();
 
-        process.env.MEM_DB_PATH = freshPath;
+        process.env.RECALL_DB_PATH = freshPath;
 
         // Pre-0.7.11 this threw "SQLiteError: no such column: importance"
         // from CREATE_INDEXES before applyMigrations ran. Post-fix it migrates.
@@ -140,7 +183,7 @@ describe('connection', () => {
         }
       } finally {
         closeDb();
-        process.env.MEM_DB_PATH = originalPath;
+        process.env.RECALL_DB_PATH = originalPath;
         rmSync(freshDir, { recursive: true, force: true });
         // Restore the shared test DB connection for subsequent tests
         initDb();

@@ -11,7 +11,7 @@ Recall is a persistent memory framework. It gives you:
 1. **Searchable history** of all past conversations via MCP tools and CLI
 2. **Automatic extraction** — sessions are parsed into structured summaries when they end
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
-4. **Tiered session-start context** — `SessionRecall` injects two tiers at the top of every session: **L0 identity** (who the user is) and **L1 top 12 records** ranked by importance. Read the L0 and L1 content at the start of every session — it is authoritative baseline context
+4. **Tiered session-start context** — `RecallStart` injects two tiers at the top of every session: **L0 identity** (who the user is) and **L1 top 12 records** ranked by importance. Read the L0 and L1 content at the start of every session — it is authoritative baseline context
 
 ## Your MCP Tools
 
@@ -130,6 +130,9 @@ mem loa list                        # Browse curated knowledge
 mem dump "Session title"            # Capture current session
 mem onboard                         # Interactive L0 identity setup (run once per user)
 mem pin decisions 42 10             # Pin a record to high importance
+mem path                            # Show DB + install paths (handy for diagnostics)
+mem doctor --fix                    # Repair drifted/missing Recall symlinks
+mem migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 
 ### L0 identity file
@@ -141,13 +144,13 @@ session context is empty — recommend running `mem onboard` to fix it.
 
 ## Core Rules
 
-1. **Memory-first at session start** — A `SessionStart` hook (`SessionRecall.ts`) automatically loads two tiers: **L0 identity** (user-authored `identity.md`, always on, capped at 1200 chars) and **L1 top 12** (messages/decisions/learnings/LoA ranked by importance, with 4 slots reserved for LoA). Review both before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`. L2/L3 tiers are documented in the preamble but NOT injected — fetch them on demand.
+1. **Memory-first at session start** — A `SessionStart` hook (`RecallStart.ts`) automatically loads two tiers: **L0 identity** (user-authored `identity.md`, always on, capped at 1200 chars) and **L1 top 12** (messages/decisions/learnings/LoA ranked by importance, with 4 slots reserved for LoA). Review both before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`. L2/L3 tiers are documented in the preamble but NOT injected — fetch them on demand.
 2. **Search memory before git** — When you need context about past work, **always search Recall first** (`memory_search` or `memory_hybrid_search`) before falling back to `git log`, `git show`, or commit history. Recall contains structured decisions, learnings, and session summaries that are richer than commit messages.
 3. **Search before asking** — Before asking the user to repeat information, search memory first
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
 6. **Session capture** — When the user says `/dump` or `/Recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
-7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the SessionRecall preamble is missing or empty), suggest the user run `mem onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `mem onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
+7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `mem onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `mem onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
 
 ### Context Resolution Order
 
@@ -161,7 +164,7 @@ When you need information about past work or project context, follow this priori
 
 ## How Extraction Works
 
-When a session ends, the `SessionExtract` hook:
+When a session ends, the `RecallExtract` hook:
 
 1. Reads the conversation JSONL file
 2. Sends it to Claude Haiku with an extraction prompt
@@ -170,11 +173,11 @@ When a session ends, the `SessionExtract` hook:
 5. Updates `SESSION_INDEX.json` for searchable lookup
 6. Tracks extraction state in `.extraction_tracker.json`
 
-A cron job (`BatchExtract.ts`) runs every 30 minutes to catch any sessions that weren't extracted at end (crashes, interruptions, etc.).
+A cron job (`RecallBatchExtract.ts`) runs every 30 minutes to catch any sessions that weren't extracted at end (crashes, interruptions, etc.).
 
 ## Database Location
 
-The SQLite database is at `~/.claude/memory.db` (or wherever `MEM_DB_PATH` points). It uses:
+The SQLite database is at `~/.agents/Recall/recall.db` (or wherever `RECALL_DB_PATH` points; the legacy `MEM_DB_PATH` is still accepted). It uses:
 
 - **WAL mode** for concurrent reads
 - **FTS5** indexes on all text tables

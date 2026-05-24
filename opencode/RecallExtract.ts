@@ -1,8 +1,8 @@
-// opencode/recall-extract.ts
+// opencode/RecallExtract.ts
 // Recall session extraction plugin for OpenCode
 //
 // Hooks into session.idle to export completed sessions as markdown,
-// dropping them into a directory that BatchExtract.ts monitors.
+// dropping them into a directory that RecallBatchExtract.ts monitors.
 //
 // VERIFIED APIs USED:
 //   - ctx.$ (Bun shell tagged template) — confirmed in OpenCode plugin docs

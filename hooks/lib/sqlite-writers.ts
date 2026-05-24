@@ -1,4 +1,4 @@
-// SQLite writers for the Stop hook (SessionExtract.ts).
+// SQLite writers for the Stop hook (RecallExtract.ts).
 // Self-contained — no imports from src/. Mirrors the relevant subset of
 // src/lib/memory.ts so the hook can dual-write into the same tables without
 // pulling in the full memory module (hooks must run even if src/ is broken).
@@ -9,13 +9,11 @@
 
 import { Database } from 'bun:sqlite';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { resolveDbPath } from './db-path';
 
-export function getDbPath(): string {
-  if (process.env.MEM_DB_PATH) return process.env.MEM_DB_PATH;
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  return join(home, '.claude', 'memory.db');
-}
+// Re-export under the historical name so existing consumers (RecallExtract,
+// RecallBatchExtract, RecallClearExtract) don't need to change their imports.
+export const getDbPath = resolveDbPath;
 
 function openDb(dbPath: string): Database {
   const db = new Database(dbPath);

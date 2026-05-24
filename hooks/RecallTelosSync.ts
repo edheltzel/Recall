@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * TelosSync.ts - Auto-import TELOS files when they change
+ * RecallTelosSync.ts - Auto-import TELOS files when they change
  *
  * TRIGGER: SessionStart (no matcher — runs every session)
  *

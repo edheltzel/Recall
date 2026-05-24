@@ -80,7 +80,7 @@ export function childReleaseLock(dbPath: string, convPath: string, pid: number):
 
 /**
  * Check whether an active lock is held for a conversation path.
- * Used by the parent (SessionExtract) before deciding to spawn a child.
+ * Used by the parent (RecallExtract) before deciding to spawn a child.
  *
  * A lock is considered held if:
  *   - A row exists for the path, AND

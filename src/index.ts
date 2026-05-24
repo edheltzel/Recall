@@ -25,6 +25,8 @@ import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
 import { runBenchmark, listBenchmarks, reportLatestBenchmark } from './commands/benchmark.js';
 import { runOnboard } from './commands/onboard.js';
+import { runMigrate } from './commands/migrate.js';
+import { runPath } from './commands/path.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -560,8 +562,28 @@ benchmarkCmd
 program
   .command('doctor')
   .description('Run health checks on all memory subsystems')
-  .action(async () => {
-    await runDoctor();
+  .option('--fix', 'Re-create missing/drifted symlinks (back up drifted files first)')
+  .action(async (options) => {
+    await runDoctor({ fix: !!options.fix });
+    closeDb();
+  });
+
+program
+  .command('migrate')
+  .description('Move the database to a new path and rewrite MCP configs')
+  .requiredOption('--to <path>', 'Destination path for recall.db (absolute, or starting with ~/)')
+  .option('--dry-run', 'Print the plan without making changes')
+  .action((options) => {
+    runMigrate({ to: options.to, dryRun: !!options.dryRun });
+    closeDb();
+  });
+
+program
+  .command('path')
+  .description('Print resolved DB path, install root, and symlink targets')
+  .option('--json', 'Output as JSON (for scripting)')
+  .action((options) => {
+    runPath({ json: !!options.json });
     closeDb();
   });
 
@@ -574,7 +596,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

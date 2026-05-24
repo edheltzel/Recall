@@ -1,10 +1,10 @@
-# Recall — Persistent Memory for Claude Code
+# Recall — Persistent Memory for Codex
 
 ## Project Overview
 
-Recall gives Claude Code persistent memory across sessions. It's a CLI (`mem`), MCP server (`mem-mcp`), and extraction hook system that stores conversations, decisions, learnings, and breadcrumbs in SQLite with FTS5 search.
+Recall gives Codex persistent memory across sessions. It's a CLI (`mem`), MCP server (`mem-mcp`), and extraction hook system that stores conversations, decisions, learnings, and breadcrumbs in SQLite with FTS5 search.
 
-**If you're an AI agent that needs to _use_ Recall** (MCP tools, CLI commands, core rules), read [`FOR_CLAUDE.md`](FOR_CLAUDE.md) — it's the guide written specifically for you. This file (`CLAUDE.md`) is for _developing_ the Recall codebase.
+**If you're an AI agent that needs to _use_ Recall** (MCP tools, CLI commands, core rules), read [`FOR_CLAUDE.md`](FOR_CLAUDE.md) — it's the guide written specifically for you. This file (`AGENTS.md`) is for _developing_ the Recall codebase.
 
 ## Build & Test
 
@@ -54,7 +54,7 @@ src/
   types/
     index.ts           # Shared TypeScript types
 commands/
-  Recall/              # Slash commands (installed to ~/.claude/commands/Recall/)
+  Recall/              # Slash commands (installed to ~/.Codex/commands/Recall/)
     add.md             #   /Recall:add — add breadcrumb/decision/learning
     doctor.md          #   /Recall:doctor — health checks
     dump.md            #   /Recall:dump — session flush + LoA capture
@@ -64,19 +64,19 @@ commands/
     stats.md           #   /Recall:stats — database statistics
     update.md          #   /Recall:update — version check + update instructions
 hooks/
-  RecallExtract.ts     # Stop hook — extracts sessions via Claude Haiku on exit
+  RecallExtract.ts     # Stop hook — extracts sessions via Codex Haiku on exit
   RecallStart.ts      # SessionStart hook — tiered L0/L1 memory context injection
   RecallPreCompact.ts  # PreCompact hook — flush in-flight messages before compaction
   RecallBatchExtract.ts       # Cron job — batch extracts sessions missed during crashes
   RecallTelosSync.ts          # Cron job — sync Telos goals/projects into memory
-  extract_prompt.md     # Extraction prompt template (copied to ~/.claude/MEMORY/)
+  extract_prompt.md     # Extraction prompt template (copied to ~/.Codex/MEMORY/)
   lib/                 # Shared hook libraries
     extraction-lock.ts      # Per-session extraction lock
     extraction-migration.ts # Migrate legacy extraction state
     extraction-quality.ts   # Quality gate (requires SUMMARY + MAIN IDEAS)
     extraction-semaphore.ts # Global extraction concurrency limiter
     extraction-tracker.ts   # .extraction_tracker dedup state
-    path-encoding.ts        # Claude Code project-folder path encoding (v0.7.23)
+    path-encoding.ts        # Codex project-folder path encoding (v0.7.23)
     pid-utils.ts            # PID-based stale-lock detection
 tests/
   benchmarks/          # Benchmark runner/suite tests
@@ -119,7 +119,7 @@ assets/
   demo-*.tape          # VHS tape scripts for re-recording demos
 ACKNOWLEDGMENTS.md     # Credits to MemPalace (ideas reshaped) + independent critics
 CHANGELOG.md           # Release notes and breaking changes
-FOR_CLAUDE.md          # Guide for Claude Code instances (copied to ~/.claude/Recall_GUIDE.md)
+FOR_CLAUDE.md          # Guide for Codex instances (copied to ~/.Codex/Recall_GUIDE.md)
 FOR_OPENCODE.md        # Guide for OpenCode instances
 FOR_PI.md              # Guide for Pi instances
 install.sh             # Installer with backup/restore, OS detection, MCP + hook registration
@@ -132,7 +132,7 @@ tsconfig.json          # TypeScript config
 
 **All plans, specs, and design documents MUST be stored in `.atlas/` at the project root.** This applies to every agent, skill, plugin, and extension — no exceptions.
 
-- Claude Code `EnterPlanMode` plans → `.atlas/plans/`
+- Codex `EnterPlanMode` plans → `.atlas/plans/`
 - Superpowers plugin plans and specs → `.atlas/plans/` and `.atlas/specs/`
 - Any skill or extension that generates planning artifacts → `.atlas/plans/`
 - Handoff documents → `.atlas/handoffs/`
@@ -145,10 +145,10 @@ tsconfig.json          # TypeScript config
 - **Runtime**: Bun (not Node). Uses `bun:sqlite` directly. Shebangs are `#!/usr/bin/env bun`.
 - **Build**: tsup produces ESM. Build script replaces node shebang with bun shebang.
 - **Database**: SQLite at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`; legacy `MEM_DB_PATH` still accepted). WAL mode. FTS5 full-text search with sync triggers.
-- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `claude/commands/Recall/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/opencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. Existing user files at symlink targets get backed up before replacement (collision rule in `lib/install-lib.sh:recall_link`).
-- **MCP registration**: User scope in `~/.claude/settings.json` under `mcpServers` (not `.mcp.json`).
-- **Hook registration**: `Stop` event in `~/.claude/settings.json` under `hooks.Stop`.
-- **Hooks are self-contained**: `RecallExtract.ts` and `RecallBatchExtract.ts` are standalone scripts copied to `~/.claude/hooks/`. They don't import from `src/`. Duplication of utilities (like bun path resolution) is intentional.
+- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `claude/commands/Recall/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes receive **per-file symlinks** back to canonicals. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
+- **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
+- **Hook registration**: `Stop`, `SessionStart`, `PreCompact` events in `~/.claude/settings.json` under `hooks.*`.
+- **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.
 - **Shell-to-JS safety**: `install.sh` passes variables to `bun -e` via environment variables, never shell interpolation in JS strings.
 - **Tests**: `bun:test` (not vitest, despite devDependency). Test files at `tests/**/*.test.ts`.
 - **No Fabric dependency**: Fabric is optional. Core functionality works without it.
@@ -160,5 +160,5 @@ tsconfig.json          # TypeScript config
 - **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
-- **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
+- **Update the Codex guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.Codex/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
 - **Cut a release**: See `docs/releasing.md` for the tag → GitHub release flow.

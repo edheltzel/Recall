@@ -19,8 +19,25 @@
 # ── Globals ──────────────────────────────────────────────────────────────────
 
 : "${CLAUDE_DIR:=$HOME/.claude}"
-: "${BACKUP_BASE:=$CLAUDE_DIR/backups/recall}"
+
+# Recall install root — canonical home for hooks, commands, guides, the DB,
+# and backups. Platform homes (~/.claude/, ~/.config/opencode/, ~/.pi/agent/)
+# receive per-file symlinks back here. Override via $RECALL_DIR to relocate.
+: "${RECALL_DIR:=$HOME/.agents/Recall}"
+: "${RECALL_SHARED_DIR:=$RECALL_DIR/shared}"
+: "${RECALL_SHARED_HOOKS_DIR:=$RECALL_SHARED_DIR/hooks}"
+: "${RECALL_SHARED_HOOKS_LIB_DIR:=$RECALL_SHARED_HOOKS_DIR/lib}"
+: "${RECALL_CLAUDE_ROOT:=$RECALL_DIR/claude}"
+: "${RECALL_CLAUDE_COMMANDS_DIR:=$RECALL_CLAUDE_ROOT/commands/Recall}"
+: "${RECALL_OPENCODE_ROOT:=$RECALL_DIR/opencode}"
+: "${RECALL_OPENCODE_PLUGINS_DIR:=$RECALL_OPENCODE_ROOT/plugins}"
+: "${RECALL_PI_ROOT:=$RECALL_DIR/pi}"
+: "${RECALL_PI_EXTENSIONS_DIR:=$RECALL_PI_ROOT/extensions}"
+: "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
+
+# Backups live under the install root now (was $CLAUDE_DIR/backups/recall).
 : "${TIMESTAMP:=$(date +%Y%m%d_%H%M%S)}"
+: "${BACKUP_BASE:=$RECALL_DIR/backups}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
 
 # Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
@@ -70,7 +87,9 @@ fi
 : "${NO_CONFIRM:=false}"
 
 
-# Files that install.sh / update.sh back up before modifying
+# Files that install.sh / update.sh back up before modifying.
+# Both the legacy DB path (~/.claude/memory.db) and the new canonical path
+# (~/.agents/Recall/recall.db) are listed so a snapshot survives migration.
 if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
   FILES_TO_BACKUP=(
     "$CLAUDE_DIR/.mcp.json"
@@ -78,6 +97,7 @@ if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
     "$CLAUDE_DIR/CLAUDE.md"
     "$CLAUDE_DIR/settings.json"
     "$CLAUDE_DIR/memory.db"
+    "$RECALL_DIR/recall.db"
     "$OPENCODE_CONFIG_DIR/opencode.json"
     "$PI_CONFIG_DIR/mcp.json"
     "$PI_CONFIG_DIR/AGENTS.md"
@@ -688,6 +708,72 @@ recall_select_platforms() {
 }
 
 
+# ── Interactive DB-path prompt ───────────────────────────────────────────────
+#
+# Prompts the user for a custom database location during install. Defaults to
+# $RECALL_DIR/recall.db. Sets $RECALL_DB_PATH to the chosen value (exported so
+# downstream install steps and auto_migrate see it), or leaves the variable
+# unset to fall through to the default.
+#
+# Skipped when:
+#   - NO_CONFIRM=true (passed via --yes / -y)
+#   - stdin is not a TTY (curl|bash, CI, scripts)
+#   - RECALL_DB_PATH is already set (--db-path flag handler exports it)
+recall_prompt_db_path() {
+  if [[ "$NO_CONFIRM" == "true" ]] || [[ ! -t 0 ]]; then
+    return 0
+  fi
+  if [[ -n "${RECALL_DB_PATH:-}" ]]; then
+    log_info "Using DB path from environment: $RECALL_DB_PATH"
+    return 0
+  fi
+
+  local default_path="$RECALL_DIR/recall.db"
+  local default_short="${default_path/#$HOME/\~}"
+  local chosen=""
+
+  echo ""
+  log_info "Recall stores its database at the path below. Press Enter to accept,"
+  log_info "or type a custom absolute path (parent directory must be writable)."
+  echo ""
+
+  if [[ -n "${HAS_GUM:-}" ]] && [[ "$HAS_GUM" == "true" ]]; then
+    # gum input doesn't honor an empty default, so we pre-seed the field.
+    chosen="$(gum input --value "$default_path" --prompt "Database path: " 2>/dev/null || echo "")"
+  else
+    printf "Database path [%s]: " "$default_short"
+    read -r chosen
+  fi
+
+  # Empty answer (just hit Enter) → accept default.
+  if [[ -z "$chosen" ]]; then
+    chosen="$default_path"
+  fi
+
+  # Expand a leading tilde so we always store/export an absolute path.
+  if [[ "$chosen" == "~"* ]]; then
+    chosen="${chosen/#\~/$HOME}"
+  fi
+
+  # Validate parent directory is creatable. We don't require the file to
+  # exist — fresh installs create it. But the parent path needs to be
+  # writable (or creatable) so `mkdir -p` succeeds later.
+  local parent
+  parent="$(dirname "$chosen")"
+  if ! mkdir -p "$parent" 2>/dev/null; then
+    log_error "Cannot create parent directory: $parent"
+    log_error "Re-run install and choose a different path."
+    return 1
+  fi
+  if [[ ! -w "$parent" ]]; then
+    log_error "Parent directory is not writable: $parent"
+    return 1
+  fi
+
+  export RECALL_DB_PATH="$chosen"
+  log_success "Database path set to: ${chosen/#$HOME/\~}"
+}
+
 # ── Backup ───────────────────────────────────────────────────────────────────
 
 recall_create_backup() {
@@ -856,6 +942,369 @@ recall_do_restore() {
   echo "To undo this restore: ./install.sh restore pre_restore_$TIMESTAMP"
 }
 
+# ── Install root + symlink helpers ───────────────────────────────────────────
+#
+# Recall stores canonical files under $RECALL_DIR. Each platform home
+# (~/.claude/, ~/.config/opencode/, ~/.pi/agent/) receives PER-FILE symlinks
+# back to the canonical files — never directory-level symlinks — so a platform
+# directory can mix Recall-owned symlinks with files owned by other tools.
+#
+# Functions:
+#   recall_create_install_root         — mkdir the full $RECALL_DIR tree
+#   recall_resolve_db_path             — resolve DB path honoring env vars
+#   recall_copy_canonical SRC DEST     — install a canonical file (with mkdirs)
+#   recall_link TARGET CANONICAL       — create a per-file symlink with the
+#                                        collision rule (skip/replace/backup)
+#   recall_unlink_if_managed TARGET    — remove a Recall-managed symlink, leave
+#                                        regular files and foreign symlinks alone
+
+# Create the canonical install root and all its expected subdirectories.
+# Idempotent: re-running on an existing install is a no-op.
+recall_create_install_root() {
+  mkdir -p \
+    "$RECALL_DIR" \
+    "$RECALL_SHARED_HOOKS_LIB_DIR" \
+    "$RECALL_CLAUDE_COMMANDS_DIR" \
+    "$RECALL_OPENCODE_PLUGINS_DIR" \
+    "$RECALL_PI_EXTENSIONS_DIR" \
+    "$RECALL_MEMORY_DIR" \
+    "$BACKUP_BASE"
+}
+
+# Resolve the configured DB path. Precedence matches src/db/connection.ts
+# and hooks/lib/db-path.ts:
+#   1. RECALL_DB_PATH
+#   2. MEM_DB_PATH (deprecated; still honored)
+#   3. $RECALL_DIR/recall.db (default)
+# Uses `eval echo` so tildes embedded in env vars expand to absolute paths.
+recall_resolve_db_path() {
+  local raw
+  if [[ -n "${RECALL_DB_PATH:-}" ]]; then
+    raw="$RECALL_DB_PATH"
+  elif [[ -n "${MEM_DB_PATH:-}" ]]; then
+    raw="$MEM_DB_PATH"
+  else
+    raw="$RECALL_DIR/recall.db"
+  fi
+  eval echo "$raw"
+}
+
+# Copy a file from the repo into its canonical location under $RECALL_DIR.
+# Creates parent directories. Overwrites unconditionally so update.sh refresh
+# always replaces stale canonicals from the previous release.
+#
+# Args: SRC_PATH  CANONICAL_PATH
+recall_copy_canonical() {
+  local src="$1"
+  local dest="$2"
+  if [[ ! -f "$src" ]]; then
+    log_warn "recall_copy_canonical: source not found: $src"
+    return 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$dest"
+}
+
+# Move a regular file (or foreign symlink) at TARGET into the backup tree
+# preserving its relative path under $HOME, so we never lose user edits.
+# Used by the collision rule before replacing an existing target with a
+# Recall-managed symlink.
+#
+# Args: TARGET_PATH
+_recall_backup_collision() {
+  local target="$1"
+  local rel
+  if [[ "$target" == "$HOME/"* ]]; then
+    rel="${target#$HOME/}"
+  else
+    rel="${target#/}"
+  fi
+  local dest="$BACKUP_DIR/collisions/$rel"
+  mkdir -p "$(dirname "$dest")"
+  # `mv` preserves the original file type (regular file or symlink).
+  mv "$target" "$dest"
+}
+
+# Create a per-file symlink at TARGET pointing to CANONICAL. Applies the
+# collision rule:
+#   - TARGET missing                              → create symlink (silent).
+#   - TARGET is symlink pointing at CANONICAL     → skip (idempotent re-run).
+#   - TARGET is regular file, hash matches        → unlink, create symlink.
+#   - TARGET is regular file, hash differs        → backup, create symlink.
+#   - TARGET is symlink pointing elsewhere        → backup, create symlink.
+#
+# Always emits at most one log line per call. Returns 0 unless the canonical
+# is missing (operator error — abort hard).
+#
+# Args: TARGET_PATH  CANONICAL_PATH
+recall_link() {
+  local target="$1"
+  local canonical="$2"
+
+  if [[ ! -e "$canonical" ]]; then
+    log_error "recall_link: canonical missing: $canonical"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$target")"
+
+  # Already correct — nothing to do.
+  if [[ -L "$target" ]]; then
+    local current_target
+    current_target="$(readlink "$target")"
+    if [[ "$current_target" == "$canonical" ]]; then
+      return 0
+    fi
+    # Foreign symlink — back it up and replace.
+    _recall_backup_collision "$target"
+    ln -s "$canonical" "$target"
+    log_info "Replaced foreign symlink: $target"
+    return 0
+  fi
+
+  if [[ -e "$target" ]]; then
+    # Regular file. Compare hashes; if identical, replace silently. If drifted,
+    # back up the user's version then symlink.
+    local target_hash canonical_hash
+    target_hash="$(_recall_hash_file "$target")"
+    canonical_hash="$(_recall_hash_file "$canonical")"
+    if [[ "$target_hash" == "$canonical_hash" ]]; then
+      rm -f "$target"
+      ln -s "$canonical" "$target"
+      return 0
+    fi
+    _recall_backup_collision "$target"
+    ln -s "$canonical" "$target"
+    log_warn "Backed up drifted file before linking: $target"
+    return 0
+  fi
+
+  # Missing — fresh link.
+  ln -s "$canonical" "$target"
+}
+
+# Hash a file using whichever sha256 tool is available. Returns empty string on
+# failure — callers treat empty hashes as "uncomparable" and fall through to
+# the backup-then-link path (safe default).
+_recall_hash_file() {
+  local f="$1"
+  if [[ ! -f "$f" ]]; then
+    echo ""
+    return
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$f" 2>/dev/null | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$f" 2>/dev/null | awk '{print $1}'
+  else
+    echo ""
+  fi
+}
+
+# Remove a symlink only if it's Recall-managed (its target resolves to a path
+# under $RECALL_DIR). Regular files and foreign symlinks are left alone so we
+# never delete user-owned data on update / uninstall.
+#
+# Args: TARGET_PATH
+recall_unlink_if_managed() {
+  local target="$1"
+  if [[ ! -L "$target" ]]; then
+    return 0
+  fi
+  local resolved
+  resolved="$(readlink "$target")"
+  if [[ "$resolved" == "$RECALL_DIR"/* ]]; then
+    rm -f "$target"
+  fi
+}
+
+# ── Post-install symlink verification ────────────────────────────────────────
+#
+# After install completes, walk every symlink the installer was supposed to
+# create and report any that are missing or point at the wrong target. This
+# catches the class of failure where individual steps silently exit early
+# (e.g. interrupted between recall_copy_canonical and recall_link inside a
+# loop, leaving canonicals in place but no symlinks at the platform home).
+#
+# Returns 0 if every expected symlink resolves correctly, 1 otherwise.
+# Prints a structured failure list with a recovery hint.
+#
+# Coverage:
+#   - Each hook symlink (Recall*.ts → ~/.agents/Recall/shared/hooks/)
+#   - Each slash-command symlink (discovered from canonical dir)
+#   - The Claude Code Recall_GUIDE.md symlink
+recall_verify_install() {
+  local missing=()
+  local wrong_target=()
+
+  _check_symlink() {
+    local target="$1"
+    local expected_canonical="$2"
+    if [[ ! -e "$target" ]] && [[ ! -L "$target" ]]; then
+      missing+=("$target")
+      return
+    fi
+    if [[ ! -L "$target" ]]; then
+      wrong_target+=("$target (regular file, expected symlink → $expected_canonical)")
+      return
+    fi
+    local actual
+    actual="$(readlink "$target")"
+    if [[ "$actual" != "$expected_canonical" ]]; then
+      wrong_target+=("$target (points at $actual, expected $expected_canonical)")
+    fi
+  }
+
+  # Hooks
+  local hook
+  for hook in RecallExtract RecallStart RecallPreCompact RecallBatchExtract RecallTelosSync RecallClearExtract; do
+    local canonical="$RECALL_SHARED_HOOKS_DIR/$hook.ts"
+    [[ ! -f "$canonical" ]] && continue
+    _check_symlink "$CLAUDE_DIR/hooks/$hook.ts" "$canonical"
+  done
+
+  # Recall_GUIDE.md (Claude)
+  if [[ -f "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md" ]]; then
+    _check_symlink "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+  fi
+
+  # Slash commands — derived from the canonical dir so we adapt to whatever
+  # commands ship in this release.
+  if [[ -d "$RECALL_CLAUDE_COMMANDS_DIR" ]]; then
+    local cmdfile
+    for cmdfile in "$RECALL_CLAUDE_COMMANDS_DIR"/*.md; do
+      [[ -f "$cmdfile" ]] || continue
+      local base
+      base="$(basename "$cmdfile")"
+      _check_symlink "$CLAUDE_DIR/commands/Recall/$base" "$cmdfile"
+    done
+  fi
+
+  # extract_prompt.md (lives under Claude's MEMORY dir, not owned by us, but
+  # the symlink points back at our canonical).
+  if [[ -f "$RECALL_SHARED_DIR/extract_prompt.md" ]]; then
+    _check_symlink "$CLAUDE_DIR/MEMORY/extract_prompt.md" "$RECALL_SHARED_DIR/extract_prompt.md"
+  fi
+
+  if [[ ${#missing[@]} -eq 0 ]] && [[ ${#wrong_target[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  log_error "Install verification failed — these symlinks are not in their expected state:"
+  local m
+  for m in "${missing[@]}"; do
+    log_error "  MISSING:   $m"
+  done
+  for m in "${wrong_target[@]}"; do
+    log_error "  MISLINKED: $m"
+  done
+  log_error ""
+  log_error "Recovery options:"
+  log_error "  1. Re-run ./install.sh (the collision rule is idempotent)."
+  log_error "  2. Run 'mem doctor --fix' (probes + repairs every symlink class)."
+  return 1
+}
+
+# ── Auto-migration ───────────────────────────────────────────────────────────
+#
+# recall_auto_migrate moves a legacy database (typically ~/.claude/memory.db)
+# to the new canonical location ($RECALL_DIR/recall.db) and renames sidecar
+# files. Designed to be safe to run on every install/update invocation:
+#   - If the canonical DB already exists, do nothing.
+#   - If no legacy DB is found, do nothing (fresh install).
+#   - Otherwise: snapshot the source first, then atomic-move main + sidecars,
+#     and migrate user-authored MEMORY files (identity.md, DISTILLED.md).
+#
+# Config rewrites (adding RECALL_DB_PATH to MCP/hook configs) are handled by
+# the regular install-flow functions (recall_configure_mcp,
+# recall_configure_opencode_mcp, recall_configure_pi_mcp) — auto_migrate's
+# job is just data movement.
+recall_auto_migrate() {
+  local target
+  target="$(recall_resolve_db_path)"
+
+  # Already at canonical location → nothing to migrate.
+  if [[ -f "$target" ]]; then
+    return 0
+  fi
+
+  # Locate a legacy DB. Order matters: an explicit env var override takes
+  # precedence over the historical default at $CLAUDE_DIR/memory.db.
+  local source=""
+  if [[ -n "${MEM_DB_PATH:-}" ]] && [[ -f "$MEM_DB_PATH" ]] && [[ "$MEM_DB_PATH" != "$target" ]]; then
+    source="$MEM_DB_PATH"
+  elif [[ -f "$CLAUDE_DIR/memory.db" ]]; then
+    source="$CLAUDE_DIR/memory.db"
+  fi
+
+  if [[ -z "$source" ]]; then
+    # Nothing to migrate — fresh install. The empty target file will be
+    # created when `mem init` runs later in the install sequence.
+    return 0
+  fi
+
+  log_info "Auto-migrating legacy database: $source → $target"
+
+  # Refuse to migrate if a process has the DB open. SQLite WAL mode lets
+  # readers and writers coexist, but moving a file out from under an active
+  # connection corrupts the WAL pointer. lsof's absence is treated as
+  # "probably safe" — best-effort check.
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -- "$source" >/dev/null 2>&1; then
+      log_error "Refusing to migrate: a process has $source open."
+      log_error "Stop mem-mcp (\`pkill -f mem-mcp\`) and any active \`mem\` CLI, then retry."
+      return 1
+    fi
+  fi
+
+  # Pre-migration snapshot. Source DB + sidecars + relevant configs go into
+  # $BACKUP_DIR/pre-migrate/ before any state change.
+  local snap_dir="$BACKUP_DIR/pre-migrate"
+  mkdir -p "$snap_dir"
+  cp "$source" "$snap_dir/$(basename "$source")" 2>/dev/null || true
+  for ext in -wal -shm; do
+    if [[ -f "${source}${ext}" ]]; then
+      cp "${source}${ext}" "$snap_dir/$(basename "$source")${ext}"
+    fi
+  done
+  for cfg in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json" \
+             "$OPENCODE_CONFIG_DIR/opencode.json" "$PI_CONFIG_DIR/mcp.json"; do
+    if [[ -f "$cfg" ]]; then
+      local rel="${cfg#$HOME/}"
+      mkdir -p "$snap_dir/$(dirname "$rel")"
+      cp "$cfg" "$snap_dir/$rel"
+    fi
+  done
+
+  # Move the DB + sidecars atomically. Sidecars are renamed to match the new
+  # base name ($target without the .db extension) so SQLite finds them.
+  mkdir -p "$(dirname "$target")"
+  mv "$source" "$target"
+  local target_base="${target%.db}"
+  local source_base="${source%.db}"
+  for ext in -wal -shm; do
+    if [[ -f "${source_base}.db${ext}" ]]; then
+      mv "${source_base}.db${ext}" "${target_base}.db${ext}"
+    fi
+  done
+  log_success "Database migrated: $target"
+
+  # Migrate user-authored MEMORY artifacts (identity.md, DISTILLED.md only).
+  # extract_prompt.md is handled by the symlink+collision flow during the
+  # regular hook-install step. sessions/ subdirs are left in place.
+  for fname in identity.md DISTILLED.md; do
+    local src_file="$CLAUDE_DIR/MEMORY/$fname"
+    local dest_file="$RECALL_MEMORY_DIR/$fname"
+    if [[ -f "$src_file" ]] && [[ ! -L "$src_file" ]] && [[ ! -f "$dest_file" ]]; then
+      mkdir -p "$RECALL_MEMORY_DIR"
+      mv "$src_file" "$dest_file"
+      log_info "Migrated MEMORY file: $fname"
+    fi
+  done
+
+  log_success "Migration snapshot: $snap_dir"
+}
+
 # ── MCP registration ─────────────────────────────────────────────────────────
 
 recall_configure_mcp() {
@@ -865,44 +1314,83 @@ recall_configure_mcp() {
 
   mkdir -p "$CLAUDE_DIR"
 
+  local already_registered=false
   if command -v claude &>/dev/null; then
     if claude mcp list 2>/dev/null | grep -q "recall-memory"; then
+      already_registered=true
       log_success "MCP already configured for recall-memory"
-      return
-    fi
-
-    log_info "Registering recall-memory MCP server..."
-    if claude mcp add --transport stdio --scope user recall-memory -- \
-      "$bun_path" "run" "$mem_mcp_path" 2>/dev/null; then
-      log_success "Registered recall-memory MCP server via Claude Code CLI"
     else
-      log_warn "claude mcp add failed — adding to settings.json directly"
-      _recall_write_mcp_settings "$bun_path" "$mem_mcp_path"
+      log_info "Registering recall-memory MCP server..."
+      if claude mcp add --transport stdio --scope user recall-memory -- \
+        "$bun_path" "run" "$mem_mcp_path" 2>/dev/null; then
+        log_success "Registered recall-memory MCP server via Claude Code CLI"
+      else
+        log_warn "claude mcp add failed — adding to settings.json directly"
+        _recall_write_mcp_settings "$bun_path" "$mem_mcp_path"
+      fi
     fi
   else
     log_warn "Claude Code CLI not found — adding recall-memory to settings.json directly"
     _recall_write_mcp_settings "$bun_path" "$mem_mcp_path"
   fi
+
+  # `claude mcp add` does not let us set an env block, and historically left
+  # env: {} so mem-mcp resolved the DB path from defaults — which broke
+  # custom installs. Patch the env block in whichever config file owns the
+  # registration so RECALL_DB_PATH always reaches the spawned mem-mcp process.
+  _recall_ensure_mcp_env
+}
+
+# Ensure the recall-memory MCP registration has env.RECALL_DB_PATH pointing at
+# the resolved canonical DB path. Patches both ~/.claude.json and
+# ~/.claude/settings.json if either contains the registration. Idempotent.
+_recall_ensure_mcp_env() {
+  local db_path_abs
+  db_path_abs="$(recall_resolve_db_path)"
+
+  local f
+  for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
+    [[ -f "$f" ]] || continue
+    if ! grep -q "recall-memory" "$f"; then
+      continue
+    fi
+    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" bun -e '
+      const fs = require("fs");
+      const file = process.env.CFG_FILE;
+      const dbPath = process.env.DB_PATH_ABS;
+      let cfg;
+      try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return; }
+      if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) return;
+      const entry = cfg.mcpServers["recall-memory"];
+      entry.env = entry.env || {};
+      entry.env.RECALL_DB_PATH = dbPath;
+      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+    ' 2>/dev/null && log_success "Patched env.RECALL_DB_PATH in $(basename "$f")"
+  done
 }
 
 _recall_write_mcp_settings() {
   local bun_path="$1"
   local mem_mcp_path="$2"
   local settings_file="$CLAUDE_DIR/settings.json"
+  local db_path_abs
+  db_path_abs="$(recall_resolve_db_path)"
 
   if [[ -f "$settings_file" ]] && grep -q "recall-memory" "$settings_file"; then
     log_success "recall-memory already in settings.json"
     return
   fi
 
-  SETTINGS_FILE="$settings_file" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" node -e '
+  SETTINGS_FILE="$settings_file" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
+    DB_PATH_ABS="$db_path_abs" node -e '
     const fs = require("fs");
     let config = {};
     try { config = JSON.parse(fs.readFileSync(process.env.SETTINGS_FILE, "utf8")); } catch {}
     config.mcpServers = config.mcpServers || {};
     config.mcpServers["recall-memory"] = {
       command: process.env.BUN_PATH,
-      args: ["run", process.env.MCP_PATH]
+      args: ["run", process.env.MCP_PATH],
+      env: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
     };
     fs.writeFileSync(process.env.SETTINGS_FILE, JSON.stringify(config, null, 2));
   '
@@ -925,33 +1413,45 @@ _recall_copy_hook_files() {
   local hooks_dir="$CLAUDE_DIR/hooks"
   local src_dir="$(pwd)/hooks"
 
-  mkdir -p "$hooks_dir"
-
-  # SessionExtract is required; log and bail early if missing.
-  if [[ ! -f "$src_dir/SessionExtract.ts" ]]; then
-    log_warn "SessionExtract.ts not found in $src_dir — skipping hook setup"
+  # RecallExtract is required; log and bail early if missing.
+  if [[ ! -f "$src_dir/RecallExtract.ts" ]]; then
+    log_warn "RecallExtract.ts not found in $src_dir — skipping hook setup"
     return 1
   fi
 
+  # Hooks now live canonically under $RECALL_SHARED_HOOKS_DIR. The platform
+  # home (~/.claude/hooks/) gets per-file symlinks back to those canonicals.
+  recall_create_install_root
+  mkdir -p "$hooks_dir"
+
   local hook
-  for hook in SessionExtract BatchExtract TelosSync SessionRecall SessionPreCompact ClearExtract; do
+  for hook in RecallExtract RecallBatchExtract RecallTelosSync RecallStart RecallPreCompact RecallClearExtract; do
     if [[ -f "$src_dir/$hook.ts" ]]; then
-      cp "$src_dir/$hook.ts" "$hooks_dir/$hook.ts"
-      log_success "Copied $hook.ts to $hooks_dir"
+      recall_copy_canonical "$src_dir/$hook.ts" "$RECALL_SHARED_HOOKS_DIR/$hook.ts"
+      recall_link "$hooks_dir/$hook.ts" "$RECALL_SHARED_HOOKS_DIR/$hook.ts"
+      log_success "Installed hook: $hook.ts"
     fi
   done
 
   if [[ -d "$src_dir/lib" ]]; then
     mkdir -p "$hooks_dir/lib"
-    cp "$src_dir/lib/"*.ts "$hooks_dir/lib/" 2>/dev/null || true
-    log_success "Copied hooks/lib/ to $hooks_dir/lib/"
+    local libfile
+    for libfile in "$src_dir/lib/"*.ts; do
+      [[ -f "$libfile" ]] || continue
+      local base
+      base="$(basename "$libfile")"
+      recall_copy_canonical "$libfile" "$RECALL_SHARED_HOOKS_LIB_DIR/$base"
+      recall_link "$hooks_dir/lib/$base" "$RECALL_SHARED_HOOKS_LIB_DIR/$base"
+    done
+    log_success "Installed hooks/lib/ ($(ls -1 "$RECALL_SHARED_HOOKS_LIB_DIR" 2>/dev/null | wc -l | tr -d ' ') files)"
   fi
 
   local memory_dir="$CLAUDE_DIR/MEMORY"
   mkdir -p "$memory_dir"
   if [[ -f "$src_dir/extract_prompt.md" ]]; then
-    cp "$src_dir/extract_prompt.md" "$memory_dir/extract_prompt.md"
-    log_success "Copied extraction prompt template to $memory_dir"
+    recall_copy_canonical "$src_dir/extract_prompt.md" "$RECALL_SHARED_DIR/extract_prompt.md"
+    recall_link "$memory_dir/extract_prompt.md" "$RECALL_SHARED_DIR/extract_prompt.md"
+    log_success "Installed extraction prompt template"
   fi
 }
 
@@ -959,7 +1459,7 @@ _recall_copy_hook_files() {
 #
 # Registers ONE hook in settings.json if an entry for this hook name is not
 # already present. `hook_name` is the substring used to detect an existing
-# registration (e.g. "SessionExtract"). `event` is the settings.json key
+# registration (e.g. "RecallExtract"). `event` is the settings.json key
 # (Stop, SessionStart, PreCompact, UserPromptSubmit). `matcher` defaults to
 # "" (matches all) — pass "clear" / "startup" / "resume" / "compact" to
 # restrict a SessionStart hook to a specific source.
@@ -1014,34 +1514,34 @@ recall_register_all_hooks() {
   local bun_path
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
 
-  if [[ -f "$hooks_dir/SessionExtract.ts" ]]; then
-    recall_register_hook "Stop" "SessionExtract" \
-      "$bun_path run $hooks_dir/SessionExtract.ts"
-    log_success "Registered SessionExtract hook in settings.json"
+  if [[ -f "$hooks_dir/RecallExtract.ts" ]]; then
+    recall_register_hook "Stop" "RecallExtract" \
+      "$bun_path run $hooks_dir/RecallExtract.ts"
+    log_success "Registered RecallExtract hook in settings.json"
   fi
 
-  if [[ -f "$hooks_dir/TelosSync.ts" ]]; then
-    recall_register_hook "SessionStart" "TelosSync" \
-      "$bun_path run $hooks_dir/TelosSync.ts" 10000
-    log_success "Registered TelosSync hook in settings.json"
+  if [[ -f "$hooks_dir/RecallTelosSync.ts" ]]; then
+    recall_register_hook "SessionStart" "RecallTelosSync" \
+      "$bun_path run $hooks_dir/RecallTelosSync.ts" 10000
+    log_success "Registered RecallTelosSync hook in settings.json"
   fi
 
-  if [[ -f "$hooks_dir/SessionRecall.ts" ]]; then
-    recall_register_hook "SessionStart" "SessionRecall" \
-      "$bun_path run $hooks_dir/SessionRecall.ts"
-    log_success "Registered SessionRecall hook (SessionStart) in settings.json"
+  if [[ -f "$hooks_dir/RecallStart.ts" ]]; then
+    recall_register_hook "SessionStart" "RecallStart" \
+      "$bun_path run $hooks_dir/RecallStart.ts"
+    log_success "Registered RecallStart hook (SessionStart) in settings.json"
   fi
 
-  if [[ -f "$hooks_dir/SessionPreCompact.ts" ]]; then
-    recall_register_hook "PreCompact" "SessionPreCompact" \
-      "$bun_path run $hooks_dir/SessionPreCompact.ts" 10000
-    log_success "Registered SessionPreCompact hook (PreCompact) in settings.json"
+  if [[ -f "$hooks_dir/RecallPreCompact.ts" ]]; then
+    recall_register_hook "PreCompact" "RecallPreCompact" \
+      "$bun_path run $hooks_dir/RecallPreCompact.ts" 10000
+    log_success "Registered RecallPreCompact hook (PreCompact) in settings.json"
   fi
 
-  if [[ -f "$hooks_dir/ClearExtract.ts" ]]; then
-    recall_register_hook "SessionStart" "ClearExtract" \
-      "$bun_path run $hooks_dir/ClearExtract.ts" "" "clear"
-    log_success "Registered ClearExtract hook (SessionStart matcher=clear) in settings.json"
+  if [[ -f "$hooks_dir/RecallClearExtract.ts" ]]; then
+    recall_register_hook "SessionStart" "RecallClearExtract" \
+      "$bun_path run $hooks_dir/RecallClearExtract.ts" "" "clear"
+    log_success "Registered RecallClearExtract hook (SessionStart matcher=clear) in settings.json"
   fi
 }
 
@@ -1051,6 +1551,68 @@ recall_register_all_hooks() {
 configure_hooks() {
   _recall_copy_hook_files || return
   recall_register_all_hooks
+}
+
+# Rewrite legacy hook names (SessionExtract, SessionRecall, etc.) to their
+# new Recall* equivalents inside ~/.claude/settings.json. Used by update.sh
+# to migrate existing installs from the Phase 1 naming to Phase 2 naming.
+# Idempotent: re-running on already-migrated configs is a no-op. Also strips
+# stale file paths under ~/.claude/hooks/<old-name>.ts so the next install
+# round can register the new symlinks cleanly.
+recall_rename_hooks_in_settings() {
+  local settings_file="$CLAUDE_DIR/settings.json"
+  [[ ! -f "$settings_file" ]] && return 0
+
+  SETTINGS_FILE="$settings_file" bun -e '
+    const fs = require("fs");
+    const file = process.env.SETTINGS_FILE;
+    let cfg;
+    try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return; }
+    if (!cfg.hooks || typeof cfg.hooks !== "object") return;
+
+    // Map of old hook name → new hook name. Order matters in the substitution
+    // loop: longest patterns first so we never rename a substring that
+    // becomes the prefix of another rename.
+    const renames = [
+      ["SessionPreCompact", "RecallPreCompact"],
+      ["SessionExtract",    "RecallExtract"],
+      ["SessionRecall",     "RecallStart"],
+      ["BatchExtract",      "RecallBatchExtract"],
+      ["TelosSync",         "RecallTelosSync"],
+      ["ClearExtract",      "RecallClearExtract"],
+    ];
+
+    let changed = false;
+    for (const event of Object.keys(cfg.hooks)) {
+      const list = cfg.hooks[event];
+      if (!Array.isArray(list)) continue;
+      for (const entry of list) {
+        const inner = (entry && entry.hooks) || [];
+        for (const h of inner) {
+          if (!h || typeof h.command !== "string") continue;
+          let cmd = h.command;
+          for (const [oldName, newName] of renames) {
+            // Match only the filename, not a substring inside another name.
+            // \b before, then OldName, then .ts or end.
+            const re = new RegExp("(?<=[/\\b])" + oldName + "(?=\\.ts|$|\\s|\\b)", "g");
+            if (re.test(cmd)) {
+              cmd = cmd.replace(re, newName);
+              changed = true;
+            }
+          }
+          // Guard against double-prefix runaway from a partially-migrated
+          // settings file (e.g. someone hand-edited "RecallSessionExtract").
+          cmd = cmd.replace(/RecallRecall/g, "Recall");
+          h.command = cmd;
+        }
+      }
+    }
+
+    if (changed) {
+      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+      console.log("Migrated hook names in " + file);
+    }
+  ' 2>/dev/null
 }
 
 # ── CLAUDE.md ────────────────────────────────────────────────────────────────
@@ -1108,15 +1670,14 @@ recall_configure_opencode_mcp() {
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
 
   local db_path_abs
-  db_path_abs="$(eval echo "${MEM_DB_PATH:-$HOME/.claude/memory.db}")"
+  db_path_abs="$(recall_resolve_db_path)"
 
   mkdir -p "$OPENCODE_CONFIG_DIR"
 
-  if [[ -f "$config" ]] && grep -q "recall-memory" "$config"; then
-    log_success "recall-memory already registered in opencode.json"
-    return
-  fi
-
+  # Always overwrite the env block so existing installs pick up RECALL_DB_PATH
+  # even when the registration is already present. (The old code returned
+  # early on detection of "recall-memory", which left stale env vars in place
+  # after a path-changing update.)
   INSTALL_MCP_PATH="$mem_mcp_path" \
     BUN_PATH="$bun_path" \
     DB_PATH_ABS="$db_path_abs" \
@@ -1136,7 +1697,7 @@ recall_configure_opencode_mcp() {
         type: "local",
         command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
         enabled: true,
-        environment: { MEM_DB_PATH: process.env.DB_PATH_ABS }
+        environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
       };
       fs.writeFileSync(path, JSON.stringify(existing, null, 2));
     '
@@ -1147,12 +1708,14 @@ recall_install_opencode_plugins() {
   local plugin_dir="$OPENCODE_CONFIG_DIR/plugins"
   local src_dir="$(pwd)/opencode"
 
+  recall_create_install_root
   mkdir -p "$plugin_dir"
 
   local plugin
-  for plugin in recall-extract.ts recall-compaction.ts; do
+  for plugin in RecallExtract.ts RecallPreCompact.ts; do
     if [[ -f "$src_dir/$plugin" ]]; then
-      cp "$src_dir/$plugin" "$plugin_dir/"
+      recall_copy_canonical "$src_dir/$plugin" "$RECALL_OPENCODE_PLUGINS_DIR/$plugin"
+      recall_link "$plugin_dir/$plugin" "$RECALL_OPENCODE_PLUGINS_DIR/$plugin"
       log_success "Installed $plugin plugin"
     fi
   done
@@ -1172,7 +1735,10 @@ recall_install_opencode_agent() {
 
 recall_install_opencode_guide() {
   if [[ -f "$(pwd)/FOR_OPENCODE.md" ]]; then
-    cp "$(pwd)/FOR_OPENCODE.md" "$OPENCODE_CONFIG_DIR/Recall_GUIDE.md"
+    recall_create_install_root
+    mkdir -p "$OPENCODE_CONFIG_DIR"
+    recall_copy_canonical "$(pwd)/FOR_OPENCODE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
+    recall_link "$OPENCODE_CONFIG_DIR/Recall_GUIDE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide for OpenCode"
   fi
 }
@@ -1192,17 +1758,13 @@ recall_install_pi_adapter() {
 recall_configure_pi_mcp() {
   local config="$PI_CONFIG_DIR/mcp.json"
   local db_path_abs
-  db_path_abs="$(eval echo "${MEM_DB_PATH:-$HOME/.claude/memory.db}")"
+  db_path_abs="$(recall_resolve_db_path)"
   local mem_mcp_path
   mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
 
   mkdir -p "$PI_CONFIG_DIR"
 
-  if [[ -f "$config" ]] && grep -q "recall-memory" "$config"; then
-    log_success "recall-memory already registered in Pi mcp.json"
-    return
-  fi
-
+  # Always rewrite the env block (see recall_configure_opencode_mcp for why).
   MCP_CONFIG_PATH="$config" \
     DB_PATH_ABS="$db_path_abs" \
     MEM_MCP_PATH="$mem_mcp_path" \
@@ -1221,7 +1783,7 @@ recall_configure_pi_mcp() {
         command: process.env.MEM_MCP_PATH,
         args: [],
         lifecycle: "lazy",
-        environment: { MEM_DB_PATH: process.env.DB_PATH_ABS }
+        environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
       };
       fs.writeFileSync(path, JSON.stringify(existing, null, 2));
     '
@@ -1232,22 +1794,26 @@ recall_install_pi_extensions() {
   local ext_dir="$PI_CONFIG_DIR/extensions"
   local src_dir="$(pwd)/pi"
 
+  recall_create_install_root
   mkdir -p "$ext_dir"
 
   local ext
-  for ext in recall-extract.ts recall-compaction.ts; do
+  for ext in RecallExtract.ts RecallPreCompact.ts; do
     if [[ -f "$src_dir/$ext" ]]; then
-      cp "$src_dir/$ext" "$ext_dir/"
+      recall_copy_canonical "$src_dir/$ext" "$RECALL_PI_EXTENSIONS_DIR/$ext"
+      recall_link "$ext_dir/$ext" "$RECALL_PI_EXTENSIONS_DIR/$ext"
       log_success "Installed $ext Pi extension"
     fi
   done
 }
 
 recall_install_pi_guide() {
+  recall_create_install_root
   mkdir -p "$PI_CONFIG_DIR"
 
   if [[ -f "$(pwd)/FOR_PI.md" ]]; then
-    cp "$(pwd)/FOR_PI.md" "$PI_CONFIG_DIR/Recall_GUIDE.md"
+    recall_copy_canonical "$(pwd)/FOR_PI.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
+    recall_link "$PI_CONFIG_DIR/Recall_GUIDE.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide for Pi"
   fi
 
@@ -1290,27 +1856,49 @@ Tool syntax:
 # and update.sh Step 7 to keep runtime artifacts in sync with the source tree.
 
 recall_copy_runtime_files() {
+  recall_create_install_root
   _recall_copy_hook_files
 
-  # FOR_CLAUDE.md → Recall_GUIDE.md
+  # FOR_CLAUDE.md → Recall_GUIDE.md (canonical lives under $RECALL_CLAUDE_ROOT,
+  # symlink at $CLAUDE_DIR/Recall_GUIDE.md).
   if [[ -f "$(pwd)/FOR_CLAUDE.md" ]]; then
-    cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/Recall_GUIDE.md"
+    recall_copy_canonical "$(pwd)/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+    recall_link "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
   fi
 
-  # Slash commands
+  # Slash commands: canonicals under $RECALL_CLAUDE_COMMANDS_DIR, per-file
+  # symlinks at $CLAUDE_DIR/commands/Recall/.
   local commands_src="$(pwd)/commands/Recall"
   local commands_dest="$CLAUDE_DIR/commands/Recall"
   local commands_legacy="$CLAUDE_DIR/commands/recall"
   if [[ -d "$commands_src" ]]; then
     mkdir -p "$commands_dest"
-    cp "$commands_src"/*.md "$commands_dest/" 2>/dev/null || true
+    local cmdfile
+    for cmdfile in "$commands_src"/*.md; do
+      [[ -f "$cmdfile" ]] || continue
+      local base
+      base="$(basename "$cmdfile")"
+      recall_copy_canonical "$cmdfile" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
+      recall_link "$commands_dest/$base" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
+    done
     if [[ -d "$commands_legacy" && "$commands_legacy" != "$commands_dest" ]]; then
       rm -rf "$commands_legacy"
       log_info "Removed legacy lowercase slash commands at $commands_legacy"
     fi
     log_success "Installed Recall: slash commands to $commands_dest"
   fi
+
+  # Symlink any user-authored MEMORY files that auto_migrate already moved.
+  # Idempotent: if a symlink already exists pointing at the canonical, recall_link
+  # is a no-op. If no canonical exists yet (user hasn't run /onboard), skip.
+  local fname
+  for fname in identity.md DISTILLED.md; do
+    if [[ -f "$RECALL_MEMORY_DIR/$fname" ]]; then
+      mkdir -p "$CLAUDE_DIR/MEMORY"
+      recall_link "$CLAUDE_DIR/MEMORY/$fname" "$RECALL_MEMORY_DIR/$fname"
+    fi
+  done
 }
 
 # ── Global link verification ─────────────────────────────────────────────────

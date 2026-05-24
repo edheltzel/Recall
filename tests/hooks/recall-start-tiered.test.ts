@@ -1,4 +1,4 @@
-// Tests for the tiered SessionRecall (Sprint #1).
+// Tests for the tiered RecallStart (Sprint #1).
 // Validates: L0 reads identity file, L1 reserves LoA slots, tie-break ordering,
 // graceful empty-state behavior, and budget enforcement.
 
@@ -36,9 +36,9 @@ afterAll(() => {
   teardownTestDb();
 });
 
-describe('SessionRecall — L0 identity', () => {
+describe('RecallStart — L0 identity', () => {
   test('buildL0 reads from RECALL_IDENTITY_PATH override', async () => {
-    const { buildL0 } = await import('../../hooks/SessionRecall');
+    const { buildL0 } = await import('../../hooks/RecallStart');
     const l0 = buildL0();
     expect(l0).toBeDefined();
     expect(l0).toContain('Ed');
@@ -49,13 +49,13 @@ describe('SessionRecall — L0 identity', () => {
     const original = process.env.RECALL_IDENTITY_PATH;
     process.env.RECALL_IDENTITY_PATH = '/nonexistent/identity.md';
     // Re-import to pick up new env? buildL0 re-reads env each call, so direct call is fine.
-    const { buildL0 } = await import('../../hooks/SessionRecall');
+    const { buildL0 } = await import('../../hooks/RecallStart');
     expect(buildL0()).toBeUndefined();
     process.env.RECALL_IDENTITY_PATH = original;
   });
 });
 
-describe('SessionRecall — L1 assembly', () => {
+describe('RecallStart — L1 assembly', () => {
   test('reserves LoA slots even when high-importance breadcrumbs exist', async () => {
     // Seed 2 LoA entries (will get default importance 8, become reserved)
     createLoaEntry({
@@ -78,7 +78,7 @@ describe('SessionRecall — L1 assembly', () => {
       });
     }
 
-    const { assembleL1 } = await import('../../hooks/SessionRecall');
+    const { assembleL1 } = await import('../../hooks/RecallStart');
     const rows = assembleL1('recall-test');
 
     const loaCount = rows.filter(r => r.table === 'loa').length;
@@ -106,7 +106,7 @@ describe('SessionRecall — L1 assembly', () => {
       importance: 7,
     });
 
-    const { assembleL1 } = await import('../../hooks/SessionRecall');
+    const { assembleL1 } = await import('../../hooks/RecallStart');
     const rows = assembleL1('tie-test');
 
     // Find indices of each
@@ -123,9 +123,9 @@ describe('SessionRecall — L1 assembly', () => {
   });
 });
 
-describe('SessionRecall — gatherContext output', () => {
+describe('RecallStart — gatherContext output', () => {
   test('emits header and L0 section (L1 may be empty depending on detected project)', async () => {
-    const { gatherContext } = await import('../../hooks/SessionRecall');
+    const { gatherContext } = await import('../../hooks/RecallStart');
     const out = gatherContext();
     expect(out).toContain('## Recall — Session Memory (tiered)');
     expect(out).toContain('### L0 — Identity');
@@ -136,7 +136,7 @@ describe('SessionRecall — gatherContext output', () => {
   });
 
   test('respects total char budget', async () => {
-    const { gatherContext } = await import('../../hooks/SessionRecall');
+    const { gatherContext } = await import('../../hooks/RecallStart');
     const out = gatherContext();
     expect(out.length).toBeLessThanOrEqual(8200); // MAX_TOTAL_CHARS plus a small overhead margin
   });

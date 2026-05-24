@@ -77,10 +77,17 @@ do_install() {
   recall_detect_platforms
   recall_select_platforms
   echo ""
+  recall_prompt_db_path
+  echo ""
 
-  # Step counter — 10 always-run steps; +1 each for OpenCode/Pi when detected.
+  # Resolve the final DB path once so downstream steps and the pre-flight
+  # summary agree on the value.
+  local RESOLVED_DB_PATH
+  RESOLVED_DB_PATH="$(recall_resolve_db_path)"
+
+  # Step counter — 11 always-run steps (added Migrate); +1 each for OpenCode/Pi.
   STEP_NUM=0
-  STEP_TOTAL=10
+  STEP_TOTAL=11
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
@@ -96,11 +103,13 @@ do_install() {
     _plist=$(IFS=", "; echo "${_platforms[*]:-(none — core install only)}")
 
     # Tildify long paths so they fit inside the 58-col panel
-    local _target_short="${CLAUDE_DIR/#$HOME/\~}"
+    local _root_short="${RECALL_DIR/#$HOME/\~}"
+    local _db_short="${RESOLVED_DB_PATH/#$HOME/\~}"
     local _backup_short="${BACKUP_DIR/#$HOME/\~}"
 
     _panel info "Pre-flight summary" \
-      "Target:     $_target_short" \
+      "Install:    $_root_short" \
+      "Database:   $_db_short" \
       "Platforms:  $_plist" \
       "Backup:     $_backup_short" \
       "Steps:      $STEP_TOTAL total"
@@ -115,6 +124,10 @@ do_install() {
 
   _step "Backup" "Creating backup of existing files"
   recall_create_backup
+
+  _step "Migrate" "Preparing install root + migrating legacy database"
+  recall_create_install_root
+  recall_auto_migrate
 
   _step "Installing" "Bun dependencies"
   if ! _run_quiet "bun install" bun install; then
@@ -159,8 +172,11 @@ do_install() {
   recall_register_all_hooks
 
   _step "Guide" "Installing Recall guide"
-  cp "$(pwd)/FOR_CLAUDE.md" "$CLAUDE_DIR/Recall_GUIDE.md"
-  log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
+  if [[ -f "$(pwd)/FOR_CLAUDE.md" ]]; then
+    recall_copy_canonical "$(pwd)/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+    recall_link "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+    log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
+  fi
 
   _step "Commands" "Installing slash commands"
   local commands_src="$(pwd)/commands/Recall"
@@ -168,7 +184,14 @@ do_install() {
   local commands_legacy="$CLAUDE_DIR/commands/recall"
   if [[ -d "$commands_src" ]]; then
     mkdir -p "$commands_dest"
-    cp "$commands_src"/*.md "$commands_dest/"
+    local cmdfile
+    for cmdfile in "$commands_src"/*.md; do
+      [[ -f "$cmdfile" ]] || continue
+      local base
+      base="$(basename "$cmdfile")"
+      recall_copy_canonical "$cmdfile" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
+      recall_link "$commands_dest/$base" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
+    done
     if [[ -d "$commands_legacy" && "$commands_legacy" != "$commands_dest" ]]; then
       rm -rf "$commands_legacy"
       log_info "Removed legacy lowercase slash commands at $commands_legacy"
@@ -204,6 +227,17 @@ do_install() {
   CURRENT_STEP="Self-check"
   log_info "Running self-check..."
   local _check_ok=true
+
+  # First: verify every expected symlink is in place. This catches the class
+  # of failure where an inner loop got interrupted between canonical-copy and
+  # symlink creation (we hit this once — slash commands canonicals were
+  # copied but the symlinks at ~/.claude/commands/Recall/ never materialized).
+  if recall_verify_install; then
+    log_success "All symlinks verified"
+  else
+    _check_ok=false
+  fi
+
   if "$mem_bin" stats >/dev/null 2>&1; then
     log_success "Database initialized"
   else
@@ -259,12 +293,15 @@ do_install() {
   echo "     https://github.com/danielmiessler/fabric"
   step=$((step + 1))
   echo "  $step. (Optional) Set up cron for batch extraction of missed sessions:"
-  echo "     */30 * * * * $HOME/.bun/bin/bun run $CLAUDE_DIR/hooks/BatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1"
+  echo "     */30 * * * * $HOME/.bun/bin/bun run $CLAUDE_DIR/hooks/RecallBatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1"
   echo ""
 }
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 
+# Flag parser — supports any combination of --yes, --no-gum, --db-path. The
+# previous case-statement form only accepted one flag at a time. Subcommands
+# (restore / list / help) still take the first positional arg.
 case "${1:-}" in
 restore)
   recall_do_restore "${2:-}"
@@ -276,32 +313,64 @@ help | --help | -h)
   echo "Recall Install Script"
   echo ""
   echo "Usage:"
-  echo "  ./install.sh                   Install Recall (creates backup first)"
-  echo "  ./install.sh --yes | -y        Install non-interactively (configure all detected agents)"
-  echo "  ./install.sh --no-gum          Skip gum auto-install; use bash UX for this run"
-  echo "  ./install.sh restore           Restore from most recent backup"
-  echo "  ./install.sh restore TIMESTAMP Restore specific backup"
-  echo "  ./install.sh list              List available backups"
-  echo "  ./install.sh help              Show this help"
+  echo "  ./install.sh                          Install Recall (creates backup first)"
+  echo "  ./install.sh --yes | -y               Install non-interactively (configure all detected agents)"
+  echo "  ./install.sh --no-gum                 Skip gum auto-install; use bash UX for this run"
+  echo "  ./install.sh --db-path PATH           Use a custom database path (skips the interactive prompt)"
+  echo "  ./install.sh restore                  Restore from most recent backup"
+  echo "  ./install.sh restore TIMESTAMP        Restore specific backup"
+  echo "  ./install.sh list                     List available backups"
+  echo "  ./install.sh help                     Show this help"
   echo ""
   echo "Environment:"
-  echo "  RECALL_NO_GUM=1                Permanently disable gum (same as --no-gum)"
-  echo "  NO_COLOR=1                     Disable ANSI colors"
-  echo "  RECALL_VERBOSE=1               Show full output of bun install/build"
-  ;;
---yes | -y)
-  export NO_CONFIRM=true
-  do_install
-  ;;
---no-gum)
-  export RECALL_NO_GUM=1
-  do_install
-  ;;
---yes | -y)
-  export NO_CONFIRM=true
-  do_install
+  echo "  RECALL_DB_PATH                        Database path (primary)"
+  echo "  MEM_DB_PATH                           Database path (deprecated; still accepted)"
+  echo "  RECALL_NO_GUM=1                       Permanently disable gum (same as --no-gum)"
+  echo "  NO_COLOR=1                            Disable ANSI colors"
+  echo "  RECALL_VERBOSE=1                      Show full output of bun install/build"
   ;;
 *)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes | -y)
+        export NO_CONFIRM=true
+        shift
+        ;;
+      --no-gum)
+        export RECALL_NO_GUM=1
+        shift
+        ;;
+      --db-path)
+        if [[ -z "${2:-}" ]]; then
+          echo "Error: --db-path requires an argument" >&2
+          exit 1
+        fi
+        # Expand a leading tilde so we always pass an absolute path through
+        # to downstream config writers.
+        if [[ "$2" == "~"* ]]; then
+          export RECALL_DB_PATH="${2/#\~/$HOME}"
+        else
+          export RECALL_DB_PATH="$2"
+        fi
+        shift 2
+        ;;
+      --db-path=*)
+        _val="${1#--db-path=}"
+        if [[ "$_val" == "~"* ]]; then
+          export RECALL_DB_PATH="${_val/#\~/$HOME}"
+        else
+          export RECALL_DB_PATH="$_val"
+        fi
+        unset _val
+        shift
+        ;;
+      *)
+        echo "Error: unknown argument: $1" >&2
+        echo "Run ./install.sh --help for usage." >&2
+        exit 1
+        ;;
+    esac
+  done
   do_install
   ;;
 esac

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-// Synthetic E2E: drive ClearExtract.ts against a tmp $HOME with two JSONLs,
+// Synthetic E2E: drive RecallClearExtract.ts against a tmp $HOME with two JSONLs,
 // confirm the parent picks the older one, acquires the semaphore, and the
-// stubbed SessionExtract child runs with the expected args.
+// stubbed RecallExtract child runs with the expected args.
 //
 // Run: bun scripts/e2e-clearextract.ts
 
@@ -66,16 +66,16 @@ async function main() {
   const newPath = writeJsonl('new.jsonl', now - 1_000);
   console.log(`✓ wrote two JSONLs: old=${oldPath} new=${newPath}`);
 
-  // 3. Stub SessionExtract.ts that records its argv
+  // 3. Stub RecallExtract.ts that records its argv
   const stub = `#!/usr/bin/env bun
 import { appendFileSync } from 'fs';
 appendFileSync(${JSON.stringify(stubMarkerPath)}, process.argv.slice(2).join('|') + '\\n');
 process.exit(0);
 `;
-  const stubPath = join(hooksDir, 'SessionExtract.ts');
+  const stubPath = join(hooksDir, 'RecallExtract.ts');
   writeFileSync(stubPath, stub);
   chmodSync(stubPath, 0o755);
-  console.log(`✓ stub SessionExtract installed at ${stubPath}`);
+  console.log(`✓ stub RecallExtract installed at ${stubPath}`);
 
   // 4. Verify extraction_tracker is empty
   const dbCheck1 = new Database(dbPath);
@@ -85,7 +85,7 @@ process.exit(0);
   assertEq(trackerCountBefore, 0, 'extraction_tracker empty before run');
   assertEq(lockCountBefore, 0, 'extraction_locks empty before run');
 
-  // 5. Spawn ClearExtract with a SessionStart-style stdin
+  // 5. Spawn RecallClearExtract with a SessionStart-style stdin
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     HOME: homeDir,
@@ -99,7 +99,7 @@ process.exit(0);
     transcript_path: newPath,
   });
 
-  const hookPath = join(import.meta.dir, '..', 'hooks', 'ClearExtract.ts');
+  const hookPath = join(import.meta.dir, '..', 'hooks', 'RecallClearExtract.ts');
   const result = spawnSync('bun', ['run', hookPath], {
     input: stdinPayload,
     env,
@@ -107,8 +107,8 @@ process.exit(0);
     timeout: 15_000,
   });
 
-  if (result.status !== 0) fail(`ClearExtract exited ${result.status}: ${result.stderr}`);
-  console.log('✓ ClearExtract parent exited 0');
+  if (result.status !== 0) fail(`RecallClearExtract exited ${result.status}: ${result.stderr}`);
+  console.log('✓ RecallClearExtract parent exited 0');
 
   // 6. Wait briefly for the detached stub to fire
   let attempts = 0;
@@ -117,7 +117,7 @@ process.exit(0);
     const tickEnd = Date.now() + 100;
     while (Date.now() < tickEnd) { /* busy wait */ }
   }
-  if (!existsSync(stubMarkerPath)) fail('stub SessionExtract was never spawned');
+  if (!existsSync(stubMarkerPath)) fail('stub RecallExtract was never spawned');
   const marker = readFileSync(stubMarkerPath, 'utf-8').trim();
   console.log(`✓ stub marker: ${marker}`);
   const parts = marker.split('|');
