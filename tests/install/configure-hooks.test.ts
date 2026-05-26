@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -35,6 +35,7 @@ interface RunResult {
 describe('install.sh configure_hooks()', () => {
   let tempRoot: string;
   let claudeDir: string;
+  let recallDir: string;
   let fakeRepo: string;
   let settingsFile: string;
 
@@ -45,6 +46,11 @@ describe('install.sh configure_hooks()', () => {
     claudeDir = join(tempRoot, '.claude');
     mkdirSync(join(claudeDir, 'hooks'), { recursive: true });
     settingsFile = join(claudeDir, 'settings.json');
+
+    // Recall's canonical install root. install-lib.sh defaults this to
+    // $HOME/.agents/Recall; the driver below overrides RECALL_DIR to it so the
+    // canonical hook copies stay inside the sandbox instead of the real install.
+    recallDir = join(tempRoot, '.agents', 'Recall');
 
     // Fake source checkout: install.sh reads $(pwd)/hooks for the file copies
     fakeRepo = join(tempRoot, 'repo');
@@ -74,7 +80,16 @@ describe('install.sh configure_hooks()', () => {
     const driver = [
       '#!/usr/bin/env bash',
       'set -eo pipefail',
+      // Sandbox every path install-lib.sh can derive. CLAUDE_DIR alone is NOT
+      // enough: configure_hooks copies the canonical hooks to
+      // $RECALL_DIR/shared/hooks, and RECALL_DIR defaults to $HOME/.agents/Recall.
+      // Without these HOME + RECALL_DIR overrides, sourcing install-lib.sh and
+      // running configure_hooks() copies this test's stub fixtures straight onto
+      // the user's REAL ~/.agents/Recall install (which is how the live hooks
+      // were once overwritten with stubs).
+      `export HOME="${tempRoot}"`,
       `export CLAUDE_DIR="${claudeDir}"`,
+      `export RECALL_DIR="${recallDir}"`,
       `cd "${fakeRepo}"`,
       'log_success() { :; }',
       'log_warn()    { :; }',
@@ -189,5 +204,29 @@ describe('install.sh configure_hooks()', () => {
     );
     expect(recallEntry).toBeDefined();
     expect(recallEntry!.matcher).toBe('');
+  });
+
+  // Regression: configure_hooks() copies the canonical hooks to
+  // $RECALL_DIR/shared/hooks. RECALL_DIR defaults to $HOME/.agents/Recall, so a
+  // harness that sandboxes CLAUDE_DIR but not RECALL_DIR copies these stub
+  // fixtures onto the user's real install — exactly the bug that left the live
+  // hooks as `// stub RecallExtract` no-ops. This asserts the copies, and the
+  // platform symlinks back to them, are confined to the sandbox.
+  test('configure_hooks confines canonical hook copies to the sandboxed RECALL_DIR', () => {
+    const r = runConfigureHooks();
+    expect(r.status).toBe(0);
+
+    const canonicalDir = join(recallDir, 'shared', 'hooks');
+    for (const name of HOOK_NAMES) {
+      const canonical = join(canonicalDir, `${name}.ts`);
+      expect(existsSync(canonical)).toBe(true);
+      // The copy is our fake-repo fixture — proof it came from the sandbox source.
+      expect(readFileSync(canonical, 'utf-8')).toBe(`// stub ${name}`);
+    }
+
+    // The ~/.claude/hooks symlink must resolve back inside the sandbox, never out.
+    // Resolve tempRoot too: macOS canonicalizes /var -> /private/var in realpath.
+    const resolved = realpathSync(join(claudeDir, 'hooks', 'RecallExtract.ts'));
+    expect(resolved.startsWith(realpathSync(tempRoot))).toBe(true);
   });
 });
