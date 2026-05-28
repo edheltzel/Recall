@@ -1686,6 +1686,107 @@ Tool syntax:
   fi
 }
 
+# ── Shared MCP config writer ─────────────────────────────────────────────────
+#
+# _recall_jsonc_merge_mcp_entry FILE PARENT_KEY VALUE_JSON
+#
+# Single hardened JSONC merge used by every platform's MCP registration
+# (OpenCode's opencode.json under "mcp", Pi's mcp.json under "mcpServers").
+# Reads FILE (tolerating // and /* */ comments), validates it, deep-merges the
+# recall-memory entry described by VALUE_JSON under PARENT_KEY, and rewrites the
+# file. Returns non-zero WITHOUT writing when the existing file cannot be safely
+# modified, so the caller can report failure and leave the file untouched.
+#
+#   FILE        absolute path to the config file
+#   PARENT_KEY  container key for MCP servers ("mcp" or "mcpServers")
+#   VALUE_JSON  JSON object of the owned fields for the recall-memory entry;
+#               its `environment` (if any) is deep-merged over the existing one
+#
+# Hardening invariants (architect/RedTeam V-1, V-3, V-4):
+#   V-1  Unparseable input → exit non-zero BEFORE any write (file untouched).
+#   V-3  Deep-merge: we own only the keys in VALUE_JSON (and the env vars it
+#        names); every other key on the entry and every other env var survive.
+#   V-4  PARENT_KEY present but not a plain object → refuse, file unchanged.
+_recall_jsonc_merge_mcp_entry() {
+  CONFIG_PATH="$1" PARENT_KEY="$2" ENTRY_JSON="$3" REPO_DIR="$RECALL_REPO_DIR" \
+    bun -e '
+      const fs = require("fs");
+      const path = require("path");
+      const { parse, modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
+      const file = process.env.CONFIG_PATH;
+      const parentKey = process.env.PARENT_KEY;
+      const name = path.basename(file);
+      const entry = JSON.parse(process.env.ENTRY_JSON);
+
+      // Read once. Empty file is treated as {} so first-time installs work.
+      // We keep the original text for modify/applyEdits so surrounding bytes
+      // (// comments, /* */ blocks, JSON5 trailing commas, sibling MCP
+      // entries) survive byte-for-byte on the write path.
+      let text = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "{}";
+      if (text.trim() === "") text = "{}";
+
+      // V-1: refuse on unparseable input instead of throwing-then-reporting
+      // success. We exit non-zero BEFORE any write, so the file is untouched.
+      // Uses jsonc-parser so // line comments, /* */ block comments, and
+      // JSON5 trailing commas are tolerated (allowTrailingCommas). The earlier
+      // regex stripper corrupted `//` inside string values (e.g. https:// URLs
+      // in sibling MCP entries) — A7 — and is replaced by a real tokenizer.
+      const errors = [];
+      const existing = parse(text, errors, { allowTrailingCommas: true });
+      if (existing === undefined || existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+        console.error("recall: refusing to modify " + name + " — existing file is not valid JSON/JSONC");
+        process.exit(1);
+      }
+
+      // V-4: the container exists but is not a plain object (e.g.
+      // "mcp": "disabled"). Refuse rather than silently rewrite.
+      if (Object.prototype.hasOwnProperty.call(existing, parentKey)) {
+        const container = existing[parentKey];
+        if (container === null || typeof container !== "object" || Array.isArray(container)) {
+          console.error("recall: refusing to modify " + name + " — \"" + parentKey + "\" exists but is not an object");
+          process.exit(1);
+        }
+      }
+
+      // V-3: deep-merge. We own only the keys named in ENTRY_JSON and the env
+      // vars it lists; every other key the user set on the entry — and every
+      // other environment var — survives a refresh.
+      const container = existing[parentKey] || {};
+      const prevRaw = container["recall-memory"];
+      const prev = (prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)) ? prevRaw : {};
+      const prevEnv = (prev.environment && typeof prev.environment === "object" && !Array.isArray(prev.environment)) ? prev.environment : {};
+      const newEnv = (entry.environment && typeof entry.environment === "object" && !Array.isArray(entry.environment)) ? entry.environment : {};
+      const mergedEntry = {
+        ...prev,
+        ...entry,
+        environment: { ...prevEnv, ...newEnv }
+      };
+
+      // In-place edit via jsonc-parser modify/applyEdits: only the
+      // recall-memory entry'"'"'s value slot is rewritten. Surrounding bytes
+      // (comments, JSON5 trailing commas, sibling MCP entry formatting,
+      // top-of-file leading comments) survive byte-for-byte. The Cycle 1
+      // preservation tests in tests/{opencode,pi}-integration.test.ts pin
+      // this contract.
+      const edits = modify(text, [parentKey, "recall-memory"], mergedEntry, {
+        formattingOptions: { tabSize: 2, insertSpaces: true }
+      });
+      const newText = applyEdits(text, edits);
+
+      // V-8: a write failure (read-only file/dir, ENOSPC) must surface as a
+      // non-zero exit. `bun -e` swallows an uncaught synchronous writeFileSync
+      // EACCES (exits 0, prints nothing), so without this guard the caller
+      // would print "✓ Registered" while the file was never modified — a silent
+      // failure. Catch explicitly and exit non-zero, like the V-1 parse guard.
+      try {
+        fs.writeFileSync(file, newText);
+      } catch (e) {
+        console.error("recall: failed to write " + name + " — " + e.message);
+        process.exit(1);
+      }
+    '
+}
+
 # ── OpenCode ─────────────────────────────────────────────────────────────────
 
 recall_configure_opencode_mcp() {
@@ -1699,38 +1800,24 @@ recall_configure_opencode_mcp() {
 
   mkdir -p "$OPENCODE_CONFIG_DIR"
 
-  # In-place merge via jsonc-parser: modify() returns edits that splice only
-  # the recall-memory entry; surrounding bytes (// and /* */ comments, JSON5
-  # trailing commas, key ordering, whitespace) are never re-serialized and
-  # survive byte-for-byte. The env block is always rewritten so existing
-  # installs pick up a new RECALL_DB_PATH on update.
-  #
-  # Was: a JSON.parse → JSON.stringify full-file rewrite that silently stripped
-  # comments, crashed on JSON5 trailing commas, and reformatted every other MCP
-  # entry. Red-team finding (2026-05-28, 5 of 16 agents converged). Guarded by
-  # Cycle 1 tests in tests/opencode-integration.test.ts.
-  INSTALL_MCP_PATH="$mem_mcp_path" \
-    BUN_PATH="$bun_path" \
-    DB_PATH_ABS="$db_path_abs" \
-    CONFIG_PATH="$config" \
-    REPO_DIR="$RECALL_REPO_DIR" \
-    bun -e '
-      const fs = require("fs");
-      const { modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
-      const path = process.env.CONFIG_PATH;
-      const text = fs.existsSync(path) ? fs.readFileSync(path, "utf-8") : "{}";
-      const newValue = {
-        type: "local",
-        command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
-        enabled: true,
-        environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
-      };
-      const edits = modify(text, ["mcp", "recall-memory"], newValue, {
-        formattingOptions: { tabSize: 2, insertSpaces: true }
-      });
-      fs.writeFileSync(path, applyEdits(text, edits));
-    '
-  log_success "Registered recall-memory MCP server in opencode.json"
+  # Build the owned entry shape via JSON.stringify (never shell-interpolated
+  # into JS source). Always overwrite the env block so existing installs pick
+  # up RECALL_DB_PATH even when the registration is already present.
+  local entry_json
+  entry_json="$(INSTALL_MCP_PATH="$mem_mcp_path" BUN_PATH="$bun_path" DB_PATH_ABS="$db_path_abs" \
+    bun -e 'process.stdout.write(JSON.stringify({
+      type: "local",
+      command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
+      enabled: true,
+      environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
+    }))')"
+
+  if _recall_jsonc_merge_mcp_entry "$config" "mcp" "$entry_json"; then
+    log_success "Registered recall-memory MCP server in opencode.json"
+  else
+    log_error "Failed to register recall-memory MCP server in opencode.json (existing config is invalid or unsupported — left unchanged)"
+    return 1
+  fi
 }
 
 recall_install_opencode_plugins() {
@@ -1811,30 +1898,24 @@ recall_configure_pi_mcp() {
 
   mkdir -p "$PI_CONFIG_DIR"
 
-  # In-place merge via jsonc-parser — same approach and motivation as
-  # recall_configure_opencode_mcp above. Guarded by Cycle 1 tests in
-  # tests/pi-integration.test.ts.
-  MCP_CONFIG_PATH="$config" \
-    DB_PATH_ABS="$db_path_abs" \
-    MEM_MCP_PATH="$mem_mcp_path" \
-    REPO_DIR="$RECALL_REPO_DIR" \
-    bun -e '
-      const fs = require("fs");
-      const { modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
-      const path = process.env.MCP_CONFIG_PATH;
-      const text = fs.existsSync(path) ? fs.readFileSync(path, "utf-8") : "{}";
-      const newValue = {
-        command: process.env.MEM_MCP_PATH,
-        args: [],
-        lifecycle: "lazy",
-        environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
-      };
-      const edits = modify(text, ["mcpServers", "recall-memory"], newValue, {
-        formattingOptions: { tabSize: 2, insertSpaces: true }
-      });
-      fs.writeFileSync(path, applyEdits(text, edits));
-    '
-  log_success "Registered recall-memory in Pi mcp.json"
+  # Build the owned entry shape via JSON.stringify (never shell-interpolated
+  # into JS source). Always rewrite the env block so existing installs pick up
+  # RECALL_DB_PATH even when the registration is already present.
+  local entry_json
+  entry_json="$(MEM_MCP_PATH="$mem_mcp_path" DB_PATH_ABS="$db_path_abs" \
+    bun -e 'process.stdout.write(JSON.stringify({
+      command: process.env.MEM_MCP_PATH,
+      args: [],
+      lifecycle: "lazy",
+      environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
+    }))')"
+
+  if _recall_jsonc_merge_mcp_entry "$config" "mcpServers" "$entry_json"; then
+    log_success "Registered recall-memory in Pi mcp.json"
+  else
+    log_error "Failed to register recall-memory in Pi mcp.json (existing config is invalid or unsupported — left unchanged)"
+    return 1
+  fi
 }
 
 recall_install_pi_extensions() {
