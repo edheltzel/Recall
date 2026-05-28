@@ -18,6 +18,19 @@
 
 # ── Globals ──────────────────────────────────────────────────────────────────
 
+# Repo root, resolved from this file's own location. Callers (install.sh,
+# update.sh, uninstall.sh) all live in the repo root and source this library
+# from lib/install-lib.sh, so `dirname BASH_SOURCE/..` is the repo every time.
+#
+# This replaces $(pwd) for source-file lookups (FOR_*.md, commands/Recall,
+# hooks/, opencode/, pi/). $(pwd) silently mis-resolved whenever a user
+# invoked a script via absolute path from another cwd — the slash-command
+# loop then skipped and `recall_verify_install` reported every Recall:*
+# symlink as missing. DRY single source of truth for the repo path.
+if [[ -z "${RECALL_REPO_DIR:-}" ]]; then
+  RECALL_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+
 : "${CLAUDE_DIR:=$HOME/.claude}"
 
 # Recall install root — canonical home for hooks, commands, guides, the DB,
@@ -1195,13 +1208,21 @@ recall_verify_install() {
   fi
 
   log_error "Install verification failed — these symlinks are not in their expected state:"
+  # Length-guard each iteration. macOS ships bash 3.2, where expanding
+  # "${arr[@]}" on an empty array under `set -u` errors with "unbound
+  # variable". Either branch can be empty here (only `missing` has entries
+  # in the cwd-mismatch failure mode that triggered this), so guard both.
   local m
-  for m in "${missing[@]}"; do
-    log_error "  MISSING:   $m"
-  done
-  for m in "${wrong_target[@]}"; do
-    log_error "  MISLINKED: $m"
-  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    for m in "${missing[@]}"; do
+      log_error "  MISSING:   $m"
+    done
+  fi
+  if [[ ${#wrong_target[@]} -gt 0 ]]; then
+    for m in "${wrong_target[@]}"; do
+      log_error "  MISLINKED: $m"
+    done
+  fi
   log_error ""
   log_error "Recovery options:"
   log_error "  1. Re-run ./install.sh (the collision rule is idempotent)."
@@ -1415,7 +1436,7 @@ _recall_write_mcp_settings() {
 
 _recall_copy_hook_files() {
   local hooks_dir="$CLAUDE_DIR/hooks"
-  local src_dir="$(pwd)/hooks"
+  local src_dir="$RECALL_REPO_DIR/hooks"
 
   # RecallExtract is required; log and bail early if missing.
   if [[ ! -f "$src_dir/RecallExtract.ts" ]]; then
@@ -1710,7 +1731,7 @@ recall_configure_opencode_mcp() {
 
 recall_install_opencode_plugins() {
   local plugin_dir="$OPENCODE_CONFIG_DIR/plugins"
-  local src_dir="$(pwd)/opencode"
+  local src_dir="$RECALL_REPO_DIR/opencode"
 
   recall_create_install_root
   mkdir -p "$plugin_dir"
@@ -1727,7 +1748,7 @@ recall_install_opencode_plugins() {
 
 recall_install_opencode_agent() {
   local agent_dir="$OPENCODE_CONFIG_DIR/agents"
-  local src_dir="$(pwd)/opencode"
+  local src_dir="$RECALL_REPO_DIR/opencode"
 
   mkdir -p "$agent_dir"
 
@@ -1738,10 +1759,10 @@ recall_install_opencode_agent() {
 }
 
 recall_install_opencode_guide() {
-  if [[ -f "$(pwd)/FOR_OPENCODE.md" ]]; then
+  if [[ -f "$RECALL_REPO_DIR/FOR_OPENCODE.md" ]]; then
     recall_create_install_root
     mkdir -p "$OPENCODE_CONFIG_DIR"
-    recall_copy_canonical "$(pwd)/FOR_OPENCODE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
+    recall_copy_canonical "$RECALL_REPO_DIR/FOR_OPENCODE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
     recall_link "$OPENCODE_CONFIG_DIR/Recall_GUIDE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide for OpenCode"
   fi
@@ -1796,7 +1817,7 @@ recall_configure_pi_mcp() {
 
 recall_install_pi_extensions() {
   local ext_dir="$PI_CONFIG_DIR/extensions"
-  local src_dir="$(pwd)/pi"
+  local src_dir="$RECALL_REPO_DIR/pi"
 
   recall_create_install_root
   mkdir -p "$ext_dir"
@@ -1815,8 +1836,8 @@ recall_install_pi_guide() {
   recall_create_install_root
   mkdir -p "$PI_CONFIG_DIR"
 
-  if [[ -f "$(pwd)/FOR_PI.md" ]]; then
-    recall_copy_canonical "$(pwd)/FOR_PI.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
+  if [[ -f "$RECALL_REPO_DIR/FOR_PI.md" ]]; then
+    recall_copy_canonical "$RECALL_REPO_DIR/FOR_PI.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
     recall_link "$PI_CONFIG_DIR/Recall_GUIDE.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide for Pi"
   fi
@@ -1865,15 +1886,15 @@ recall_copy_runtime_files() {
 
   # FOR_CLAUDE.md → Recall_GUIDE.md (canonical lives under $RECALL_CLAUDE_ROOT,
   # symlink at $CLAUDE_DIR/Recall_GUIDE.md).
-  if [[ -f "$(pwd)/FOR_CLAUDE.md" ]]; then
-    recall_copy_canonical "$(pwd)/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+  if [[ -f "$RECALL_REPO_DIR/FOR_CLAUDE.md" ]]; then
+    recall_copy_canonical "$RECALL_REPO_DIR/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     recall_link "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
   fi
 
   # Slash commands: canonicals under $RECALL_CLAUDE_COMMANDS_DIR, per-file
   # symlinks at $CLAUDE_DIR/commands/Recall/.
-  local commands_src="$(pwd)/commands/Recall"
+  local commands_src="$RECALL_REPO_DIR/commands/Recall"
   local commands_dest="$CLAUDE_DIR/commands/Recall"
   local commands_legacy="$CLAUDE_DIR/commands/recall"
   if [[ -d "$commands_src" ]]; then
@@ -1994,7 +2015,7 @@ recall_link_global() {
   log_error "Failed to establish working global link (bun + npm both declined)."
   [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
   log_error "Recovery: exit Claude Code / OpenCode / Pi, then run:"
-  log_error "  cd $(pwd) && bun install && bun run build && bun link"
+  log_error "  cd $RECALL_REPO_DIR && bun install && bun run build && bun link"
   log_error "  ls -la ~/.bun/bin/mem ~/.bun/bin/mem-mcp"
   return 1
 }

@@ -172,14 +172,14 @@ do_install() {
   recall_register_all_hooks
 
   _step "Guide" "Installing Recall guide"
-  if [[ -f "$(pwd)/FOR_CLAUDE.md" ]]; then
-    recall_copy_canonical "$(pwd)/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+  if [[ -f "$RECALL_REPO_DIR/FOR_CLAUDE.md" ]]; then
+    recall_copy_canonical "$RECALL_REPO_DIR/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     recall_link "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
   fi
 
   _step "Commands" "Installing slash commands"
-  local commands_src="$(pwd)/commands/Recall"
+  local commands_src="$RECALL_REPO_DIR/commands/Recall"
   local commands_dest="$CLAUDE_DIR/commands/Recall"
   local commands_legacy="$CLAUDE_DIR/commands/recall"
   if [[ -d "$commands_src" ]]; then

@@ -324,7 +324,7 @@ step_migrate() {
   fi
   if [[ -z "$mem_bin" ]]; then
     log_error "mem binary not found after step_link_global — symlinks must have been removed."
-    log_error "Recovery: cd $(pwd) && bun link"
+    log_error "Recovery: cd $RECALL_REPO_DIR && bun link"
     exit 1
   fi
   "$mem_bin" init
@@ -398,7 +398,7 @@ step_verify() {
   # Code / OpenCode / Pi restart will silently fail to load Recall.
   if ! recall_verify_global_link; then
     log_error "Verification failed: bin symlinks missing or stale at end of update."
-    log_error "Recovery: cd $(pwd) && bun link"
+    log_error "Recovery: cd $RECALL_REPO_DIR && bun link"
     exit 1
   fi
 
@@ -406,13 +406,13 @@ step_verify() {
   [[ ! -x "$mem_bin" ]] && mem_bin="$(which mem 2>/dev/null || echo "")"
   if [[ -z "$mem_bin" ]]; then
     log_error "Verification failed: mem binary not found on PATH or at ~/.bun/bin/mem."
-    log_error "Recovery: cd $(pwd) && bun link"
+    log_error "Recovery: cd $RECALL_REPO_DIR && bun link"
     exit 1
   fi
 
   if ! "$mem_bin" --version >/dev/null 2>&1; then
     log_error "Verification failed: '$mem_bin --version' did not run cleanly."
-    log_error "Recovery: cd $(pwd) && bun install && bun run build && bun link"
+    log_error "Recovery: cd $RECALL_REPO_DIR && bun install && bun run build && bun link"
     exit 1
   fi
 

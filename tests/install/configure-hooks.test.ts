@@ -90,6 +90,12 @@ describe('install.sh configure_hooks()', () => {
       `export HOME="${tempRoot}"`,
       `export CLAUDE_DIR="${claudeDir}"`,
       `export RECALL_DIR="${recallDir}"`,
+      // install-lib.sh resolves its source files via $RECALL_REPO_DIR
+      // (anchored on BASH_SOURCE, not $(pwd) — the cwd-fragility fix that
+      // caused install/update to skip the slash-command loop when invoked
+      // from a non-repo cwd). Sandbox it to the fake repo so the canonical
+      // copies come from the test fixtures, not the real repo on disk.
+      `export RECALL_REPO_DIR="${fakeRepo}"`,
       `cd "${fakeRepo}"`,
       'log_success() { :; }',
       'log_warn()    { :; }',
