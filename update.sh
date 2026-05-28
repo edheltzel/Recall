@@ -334,12 +334,30 @@ step_refresh_runtime() {
   log_info "Refreshing runtime files (canonical + symlinks)..."
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [dry-run] would: write canonicals to $RECALL_DIR and per-file symlinks into platform homes"
+    echo "  [dry-run] would: refresh OpenCode/Pi guide + agent prompt for any detected platform"
     return
   fi
   # The collision rule in recall_link backs up any user-modified file at the
   # symlink target before replacing it, so the .new-suffix drift dance the
   # legacy version did is no longer needed.
   recall_copy_runtime_files
+
+  # recall_copy_runtime_files only refreshes the Claude guide + slash commands.
+  # Without the calls below, existing OpenCode/Pi users who run update.sh never
+  # receive guide or agent-prompt updates (the bug this step fixes). Reuse the
+  # same shared installers install.sh calls — each is idempotent (copy canonical
+  # + relink), so re-running is safe. Detection mirrors install.sh exactly via
+  # the shared recall_detect_platforms (DRY: no duplicated `command -v` checks).
+  # --quiet: reuse detection for the flags without reprinting the "Detected:"
+  # lines the install run already showed.
+  recall_detect_platforms --quiet
+  if [[ "$OPENCODE_DETECTED" == "true" ]]; then
+    recall_install_opencode_agent
+    recall_install_opencode_guide
+  fi
+  if [[ "$PI_DETECTED" == "true" ]]; then
+    recall_install_pi_guide
+  fi
 }
 
 step_reregister_hooks() {

@@ -213,6 +213,11 @@ describe('installer Pi integration', () => {
     expect(content).toContain('RecallExtract.ts');
     expect(content).toContain('RecallPreCompact.ts');
   });
+
+  // update.sh's refresh path propagating the Pi guide (recall_install_pi_guide
+  // gated on PI_DETECTED) is asserted canonically in tests/install/update.test.ts
+  // → "refresh path propagates OpenCode/Pi guides and prompts". Not duplicated
+  // here (DRY).
 });
 
 // ─── Pi Extraction Tracker Dedup ───

@@ -9,6 +9,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const REPO = process.cwd();
@@ -73,5 +74,35 @@ describe('update.sh', () => {
     // symlink is never repaired and MCP fails silently on next
     // Claude Code restart.
     expect(r.stdout).toMatch(/would: bun link/);
+    // Regression: the refresh step must also narrate OpenCode/Pi guide +
+    // agent-prompt propagation (see "refresh path propagates" tests below).
+    expect(r.stdout).toMatch(/would: refresh OpenCode\/Pi guide/);
+  });
+
+  // Regression: recall_copy_runtime_files only refreshes the Claude guide +
+  // slash commands. recall_install_pi_guide / recall_install_opencode_guide /
+  // recall_install_opencode_agent were called ONLY from install.sh, so existing
+  // OpenCode/Pi users never received guide/prompt updates on `update.sh`. The
+  // refresh path must call the shared installers (DRY — reused, not duplicated).
+  describe('refresh path propagates OpenCode/Pi guides and prompts', () => {
+    const src = readFileSync(UPDATE, 'utf-8');
+
+    test('reuses recall_detect_platforms to gate (no duplicated command -v)', () => {
+      expect(src).toContain('recall_detect_platforms');
+      // Must reuse the shared detector, not re-implement detection inline.
+      expect(src).not.toContain('command -v opencode');
+      expect(src).not.toContain('command -v pi');
+    });
+
+    test('refreshes the OpenCode guide and agent prompt for detected OpenCode', () => {
+      expect(src).toContain('recall_install_opencode_agent');
+      expect(src).toContain('recall_install_opencode_guide');
+      expect(src).toMatch(/OPENCODE_DETECTED.*==.*true/);
+    });
+
+    test('refreshes the Pi guide for detected Pi', () => {
+      expect(src).toContain('recall_install_pi_guide');
+      expect(src).toMatch(/PI_DETECTED.*==.*true/);
+    });
   });
 });

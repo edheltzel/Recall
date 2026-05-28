@@ -33,6 +33,16 @@ Show recent memory records.
 - `/Recall:recent` — all tables
 - `/Recall:recent decisions` — specific table
 
+### /Recall:scout
+
+Memory-first orientation for an unfamiliar codebase. Searches Recall before touching git history or source, then produces a structured scout report in chat.
+
+**Usage:**
+- `/Recall:scout` — scout the whole repo
+- `/Recall:scout auth` — narrow the scout to a subsystem, path, or question
+
+The report covers: **memory summary** (what Recall already knew), **repo map**, **key paths**, **tests**, **risks**, and **next steps**. It enforces a strict sensitive-data boundary — no secrets, generated/vendored files, the live database, or cross-project memory — and is chat-only by default. Reports are persisted only when the repo endorses it, and then only to `.agents/atlas/artifacts/` (never `.agents/atlas/handoffs/`).
+
 ### /Recall:stats
 
 Database statistics — record counts, size, and table breakdown.

@@ -323,6 +323,12 @@ describe('installer', () => {
     expect(content).toContain('.replace(/\\/\\/.*$/gm, "")');
     expect(content).toContain('.replace(/\\/\\*[\\s\\S]*?\\*\\//g, "")');
   });
+
+  // update.sh's refresh path propagating the OpenCode guide + agent prompt
+  // (recall_install_opencode_guide / recall_install_opencode_agent gated on
+  // OPENCODE_DETECTED) is asserted canonically in tests/install/update.test.ts
+  // → "refresh path propagates OpenCode/Pi guides and prompts". Not duplicated
+  // here (DRY).
 });
 
 // ─── Task 7: linearizeSession Unit Tests ───

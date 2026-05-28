@@ -113,11 +113,22 @@ These slash commands are available in any Claude Code session:
 | `/Recall:dump <title>` | Flush session to DB + capture LoA entry. Run at end of every session. |
 | `/Recall:search <query>` | FTS5 search across all memory. Example: `/Recall:search kubernetes auth` |
 | `/Recall:recent [table]` | Recent records. Example: `/Recall:recent decisions` |
+| `/Recall:scout [focus]` | Memory-first codebase scout report (repo map, key paths, tests, risks, next steps). Example: `/Recall:scout auth` |
 | `/Recall:stats` | Database statistics at a glance |
 | `/Recall:add` | Add a record. Example: `/Recall:add breadcrumb "Auth refactor in progress"` |
 | `/Recall:doctor` | Health check all subsystems |
 | `/Recall:update` | Check-only: prints current vs. latest GitHub release + `cd <path> && ./update.sh` recipe. Never rebuilds mid-session. |
 | `/Recall:loa` | Browse Library of Alexandria entries |
+
+## Codebase Scouting
+
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`commands/Recall/scout.md`](commands/Recall/scout.md). This guide supplies only the tool-name mapping:
+
+| Canonical step | Your tool / invocation |
+|---|---|
+| Invoke the workflow | `/Recall:scout [focus]` slash command |
+| "Search Recall first" (memory-first) | `memory_search` (keyword), `memory_hybrid_search` (natural language) |
+| Persist a report (only if endorsed) | Write tool → `.agents/atlas/artifacts/YYYY-MM-DD-scout-<focus>.md` |
 
 ## The CLI
 

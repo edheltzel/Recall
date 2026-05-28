@@ -60,6 +60,7 @@ commands/
     dump.md            #   /Recall:dump — session flush + LoA capture
     loa.md             #   /Recall:loa — Library of Alexandria browser
     recent.md          #   /Recall:recent — recent records
+    scout.md           #   /Recall:scout — memory-first codebase scout report
     search.md          #   /Recall:search — FTS5 search
     stats.md           #   /Recall:stats — database statistics
     update.md          #   /Recall:update — version check + update instructions
@@ -139,6 +140,28 @@ tsconfig.json          # TypeScript config
 - Completed plans → `.atlas/plans/archive/`
 
 **Never store plans in `docs/`.** The `docs/` directory is exclusively for user-facing published documentation.
+
+## Scout Artifacts Directory (MANDATORY)
+
+Codebase scout reports (`/Recall:scout`, see `commands/Recall/scout.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
+
+- Generated scout reports and agent artifacts → `.agents/atlas/artifacts/`
+- This directory is **opt-in**: write to it only when it already exists or the user explicitly asks for a saved report
+- File naming: `YYYY-MM-DD-scout-<focus>.md` (kebab-case)
+- `.agents/atlas/handoffs/` stays **reserved for session handoff documents** — never write scout artifacts there
+
+## DRY — Single Source of Truth (MANDATORY)
+
+**Don't Repeat Yourself.** Every piece of knowledge — logic, configuration, prompt/workflow text, user-facing copy — must have exactly one authoritative definition. Duplication is treated as a defect, not a style preference.
+
+- **Code**: extract shared logic into one function/module and call it; never copy-paste a block to a second location. If you are about to duplicate more than ~3 lines, factor it out first.
+- **Lifecycle scripts**: shared behavior lives in `lib/install-lib.sh` only — never re-implemented across `install.sh` / `update.sh` / `uninstall.sh`.
+- **Prompt / guide / workflow text**: when the same workflow must reach multiple guides (`FOR_CLAUDE.md`, `FOR_PI.md`, `FOR_OPENCODE.md`, `opencode/recall-memory.md`), author the workflow body **once** as a canonical block; each platform guide carries only its platform-specific tool-name mapping plus a reference to that canonical block. Do not hand-copy a full workflow into four files and hope they stay aligned.
+- **Tests / docs**: assert or document a fact in one place; cross-reference rather than restate it.
+
+Before adding code or content, search for an existing definition and extend it. Code review **must** reject diffs that introduce copy-paste duplication.
+
+**Documented exception:** the self-contained hooks (`RecallExtract.ts`, `RecallBatchExtract.ts`) intentionally duplicate small utilities (e.g. bun-path resolution) so they never import from `src/` — see the Key Conventions note below. That carve-out is deliberate; do not "DRY it up."
 
 ## Key Conventions
 
