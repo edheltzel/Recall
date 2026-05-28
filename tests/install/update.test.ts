@@ -94,15 +94,121 @@ describe('update.sh', () => {
       expect(src).not.toContain('command -v pi');
     });
 
-    test('refreshes the OpenCode guide and agent prompt for detected OpenCode', () => {
-      expect(src).toContain('recall_install_opencode_agent');
-      expect(src).toContain('recall_install_opencode_guide');
+    test('routes OpenCode refresh through recall_install_opencode_platform helper', () => {
+      // The helper composes recall_configure_opencode_mcp + plugins + agent +
+      // guide (lib/install-lib.sh). install.sh and update.sh both call this
+      // single entry point so a new OpenCode surface added inside the helper
+      // applies to both scripts — the DRY mandate from CLAUDE.md.
+      expect(src).toContain('recall_install_opencode_platform');
       expect(src).toMatch(/OPENCODE_DETECTED.*==.*true/);
     });
 
-    test('refreshes the Pi guide for detected Pi', () => {
-      expect(src).toContain('recall_install_pi_guide');
+    test('routes Pi refresh through recall_install_pi_platform helper', () => {
+      expect(src).toContain('recall_install_pi_platform');
       expect(src).toMatch(/PI_DETECTED.*==.*true/);
+    });
+  });
+
+  // ─── Cycle 2/3 — refresh-step call topology (red-team-driven) ───
+  //
+  // Behavioral assertion that update.sh's step_refresh_runtime actually invokes
+  // ALL platform install functions install.sh calls, not just the subset
+  // (recall_install_*_guide + recall_install_opencode_agent) that was wired up
+  // initially. For symlinked surfaces (plugins, guide) a filesystem-state
+  // assertion is a no-op — `recall_link` short-circuits on already-correct
+  // targets — so the only honest check is whether the function ran. We do that
+  // by stubbing each install/configure function to echo its name, sourcing
+  // step_refresh_runtime, and asserting all expected stub lines appear.
+  describe('step_refresh_runtime call topology', () => {
+    function runRefresh(env: { OPENCODE_DETECTED: string; PI_DETECTED: string }) {
+      const harness = `
+        set -e
+        source "${REPO}/lib/install-lib.sh" >/dev/null 2>&1
+
+        # Silence log helpers — only stub output should appear on stdout.
+        log_info() { :; }
+        log_success() { :; }
+        log_warn() { :; }
+        log_error() { :; }
+
+        # Stub every install/configure function step_refresh_runtime might call.
+        # Each prints CALL:<name> so test assertions can grep for invocations.
+        recall_copy_runtime_files()      { echo "CALL:recall_copy_runtime_files"; }
+        recall_detect_platforms()        { echo "CALL:recall_detect_platforms"; }
+        recall_install_opencode_agent()  { echo "CALL:recall_install_opencode_agent"; }
+        recall_install_opencode_guide()  { echo "CALL:recall_install_opencode_guide"; }
+        recall_configure_opencode_mcp()  { echo "CALL:recall_configure_opencode_mcp"; }
+        recall_install_opencode_plugins(){ echo "CALL:recall_install_opencode_plugins"; }
+        recall_install_pi_adapter()      { echo "CALL:recall_install_pi_adapter"; }
+        recall_configure_pi_mcp()        { echo "CALL:recall_configure_pi_mcp"; }
+        recall_install_pi_extensions()   { echo "CALL:recall_install_pi_extensions"; }
+        recall_install_pi_guide()        { echo "CALL:recall_install_pi_guide"; }
+        recall_install_opencode_platform() { echo "CALL:recall_install_opencode_platform"; }
+        recall_install_pi_platform()     { echo "CALL:recall_install_pi_platform"; }
+
+        CLAUDE_CODE_DETECTED=false
+        OPENCODE_DETECTED=${env.OPENCODE_DETECTED}
+        PI_DETECTED=${env.PI_DETECTED}
+        DRY_RUN=false
+
+        # Pull step_refresh_runtime out of update.sh and define it inline.
+        # awk over sed: more robust to inline shell that might confuse sed's
+        # range matcher.
+        eval "$(awk '/^step_refresh_runtime\\(\\)/{p=1} p; p && /^}$/{exit}' "${REPO}/update.sh")"
+
+        step_refresh_runtime
+      `;
+      return spawnSync('bash', ['-c', harness], { encoding: 'utf-8' });
+    }
+
+    test('OpenCode: invokes all 4 install functions when OPENCODE_DETECTED=true', () => {
+      const r = runRefresh({ OPENCODE_DETECTED: 'true', PI_DETECTED: 'false' });
+      expect(r.status).toBe(0);
+      // Original install.sh order (lib/install-lib.sh:1668-1747):
+      //   recall_configure_opencode_mcp
+      //   recall_install_opencode_plugins
+      //   recall_install_opencode_agent
+      //   recall_install_opencode_guide
+      // After the refactor a single helper recall_install_opencode_platform
+      // wraps these — accept either the helper or the four individual calls
+      // so this test stays valid through Cycles 2 → refactor.
+      const ok =
+        r.stdout.includes('CALL:recall_install_opencode_platform') ||
+        (
+          r.stdout.includes('CALL:recall_configure_opencode_mcp') &&
+          r.stdout.includes('CALL:recall_install_opencode_plugins') &&
+          r.stdout.includes('CALL:recall_install_opencode_agent') &&
+          r.stdout.includes('CALL:recall_install_opencode_guide')
+        );
+      expect(ok).toBe(true);
+    });
+
+    test('Pi: invokes all 4 install functions when PI_DETECTED=true', () => {
+      const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'true' });
+      expect(r.status).toBe(0);
+      // Original install.sh order (lib/install-lib.sh:1750-1854):
+      //   recall_install_pi_adapter
+      //   recall_configure_pi_mcp
+      //   recall_install_pi_extensions
+      //   recall_install_pi_guide
+      const ok =
+        r.stdout.includes('CALL:recall_install_pi_platform') ||
+        (
+          r.stdout.includes('CALL:recall_install_pi_adapter') &&
+          r.stdout.includes('CALL:recall_configure_pi_mcp') &&
+          r.stdout.includes('CALL:recall_install_pi_extensions') &&
+          r.stdout.includes('CALL:recall_install_pi_guide')
+        );
+      expect(ok).toBe(true);
+    });
+
+    test('No platforms: skips all platform install calls', () => {
+      const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).not.toContain('CALL:recall_install_opencode_');
+      expect(r.stdout).not.toContain('CALL:recall_configure_opencode_');
+      expect(r.stdout).not.toContain('CALL:recall_install_pi_');
+      expect(r.stdout).not.toContain('CALL:recall_configure_pi_');
     });
   });
 });

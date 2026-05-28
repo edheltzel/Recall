@@ -206,18 +206,12 @@ do_install() {
 
   if [[ "$OPENCODE_DETECTED" == "true" ]]; then
     _step "OpenCode" "Configuring OpenCode integration"
-    recall_configure_opencode_mcp
-    recall_install_opencode_plugins
-    recall_install_opencode_agent
-    recall_install_opencode_guide
+    recall_install_opencode_platform
   fi
 
   if [[ "$PI_DETECTED" == "true" ]]; then
     _step "Pi" "Configuring Pi integration"
-    recall_install_pi_adapter
-    recall_configure_pi_mcp
-    recall_install_pi_extensions
-    recall_install_pi_guide
+    recall_install_pi_platform
   fi
   echo ""
 

@@ -319,9 +319,14 @@ describe('installer', () => {
     const installPath = join(__dirname, '..', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
-    // Verify comment stripping regex is present
-    expect(content).toContain('.replace(/\\/\\/.*$/gm, "")');
-    expect(content).toContain('.replace(/\\/\\*[\\s\\S]*?\\*\\//g, "")');
+    // Was: hand-rolled comment-stripping regex pair. That approach silently
+    // destroyed user `//` comments and crashed on JSON5 trailing commas
+    // (red team 2026-05-28). Replaced with jsonc-parser's modify() + applyEdits()
+    // which splices only the recall-memory entry and preserves surrounding
+    // bytes byte-for-byte.
+    expect(content).toContain('jsonc-parser');
+    expect(content).toContain('modify');
+    expect(content).toContain('applyEdits');
   });
 
   // update.sh's refresh path propagating the OpenCode guide + agent prompt
@@ -537,5 +542,93 @@ You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Reca
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('configure_pi_mcp');
     expect(content).toContain('recall-memory');
+  });
+});
+
+// ─── Cycle 1 RED — recall_configure_opencode_mcp must not destroy user customizations ───
+//
+// Red-team finding (2026-05-28, 5 of 16 agents converged on this): the function
+// does `JSON.parse → JSON.stringify` on opencode.json via direct fs.writeFileSync,
+// irreversibly stripping `//` comments, /* */ block comments, JSON5 trailing
+// commas, and any non-default formatting. It bypasses recall_link's collision-
+// backup rule. Today it runs only on first install; calling it from update.sh's
+// refresh path (the goal of Cycles 2/3) would silently clobber user MCP entries.
+//
+// This test asserts the destructive behavior. It is expected to FAIL on the
+// current implementation and PASS once the function is rewritten to do a true
+// in-place merge (or, in the worst-case fallback approach, to back up the file
+// before overwriting).
+describe('recall_configure_opencode_mcp preserves user customizations', () => {
+  let sandboxDir: string;
+  let opencodeJsonPath: string;
+  const REPO = join(__dirname, '..');
+
+  beforeEach(() => {
+    sandboxDir = mkdtempSync(join(tmpdir(), 'recall-opencode-mcp-preserve-'));
+    opencodeJsonPath = join(sandboxDir, 'opencode.json');
+  });
+
+  afterEach(() => {
+    if (sandboxDir && existsSync(sandboxDir)) {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  function runConfigure() {
+    return execFileSync('bash', ['-c',
+      `source "${REPO}/lib/install-lib.sh" >/dev/null 2>&1 && recall_configure_opencode_mcp >/dev/null 2>&1`,
+    ], {
+      env: {
+        ...process.env,
+        OPENCODE_CONFIG_DIR: sandboxDir,
+        RECALL_DB_PATH: join(sandboxDir, 'fake-recall.db'),
+      },
+      encoding: 'utf-8',
+    });
+  }
+
+  test('preserves inline // comments, non-Recall MCP entries, and JSON5 trailing commas', () => {
+    const userConfig = [
+      '{',
+      '  // User-managed MCP configuration — DO NOT REWRITE',
+      '  "mcp": {',
+      '    "recall-memory": {',
+      '      "type": "local",',
+      '      "command": ["/old/bun", "run", "/old/mem-mcp"],',
+      '      "enabled": true,',
+      '      "environment": { "RECALL_DB_PATH": "/old/db" }',
+      '    },',
+      '    // GitHub MCP — critical for repo work, hand-tuned',
+      '    "github": {',
+      '      "type": "local",',
+      '      "command": ["gh-mcp"],',
+      '      "enabled": true,',
+      '      "environment": { "GITHUB_TOKEN": "ghp_xxx" },',
+      '    },',
+      '  },',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(opencodeJsonPath, userConfig);
+
+    runConfigure();
+    const after = readFileSync(opencodeJsonPath, 'utf-8');
+
+    // 1. Inline // comments must survive (today: stripped by .replace(/\/\/.*$/gm, "")).
+    expect(after).toContain('// User-managed MCP configuration — DO NOT REWRITE');
+    expect(after).toContain('// GitHub MCP — critical for repo work, hand-tuned');
+
+    // 2. Non-Recall MCP entry must survive byte-for-byte (today: reformatted by
+    //    JSON.stringify, losing original whitespace and key ordering).
+    expect(after).toMatch(/"github":\s*\{[\s\S]*?"command":\s*\[\s*"gh-mcp"\s*\][\s\S]*?"GITHUB_TOKEN":\s*"ghp_xxx"/);
+
+    // 3. JSON5 trailing comma must survive (today: JSON.parse throws → bun -e
+    //    exits non-zero → recall-memory never gets re-registered with new path).
+    expect(after).toMatch(/"ghp_xxx"\s*\}\s*,/);
+
+    // 4. recall-memory entry must reflect the NEW path (sandbox fake-recall.db),
+    //    not the old one. Proves the function actually ran successfully.
+    expect(after).toContain('fake-recall.db');
+    expect(after).not.toContain('"/old/db"');
   });
 });

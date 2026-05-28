@@ -352,11 +352,10 @@ step_refresh_runtime() {
   # lines the install run already showed.
   recall_detect_platforms --quiet
   if [[ "$OPENCODE_DETECTED" == "true" ]]; then
-    recall_install_opencode_agent
-    recall_install_opencode_guide
+    recall_install_opencode_platform
   fi
   if [[ "$PI_DETECTED" == "true" ]]; then
-    recall_install_pi_guide
+    recall_install_pi_platform
   fi
 }
 
