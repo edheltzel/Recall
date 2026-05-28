@@ -259,3 +259,86 @@ describe('Pi extraction tracker (dedup)', () => {
     expect(tracker.size).toBe(0);
   });
 });
+
+// ─── Cycle 1 RED — recall_configure_pi_mcp must not destroy user customizations ───
+//
+// Mirror of the OpenCode preservation test in tests/opencode-integration.test.ts.
+// recall_configure_pi_mcp has the same shape as recall_configure_opencode_mcp
+// (JSON.parse → JSON.stringify direct rewrite of pi/mcp.json), so the same
+// red-team finding applies: comments, JSON5 trailing-commas, and non-Recall
+// MCP entries get destroyed. This test asserts the destructive behavior and is
+// expected to FAIL on the current implementation, PASS once the function is
+// rewritten to do a true in-place merge.
+describe('recall_configure_pi_mcp preserves user customizations', () => {
+  let sandboxDir: string;
+  let mcpJsonPath: string;
+  const REPO = join(__dirname, '..');
+
+  beforeEach(() => {
+    sandboxDir = mkdtempSync(join(tmpdir(), 'recall-pi-mcp-preserve-'));
+    mcpJsonPath = join(sandboxDir, 'mcp.json');
+  });
+
+  afterEach(() => {
+    if (sandboxDir && existsSync(sandboxDir)) {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  function runConfigure() {
+    return execFileSync('bash', ['-c',
+      `source "${REPO}/lib/install-lib.sh" >/dev/null 2>&1 && recall_configure_pi_mcp >/dev/null 2>&1`,
+    ], {
+      env: {
+        ...process.env,
+        PI_CONFIG_DIR: sandboxDir,
+        RECALL_DB_PATH: join(sandboxDir, 'fake-recall.db'),
+      },
+      encoding: 'utf-8',
+    });
+  }
+
+  test('preserves inline // comments, non-Recall MCP entries, and JSON5 trailing commas', () => {
+    const userConfig = [
+      '{',
+      '  // User-managed Pi MCP configuration — DO NOT REWRITE',
+      '  "mcpServers": {',
+      '    "recall-memory": {',
+      '      "command": "/old/mem-mcp",',
+      '      "args": [],',
+      '      "lifecycle": "lazy",',
+      '      "environment": { "RECALL_DB_PATH": "/old/db" }',
+      '    },',
+      '    // GitHub MCP — critical for Pi workflows, hand-tuned',
+      '    "github": {',
+      '      "command": "gh-mcp",',
+      '      "args": ["--scope=repo"],',
+      '      "lifecycle": "lazy",',
+      '      "environment": { "GITHUB_TOKEN": "ghp_xxx" },',
+      '    },',
+      '  },',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(mcpJsonPath, userConfig);
+
+    runConfigure();
+    const after = readFileSync(mcpJsonPath, 'utf-8');
+
+    // 1. Inline // comments must survive (today: stripped).
+    expect(after).toContain('// User-managed Pi MCP configuration — DO NOT REWRITE');
+    expect(after).toContain('// GitHub MCP — critical for Pi workflows, hand-tuned');
+
+    // 2. Non-Recall MCP entry must survive with original formatting (today:
+    //    reformatted by JSON.stringify, key ordering and whitespace destroyed).
+    expect(after).toMatch(/"github":\s*\{[\s\S]*?"command":\s*"gh-mcp"[\s\S]*?"--scope=repo"[\s\S]*?"GITHUB_TOKEN":\s*"ghp_xxx"/);
+
+    // 3. JSON5 trailing comma must survive (today: JSON.parse throws → bun -e
+    //    exits non-zero → recall-memory never gets re-registered).
+    expect(after).toMatch(/"ghp_xxx"\s*\}\s*,/);
+
+    // 4. recall-memory entry must reflect the NEW path. Proves the function ran.
+    expect(after).toContain('fake-recall.db');
+    expect(after).not.toContain('"/old/db"');
+  });
+});

@@ -1699,32 +1699,36 @@ recall_configure_opencode_mcp() {
 
   mkdir -p "$OPENCODE_CONFIG_DIR"
 
-  # Always overwrite the env block so existing installs pick up RECALL_DB_PATH
-  # even when the registration is already present. (The old code returned
-  # early on detection of "recall-memory", which left stale env vars in place
-  # after a path-changing update.)
+  # In-place merge via jsonc-parser: modify() returns edits that splice only
+  # the recall-memory entry; surrounding bytes (// and /* */ comments, JSON5
+  # trailing commas, key ordering, whitespace) are never re-serialized and
+  # survive byte-for-byte. The env block is always rewritten so existing
+  # installs pick up a new RECALL_DB_PATH on update.
+  #
+  # Was: a JSON.parse → JSON.stringify full-file rewrite that silently stripped
+  # comments, crashed on JSON5 trailing commas, and reformatted every other MCP
+  # entry. Red-team finding (2026-05-28, 5 of 16 agents converged). Guarded by
+  # Cycle 1 tests in tests/opencode-integration.test.ts.
   INSTALL_MCP_PATH="$mem_mcp_path" \
     BUN_PATH="$bun_path" \
     DB_PATH_ABS="$db_path_abs" \
     CONFIG_PATH="$config" \
+    REPO_DIR="$RECALL_REPO_DIR" \
     bun -e '
       const fs = require("fs");
+      const { modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
       const path = process.env.CONFIG_PATH;
-      let raw = "{}";
-      if (fs.existsSync(path)) {
-        raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-      }
-      const existing = JSON.parse(raw);
-      existing.mcp = existing.mcp || {};
-      existing.mcp["recall-memory"] = {
+      const text = fs.existsSync(path) ? fs.readFileSync(path, "utf-8") : "{}";
+      const newValue = {
         type: "local",
         command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
         enabled: true,
         environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
       };
-      fs.writeFileSync(path, JSON.stringify(existing, null, 2));
+      const edits = modify(text, ["mcp", "recall-memory"], newValue, {
+        formattingOptions: { tabSize: 2, insertSpaces: true }
+      });
+      fs.writeFileSync(path, applyEdits(text, edits));
     '
   log_success "Registered recall-memory MCP server in opencode.json"
 }
@@ -1768,6 +1772,24 @@ recall_install_opencode_guide() {
   fi
 }
 
+# Canonical OpenCode platform install entry point — composes the four idempotent
+# OpenCode surfaces (MCP config, plugins, agent definition, guide) in the order
+# install.sh has always used. install.sh and update.sh both call this; whatever
+# install.sh wires for first-install runs through the same path on every update.
+#
+# Scope (honest): this helper eliminates drift WITHIN the OpenCode platform —
+# adding a fifth OpenCode surface here applies to both scripts automatically.
+# It does NOT prevent drift for top-level update.sh steps added OUTSIDE the
+# platform block, nor for a third platform added to install.sh without being
+# wired into update.sh's step_refresh_runtime. A declarative surface manifest
+# (see plan "Deferred" section) would close that broader gap class.
+recall_install_opencode_platform() {
+  recall_configure_opencode_mcp
+  recall_install_opencode_plugins
+  recall_install_opencode_agent
+  recall_install_opencode_guide
+}
+
 # ── Pi ───────────────────────────────────────────────────────────────────────
 
 recall_install_pi_adapter() {
@@ -1789,28 +1811,28 @@ recall_configure_pi_mcp() {
 
   mkdir -p "$PI_CONFIG_DIR"
 
-  # Always rewrite the env block (see recall_configure_opencode_mcp for why).
+  # In-place merge via jsonc-parser — same approach and motivation as
+  # recall_configure_opencode_mcp above. Guarded by Cycle 1 tests in
+  # tests/pi-integration.test.ts.
   MCP_CONFIG_PATH="$config" \
     DB_PATH_ABS="$db_path_abs" \
     MEM_MCP_PATH="$mem_mcp_path" \
+    REPO_DIR="$RECALL_REPO_DIR" \
     bun -e '
       const fs = require("fs");
+      const { modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
       const path = process.env.MCP_CONFIG_PATH;
-      let raw = "{}";
-      if (fs.existsSync(path)) {
-        raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-      }
-      const existing = JSON.parse(raw);
-      existing.mcpServers = existing.mcpServers || {};
-      existing.mcpServers["recall-memory"] = {
+      const text = fs.existsSync(path) ? fs.readFileSync(path, "utf-8") : "{}";
+      const newValue = {
         command: process.env.MEM_MCP_PATH,
         args: [],
         lifecycle: "lazy",
         environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
       };
-      fs.writeFileSync(path, JSON.stringify(existing, null, 2));
+      const edits = modify(text, ["mcpServers", "recall-memory"], newValue, {
+        formattingOptions: { tabSize: 2, insertSpaces: true }
+      });
+      fs.writeFileSync(path, applyEdits(text, edits));
     '
   log_success "Registered recall-memory in Pi mcp.json"
 }
@@ -1872,6 +1894,17 @@ Tool syntax:
   fi
   echo "$memory_section" >>"$agents_md"
   log_success "Added MEMORY section to AGENTS.md"
+}
+
+# Canonical Pi platform install entry point — composes the four Pi surfaces
+# (adapter package, MCP config, extensions, guide) in the order install.sh has
+# always used. Same scope caveats as recall_install_opencode_platform above:
+# closes within-platform drift, not broader gap classes.
+recall_install_pi_platform() {
+  recall_install_pi_adapter
+  recall_configure_pi_mcp
+  recall_install_pi_extensions
+  recall_install_pi_guide
 }
 
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────
