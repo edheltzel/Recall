@@ -6,6 +6,22 @@ This document describes how a maintainer cuts a new Recall release.
 Users should read [Upgrading](upgrading.md) instead — they do not run
 these steps.
 
+## Pre-flight: agent context files
+
+Before tagging, confirm `CLAUDE.md` is still the one-line `@AGENTS.md` shim and
+has not been regenerated into a full duplicate:
+
+```bash
+# Should print the @AGENTS.md import (and the HTML comment) — nothing else.
+cat CLAUDE.md
+```
+
+`AGENTS.md` is the canonical agent guide; `CLAUDE.md` only `@`-imports it so
+Claude Code auto-loads it. **Never run `/init` in this repo** — it rewrites
+`CLAUDE.md` from scratch and reintroduces the duplication. If `CLAUDE.md` has
+drifted, restore the shim and fold any new content back into `AGENTS.md` before
+releasing.
+
 ## Source of truth: `CHANGELOG.md`
 
 Every release's notes live in `CHANGELOG.md` at the repo root, following
