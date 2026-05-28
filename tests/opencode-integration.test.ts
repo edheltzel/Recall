@@ -545,19 +545,18 @@ You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Reca
   });
 });
 
-// ─── Cycle 1 RED — recall_configure_opencode_mcp must not destroy user customizations ───
+// ─── Cycle 1 — recall_configure_opencode_mcp must not destroy user customizations ───
 //
-// Red-team finding (2026-05-28, 5 of 16 agents converged on this): the function
-// does `JSON.parse → JSON.stringify` on opencode.json via direct fs.writeFileSync,
-// irreversibly stripping `//` comments, /* */ block comments, JSON5 trailing
-// commas, and any non-default formatting. It bypasses recall_link's collision-
-// backup rule. Today it runs only on first install; calling it from update.sh's
-// refresh path (the goal of Cycles 2/3) would silently clobber user MCP entries.
+// Red-team finding (2026-05-28, 5 of 16 agents converged on this): the original
+// function did `JSON.parse → JSON.stringify` on opencode.json via direct
+// fs.writeFileSync, irreversibly stripping `//` comments, /* */ block comments,
+// JSON5 trailing commas, and any non-default formatting. It bypassed
+// recall_link's collision-backup rule.
 //
-// This test asserts the destructive behavior. It is expected to FAIL on the
-// current implementation and PASS once the function is rewritten to do a true
-// in-place merge (or, in the worst-case fallback approach, to back up the file
-// before overwriting).
+// Now satisfied by `_recall_jsonc_merge_mcp_entry` (lib/install-lib.sh): reads
+// via jsonc-parser's tokenizer (so `//` inside string values like https:// URLs
+// is safe — A7), writes via modify+applyEdits so the only bytes touched are
+// the recall-memory entry value slot.
 describe('recall_configure_opencode_mcp preserves user customizations', () => {
   let sandboxDir: string;
   let opencodeJsonPath: string;
@@ -614,21 +613,137 @@ describe('recall_configure_opencode_mcp preserves user customizations', () => {
     runConfigure();
     const after = readFileSync(opencodeJsonPath, 'utf-8');
 
-    // 1. Inline // comments must survive (today: stripped by .replace(/\/\/.*$/gm, "")).
+    // 1. Inline // comments must survive (jsonc-parser tokenizer + modify+applyEdits preserve them).
     expect(after).toContain('// User-managed MCP configuration — DO NOT REWRITE');
     expect(after).toContain('// GitHub MCP — critical for repo work, hand-tuned');
 
-    // 2. Non-Recall MCP entry must survive byte-for-byte (today: reformatted by
-    //    JSON.stringify, losing original whitespace and key ordering).
+    // 2. Non-Recall MCP entry must survive byte-for-byte (modify only edits the recall-memory slot).
     expect(after).toMatch(/"github":\s*\{[\s\S]*?"command":\s*\[\s*"gh-mcp"\s*\][\s\S]*?"GITHUB_TOKEN":\s*"ghp_xxx"/);
 
-    // 3. JSON5 trailing comma must survive (today: JSON.parse throws → bun -e
-    //    exits non-zero → recall-memory never gets re-registered with new path).
+    // 3. JSON5 trailing comma must survive (allowTrailingCommas on read, modify preserves on write).
     expect(after).toMatch(/"ghp_xxx"\s*\}\s*,/);
 
     // 4. recall-memory entry must reflect the NEW path (sandbox fake-recall.db),
     //    not the old one. Proves the function actually ran successfully.
     expect(after).toContain('fake-recall.db');
     expect(after).not.toContain('"/old/db"');
+  });
+});
+
+// ─── MCP config hardening RED — V-1, V-3, V-4 (recall_configure_opencode_mcp) ───
+//
+// Red-team finding (2026-05-28). recall_configure_opencode_mcp does a
+// JSON.parse → JSON.stringify full-file rewrite of opencode.json. Three gaps,
+// each asserted below as the DESIRED post-fix behavior — expected to FAIL on
+// the current implementation (RED). The GREEN agent hardens the function in
+// lib/install-lib.sh to make them pass.
+//
+//   V-1  Malformed JSON on disk → refuse with a non-zero exit AND leave the
+//        file byte-identical. Today JSON.parse throws inside `bun -e`, but the
+//        function still exits 0 because `log_success` runs as the last command
+//        regardless of the bun exit code — so the caller cannot tell it failed.
+//   V-3  User-added custom keys on the recall-memory entry (myExtraKey,
+//        environment.MY_CUSTOM_VAR) must survive a refresh while
+//        environment.RECALL_DB_PATH is updated to the new path. Today the
+//        function REPLACES the entire recall-memory value with a fixed object,
+//        silently dropping every custom key.
+//   V-4  The mcp container present but a non-object (e.g. "mcp": "disabled") →
+//        refuse with a non-zero exit AND leave the file unchanged. Today
+//        `existing.mcp = existing.mcp || {}` keeps the string and the nested
+//        assignment is a silent no-op (or throws but is swallowed), so the
+//        function reports success and rewrites the file without registering.
+describe('recall_configure_opencode_mcp hardening (V-1, V-3, V-4) [RED]', () => {
+  let sandboxDir: string;
+  let opencodeJsonPath: string;
+  const REPO = join(__dirname, '..');
+
+  beforeEach(() => {
+    sandboxDir = mkdtempSync(join(tmpdir(), 'recall-opencode-mcp-harden-'));
+    opencodeJsonPath = join(sandboxDir, 'opencode.json');
+  });
+
+  afterEach(() => {
+    if (sandboxDir && existsSync(sandboxDir)) {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  // Runs the configure function and returns its process exit code (0 = success).
+  // execFileSync throws on non-zero exit; we translate that into the status code.
+  function runConfigureStatus(): number {
+    try {
+      execFileSync('bash', ['-c',
+        `source "${REPO}/lib/install-lib.sh" >/dev/null 2>&1 && recall_configure_opencode_mcp >/dev/null 2>&1`,
+      ], {
+        env: {
+          ...process.env,
+          OPENCODE_CONFIG_DIR: sandboxDir,
+          RECALL_DB_PATH: join(sandboxDir, 'fake-recall.db'),
+        },
+        encoding: 'utf-8',
+      });
+      return 0;
+    } catch (e: any) {
+      return typeof e.status === 'number' ? e.status : 1;
+    }
+  }
+
+  test('V-1: malformed JSON → non-zero exit AND file left byte-identical', () => {
+    const malformed = 'this is not valid json !!!';
+    writeFileSync(opencodeJsonPath, malformed);
+
+    const status = runConfigureStatus();
+
+    expect(status).not.toBe(0);
+    expect(readFileSync(opencodeJsonPath, 'utf-8')).toBe(malformed);
+  });
+
+  test('V-3: user custom keys on recall-memory survive refresh; RECALL_DB_PATH updated', () => {
+    const userConfig = [
+      '{',
+      '  "mcp": {',
+      '    "recall-memory": {',
+      '      "type": "local",',
+      '      "command": ["/old/bun", "run", "/old/mem-mcp"],',
+      '      "enabled": true,',
+      '      "myExtraKey": "bar",',
+      '      "environment": { "RECALL_DB_PATH": "/old/db", "MY_CUSTOM_VAR": "foo" }',
+      '    },',
+      '    "github": {',
+      '      "type": "local",',
+      '      "command": ["gh-mcp"],',
+      '      "enabled": true,',
+      '      "environment": { "GITHUB_TOKEN": "ghp_xxx" }',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(opencodeJsonPath, userConfig);
+
+    const status = runConfigureStatus();
+    expect(status).toBe(0);
+
+    const after = readFileSync(opencodeJsonPath, 'utf-8');
+
+    // Custom key directly on the recall-memory entry must survive.
+    expect(after).toMatch(/"myExtraKey":\s*"bar"/);
+    // Custom env var nested under recall-memory.environment must survive.
+    expect(after).toMatch(/"MY_CUSTOM_VAR":\s*"foo"/);
+    // RECALL_DB_PATH must be updated to the new path (the point of a refresh).
+    expect(after).toContain('fake-recall.db');
+    expect(after).not.toContain('"/old/db"');
+    // Sibling non-Recall MCP entry must remain intact.
+    expect(after).toMatch(/"github":\s*\{[\s\S]*?"gh-mcp"[\s\S]*?"ghp_xxx"/);
+  });
+
+  test('V-4: mcp container as non-object → non-zero exit AND file unchanged', () => {
+    const fixture = '{ "mcp": "disabled" }';
+    writeFileSync(opencodeJsonPath, fixture);
+
+    const status = runConfigureStatus();
+
+    expect(status).not.toBe(0);
+    expect(readFileSync(opencodeJsonPath, 'utf-8')).toBe(fixture);
   });
 });
