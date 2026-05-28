@@ -216,6 +216,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `mem telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`mem add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
+- **Codebase scouting** — `/Recall:scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
 - **Benchmark harness** — `mem benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
 - **Onboarding** — `mem onboard` runs a 7-question interview that writes your L0 identity file
 

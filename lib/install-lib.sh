@@ -640,19 +640,23 @@ recall_check_prerequisites() {
 # ── Platform detection ───────────────────────────────────────────────────────
 
 recall_detect_platforms() {
+  # Pass "--quiet" to set the *_DETECTED flags without re-announcing each
+  # platform. update.sh's refresh step reuses this detector purely for the
+  # flags and shouldn't reprint the "Detected:" lines the install run shows.
+  local quiet="${1:-}"
   if [[ -d "$HOME/.claude" ]] || command -v claude &>/dev/null; then
     CLAUDE_CODE_DETECTED=true
-    log_success "Detected: Claude Code"
+    [[ "$quiet" == "--quiet" ]] || log_success "Detected: Claude Code"
   fi
 
   if command -v opencode &>/dev/null; then
     OPENCODE_DETECTED=true
-    log_success "Detected: OpenCode"
+    [[ "$quiet" == "--quiet" ]] || log_success "Detected: OpenCode"
   fi
 
   if command -v pi &>/dev/null; then
     PI_DETECTED=true
-    log_success "Detected: Pi"
+    [[ "$quiet" == "--quiet" ]] || log_success "Detected: Pi"
   fi
 
   if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \

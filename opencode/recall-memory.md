@@ -38,3 +38,12 @@ You have access to persistent memory via the recall-memory MCP server.
 | `recall-memory_memory_stats` | Database statistics |
 | `recall-memory_memory_dump` | Dump current session to SQLite (mid-session) |
 | `recall-memory_loa_show` | View full Library of Alexandria entry |
+
+## Codebase Scouting
+
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in `commands/Recall/scout.md`. This guide supplies only the tool-name mapping:
+
+| Canonical step | Your tool / invocation |
+|------|---------|
+| "Search Recall first" (memory-first) | `recall-memory_memory_search` (keyword), `recall-memory_memory_hybrid_search` (natural language) |
+| Persist a report (only if endorsed) | Write to `.agents/atlas/artifacts/YYYY-MM-DD-scout-<focus>.md` |
