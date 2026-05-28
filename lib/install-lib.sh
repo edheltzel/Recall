@@ -1736,7 +1736,17 @@ _recall_jsonc_merge_mcp_entry() {
         ...entry,
         environment: { ...prevEnv, ...newEnv }
       };
-      fs.writeFileSync(file, JSON.stringify(existing, null, 2));
+      // V-8: a write failure (read-only file/dir, ENOSPC) must surface as a
+      // non-zero exit. `bun -e` swallows an uncaught synchronous writeFileSync
+      // EACCES (exits 0, prints nothing), so without this guard the caller
+      // would print "✓ Registered" while the file was never modified — a silent
+      // failure. Catch explicitly and exit non-zero, like the V-1 parse guard.
+      try {
+        fs.writeFileSync(file, JSON.stringify(existing, null, 2));
+      } catch (e) {
+        console.error("recall: failed to write " + name + " — " + e.message);
+        process.exit(1);
+      }
     '
 }
 
