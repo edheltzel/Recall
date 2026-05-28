@@ -340,6 +340,44 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
     expect(after).toContain('fake-recall.db');
     expect(after).not.toContain('"/old/db"');
   });
+
+  // A7 regression — `//` inside a string value (e.g. an https:// URL on a
+  // sibling MCP entry) must survive. The pre-merge helper used a hand-rolled
+  // regex to strip `//` line comments before JSON.parse; that regex was not
+  // string-aware and corrupted https:// URLs, making the helper falsely refuse
+  // perfectly valid pi/mcp.json. The merged-tip implementation uses
+  // jsonc-parser's tokenizer (string-aware), and this test locks that in.
+  test('A7: preserves https:// URLs and other `//` substrings inside string values', () => {
+    const userConfig = [
+      '{',
+      '  "mcpServers": {',
+      '    "remote-mcp": {',
+      '      "command": "https-mcp-client",',
+      '      "args": ["--endpoint", "https://example.com/mcp/v1"],',
+      '      "lifecycle": "lazy",',
+      '      "environment": { "DOCS_URL": "https://docs.example.com//deep/path" }',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(mcpJsonPath, userConfig);
+
+    runConfigure();
+    const after = readFileSync(mcpJsonPath, 'utf-8');
+
+    // 1. The https:// URLs survive byte-for-byte — proves the tokenizer did
+    //    not mistake `//` inside a string for the start of a line comment.
+    expect(after).toContain('"https://example.com/mcp/v1"');
+    expect(after).toContain('"https://docs.example.com//deep/path"');
+
+    // 2. The sibling remote-mcp entry is otherwise intact.
+    expect(after).toMatch(/"remote-mcp":\s*\{[\s\S]*?"command":\s*"https-mcp-client"[\s\S]*?"https:\/\/example\.com\/mcp\/v1"/);
+
+    // 3. recall-memory was registered (function ran to success).
+    expect(after).toContain('"recall-memory"');
+    expect(after).toContain('fake-recall.db');
+  });
 });
 
 // ─── MCP config hardening RED — V-1, V-3, V-4 (recall_configure_pi_mcp) ───
