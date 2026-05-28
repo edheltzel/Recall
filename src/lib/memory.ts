@@ -464,7 +464,7 @@ export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; 
   const lastLoa = getLastLoaEntry();
 
   let sql: string;
-  let params: (number | undefined)[];
+  let params: number[];
 
   if (lastLoa?.message_range_end) {
     sql = limit
