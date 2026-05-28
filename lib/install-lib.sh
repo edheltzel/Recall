@@ -1665,6 +1665,81 @@ Tool syntax:
   fi
 }
 
+# ── Shared MCP config writer ─────────────────────────────────────────────────
+#
+# _recall_jsonc_merge_mcp_entry FILE PARENT_KEY VALUE_JSON
+#
+# Single hardened JSONC merge used by every platform's MCP registration
+# (OpenCode's opencode.json under "mcp", Pi's mcp.json under "mcpServers").
+# Reads FILE (tolerating // and /* */ comments), validates it, deep-merges the
+# recall-memory entry described by VALUE_JSON under PARENT_KEY, and rewrites the
+# file. Returns non-zero WITHOUT writing when the existing file cannot be safely
+# modified, so the caller can report failure and leave the file untouched.
+#
+#   FILE        absolute path to the config file
+#   PARENT_KEY  container key for MCP servers ("mcp" or "mcpServers")
+#   VALUE_JSON  JSON object of the owned fields for the recall-memory entry;
+#               its `environment` (if any) is deep-merged over the existing one
+#
+# Hardening invariants (architect/RedTeam V-1, V-3, V-4):
+#   V-1  Unparseable input → exit non-zero BEFORE any write (file untouched).
+#   V-3  Deep-merge: we own only the keys in VALUE_JSON (and the env vars it
+#        names); every other key on the entry and every other env var survive.
+#   V-4  PARENT_KEY present but not a plain object → refuse, file unchanged.
+_recall_jsonc_merge_mcp_entry() {
+  CONFIG_PATH="$1" PARENT_KEY="$2" ENTRY_JSON="$3" \
+    bun -e '
+      const fs = require("fs");
+      const path = require("path");
+      const file = process.env.CONFIG_PATH;
+      const parentKey = process.env.PARENT_KEY;
+      const name = path.basename(file);
+      const entry = JSON.parse(process.env.ENTRY_JSON);
+      let raw = "{}";
+      if (fs.existsSync(file)) {
+        raw = fs.readFileSync(file, "utf-8")
+          .replace(/\/\/.*$/gm, "")
+          .replace(/\/\*[\s\S]*?\*\//g, "");
+      }
+      // V-1: refuse on unparseable input instead of throwing-then-reporting
+      // success. We exit non-zero BEFORE any write, so the file is untouched.
+      let existing;
+      try {
+        existing = JSON.parse(raw);
+      } catch (e) {
+        console.error("recall: refusing to modify " + name + " — existing file is not valid JSON/JSONC: " + e.message);
+        process.exit(1);
+      }
+      if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+        console.error("recall: refusing to modify " + name + " — top-level value is not an object");
+        process.exit(1);
+      }
+      // V-4: the container exists but is not a plain object (e.g.
+      // "mcp": "disabled"). Refuse rather than silently rewrite.
+      if (Object.prototype.hasOwnProperty.call(existing, parentKey)) {
+        const container = existing[parentKey];
+        if (container === null || typeof container !== "object" || Array.isArray(container)) {
+          console.error("recall: refusing to modify " + name + " — \"" + parentKey + "\" exists but is not an object");
+          process.exit(1);
+        }
+      }
+      existing[parentKey] = existing[parentKey] || {};
+      // V-3: deep-merge. We own only the keys named in ENTRY_JSON and the env
+      // vars it lists; every other key the user set on the entry — and every
+      // other environment var — survives a refresh.
+      const prevRaw = existing[parentKey]["recall-memory"];
+      const prev = (prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)) ? prevRaw : {};
+      const prevEnv = (prev.environment && typeof prev.environment === "object" && !Array.isArray(prev.environment)) ? prev.environment : {};
+      const newEnv = (entry.environment && typeof entry.environment === "object" && !Array.isArray(entry.environment)) ? entry.environment : {};
+      existing[parentKey]["recall-memory"] = {
+        ...prev,
+        ...entry,
+        environment: { ...prevEnv, ...newEnv }
+      };
+      fs.writeFileSync(file, JSON.stringify(existing, null, 2));
+    '
+}
+
 # ── OpenCode ─────────────────────────────────────────────────────────────────
 
 recall_configure_opencode_mcp() {
@@ -1678,61 +1753,19 @@ recall_configure_opencode_mcp() {
 
   mkdir -p "$OPENCODE_CONFIG_DIR"
 
-  # Always overwrite the env block so existing installs pick up RECALL_DB_PATH
-  # even when the registration is already present. (The old code returned
-  # early on detection of "recall-memory", which left stale env vars in place
-  # after a path-changing update.)
-  if INSTALL_MCP_PATH="$mem_mcp_path" \
-    BUN_PATH="$bun_path" \
-    DB_PATH_ABS="$db_path_abs" \
-    CONFIG_PATH="$config" \
-    bun -e '
-      const fs = require("fs");
-      const path = process.env.CONFIG_PATH;
-      let raw = "{}";
-      if (fs.existsSync(path)) {
-        raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-      }
-      // V-1: refuse on unparseable input instead of throwing-then-reporting
-      // success. We exit non-zero BEFORE any write, so the file is untouched.
-      let existing;
-      try {
-        existing = JSON.parse(raw);
-      } catch (e) {
-        console.error("recall: refusing to modify opencode.json — existing file is not valid JSON/JSONC: " + e.message);
-        process.exit(1);
-      }
-      if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
-        console.error("recall: refusing to modify opencode.json — top-level value is not an object");
-        process.exit(1);
-      }
-      // V-4: the mcp container exists but is not a plain object (e.g.
-      // "mcp": "disabled"). Refuse rather than silently rewrite.
-      if (Object.prototype.hasOwnProperty.call(existing, "mcp")) {
-        const container = existing.mcp;
-        if (container === null || typeof container !== "object" || Array.isArray(container)) {
-          console.error("recall: refusing to modify opencode.json — \"mcp\" exists but is not an object");
-          process.exit(1);
-        }
-      }
-      existing.mcp = existing.mcp || {};
-      // V-3: deep-merge. We own only type/command/enabled and
-      // environment.RECALL_DB_PATH; every other key the user set on the entry
-      // — and every other environment var — survives a refresh.
-      const prevRaw = existing.mcp["recall-memory"];
-      const prev = (prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)) ? prevRaw : {};
-      const prevEnv = (prev.environment && typeof prev.environment === "object" && !Array.isArray(prev.environment)) ? prev.environment : {};
-      existing.mcp["recall-memory"] = {
-        ...prev,
-        type: "local",
-        command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
-        enabled: true,
-        environment: { ...prevEnv, RECALL_DB_PATH: process.env.DB_PATH_ABS }
-      };
-      fs.writeFileSync(path, JSON.stringify(existing, null, 2));
-    '; then
+  # Build the owned entry shape via JSON.stringify (never shell-interpolated
+  # into JS source). Always overwrite the env block so existing installs pick
+  # up RECALL_DB_PATH even when the registration is already present.
+  local entry_json
+  entry_json="$(INSTALL_MCP_PATH="$mem_mcp_path" BUN_PATH="$bun_path" DB_PATH_ABS="$db_path_abs" \
+    bun -e 'process.stdout.write(JSON.stringify({
+      type: "local",
+      command: [process.env.BUN_PATH, "run", process.env.INSTALL_MCP_PATH],
+      enabled: true,
+      environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
+    }))')"
+
+  if _recall_jsonc_merge_mcp_entry "$config" "mcp" "$entry_json"; then
     log_success "Registered recall-memory MCP server in opencode.json"
   else
     log_error "Failed to register recall-memory MCP server in opencode.json (existing config is invalid or unsupported — left unchanged)"
@@ -1800,57 +1833,19 @@ recall_configure_pi_mcp() {
 
   mkdir -p "$PI_CONFIG_DIR"
 
-  # Always rewrite the env block (see recall_configure_opencode_mcp for why).
-  if MCP_CONFIG_PATH="$config" \
-    DB_PATH_ABS="$db_path_abs" \
-    MEM_MCP_PATH="$mem_mcp_path" \
-    bun -e '
-      const fs = require("fs");
-      const path = process.env.MCP_CONFIG_PATH;
-      let raw = "{}";
-      if (fs.existsSync(path)) {
-        raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-      }
-      // V-1: refuse on unparseable input instead of throwing-then-reporting
-      // success. We exit non-zero BEFORE any write, so the file is untouched.
-      let existing;
-      try {
-        existing = JSON.parse(raw);
-      } catch (e) {
-        console.error("recall: refusing to modify mcp.json — existing file is not valid JSON/JSONC: " + e.message);
-        process.exit(1);
-      }
-      if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
-        console.error("recall: refusing to modify mcp.json — top-level value is not an object");
-        process.exit(1);
-      }
-      // V-4: the mcpServers container exists but is not a plain object (e.g.
-      // "mcpServers": "disabled"). Refuse rather than silently rewrite.
-      if (Object.prototype.hasOwnProperty.call(existing, "mcpServers")) {
-        const container = existing.mcpServers;
-        if (container === null || typeof container !== "object" || Array.isArray(container)) {
-          console.error("recall: refusing to modify mcp.json — \"mcpServers\" exists but is not an object");
-          process.exit(1);
-        }
-      }
-      existing.mcpServers = existing.mcpServers || {};
-      // V-3: deep-merge. We own only command/args/lifecycle and
-      // environment.RECALL_DB_PATH; every other key the user set on the entry
-      // — and every other environment var — survives a refresh.
-      const prevRaw = existing.mcpServers["recall-memory"];
-      const prev = (prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)) ? prevRaw : {};
-      const prevEnv = (prev.environment && typeof prev.environment === "object" && !Array.isArray(prev.environment)) ? prev.environment : {};
-      existing.mcpServers["recall-memory"] = {
-        ...prev,
-        command: process.env.MEM_MCP_PATH,
-        args: [],
-        lifecycle: "lazy",
-        environment: { ...prevEnv, RECALL_DB_PATH: process.env.DB_PATH_ABS }
-      };
-      fs.writeFileSync(path, JSON.stringify(existing, null, 2));
-    '; then
+  # Build the owned entry shape via JSON.stringify (never shell-interpolated
+  # into JS source). Always rewrite the env block so existing installs pick up
+  # RECALL_DB_PATH even when the registration is already present.
+  local entry_json
+  entry_json="$(MEM_MCP_PATH="$mem_mcp_path" DB_PATH_ABS="$db_path_abs" \
+    bun -e 'process.stdout.write(JSON.stringify({
+      command: process.env.MEM_MCP_PATH,
+      args: [],
+      lifecycle: "lazy",
+      environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
+    }))')"
+
+  if _recall_jsonc_merge_mcp_entry "$config" "mcpServers" "$entry_json"; then
     log_success "Registered recall-memory in Pi mcp.json"
   else
     log_error "Failed to register recall-memory in Pi mcp.json (existing config is invalid or unsupported — left unchanged)"
