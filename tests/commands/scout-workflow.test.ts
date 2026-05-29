@@ -7,7 +7,8 @@
 //      sensitive-data boundary, and keeps artifacts opt-in.
 //   3. DRY: the four platform guides reference the canonical block and do NOT
 //      hand-copy its body (per the MANDATORY DRY rule in CLAUDE.md/AGENTS.md).
-//   4. The artifacts policy is recorded in AGENTS.md + CLAUDE.md.
+//   4. The artifacts policy is recorded in canonical AGENTS.md; CLAUDE.md is a
+//      shim that @-imports it.
 //   5. /Recall:scout is listed in the user-facing docs (slash-commands, README).
 
 import { describe, test, expect } from 'bun:test';
@@ -101,15 +102,22 @@ describe('DRY — guides reference the canonical block, never copy it', () => {
   });
 });
 
-describe('artifacts policy is recorded in the dev guides', () => {
-  for (const devGuide of ['AGENTS.md', 'CLAUDE.md']) {
-    test(`${devGuide} documents the .agents/atlas/artifacts/ policy`, () => {
-      const body = read(devGuide);
-      expect(body).toContain('.agents/atlas/artifacts/');
-      // handoffs/ remains reserved for handoffs.
-      expect(body).toMatch(/\.agents\/atlas\/handoffs\/.*reserved|reserved for session handoff/i);
-    });
-  }
+describe('artifacts policy is recorded in the canonical dev guide', () => {
+  // AGENTS.md is the single source of truth; CLAUDE.md is a thin shim that
+  // @-imports it so Claude Code loads it. The policy lives in AGENTS.md only.
+  test('AGENTS.md documents the .agents/atlas/artifacts/ policy', () => {
+    const body = read('AGENTS.md');
+    expect(body).toContain('.agents/atlas/artifacts/');
+    // handoffs/ remains reserved for handoffs.
+    expect(body).toMatch(/\.agents\/atlas\/handoffs\/.*reserved|reserved for session handoff/i);
+  });
+
+  test('CLAUDE.md is a shim that @-imports AGENTS.md (no duplicated content)', () => {
+    const body = read('CLAUDE.md');
+    expect(body).toMatch(/^@AGENTS\.md\s*$/m);
+    // It must NOT hand-copy the policy — that would reintroduce drift.
+    expect(body).not.toContain('.agents/atlas/artifacts/');
+  });
 });
 
 describe('/Recall:scout is listed for users', () => {
