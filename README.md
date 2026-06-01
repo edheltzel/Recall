@@ -197,17 +197,24 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 | Strategy             | Command                      | How it works                                                                                                            |
 | -------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **Keyword**          | `mem search "query"`         | FTS5 full-text search across all tables                                                                                 |
+| **Keyword**          | `mem search "query"`         | FTS5 full-text search across all tables. Use `-t decisions` to hard-filter, or `--bias-type decisions` to prefer decisions while keeping other matches. |
 | **Semantic**         | `mem embed semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama)                                                                 |
 | **Hybrid** (default) | `mem "query"`                | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
+
+**Narrowing by record type — `table` vs `bias_type`.** Both let you steer results toward decisions, learnings, breadcrumbs, LoA entries, or raw messages, but they differ in strength:
+
+- **`-t` / `table`** is a **hard filter** — only the named record type comes back.
+- **`--bias-type` / `bias_type`** is a **soft boost** — matching records of that type rank higher, but every other type can still appear when it's relevant.
+
+**Where it's available:** `table` and `bias_type` act on FTS5 ranking, so they exist **only on the keyword path** — `mem search`, `mem "query" -k`, and the MCP `memory_search` tool. They are silently ignored elsewhere: plain `mem "query"` (default hybrid), `mem "query" -v` (semantic), and `memory_hybrid_search` rank by embedding distance and have no `bias_type`. Valid types: `messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`.
 
 > [Architecture deep-dive](docs/architecture.md) — database tables, FTS5 indexes, extraction pipeline details
 
 ## What You Get
 
 - **Auto-captured session memory** — extracted incrementally (Stop hook on every turn) via Claude Haiku, with `RecallBatchExtract.ts` cron sweeper as a crash-recovery safety net
-- **MCP server (`mem-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session
-- **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working
+- **MCP server (`mem-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
+- **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
 - **Tiered RecallStart (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
 - **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `mem pin` / `mem unpin` / `mem importance backfill`
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost

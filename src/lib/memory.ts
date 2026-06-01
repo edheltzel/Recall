@@ -257,11 +257,36 @@ export function getBreadcrumb(id: number): Breadcrumb | undefined {
 // Track search errors for debugging (FIX #7)
 let lastSearchErrors: string[] = [];
 
+export const SEARCH_TABLES = ['messages', 'loa', 'decisions', 'learnings', 'breadcrumbs'] as const;
+export type SearchTable = typeof SEARCH_TABLES[number];
+
+export interface MemorySearchOptions {
+  project?: string;
+  table?: string;
+  limit?: number;
+  biasType?: SearchTable;
+}
+
+const TYPE_BIAS_RANK_MULTIPLIER = 4;
+
+function rankWithTypeBias(rank: number | undefined, shouldBias: boolean): number {
+  const baseRank = rank || 0;
+  if (!shouldBias) return baseRank;
+
+  // SQLite FTS5 ranks sort ascending. In practice bm25 ranks are negative,
+  // so multiplying makes a biased match more competitive without filtering
+  // out stronger results from other tables. Positive/zero ranks get the
+  // equivalent lower-is-better treatment.
+  if (baseRank < 0) return baseRank * TYPE_BIAS_RANK_MULTIPLIER;
+  if (baseRank > 0) return baseRank / TYPE_BIAS_RANK_MULTIPLIER;
+  return -Number.EPSILON;
+}
+
 export function getLastSearchErrors(): string[] {
   return lastSearchErrors;
 }
 
-export function search(query: string, options?: { project?: string; table?: string; limit?: number }): SearchResult[] {
+export function search(query: string, options?: MemorySearchOptions): SearchResult[] {
   const db = getDb();
   const limit = options?.limit || 20;
   const results: SearchResult[] = [];
@@ -269,7 +294,7 @@ export function search(query: string, options?: { project?: string; table?: stri
 
   const tables = options?.table
     ? [options.table]
-    : ['messages', 'loa', 'decisions', 'learnings', 'breadcrumbs'];
+    : SEARCH_TABLES;
 
   for (const table of tables) {
     let sql: string;
@@ -368,8 +393,15 @@ export function search(query: string, options?: { project?: string; table?: stri
     }
   }
 
-  // Sort all results by rank
-  results.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  // Sort all results by rank, with an optional soft table-type bias.
+  const biasType = options?.biasType;
+  results.sort((a, b) => {
+    const aSortRank = rankWithTypeBias(a.rank, biasType === a.table);
+    const bSortRank = rankWithTypeBias(b.rank, biasType === b.table);
+
+    if (aSortRank !== bSortRank) return aSortRank - bSortRank;
+    return (a.rank || 0) - (b.rank || 0);
+  });
 
   return results.slice(0, limit);
 }
