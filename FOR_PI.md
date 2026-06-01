@@ -23,11 +23,15 @@ These tools are available via the `recall-memory` MCP server. In Pi, tool names 
 
 ### recall-memory_memory_search
 
-Search all memory with FTS5 full-text search. **Use this BEFORE asking the user to repeat anything.**
+Search all memory with FTS5 full-text search. **Use this BEFORE asking the user to repeat anything.** Use `table` for a hard filter; use `bias_type` to prefer one type while preserving other matches.
 
 ```
 recall-memory_memory_search({ query: "kubernetes auth", project: "my-app" })
+recall-memory_memory_search({ query: "database choice", table: "decisions" })      // decisions only
+recall-memory_memory_search({ query: "database choice", bias_type: "decisions" })  // decisions first, broader context kept
 ```
+
+Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for curated summaries, `messages` for raw conversation traces.
 
 ### recall-memory_memory_hybrid_search
 
@@ -81,6 +85,7 @@ You can also use the `mem` CLI directly via shell commands:
 
 ```bash
 mem search "deployment pipeline"    # Search memory
+mem search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
 mem stats                           # Database statistics
 mem loa list                        # Browse curated knowledge
 mem onboard                         # Interactive L0 identity setup (run once per user)
@@ -122,7 +127,7 @@ exit Pi first.
 
 ## Core Rules
 
-1. **Search before asking** — Before asking the user to repeat information, search memory first
+1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
 4. **Capture sessions** — At the end of a session, run `mem dump "Descriptive Title"` via a slash command to persist the conversation

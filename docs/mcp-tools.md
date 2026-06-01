@@ -10,20 +10,29 @@ All 8 tools available when Claude Code connects to the Recall MCP server (`recal
 
 FTS5 keyword search across all memory tables. Use before asking the user to repeat anything.
 
+Use `table` when you need a **hard filter** to one record type. Use `bias_type` when you want one type to appear first but still want useful matches from other tables.
+
 **Parameters**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | query | string | yes | — | Search query. FTS5 supports `AND`, `OR`, `NOT`, `prefix*`, `"exact phrase"` |
 | project | string | no | — | Filter results to a specific project name |
-| table | string | no | — | Restrict search to one table: `messages`, `loa`, `decisions`, `learnings`, `breadcrumbs` |
+| table | string | no | — | Hard-filter search to one table: `messages`, `loa`, `decisions`, `learnings`, `breadcrumbs` |
+| bias_type | string | no | — | Softly boost one table type in ranking without filtering other matches. Same allowed values as `table`; prefer `table` when you need only one type. |
 | limit | number | no | 10 | Maximum number of results to return |
 
 **Returns:** Array of matching records with table name, id, content, project, and snippet highlighting.
 
 ```js
+// Only decisions
 memory_search({ query: "kubernetes auth", project: "my-app", table: "decisions", limit: 10 })
+
+// Prefer decisions, but keep matching learnings/messages/LoA/breadcrumbs
+memory_search({ query: "kubernetes auth", project: "my-app", bias_type: "decisions", limit: 10 })
 ```
+
+**When to bias:** use `bias_type: "decisions"` for “what did we decide,” `"learnings"` for “what did we learn,” `"breadcrumbs"` for “where did we leave off,” `"loa"` for curated summaries, and `"messages"` for raw conversation traces.
 
 ---
 

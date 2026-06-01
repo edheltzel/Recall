@@ -2,7 +2,7 @@
 description: Search Recall memory using FTS5 full-text search across all tables
 ---
 
-Search across all Recall memory tables (messages, decisions, learnings, breadcrumbs) using SQLite FTS5 full-text search. Supports AND, OR, NOT operators, prefix matching, and exact phrases.
+Search across all Recall memory tables (messages, LoA entries, decisions, learnings, breadcrumbs) using SQLite FTS5 full-text search. Supports AND, OR, NOT operators, prefix matching, exact phrases, hard table filtering, and soft table biasing.
 
 ## Usage
 
@@ -15,7 +15,8 @@ mem search "$1"
 
 **Options:**
 - `-p <project>` — Filter by project name
-- `-t <table>` — Search specific table: messages, decisions, learnings, breadcrumbs
+- `-t <table>` — Hard-filter to one table: messages, loa, decisions, learnings, breadcrumbs
+- `--bias-type <table>` — Softly boost one table without filtering other matches. Same values as `-t`.
 - `-l <n>` — Max results (default: 20)
 
 ## Examples
@@ -24,8 +25,11 @@ mem search "$1"
 # Search all memory
 mem search "kubernetes deployment"
 
-# Search decisions only
+# Search decisions only (hard filter)
 mem search "database choice" -t decisions
+
+# Prefer decisions first, but still show matching learnings/messages/etc.
+mem search "database choice" --bias-type decisions
 
 # Filter by project
 mem search "auth middleware" -p my-api
@@ -35,6 +39,8 @@ mem search '"rate limiting strategy"' -l 5
 
 # FTS5 operators
 mem search "webpack OR vite" -t learnings
+
+# Rule of thumb: use -t when you want ONLY that table; use --bias-type when you want that table first.
 ```
 
 $@

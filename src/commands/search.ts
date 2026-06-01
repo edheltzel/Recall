@@ -5,6 +5,7 @@ import { search } from '../lib/memory.js';
 interface SearchOptions {
   project?: string;
   table?: string;
+  biasType?: 'messages' | 'loa' | 'decisions' | 'learnings' | 'breadcrumbs';
   limit?: number;
 }
 
@@ -12,6 +13,7 @@ export function runSearch(query: string, options: SearchOptions): void {
   const results = search(query, {
     project: options.project,
     table: options.table,
+    biasType: options.biasType,
     limit: options.limit || 20
   });
 

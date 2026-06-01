@@ -19,11 +19,15 @@ These tools are available via the `recall-memory` MCP server:
 
 ### memory_search
 
-Search all memory with FTS5 full-text search. **Use this BEFORE asking the user to repeat anything.**
+Search all memory with FTS5 full-text search. **Use this BEFORE asking the user to repeat anything.** Use `table` for a hard filter; use `bias_type` to prefer one type while preserving other matches.
 
 ```
 memory_search({ query: "kubernetes auth", project: "my-app" })
+memory_search({ query: "database choice", table: "decisions" })      // decisions only
+memory_search({ query: "database choice", bias_type: "decisions" })  // decisions first, broader context kept
 ```
+
+Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for curated summaries, `messages` for raw conversation traces.
 
 ### memory_hybrid_search
 
@@ -136,6 +140,7 @@ You can also use the `mem` CLI directly via Bash:
 
 ```bash
 mem search "deployment pipeline"    # Search memory
+mem search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
 mem stats                           # Database statistics
 mem loa list                        # Browse curated knowledge
 mem dump "Session title"            # Capture current session
@@ -156,7 +161,7 @@ session context is empty — recommend running `mem onboard` to fix it.
 ## Core Rules
 
 1. **Memory-first at session start** — A `SessionStart` hook (`RecallStart.ts`) automatically loads two tiers: **L0 identity** (user-authored `identity.md`, always on, capped at 1200 chars) and **L1 top 12** (messages/decisions/learnings/LoA ranked by importance, with 4 slots reserved for LoA). Review both before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`. L2/L3 tiers are documented in the preamble but NOT injected — fetch them on demand.
-2. **Search memory before git** — When you need context about past work, **always search Recall first** (`memory_search` or `memory_hybrid_search`) before falling back to `git log`, `git show`, or commit history. Recall contains structured decisions, learnings, and session summaries that are richer than commit messages.
+2. **Search memory before git** — When you need context about past work, **always search Recall first** (`memory_search` or `memory_hybrid_search`) before falling back to `git log`, `git show`, or commit history. Recall contains structured decisions, learnings, and session summaries that are richer than commit messages. Prefer `bias_type` over `table` when a user asks for a kind of memory but broader context may still matter.
 3. **Search before asking** — Before asking the user to repeat information, search memory first
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history

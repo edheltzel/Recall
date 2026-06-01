@@ -13,13 +13,27 @@ mem "query"                          # Hybrid search (keyword + semantic, defaul
 mem "query" -k                       # Keyword only (FTS5)
 mem "query" -v                       # Vector only (semantic, requires Ollama)
 mem search "query"                   # FTS5 search with options
-mem search "query" -t decisions      # Search specific table
+mem search "query" -t decisions      # Hard-filter to decisions only
+mem search "query" --bias-type decisions # Prefer decisions, still show other matching tables
 mem search "query" -p myproject      # Filter by project
 mem semantic "query"                 # Semantic search (explicit)
 mem hybrid "query"                   # Hybrid search (explicit)
 ```
 
 The default search mode is hybrid: it runs FTS5 keyword matching and vector similarity in parallel, then merges results by relevance score. Use `-k` when you want exact phrase or operator matching without semantic expansion. Use `-v` when you want conceptually related results even if the exact words differ.
+
+For keyword search, `-t/--table` and `--bias-type` solve different problems:
+
+- `-t decisions` is a **hard filter**: only decisions can appear.
+- `--bias-type decisions` is a **soft boost**: matching decisions rank higher, but matching LoA entries, learnings, breadcrumbs, and messages can still appear.
+
+Allowed values: `messages`, `loa`, `decisions`, `learnings`, `breadcrumbs`.
+
+```bash
+mem search "database choice" -t decisions          # only decisions
+mem search "database choice" --bias-type decisions # decisions first, broader context preserved
+mem "database choice" -k --bias-type decisions     # default command, keyword-only with soft bias
+```
 
 FTS5 supports boolean operators and prefix matching:
 

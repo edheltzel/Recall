@@ -49,7 +49,7 @@ A JSON tracker at `~/.claude/MEMORY/pi-sessions/.extraction_tracker.json` record
 
 ## Memory Injection
 
-Before each agent turn, the `before_agent_start` hook runs `mem search <query>` and appends results to the system prompt. This is per-turn injection, not persistent session state — the context is re-fetched on every turn.
+Before each agent turn, the `before_agent_start` hook runs `mem search <query>` and appends results to the system prompt. This is per-turn injection, not persistent session state — the context is re-fetched on every turn. Humans can narrow manual keyword searches with `-t <table>` or softly prefer a type with `--bias-type <table>`.
 
 The hook lives in `~/.pi/agent/extensions/RecallPreCompact.ts` (named for consistency with the OpenCode equivalent, though it handles injection rather than compaction context).
 
@@ -59,6 +59,12 @@ before_agent_start → extract project/task keywords from input
                    → mem search <keywords> --limit 5
                    → append to system prompt as "## Persistent Memory"
                    → agent runs with context
+```
+
+Manual targeted search examples:
+```bash
+mem search "database choice" -t decisions          # decisions only
+mem search "database choice" --bias-type decisions # decisions first, broader context preserved
 ```
 
 If `mem` is unavailable or times out (5s limit), the hook skips silently.
@@ -81,7 +87,7 @@ Pi uses `pi-mcp-adapter` in server prefix mode, which prepends `recall-memory_` 
 
 | Base Tool | Pi Tool Name | Description |
 |-----------|-------------|-------------|
-| `memory_search` | `recall-memory_memory_search` | FTS5 keyword search |
+| `memory_search` | `recall-memory_memory_search` | FTS5 keyword search; supports `table` hard filters and `bias_type` soft boosts |
 | `memory_hybrid_search` | `recall-memory_memory_hybrid_search` | FTS5 + vector search |
 | `memory_recall` | `recall-memory_memory_recall` | Contextual recall |
 | `memory_add` | `recall-memory_memory_add` | Add memory entry |
@@ -99,9 +105,11 @@ The snippet installed at `~/.pi/agent/AGENTS.md` enables Recall tools and sets e
 ## Memory (Recall)
 
 You have persistent memory via recall-memory MCP tools. Before asking the user
-to repeat anything, search first with `recall-memory_memory_search`. Record
-important decisions with `recall-memory_memory_add`. Before delegating tasks,
-call `recall-memory_context_for_agent`.
+to repeat anything, search first with `recall-memory_memory_search`. Use
+`table` when you need only one record type; use `bias_type` when that type
+should rank first while preserving other matching context. Record important
+decisions with `recall-memory_memory_add`. Before delegating tasks, call
+`recall-memory_context_for_agent`.
 ```
 
 ## Database
