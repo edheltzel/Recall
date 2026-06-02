@@ -252,7 +252,9 @@ tools:
 You have access to persistent memory via the recall-memory MCP server.
 
 Before asking the user to repeat information, search memory first using
-recall-memory_memory_search or recall-memory_memory_hybrid_search.
+recall-memory_memory_search or recall-memory_memory_hybrid_search. For keyword
+search, use `table` when you need only one record type; use `bias_type` when
+that type should rank first while preserving other matching context.
 
 When important decisions are made, record them with recall-memory_memory_add.
 
@@ -397,7 +399,7 @@ OpenCode prefixes MCP tools with the server name + underscore:
 
 | Claude Code | OpenCode | Same Tool |
 |-------------|----------|-----------|
-| `memory_search` | `recall-memory_memory_search` | Yes |
+| `memory_search` | `recall-memory_memory_search` | Yes — includes `table` hard filters and `bias_type` soft boosts |
 | `memory_hybrid_search` | `recall-memory_memory_hybrid_search` | Yes |
 | `memory_recall` | `recall-memory_memory_recall` | Yes |
 | `memory_add` | `recall-memory_memory_add` | Yes |
