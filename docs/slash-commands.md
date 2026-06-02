@@ -23,7 +23,12 @@ FTS5 full-text search across all memory tables.
 
 **Usage:** `/Recall:search kubernetes auth`
 
-Searches messages, LoA entries, decisions, learnings, and breadcrumbs.
+Searches messages, LoA entries, decisions, learnings, and breadcrumbs. The slash command wraps `mem search`, so human CLI flags work here too:
+
+- `/Recall:search database choice -t decisions` — hard-filter to decisions only
+- `/Recall:search database choice --bias-type decisions` — prefer decisions first, while still returning matching learnings/messages/LoA/breadcrumbs
+
+Rule of thumb: use `-t` when you want only one table; use `--bias-type` when you want one table first without hiding other context.
 
 ### /Recall:recent
 

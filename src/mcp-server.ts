@@ -43,6 +43,7 @@ import { z } from "zod";
 import { getDb, initDb, getDbPath } from "./db/connection.js";
 import {
 	search,
+	SEARCH_TABLES,
 	recentMessages,
 	recentDecisions,
 	recentLearnings,
@@ -257,14 +258,20 @@ server.tool(
 			),
 		project: z.string().optional().describe("Filter by project name"),
 		table: z
-			.enum(["messages", "loa", "decisions", "learnings", "breadcrumbs"])
+			.enum(SEARCH_TABLES)
 			.optional()
-			.describe("Search specific table only"),
+			.describe("Hard-filter search to a specific table"),
+		bias_type: z
+			.enum(SEARCH_TABLES)
+			.optional()
+			.describe(
+				"Soft ranking bias for a record type. Matching records get a ranking boost but other types can still be returned; use table for hard filtering.",
+			),
 		limit: z.number().default(10).describe("Max results to return"),
 	},
-	async ({ query, project, table, limit }) => {
+	async ({ query, project, table, bias_type, limit }) => {
 		try {
-			const results = search(query, { project, table, limit });
+			const results = search(query, { project, table, biasType: bias_type, limit });
 
 			// Log memory usage for metrics
 			logMemoryUsage("memory_search", query, results.length, project);

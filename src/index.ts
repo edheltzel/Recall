@@ -173,12 +173,14 @@ program
   .command('search <query>')
   .description('Full-text search across all memory')
   .option('-p, --project <name>', 'Filter by project')
-  .option('-t, --table <table>', 'Search specific table (messages, decisions, learnings, breadcrumbs)')
+  .option('-t, --table <table>', 'Hard-filter to one table (messages, loa, decisions, learnings, breadcrumbs)')
+  .option('--bias-type <table>', 'Softly boost one table without filtering others (messages, loa, decisions, learnings, breadcrumbs)')
   .option('-l, --limit <n>', 'Max results', '20')
   .action((query, options) => {
     runSearch(query, {
       project: options.project,
       table: options.table,
+      biasType: options.biasType,
       limit: parseInt(options.limit, 10)
     });
     closeDb();
@@ -592,6 +594,7 @@ program
   .arguments('[query]')
   .option('-p, --project <name>', 'Filter by project')
   .option('-t, --table <table>', 'Search specific table')
+  .option('--bias-type <table>', 'Keyword search only: softly boost one table without filtering others')
   .option('-l, --limit <n>', 'Max results', '10')
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
@@ -602,6 +605,7 @@ program
         runSearch(query, {
           project: options.project,
           table: options.table,
+          biasType: options.biasType,
           limit: parseInt(options.limit, 10)
         });
       } else if (options.vector) {

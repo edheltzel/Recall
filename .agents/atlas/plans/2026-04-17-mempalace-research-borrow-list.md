@@ -1,11 +1,11 @@
 ---
 title: MemPalace Research → Recall Borrow List
 status: In Progress
-percent_complete: 65
-last_updated: 2026-04-28
+percent_complete: 70
+last_updated: 2026-06-01
 phase: Phase 3 (Postgres/Turso backend) + Phase 4 (non-coding agents) — DRAFT, awaiting decision
 blockers: Awaiting Ed's go/no-go on Phase 3 (Turso/libSQL multi-device) and Phase 4 (Slack bot, etc.)
-next_action: Decide Phase 3 priority vs. CLI rename + npm publish; Sprints #1, #2, #4 + Suite B already shipped
+next_action: Review/merge #7 bias_type + --bias-type implementation; then decide Phase 3 priority vs. CLI rename + npm publish
 ---
 
 # MemPalace Research → Recall Borrow List
@@ -43,7 +43,7 @@ The roman-rr Gist documents metronomic star-acquisition timing consistent with b
 | 4 | Importance scoring on records | RESHAPE | M | **BUILD** (reshape: integer 1–10 matching existing breadcrumbs, backfill-only) |
 | 5 | Behavioral instruction injected into MCP tool responses | KILL | S | **KILL** (prompt-injection attack surface — see analysis) |
 | 6 | Multi-format conversation import | RESHAPE | M | **BUILD** (reshape: must pass through Haiku extraction; never bypass the filter) |
-| 7 | Type-weighted FTS5 ranking | KILL | S | **OPTIONAL** (offer as opt-in `bias_type` param; do not change defaults) |
+| 7 | Type-weighted FTS5 ranking | KILL | S | **IMPLEMENTED** (opt-in `bias_type` param; defaults unchanged) |
 
 ---
 
@@ -132,11 +132,11 @@ The roman-rr Gist documents metronomic star-acquisition timing consistent with b
 
 ---
 
-### #7 Type-weighted FTS5 ranking — **OPTIONAL**
+### #7 Type-weighted FTS5 ranking — **IMPLEMENTED (opt-in)**
 
 **Architect:** S complexity, low risk, additive `bias_type` parameter on `memory_search`. **Red team:** redundant with the existing `--type` filter, adds opacity to ranking.
 
-Both are right. **Compromise:** add `bias_type` as an *opt-in* MCP parameter (no default change, no CLI surface yet). Document that hard filtering via `--type` remains the recommended path. If usage proves out, promote it; otherwise deprecate. No work needed if Ed wants to skip — the existing filter is sufficient.
+Both are right. **Compromise shipped 2026-06-01:** add `bias_type` as an *opt-in* MCP parameter (no default change, no CLI surface yet). Matching table types receive a soft FTS rank boost; other matching types can still appear. Hard filtering via `table` remains the recommended path when the caller needs only one type. If usage proves out, promote it; otherwise deprecate.
 
 ---
 
@@ -297,6 +297,15 @@ Tests: 267 pass, 0 fail. Build: clean.
 - Backfill is heuristic-only for the first cut: confidence=high → 7, low → 3, else 5. Haiku suggestion path deferred until benchmark feedback.
 - L1 budget: 12 slots, 4 reserved for LoA (~33%). Tie-break: `(importance DESC, table_priority [loa>dec>learn>bread], created_at DESC)`.
 - Removed in v2 (with rationale captured in commit message): HOT_RECALL.md integration (legacy pre-SQLite store), `**Recall is active.**` behavioral footer (prompt-injection surface per red team).
+
+## Sprint #7 — Status: **IMPLEMENTED 2026-06-01** (branch `feat/type-weighted-fts5-ranking`)
+
+- `memory_search` MCP schema now accepts optional `bias_type` with the same allowed values as `table`.
+- Human CLI usage ships as `mem search "query" --bias-type decisions` (soft boost) alongside existing `-t/--table` hard filtering; default command supports `mem "query" -k --bias-type decisions` for keyword-only mode.
+- Agent and human docs now explain `bias_type`/`--bias-type`: use it when a type should come first without hiding other matching context.
+- `src/lib/memory.ts` keeps default ranking unchanged unless `biasType` is supplied.
+- Added regression coverage that biased search prefers the requested type while still returning other matching types.
+- Validation: `bun test tests/lib/memory.test.ts`, full `bun test`, `bun run lint`, `bun run build`, CLI help smoke checks, and `git diff --check` all pass.
 
 ---
 

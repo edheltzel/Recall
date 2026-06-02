@@ -380,6 +380,35 @@ describe('Search (FTS5)', () => {
     }
   });
 
+  test('search can softly bias results toward a table without filtering others', () => {
+    const term = 'biasrankneedle';
+
+    addMessage({
+      session_id: searchSessionId,
+      timestamp: new Date().toISOString(),
+      role: 'user',
+      content: `${term} ${term} ${term} ${term} ${term} shared memory type ranking`,
+      project: searchProject,
+    });
+
+    addDecision({
+      session_id: searchSessionId,
+      decision: term,
+      reasoning: 'Used to verify opt-in type-weighted FTS ranking',
+      status: 'active',
+      project: searchProject,
+    });
+
+    const defaultResults = search(term, { project: searchProject, limit: 10 });
+    const biasedResults = search(term, { project: searchProject, biasType: 'decisions', limit: 10 });
+    const biasedTables = biasedResults.map((result) => result.table);
+
+    expect(defaultResults[0].table).toBe('messages');
+    expect(biasedTables).toContain('decisions');
+    expect(biasedTables).toContain('messages');
+    expect(biasedResults[0].table).toBe('decisions');
+  });
+
   test('search returns empty array for no matches', () => {
     const results = search('zxqvbnmthiswordwillneverexist12345');
     expect(results).toEqual([]);

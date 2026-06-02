@@ -12,6 +12,7 @@ You have access to persistent memory via the recall-memory MCP server.
 1. **Search before asking** — Before asking the user to repeat information, search memory first:
    - `recall-memory_memory_search` for keyword search
    - `recall-memory_memory_hybrid_search` for natural language queries
+   - Use `table` for one-type-only results; use `bias_type` when one type should rank first but other matching context should remain visible
 
 2. **Record decisions** — When architectural or process decisions are made:
    - `recall-memory_memory_add` with type "decision"
@@ -30,7 +31,7 @@ You have access to persistent memory via the recall-memory MCP server.
 
 | Tool | Purpose |
 |------|---------|
-| `recall-memory_memory_search` | FTS5 keyword search across all memory |
+| `recall-memory_memory_search` | FTS5 keyword search; supports `table` hard filters and `bias_type` soft boosts |
 | `recall-memory_memory_hybrid_search` | Semantic + keyword search with RRF fusion |
 | `recall-memory_memory_recall` | Recent context (LoA, decisions, breadcrumbs) |
 | `recall-memory_memory_add` | Record decisions, learnings, or breadcrumbs |

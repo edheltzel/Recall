@@ -120,7 +120,7 @@ graph LR
 
 | Mode | Command | MCP Tool | How It Works |
 |------|---------|----------|-------------|
-| Keyword | `mem search "query"` | memory_search | SQLite FTS5. Supports AND, OR, NOT, prefix*, "exact phrases" |
+| Keyword | `mem search "query"` | memory_search | SQLite FTS5. Supports AND, OR, NOT, prefix*, "exact phrases", hard table filters (`-t` / `table`), and soft type boosts (`--bias-type` / `bias_type`) |
 | Semantic | `mem semantic "query"` | — | Ollama embedding → cosine similarity against stored vectors |
 | Hybrid | `mem "query"` | memory_hybrid_search | Both combined via Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama unavailable |
 
