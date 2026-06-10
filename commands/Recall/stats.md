@@ -7,7 +7,7 @@ Display database statistics for the Recall memory system, including record count
 ## Usage
 
 ```bash
-mem stats
+recall stats
 ```
 
 No arguments or options. Shows a complete overview of the database state.

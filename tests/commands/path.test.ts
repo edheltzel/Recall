@@ -1,4 +1,4 @@
-// Smoke tests for `mem path`. Confirms human + JSON output and that the
+// Smoke tests for `recall path`. Confirms human + JSON output and that the
 // resolved DB path matches whatever's actually in the resolver.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -22,7 +22,7 @@ afterAll(() => {
   teardownTestDb();
 });
 
-describe('mem path', () => {
+describe('recall path', () => {
   test('human output mentions the resolved DB path', () => {
     captured = [];
     runPath({ json: false });

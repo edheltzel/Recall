@@ -2,22 +2,22 @@
 
 ← [Back to README](../README.md)
 
-The `mem` command is the primary interface for Recall. All subcommands operate on the SQLite database at `~/.agents/Recall/recall.db`.
+The `recall` command is the primary interface for Recall. All subcommands operate on the SQLite database at `~/.agents/Recall/recall.db`.
 
 ---
 
 ## Search
 
 ```bash
-mem "query"                          # Hybrid search (keyword + semantic, default)
-mem "query" -k                       # Keyword only (FTS5)
-mem "query" -v                       # Vector only (semantic, requires Ollama)
-mem search "query"                   # FTS5 search with options
-mem search "query" -t decisions      # Hard-filter to decisions only
-mem search "query" --bias-type decisions # Prefer decisions, still show other matching tables
-mem search "query" -p myproject      # Filter by project
-mem semantic "query"                 # Semantic search (explicit)
-mem hybrid "query"                   # Hybrid search (explicit)
+recall "query"                          # Hybrid search (keyword + semantic, default)
+recall "query" -k                       # Keyword only (FTS5)
+recall "query" -v                       # Vector only (semantic, requires Ollama)
+recall search "query"                   # FTS5 search with options
+recall search "query" -t decisions      # Hard-filter to decisions only
+recall search "query" --bias-type decisions # Prefer decisions, still show other matching tables
+recall search "query" -p myproject      # Filter by project
+recall semantic "query"                 # Semantic search (explicit)
+recall hybrid "query"                   # Hybrid search (explicit)
 ```
 
 The default search mode is hybrid: it runs FTS5 keyword matching and vector similarity in parallel, then merges results by relevance score. Use `-k` when you want exact phrase or operator matching without semantic expansion. Use `-v` when you want conceptually related results even if the exact words differ.
@@ -30,9 +30,9 @@ For keyword search, `-t/--table` and `--bias-type` solve different problems:
 Allowed values: `messages`, `loa`, `decisions`, `learnings`, `breadcrumbs`.
 
 ```bash
-mem search "database choice" -t decisions          # only decisions
-mem search "database choice" --bias-type decisions # decisions first, broader context preserved
-mem "database choice" -k --bias-type decisions     # default command, keyword-only with soft bias
+recall search "database choice" -t decisions          # only decisions
+recall search "database choice" --bias-type decisions # decisions first, broader context preserved
+recall "database choice" -k --bias-type decisions     # default command, keyword-only with soft bias
 ```
 
 FTS5 supports boolean operators and prefix matching:
@@ -50,21 +50,21 @@ FTS5 supports boolean operators and prefix matching:
 ### Session Dump
 
 ```bash
-mem dump "Session Title"             # Import session + capture LoA entry
+recall dump "Session Title"             # Import session + capture LoA entry
 ```
 
-Combines `mem import` and `mem loa write` in one step. Run this at the end of every session to persist the conversation and extract a Fabric summary into the Library of Alexandria. The title should describe what was accomplished in the session.
+Combines `recall import` and `recall loa write` in one step. Run this at the end of every session to persist the conversation and extract a Fabric summary into the Library of Alexandria. The title should describe what was accomplished in the session.
 
 ### Library of Alexandria (LoA)
 
 ```bash
-mem loa write "Session Title"              # Capture messages since last LoA entry
-mem loa write "VPN Config" -p infra        # Tag with project
-mem loa write "VPN Part 2" -c 1            # Continue from previous entry (chain)
-mem loa write "Auth System" -t "auth"      # Add tags
-mem loa list                               # List recent entries
-mem loa show 1                             # View full Fabric extract for entry #1
-mem loa quote 1                            # View raw source messages for entry #1
+recall loa write "Session Title"              # Capture messages since last LoA entry
+recall loa write "VPN Config" -p infra        # Tag with project
+recall loa write "VPN Part 2" -c 1            # Continue from previous entry (chain)
+recall loa write "Auth System" -t "auth"      # Add tags
+recall loa list                               # List recent entries
+recall loa show 1                             # View full Fabric extract for entry #1
+recall loa quote 1                            # View raw source messages for entry #1
 ```
 
 LoA is the primary knowledge capture mechanism. Raw transcripts are high-noise; LoA entries contain Fabric-extracted insights, message lineage, continuation chains, and project context. Chaining (`-c <id>`) links a new entry to a prior one, forming a thread of related sessions.
@@ -72,8 +72,8 @@ LoA is the primary knowledge capture mechanism. Raw transcripts are high-noise; 
 ### Decisions
 
 ```bash
-mem add decision "Use TypeScript over Python" --why "Type safety, team preference" -p myproject
-mem add decision "Use SQLite for storage" -w "Lightweight, zero-config" --confidence high
+recall add decision "Use TypeScript over Python" --why "Type safety, team preference" -p myproject
+recall add decision "Use SQLite for storage" -w "Lightweight, zero-config" --confidence high
 ```
 
 Records an architectural or strategic decision with rationale. Decisions carry a status field (`active`, `superseded`, `reverted`) so you can track when a decision is overturned and why.
@@ -84,22 +84,22 @@ Manage decision status transitions.
 
 ```bash
 # List all decisions (all statuses)
-mem decision list
-mem decision list --status active
-mem decision list --status superseded
-mem decision list --project my-project --limit 10
+recall decision list
+recall decision list --status active
+recall decision list --status superseded
+recall decision list --project my-project --limit 10
 
 # Mark a decision as superseded (replaced by newer)
-mem decision supersede 42
+recall decision supersede 42
 
 # Mark a decision as reverted (was wrong, rolled back)
-mem decision revert 42
+recall decision revert 42
 ```
 
 ### Learnings
 
 ```bash
-mem add learning "Port conflict on 4000" "Kill process or change port" --prevention "Use dynamic port allocation"
+recall add learning "Port conflict on 4000" "Kill process or change port" --prevention "Use dynamic port allocation"
 ```
 
 Captures a problem-solution pair. The first argument is the problem, the second is the solution. The optional `--prevention` flag records how to avoid the issue in the future.
@@ -107,7 +107,7 @@ Captures a problem-solution pair. The first argument is the problem, the second 
 ### Breadcrumbs
 
 ```bash
-mem add breadcrumb "User prefers dark mode in all UIs" -p myproject -i 8
+recall add breadcrumb "User prefers dark mode in all UIs" -p myproject -i 8
 ```
 
 Stores a freeform observation or preference. The `-i` flag sets importance on a scale of 1–10 (default: 5). Higher importance surfaces the breadcrumb earlier in search results.
@@ -117,55 +117,55 @@ Stores a freeform observation or preference. The `-i` flag sets importance on a 
 ## View
 
 ```bash
-mem loa list                         # Recent LoA entries
-mem loa show 1                       # Full Fabric extract for entry #1
-mem loa quote 1                      # Raw source messages for entry #1
-mem recent                           # Recent records across all tables
-mem recent decisions                 # Recent decisions only
-mem show decisions 5                 # Full record for decision #5
-mem stats                            # Database statistics
-mem doctor                           # Health check all subsystems
+recall loa list                         # Recent LoA entries
+recall loa show 1                       # Full Fabric extract for entry #1
+recall loa quote 1                      # Raw source messages for entry #1
+recall recent                           # Recent records across all tables
+recall recent decisions                 # Recent decisions only
+recall show decisions 5                 # Full record for decision #5
+recall stats                            # Database statistics
+recall doctor                           # Health check all subsystems
 ```
 
-`mem recent` accepts any table name: `decisions`, `learnings`, `breadcrumbs`, `loa`, `sessions`, `docs`, `telos`.
+`recall recent` accepts any table name: `decisions`, `learnings`, `breadcrumbs`, `loa`, `sessions`, `docs`, `telos`.
 
-`mem show` displays the full record for a single row. The first argument is the table name, the second is the row ID.
+`recall show` displays the full record for a single row. The first argument is the table name, the second is the row ID.
 
 ---
 
 ## Import
 
 ```bash
-mem import --dry-run                 # Preview session imports without writing
-mem import --yes -v                  # Import all sessions from ~/.claude/projects/
-mem import-legacy --yes              # Import DISTILLED.md extracts as LoA entries
-mem docs import --dry-run            # Preview document imports
-mem docs import --yes                # Import standalone markdown documents
-mem telos import --dry-run           # Preview TELOS imports
-mem telos import --yes -u            # Import TELOS framework (update existing)
-mem telos list -t goal               # List TELOS entries of type: goal
-mem telos show G7                    # Show a specific TELOS entry by ID
+recall import --dry-run                 # Preview session imports without writing
+recall import --yes -v                  # Import all sessions from ~/.claude/projects/
+recall import-legacy --yes              # Import DISTILLED.md extracts as LoA entries
+recall docs import --dry-run            # Preview document imports
+recall docs import --yes                # Import standalone markdown documents
+recall telos import --dry-run           # Preview TELOS imports
+recall telos import --yes -u            # Import TELOS framework (update existing)
+recall telos list -t goal               # List TELOS entries of type: goal
+recall telos show G7                    # Show a specific TELOS entry by ID
 ```
 
-`mem import` scans `~/.claude/projects/` for JSONL session files and imports any not yet recorded. Use `--dry-run` first to confirm scope. The `-v` flag enables verbose output.
+`recall import` scans `~/.claude/projects/` for JSONL session files and imports any not yet recorded. Use `--dry-run` first to confirm scope. The `-v` flag enables verbose output.
 
-`mem import-legacy` converts entries from `DISTILLED.md` files (the previous manual memory format) into LoA entries, preserving their content in the new structured format.
+`recall import-legacy` converts entries from `DISTILLED.md` files (the previous manual memory format) into LoA entries, preserving their content in the new structured format.
 
-`mem docs` manages standalone reference documents (markdown files) that should be searchable alongside session memory.
+`recall docs` manages standalone reference documents (markdown files) that should be searchable alongside session memory.
 
-`mem telos` manages TELOS framework entries (goals, principles, constraints). The `-u` flag updates existing entries rather than skipping them on reimport.
+`recall telos` manages TELOS framework entries (goals, principles, constraints). The `-u` flag updates existing entries rather than skipping them on reimport.
 
 ---
 
 ## Embeddings
 
 ```bash
-mem embed stats                      # Check embedding service status and coverage
-mem embed backfill -t loa            # Generate missing embeddings for LoA entries
-mem embed backfill -t decisions      # Generate missing embeddings for decisions
+recall embed stats                      # Check embedding service status and coverage
+recall embed backfill -t loa            # Generate missing embeddings for LoA entries
+recall embed backfill -t decisions      # Generate missing embeddings for decisions
 ```
 
-Embeddings are generated via Ollama and stored in the database for vector similarity search. `mem embed stats` shows how many records have embeddings versus how many are eligible. Run `mem embed backfill` after importing a large batch of records to ensure full semantic search coverage.
+Embeddings are generated via Ollama and stored in the database for vector similarity search. `recall embed stats` shows how many records have embeddings versus how many are eligible. Run `recall embed backfill` after importing a large batch of records to ensure full semantic search coverage.
 
 Supported tables for backfill: `loa`, `decisions`, `learnings`, `breadcrumbs`, `sessions`, `docs`.
 
@@ -174,13 +174,13 @@ Supported tables for backfill: `loa`, `decisions`, `learnings`, `breadcrumbs`, `
 ## Identity & Onboarding
 
 ```bash
-mem onboard                          # Interactive L0 identity interview (writes identity.md)
-mem onboard --print --yes            # Preview rendered markdown without writing
-mem onboard --project                # Write project-local (./.atlas-recall/identity.md)
-mem onboard --out /path/identity.md  # Write to an explicit path
+recall onboard                          # Interactive L0 identity interview (writes identity.md)
+recall onboard --print --yes            # Preview rendered markdown without writing
+recall onboard --project                # Write project-local (./.atlas-recall/identity.md)
+recall onboard --out /path/identity.md  # Write to an explicit path
 ```
 
-`mem onboard` creates the L0 tier that `RecallStart` injects at the top of every
+`recall onboard` creates the L0 tier that `RecallStart` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
 `--project` > global default (`~/.claude/MEMORY/identity.md`). If a file already
 exists, the command asks for confirmation and writes a `.bak` copy before
@@ -196,29 +196,29 @@ The `importance` column (1-10) on `messages`, `decisions`, `learnings`, and
 
 ```bash
 # Backfill importance scores from confidence signals (dry-run by default)
-mem importance backfill
-mem importance backfill --execute
-mem importance backfill --execute --table decisions
-mem importance backfill --execute --force            # overwrite non-defaults too
+recall importance backfill
+recall importance backfill --execute
+recall importance backfill --execute --table decisions
+recall importance backfill --execute --force            # overwrite non-defaults too
 
 # Pin / unpin individual records
-mem pin decisions 42                 # Pin decision #42 to importance 10 (default)
-mem pin learnings 7 8                # Pin learning #7 to importance 8
-mem unpin decisions 42               # Reset to table default (5, or 8 for LoA)
+recall pin decisions 42                 # Pin decision #42 to importance 10 (default)
+recall pin learnings 7 8                # Pin learning #7 to importance 8
+recall unpin decisions 42               # Reset to table default (5, or 8 for LoA)
 ```
 
-LoA entries have a write-time floor of 5; `mem pin` will not drop them below that.
+LoA entries have a write-time floor of 5; `recall pin` will not drop them below that.
 
 ## Benchmarks
 
 Phase 2 benchmark harness for measuring context efficiency.
 
 ```bash
-mem benchmark list                   # Show available suites + build status
-mem benchmark run                    # Run all available suites
-mem benchmark run B                  # Run a specific suite (A-E)
-mem benchmark run B -p my-project    # Scope to a specific project
-mem benchmark report                 # Show the latest report
+recall benchmark list                   # Show available suites + build status
+recall benchmark run                    # Run all available suites
+recall benchmark run B                  # Run a specific suite (A-E)
+recall benchmark run B -p my-project    # Scope to a specific project
+recall benchmark report                 # Show the latest report
 ```
 
 Suite B (token efficiency) compares the v2 wake-up bundle against v1 and the
@@ -228,38 +228,38 @@ a human-readable `.md` alongside. See `benchmarks/README.md` for methodology.
 ## Admin
 
 ```bash
-mem init                             # Initialize the database (safe to re-run)
-mem doctor                           # Health check all subsystems
-mem doctor --fix                     # Re-create missing/drifted Recall symlinks
-mem stats                            # Database statistics
-mem path                             # Print resolved paths (DB, install root, symlinks)
-mem path --json                      # Same, as JSON
-mem migrate --to /new/path/recall.db # Relocate the database and rewrite MCP configs
-mem migrate --to ... --dry-run       # Preview the migration plan
-mem onboard                          # Interactive L0 identity interview (see Onboard)
+recall init                             # Initialize the database (safe to re-run)
+recall doctor                           # Health check all subsystems
+recall doctor --fix                     # Re-create missing/drifted Recall symlinks
+recall stats                            # Database statistics
+recall path                             # Print resolved paths (DB, install root, symlinks)
+recall path --json                      # Same, as JSON
+recall migrate --to /new/path/recall.db # Relocate the database and rewrite MCP configs
+recall migrate --to ... --dry-run       # Preview the migration plan
+recall onboard                          # Interactive L0 identity interview (see Onboard)
 ```
 
-`mem init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
+`recall init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
 
-`mem doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created; user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced.
+`recall doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created; user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced.
 
-`mem stats` reports row counts per table and total database size.
+`recall stats` reports row counts per table and total database size.
 
-`mem path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
+`recall path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
 
-`mem migrate` moves the database to a new path and rewrites MCP/hook configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `mem-mcp` process keeps reading from the right file. Refuses to overwrite a non-empty destination. Snapshots the source DB + sidecars + configs to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
+`recall migrate` moves the database to a new path and rewrites MCP/hook configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. Refuses to overwrite a non-empty destination. Snapshots the source DB + sidecars + configs to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
 
 ### Onboard
 
 ```bash
-mem onboard                          # Interactive 7-question identity interview
-mem onboard --yes                    # Non-interactive (accept all defaults)
-mem onboard --dry-run                # Show the proposed identity.md, write nothing
+recall onboard                          # Interactive 7-question identity interview
+recall onboard --yes                    # Non-interactive (accept all defaults)
+recall onboard --dry-run                # Show the proposed identity.md, write nothing
 ```
 
-`mem onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
+`recall onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
 
-Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `mem onboard` (write) and the RecallStart hook (read).
+Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `recall onboard` (write) and the RecallStart hook (read).
 
 Inputs are separated with `|` (not `,` or `;`) to avoid silent data loss when a value itself contains a comma: e.g. `no force-push, ever | always use worktrees`.
 
@@ -269,16 +269,16 @@ Clean up old and expired records. **Dry-run by default** — must pass `--execut
 
 ```bash
 # Preview what would be pruned (safe, no deletions)
-mem prune
+recall prune
 
 # Actually prune with default 180-day retention
-mem prune --execute
+recall prune --execute
 
 # Custom retention period
-mem prune --execute --older-than 90d
+recall prune --execute --older-than 90d
 
 # Skip decision pruning
-mem prune --execute --keep-decisions
+recall prune --execute --keep-decisions
 ```
 
 **What gets pruned:**

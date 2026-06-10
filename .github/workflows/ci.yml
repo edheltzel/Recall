@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS primary
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check release version consistency
+        run: bun run check:version
+
+      - name: Type-check
+        run: bun run lint
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+  ubuntu-smoke:
+    name: Ubuntu compatibility smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check release version consistency
+        run: bun run check:version
+
+      - name: Type-check
+        run: bun run lint
+
+      # Ubuntu is a portability smoke target, not Recall's primary platform.
+      # macOS runs the full test suite; Linux still builds to catch Bun/ESM and shell portability regressions.
+      - name: Build
+        run: bun run build

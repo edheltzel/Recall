@@ -9,7 +9,7 @@ Set Padding 20
 Set Shell "bash"
 Env PATH "/Users/ed/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
-Type "mem search 'session extract'"
+Type "recall search 'session extract'"
 Sleep 500ms
 Enter
 Sleep 3s

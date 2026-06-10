@@ -1,4 +1,4 @@
-// mem recent command
+// recall recent command
 
 import {
   recentMessages,

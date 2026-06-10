@@ -1,4 +1,4 @@
-// mem stats command
+// recall stats command
 
 import { getStats } from '../lib/memory.js';
 import { getDbPath } from '../db/connection.js';
@@ -20,7 +20,7 @@ export function runStats(): void {
   console.log('Record Counts:');
   console.log(`  Sessions:    ${stats.sessions.toLocaleString()}`);
 
-  const msgWarn = stats.messages > 10000 ? '  ** Consider mem prune' : '';
+  const msgWarn = stats.messages > 10000 ? '  ** Consider recall prune' : '';
   console.log(`  Messages:    ${stats.messages.toLocaleString()}${msgWarn}`);
 
   console.log(`  LoA Entries: ${stats.loa_entries.toLocaleString()}`);
@@ -40,7 +40,7 @@ export function runStats(): void {
 
   console.log('Extraction:');
   console.log(`  Tracker:     ${stats.extraction_tracker.toLocaleString()}`);
-  const sessWarn = stats.extraction_sessions > 500 ? '  ** Consider mem prune' : '';
+  const sessWarn = stats.extraction_sessions > 500 ? '  ** Consider recall prune' : '';
   console.log(`  Sessions:    ${stats.extraction_sessions.toLocaleString()}${sessWarn}`);
   console.log(`  Errors:      ${stats.extraction_errors.toLocaleString()}`);
   console.log('');

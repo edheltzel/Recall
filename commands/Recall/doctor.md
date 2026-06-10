@@ -9,7 +9,7 @@ Start here when troubleshooting any Recall issue.
 ## Usage
 
 ```bash
-mem doctor
+recall doctor
 ```
 
 No arguments or options. Runs all checks and reports status for each subsystem.

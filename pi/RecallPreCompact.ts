@@ -5,7 +5,7 @@
 //   - pi.on("before_agent_start", handler) — fires before every agent turn
 //   - handler receives (event, ctx) where event.systemPrompt is current prompt
 //   - Returning { systemPrompt: "..." } replaces it for that turn only
-//   - execFileSync for mem CLI — standard Node/Bun API
+//   - execFileSync for recall CLI — standard Node/Bun API
 
 import { execFileSync } from "child_process"
 
@@ -19,7 +19,7 @@ export default function (pi: any) {
       // execFileSync blocks the event loop, but the 5-second timeout caps the
       // worst-case delay. Pi's before_agent_start hook must return synchronously,
       // so async execFile is not viable here without Pi's explicit async support.
-      const context = execFileSync("mem", [
+      const context = execFileSync("recall", [
         "search", projectName, "--limit", "5"
       ], { encoding: "utf-8", timeout: 5000 })
 
@@ -32,7 +32,7 @@ export default function (pi: any) {
         }
       }
     } catch {
-      // mem CLI unavailable or timed out — skip silently
+      // recall CLI unavailable or timed out — skip silently
     }
   })
 }

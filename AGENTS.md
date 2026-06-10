@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-Recall gives AI coding agents persistent memory across sessions. It's a CLI (`mem`), MCP server (`mem-mcp`), and extraction hook system that stores conversations, decisions, learnings, and breadcrumbs in SQLite with FTS5 search. It targets Claude Code first, with OpenCode and Pi as additional supported hosts.
+Recall gives AI coding agents persistent memory across sessions. It's a CLI (`recall`), MCP server (`recall-mcp`), and extraction hook system that stores conversations, decisions, learnings, and breadcrumbs in SQLite with FTS5 search. It targets Claude Code first, with OpenCode and Pi as additional supported hosts.
 
 **If you're an AI agent that needs to _use_ Recall** (MCP tools, CLI commands, core rules), read [`FOR_CLAUDE.md`](FOR_CLAUDE.md) — it's the guide written specifically for you. This file (`AGENTS.md`) is for _developing_ the Recall codebase.
 
@@ -25,26 +25,26 @@ src/
   mcp-server.ts        # MCP server entry point (@modelcontextprotocol/sdk)
   version.ts           # Version from package.json
   commands/            # CLI subcommands
-    add.ts             #   mem add breadcrumb/decision/learning
-    benchmark.ts       #   mem benchmark run (wake-up context efficiency)
-    cluster.ts         #   mem cluster (semantic clustering over embeddings)
-    decision.ts        #   mem decision supersede/revert/list
-    doctor.ts          #   mem doctor (health checks)
-    dump.ts             #   mem dump (session import + LoA capture)
-    embed.ts           #   mem embed backfill/stats, mem semantic, mem hybrid
-    import.ts          #   mem import (session JSONL import)
-    import-docs.ts     #   mem docs import/list/search/show
-    import-legacy.ts   #   mem import-legacy (DISTILLED.md → LoA)
-    import-telos.ts    #   mem telos import/list/show/search
-    importance.ts      #   mem pin / unpin / importance backfill
-    init.ts            #   mem init (database setup)
-    loa.ts             #   mem loa write/show/quote/list
-    onboard.ts         #   mem onboard (7-question L0 identity interview)
-    prune.ts           #   mem prune (table lifecycle cleanup)
-    recent.ts          #   mem recent [table]
-    search.ts          #   mem search (FTS5)
-    show.ts            #   mem show <table> <id>
-    stats.ts           #   mem stats
+    add.ts             #   recall add breadcrumb/decision/learning
+    benchmark.ts       #   recall benchmark run (wake-up context efficiency)
+    cluster.ts         #   recall cluster (semantic clustering over embeddings)
+    decision.ts        #   recall decision supersede/revert/list
+    doctor.ts          #   recall doctor (health checks)
+    dump.ts             #   recall dump (session import + LoA capture)
+    embed.ts           #   recall embed backfill/stats, recall semantic, recall hybrid
+    import.ts          #   recall import (session JSONL import)
+    import-docs.ts     #   recall docs import/list/search/show
+    import-legacy.ts   #   recall import-legacy (DISTILLED.md → LoA)
+    import-telos.ts    #   recall telos import/list/show/search
+    importance.ts      #   recall pin / unpin / importance backfill
+    init.ts            #   recall init (database setup)
+    loa.ts             #   recall loa write/show/quote/list
+    onboard.ts         #   recall onboard (7-question L0 identity interview)
+    prune.ts           #   recall prune (table lifecycle cleanup)
+    recent.ts          #   recall recent [table]
+    search.ts          #   recall search (FTS5)
+    show.ts            #   recall show <table> <id>
+    stats.ts           #   recall stats
   db/
     connection.ts      # SQLite connection (bun:sqlite, WAL mode)
     schema.ts          # Table definitions and FTS5 indexes
@@ -95,7 +95,7 @@ tests/
   mcp-server.test.ts   # MCP server tests
   version.test.ts      # Version tests
 benchmarks/
-  runner.ts            # Benchmark entry point (mem benchmark run)
+  runner.ts            # Benchmark entry point (recall benchmark run)
   types.ts             # Shared benchmark types
   suites/              # Benchmark suite definitions (e.g. Suite B wake-up)
   baselines/           # Locked baseline runs for regression comparison
@@ -110,16 +110,16 @@ docs/
   PI_INTEGRATION.md    # Pi integration guide
   releasing.md         # Release process (tagging, GitHub release, version bump)
   slash-commands.md    # /Recall:* command reference
-  troubleshooting.md   # Common issues and fixes (start with mem doctor)
+  troubleshooting.md   # Common issues and fixes (start with recall doctor)
   upgrading.md         # Update, backup/restore, migration system
 lib/
   install-lib.sh       # Shared bash functions for install.sh / update.sh / uninstall.sh
 assets/
   banner.png           # README banner image
-  demo-search.gif      # VHS recording: mem search
-  demo-stats.gif       # VHS recording: mem stats
-  demo-doctor.gif      # VHS recording: mem doctor
-  demo-recent.gif      # VHS recording: mem recent
+  demo-search.gif      # VHS recording: recall search
+  demo-stats.gif       # VHS recording: recall stats
+  demo-doctor.gif      # VHS recording: recall doctor
+  demo-recent.gif      # VHS recording: recall recent
   demo-*.tape          # VHS tape scripts for re-recording demos
 ACKNOWLEDGMENTS.md     # Credits to MemPalace (ideas reshaped) + independent critics
 AGENTS.md              # Canonical agent dev guide (this file)
@@ -134,15 +134,26 @@ uninstall.sh           # Surgical remove (preserves ~/.agents/Recall/); --purge 
 tsconfig.json          # TypeScript config
 ```
 
+## Check GitHub Issues Before Planning (MANDATORY)
+
+**Before producing any plan, design, or proposal — and before opening a new issue — search this repo's GitHub issues to confirm the work isn't already tracked.** A bug, enhancement, or feature is often already documented; planning or filing without checking duplicates effort and fragments the record.
+
+- Search open **and** closed issues — a closed issue may carry a prior decision, a rejected approach, or context that reshapes the plan.
+- Use `gh` (never the web UI or raw API): `gh issue list --search "<keywords>" --state all`, then `gh issue view <n>` for any near-match.
+- If a matching issue exists: extend or reference it rather than starting fresh. Link it in the plan and surface it to the user before proceeding.
+- If none exists: proceed, and reference the new issue number once filed.
+
+This applies to every agent and every planning surface (`EnterPlanMode`, design docs, proposals) — no exceptions.
+
 ## Plans Directory (MANDATORY)
 
-**All plans, specs, and design documents MUST be stored in `.atlas/` at the project root.** This applies to every agent, skill, plugin, and extension — no exceptions.
+**All plans, specs, and design documents MUST be stored in `.agents/atlas/` at the project root.** This applies to every agent, skill, plugin, and extension — no exceptions.
 
-- Plan-mode / design plans (e.g. Claude Code `EnterPlanMode`) → `.atlas/plans/`
-- Superpowers plugin plans and specs → `.atlas/plans/` and `.atlas/specs/`
-- Any skill or extension that generates planning artifacts → `.atlas/plans/`
-- Handoff documents → `.atlas/handoffs/`
-- Completed plans → `.atlas/plans/archive/`
+- Plan-mode / design plans (e.g. Claude Code `EnterPlanMode`) → `.agents/atlas/plans/`
+- Superpowers plugin plans and specs → `.atlas/plans/` and `.agents/atlas/specs/`
+- Any skill or extension that generates planning artifacts → `.agents/atlas/plans/`
+- Handoff documents → `.agents/atlas/handoffs/`
+- Completed plans → `.agents/atlas/plans/archive/`
 
 **Never store plans in `docs/`.** The `docs/` directory is exclusively for user-facing published documentation.
 
@@ -154,6 +165,20 @@ Codebase scout reports (`/Recall:scout`, see `commands/Recall/scout.md`) are **c
 - This directory is **opt-in**: write to it only when it already exists or the user explicitly asks for a saved report
 - File naming: `YYYY-MM-DD-scout-<focus>.md` (kebab-case)
 - `.agents/atlas/handoffs/` stays **reserved for session handoff documents** — never write scout artifacts there
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `edheltzel/Recall`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the canonical triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo: use root `CONTEXT.md` when present and root `docs/adr/` for architectural decisions. See `docs/agents/domain.md`.
 
 ## DRY — Single Source of Truth (MANDATORY)
 
@@ -174,7 +199,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Runtime**: Bun (not Node). Uses `bun:sqlite` directly. Shebangs are `#!/usr/bin/env bun`.
 - **Build**: tsup produces ESM. Build script replaces node shebang with bun shebang.
 - **Database**: SQLite at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`; legacy `MEM_DB_PATH` still accepted). WAL mode. FTS5 full-text search with sync triggers.
-- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `claude/commands/Recall/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/opencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
+- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `claude/commands/Recall/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/pencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
 - **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
 - **Hook registration**: `Stop`, `SessionStart`, `PreCompact` events in `~/.claude/settings.json` under `hooks.*`.
 - **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.

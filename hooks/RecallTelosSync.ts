@@ -42,9 +42,9 @@ function getLastImportTime(): number {
 
 function findMem(): string | null {
   const candidates = [
-    join(HOME, '.bun', 'bin', 'mem'),
-    '/usr/local/bin/mem',
-    '/opt/homebrew/bin/mem',
+    join(HOME, '.bun', 'bin', 'recall'),
+    '/usr/local/bin/recall',
+    '/opt/homebrew/bin/recall',
   ];
 
   for (const c of candidates) {
@@ -53,7 +53,7 @@ function findMem(): string | null {
 
   // Fallback: which
   try {
-    return execFileSync('which', ['mem'], { encoding: 'utf-8' }).trim() || null;
+    return execFileSync('which', ['recall'], { encoding: 'utf-8' }).trim() || null;
   } catch {
     return null;
   }
