@@ -167,6 +167,8 @@ session context is empty — recommend running `recall onboard` to fix it.
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
 6. **Session capture** — When the user says `/dump` or `/Recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
 7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `recall onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `recall onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
+8. **Never store secrets** — `memory_add` and `memory_dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+9. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ### Context Resolution Order
 
