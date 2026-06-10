@@ -11,7 +11,7 @@
 #   ./update.sh --check        # version check only, exit
 #   ./update.sh --dry-run      # show plan, touch nothing
 #   ./update.sh --force        # skip "already current" guard, still confirm
-#   ./update.sh --no-migrate   # skip mem init migration step
+#   ./update.sh --no-migrate   # skip recall init migration step
 #   ./update.sh --no-confirm   # non-interactive (same as install.sh --yes)
 #   ./update.sh --no-gum       # skip gum auto-install; use bash UX this run
 #   ./update.sh --help         # this message
@@ -278,13 +278,13 @@ step_install_and_build() {
   fi
 }
 
-# Re-link the global `mem` / `mem-mcp` binaries.
+# Re-link the global `recall` / `recall-mcp` binaries.
 #
 # bun install will drop a fresh `dist/` but does NOT touch ~/.bun/bin
 # symlinks, so stale links can linger — or, if a prior `bun unlink` /
 # `bun upgrade` / homedir pruning removed them, the symlinks are just
 # gone. Without active symlinks the MCP server entry in settings.json
-# (command: /Users/*/.bun/bin/mem-mcp) fails silently on the next
+# (command: /Users/*/.bun/bin/recall-mcp) fails silently on the next
 # Claude Code / OpenCode / Pi restart. Re-running `bun link` every
 # update is cheap insurance.
 #
@@ -294,10 +294,10 @@ step_install_and_build() {
 # bun link → verify bin symlinks → npm link fallback → verify again →
 # fail loudly with diagnostic. The verification step (added in 0.7.22)
 # catches the silent-no-op case where bun link exits 0 but doesn't
-# actually refresh ~/.bun/bin/mem{,-mcp}.
+# actually refresh ~/.bun/bin/recall{,-mcp}.
 step_link_global() {
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: bun link (+ verify ~/.bun/bin/mem, mem-mcp)"
+    echo "  [dry-run] would: bun link (+ verify ~/.bun/bin/recall, recall-mcp)"
     return
   fi
 
@@ -312,18 +312,18 @@ step_migrate() {
     return
   fi
 
-  log_info "Applying database migrations (mem init)..."
+  log_info "Applying database migrations (recall init)..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: mem init"
+    echo "  [dry-run] would: recall init"
     return
   fi
 
-  local mem_bin="$HOME/.bun/bin/mem"
+  local mem_bin="$HOME/.bun/bin/recall"
   if [[ ! -x "$mem_bin" ]]; then
-    mem_bin="$(which mem 2>/dev/null || echo "")"
+    mem_bin="$(which recall 2>/dev/null || echo "")"
   fi
   if [[ -z "$mem_bin" ]]; then
-    log_error "mem binary not found after step_link_global — symlinks must have been removed."
+    log_error "recall binary not found after step_link_global — symlinks must have been removed."
     log_error "Recovery: cd $RECALL_REPO_DIR && bun link"
     exit 1
   fi
@@ -386,14 +386,14 @@ step_reregister_hooks() {
 step_verify() {
   log_info "Verifying..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: mem --version && mem stats && verify ~/.bun/bin/mem{,-mcp}"
+    echo "  [dry-run] would: recall --version && recall stats && verify ~/.bun/bin/recall{,-mcp}"
     return
   fi
 
   # Re-verify symlinks. step_link_global verified them earlier, but a parallel
   # process (bun upgrade, homebrew cleanup, package manager) could have removed
   # them in the interim. The MCP server entry in settings.json points directly
-  # at ~/.bun/bin/mem-mcp, so a missing symlink here means the next Claude
+  # at ~/.bun/bin/recall-mcp, so a missing symlink here means the next Claude
   # Code / OpenCode / Pi restart will silently fail to load Recall.
   if ! recall_verify_global_link; then
     log_error "Verification failed: bin symlinks missing or stale at end of update."
@@ -401,10 +401,10 @@ step_verify() {
     exit 1
   fi
 
-  local mem_bin="$HOME/.bun/bin/mem"
-  [[ ! -x "$mem_bin" ]] && mem_bin="$(which mem 2>/dev/null || echo "")"
+  local mem_bin="$HOME/.bun/bin/recall"
+  [[ ! -x "$mem_bin" ]] && mem_bin="$(which recall 2>/dev/null || echo "")"
   if [[ -z "$mem_bin" ]]; then
-    log_error "Verification failed: mem binary not found on PATH or at ~/.bun/bin/mem."
+    log_error "Verification failed: recall binary not found on PATH or at ~/.bun/bin/recall."
     log_error "Recovery: cd $RECALL_REPO_DIR && bun link"
     exit 1
   fi
@@ -421,12 +421,12 @@ step_verify() {
   # in place but no platform-home symlinks).
   if ! recall_verify_install; then
     log_error "Symlink verification failed after update."
-    log_error "Recovery: re-run ./update.sh, or run 'mem doctor --fix'."
+    log_error "Recovery: re-run ./update.sh, or run 'recall doctor --fix'."
     exit 1
   fi
 
   "$mem_bin" --version
-  "$mem_bin" stats 2>/dev/null | head -10 || log_warn "mem stats output non-zero (db may be empty)"
+  "$mem_bin" stats 2>/dev/null | head -10 || log_warn "recall stats output non-zero (db may be empty)"
 }
 
 step_report() {

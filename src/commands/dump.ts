@@ -1,15 +1,15 @@
-// mem dump command - Flush current session to DB + capture LoA
+// recall dump command - Flush current session to DB + capture LoA
 // Core functions are exported for use by the MCP server's memory_dump tool.
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
-import { execSync } from 'child_process';
 import { getDb } from '../db/connection.js';
 import { createSession, sessionExists, addMessagesBatch, createLoaEntry } from '../lib/memory.js';
 import { extractProjectFromPath } from '../lib/project.js';
 import { chunked } from '../lib/chunk.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
+import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
 import type { Message } from '../types/index.js';
 
 // ============ Constants ============
@@ -17,8 +17,6 @@ import type { Message } from '../types/index.js';
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
 const OPENCODE_DROP_DIR = join(homedir(), '.claude', 'MEMORY', 'opencode-sessions');
 const PI_DROP_DIR = join(homedir(), '.claude', 'MEMORY', 'pi-sessions');
-const MAX_FABRIC_INPUT_BYTES = 50 * 1024 * 1024;
-
 // ============ Types ============
 
 export type SessionSource = 'claude' | 'opencode' | 'pi';
@@ -265,33 +263,6 @@ export function findCurrentSessionAcrossAgents(): ParsedSession | null {
   return null;
 }
 
-// ============ Summary Generation ============
-
-/**
- * Generate a basic summary from messages when Fabric is unavailable.
- */
-export function generateBasicSummary(messages: Omit<Message, 'id'>[]): string {
-  const userMessages = messages.filter(m => m.role === 'user');
-  const assistantMessages = messages.filter(m => m.role === 'assistant');
-
-  const firstUser = userMessages[0]?.content.slice(0, 200) || 'No user messages';
-  const lastAssistant = assistantMessages[assistantMessages.length - 1]?.content.slice(0, 200) || 'No assistant messages';
-
-  return `## ONE SENTENCE SUMMARY
-
-Session with ${messages.length} messages.
-
-## MAIN IDEAS
-
-- User started with: ${firstUser}${firstUser.length >= 200 ? '...' : ''}
-- Final response covered: ${lastAssistant}${lastAssistant.length >= 200 ? '...' : ''}
-
-## TOPICS
-
-- ${messages.length} total messages (${userMessages.length} user, ${assistantMessages.length} assistant)
-`;
-}
-
 // ============ Internal Helpers ============
 
 async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: string): Promise<void> {
@@ -372,26 +343,11 @@ function deleteSession(sessionId: string): number {
   return deleteAll();
 }
 
-function runFabricExtract(content: string): string {
-  const inputBytes = Buffer.byteLength(content, 'utf-8');
-  if (inputBytes > MAX_FABRIC_INPUT_BYTES) {
-    throw new Error(`Input too large for Fabric (${(inputBytes / 1024 / 1024).toFixed(1)}MB > 50MB limit). Use --limit to reduce message count.`);
-  }
-
-  const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
-    input: content,
-    encoding: 'utf-8',
-    maxBuffer: MAX_FABRIC_INPUT_BYTES,
-    timeout: 600000
-  });
-  return result.trim();
-}
-
 // ============ Core Dump Logic (shared by CLI and MCP) ============
 
 /**
  * Core dump logic — imports session to SQLite and optionally runs Fabric.
- * Used by both the `mem dump` CLI command and the `memory_dump` MCP tool.
+ * Used by both the `recall dump` CLI command and the `memory_dump` MCP tool.
  */
 export async function coreDump(title: string, options: DumpOptions & { session?: ParsedSession }): Promise<{
   success: boolean;
@@ -439,7 +395,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     ORDER BY timestamp
     ${options.limit ? 'LIMIT ?' : ''}
   `).all(session.sessionId, ...(options.limit ? [options.limit] : [])) as Array<{
-    id: number; content: string; role: string; timestamp: string;
+    id: number; content: string; role: 'user' | 'assistant' | 'system'; timestamp: string;
   }>;
 
   if (importedMessages.length === 0) {
@@ -455,11 +411,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     fabricExtract = generateBasicSummary(session.messages);
   } else {
     try {
-      const conversationText = importedMessages.map(m => {
-        const role = m.role.toUpperCase();
-        const time = m.timestamp.split('T')[1]?.split('.')[0] || '';
-        return `[${role} ${time}]\n${m.content}`;
-      }).join('\n\n---\n\n');
+      const conversationText = formatMessagesForExtraction(importedMessages);
       fabricExtract = runFabricExtract(conversationText);
     } catch {
       fabricExtract = generateBasicSummary(session.messages);

@@ -7,7 +7,7 @@ Display the most recent records from Recall memory. Shows entries across all tab
 ## Usage
 
 ```bash
-mem recent $1
+recall recent $1
 ```
 
 **Arguments:**
@@ -21,16 +21,16 @@ mem recent $1
 
 ```bash
 # Recent records across all tables
-mem recent
+recall recent
 
 # Recent decisions only
-mem recent decisions
+recall recent decisions
 
 # Recent learnings for a specific project
-mem recent learnings -p my-api
+recall recent learnings -p my-api
 
 # Last 20 breadcrumbs
-mem recent breadcrumbs -l 20
+recall recent breadcrumbs -l 20
 ```
 
 $@

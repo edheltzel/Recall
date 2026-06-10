@@ -12,6 +12,7 @@ import { runRecent } from './commands/recent.js';
 import { runShow } from './commands/show.js';
 import { runStats } from './commands/stats.js';
 import { runImport } from './commands/import.js';
+import { runImportConversations } from './commands/import-conversations.js';
 import { runLoa, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
 import { runDump } from './commands/dump.js';
 import { runImportLegacy } from './commands/import-legacy.js';
@@ -32,12 +33,12 @@ import { closeDb } from './db/connection.js';
 const program = new Command();
 
 program
-  .name('mem')
+  .name('recall')
   .description(`${DISPLAY_NAME} - Persistent AI Memory System`)
   .version(VERSION)
   .enablePositionalOptions();
 
-// mem init
+// recall init
 program
   .command('init')
   .description('Initialize the memory database')
@@ -46,7 +47,7 @@ program
     closeDb();
   });
 
-// mem add breadcrumb
+// recall add breadcrumb
 const addCmd = program
   .command('add')
   .description('Add a memory record');
@@ -102,7 +103,7 @@ addCmd
     closeDb();
   });
 
-// mem decision — lifecycle management
+// recall decision — lifecycle management
 const decisionCmd = program
   .command('decision')
   .description('Decision lifecycle management (supersede, revert, list)');
@@ -138,7 +139,7 @@ decisionCmd
     closeDb();
   });
 
-// mem prune — table lifecycle management
+// recall prune — table lifecycle management
 program
   .command('prune')
   .description('Prune old/expired records (dry-run by default, --execute to delete)')
@@ -154,7 +155,7 @@ program
     closeDb();
   });
 
-// mem cluster — procedure detection from learnings
+// recall cluster — procedure detection from learnings
 program
   .command('cluster')
   .description('Detect procedures from clustered learnings (dry-run by default)')
@@ -168,7 +169,7 @@ program
     closeDb();
   });
 
-// mem search
+// recall search
 program
   .command('search <query>')
   .description('Full-text search across all memory')
@@ -186,7 +187,7 @@ program
     closeDb();
   });
 
-// mem recent
+// recall recent
 program
   .command('recent [table]')
   .description('Show recent records (messages, decisions, learnings, breadcrumbs, all)')
@@ -200,7 +201,7 @@ program
     closeDb();
   });
 
-// mem show
+// recall show
 program
   .command('show <table> <id>')
   .description('Show full details of a record')
@@ -209,7 +210,7 @@ program
     closeDb();
   });
 
-// mem stats
+// recall stats
 program
   .command('stats')
   .description('Show database statistics')
@@ -218,7 +219,7 @@ program
     closeDb();
   });
 
-// mem import
+// recall import
 program
   .command('import')
   .description('Import conversations from Claude Code session files')
@@ -234,7 +235,27 @@ program
     closeDb();
   });
 
-// mem loa - Library of Alexandria
+// recall import-conversations
+program
+  .command('import-conversations <path>')
+  .description('Import Claude.ai, ChatGPT, or Slack JSON conversation exports')
+  .option('--format <format>', 'Format: auto, claude-ai, chatgpt, slack', 'auto')
+  .option('--no-extract', 'Import raw messages only; skip Haiku extraction')
+  .option('--dry-run', 'Preview what would be imported without making changes')
+  .option('-v, --verbose', 'Show detailed progress')
+  .option('-p, --project <name>', 'Override project name for imported records')
+  .action(async (inputPath, options) => {
+    await runImportConversations(inputPath, {
+      format: options.format,
+      noExtract: options.noExtract,
+      dryRun: options.dryRun,
+      verbose: options.verbose,
+      project: options.project
+    });
+    closeDb();
+  });
+
+// recall loa - Library of Alexandria
 const loaCmd = program
   .command('loa')
   .description('Library of Alexandria - curated knowledge capture');
@@ -281,7 +302,7 @@ loaCmd
     closeDb();
   });
 
-// mem import-legacy - Import DISTILLED.md extracts
+// recall import-legacy - Import DISTILLED.md extracts
 program
   .command('import-legacy')
   .description('Import legacy DISTILLED.md extracts as LoA entries')
@@ -299,7 +320,7 @@ program
     closeDb();
   });
 
-// mem telos - TELOS framework commands
+// recall telos - TELOS framework commands
 const telosCmd = program
   .command('telos')
   .description('TELOS framework - purpose, goals, strategies');
@@ -355,7 +376,7 @@ telosCmd
     closeDb();
   });
 
-// mem dump - Flush current session + capture LoA
+// recall dump - Flush current session + capture LoA
 program
   .command('dump <title>')
   .description('Flush current session to DB and capture LoA entry')
@@ -375,7 +396,7 @@ program
     closeDb();
   });
 
-// mem docs - Standalone document management
+// recall docs - Standalone document management
 const docsCmd = program
   .command('docs')
   .description('Standalone documents - diary, reference, wisdom files');
@@ -420,7 +441,7 @@ docsCmd
     closeDb();
   });
 
-// mem embed - Vector embeddings for semantic search
+// recall embed - Vector embeddings for semantic search
 const embedCmd = program
   .command('embed')
   .description('Vector embeddings for semantic search');
@@ -448,7 +469,7 @@ embedCmd
     closeDb();
   });
 
-// mem semantic <query> - Semantic search
+// recall semantic <query> - Semantic search
 program
   .command('semantic <query>')
   .description('Semantic search using vector embeddings')
@@ -462,7 +483,7 @@ program
     closeDb();
   });
 
-// mem hybrid <query> - Hybrid search (FTS5 + semantic with RRF fusion)
+// recall hybrid <query> - Hybrid search (FTS5 + semantic with RRF fusion)
 program
   .command('hybrid <query>')
   .description('Hybrid search combining keywords (FTS5) + semantics (embeddings) with RRF fusion')
@@ -476,7 +497,7 @@ program
     closeDb();
   });
 
-// mem onboard — interactive interview that creates the L0 identity tier
+// recall onboard — interactive interview that creates the L0 identity tier
 program
   .command('onboard')
   .description('Interactive interview to create your L0 identity.md (loaded at every session start)')
@@ -494,7 +515,7 @@ program
     });
   });
 
-// mem importance — heuristic backfill for the importance column
+// recall importance — heuristic backfill for the importance column
 const importanceCmd = program
   .command('importance')
   .description('Manage the importance score on memory records');
@@ -514,7 +535,7 @@ importanceCmd
     closeDb();
   });
 
-// mem pin <table> <id> [importance] — force a record to a high importance (default 10)
+// recall pin <table> <id> [importance] — force a record to a high importance (default 10)
 program
   .command('pin <table> <id> [importance]')
   .description('Pin a memory record to a high importance (default 10). LoA floor of 5 enforced.')
@@ -523,7 +544,7 @@ program
     closeDb();
   });
 
-// mem unpin <table> <id> — reset importance to table default
+// recall unpin <table> <id> — reset importance to table default
 program
   .command('unpin <table> <id>')
   .description("Reset a record's importance to its table default (5 for most, 8 for LoA)")
@@ -532,7 +553,7 @@ program
     closeDb();
   });
 
-// mem benchmark — Phase 2 benchmark harness
+// recall benchmark — Phase 2 benchmark harness
 const benchmarkCmd = program
   .command('benchmark')
   .description('Run, list, or report Phase 2 benchmarks (see benchmarks/README.md)');
@@ -560,7 +581,7 @@ benchmarkCmd
     reportLatestBenchmark();
   });
 
-// mem doctor - Run health checks on all memory subsystems
+// recall doctor - Run health checks on all memory subsystems
 program
   .command('doctor')
   .description('Run health checks on all memory subsystems')
@@ -589,7 +610,7 @@ program
     closeDb();
   });
 
-// Default command: mem <query> → hybrid search (Phase 3: best of both worlds)
+// Default command: recall <query> → hybrid search (Phase 3: best of both worlds)
 program
   .arguments('[query]')
   .option('-p, --project <name>', 'Filter by project')
@@ -599,7 +620,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

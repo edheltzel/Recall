@@ -492,7 +492,7 @@ describe('Installer: Pi Detection and MCP Config', () => {
     const mockConfig = {
       mcpServers: {
         'recall-memory': {
-          command: 'mem-mcp',
+          command: 'recall-mcp',
           args: [],
           environment: {
             RECALL_DB_PATH: '/Users/ed/.agents/Recall/recall.db'
@@ -504,7 +504,7 @@ describe('Installer: Pi Detection and MCP Config', () => {
     // Verify it serializes to valid JSON
     expect(() => JSON.stringify(mockConfig)).not.toThrow();
     const parsed = JSON.parse(JSON.stringify(mockConfig));
-    expect(parsed.mcpServers['recall-memory'].command).toBe('mem-mcp');
+    expect(parsed.mcpServers['recall-memory'].command).toBe('recall-mcp');
   });
 
   test('AGENTS.md snippet has no unexpanded shell variables', () => {
@@ -593,7 +593,7 @@ describe('recall_configure_opencode_mcp preserves user customizations', () => {
       '  "mcp": {',
       '    "recall-memory": {',
       '      "type": "local",',
-      '      "command": ["/old/bun", "run", "/old/mem-mcp"],',
+      '      "command": ["/old/bun", "run", "/old/recall-mcp"],',
       '      "enabled": true,',
       '      "environment": { "RECALL_DB_PATH": "/old/db" }',
       '    },',
@@ -744,7 +744,7 @@ describe('recall_configure_opencode_mcp hardening (V-1, V-3, V-4) [RED]', () => 
       '  "mcp": {',
       '    "recall-memory": {',
       '      "type": "local",',
-      '      "command": ["/old/bun", "run", "/old/mem-mcp"],',
+      '      "command": ["/old/bun", "run", "/old/recall-mcp"],',
       '      "enabled": true,',
       '      "myExtraKey": "bar",',
       '      "environment": { "RECALL_DB_PATH": "/old/db", "MY_CUSTOM_VAR": "foo" }',

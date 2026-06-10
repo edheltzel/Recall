@@ -1,4 +1,4 @@
-// mem show command
+// recall show command
 
 import { getDb } from '../db/connection.js';
 import { getLoaEntry } from '../lib/memory.js';

@@ -19,8 +19,8 @@ describe("DISPLAY_NAME", () => {
 
 	test("contains the full version derived from VERSION", () => {
 		// 0.7.22 regression: DISPLAY_NAME was truncating to major.minor
-		// ("Recall 0.7"), which hid patch-level state in `mem --help`
-		// and `mem stats`. Must be the full X.Y.Z now.
+		// ("Recall 0.7"), which hid patch-level state in `recall --help`
+		// and `recall stats`. Must be the full X.Y.Z now.
 		expect(DISPLAY_NAME).toBe(`Recall ${VERSION}`);
 		expect(DISPLAY_NAME).toContain(VERSION);
 	});

@@ -15,7 +15,7 @@ Recall is a persistent memory framework. It gives you:
 
 The L0 tier reads from `~/.claude/MEMORY/identity.md` (or project-local
 `./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set). If the
-user has never written one, recommend `mem onboard` via Bash to create it.
+user has never written one, recommend `recall onboard` via Bash to create it.
 
 ## Your MCP Tools
 
@@ -81,17 +81,17 @@ recall-memory_context_for_agent({ task_description: "implement the auth middlewa
 
 ## The CLI
 
-You can also use the `mem` CLI directly via shell commands:
+You can also use the `recall` CLI directly via shell commands:
 
 ```bash
-mem search "deployment pipeline"    # Search memory
-mem search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
-mem stats                           # Database statistics
-mem loa list                        # Browse curated knowledge
-mem onboard                         # Interactive L0 identity setup (run once per user)
-mem path                            # Show DB + install paths (diagnostics)
-mem doctor --fix                    # Repair drifted/missing Recall symlinks
-mem migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
+recall search "deployment pipeline"    # Search memory
+recall search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
+recall stats                           # Database statistics
+recall loa list                        # Browse curated knowledge
+recall onboard                         # Interactive L0 identity setup (run once per user)
+recall path                            # Show DB + install paths (diagnostics)
+recall doctor --fix                    # Repair drifted/missing Recall symlinks
+recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 
 ## Codebase Scouting
@@ -120,7 +120,7 @@ They are platform-agnostic — Pi, Claude Code, and OpenCode share them.
 
 If the user asks about updating or uninstalling, point them at these
 scripts rather than instructing per-platform manual steps. Never run
-`./update.sh` while the user is actively in a Pi session — the `mem`
+`./update.sh` while the user is actively in a Pi session — the `recall`
 binary lives in the same `bun link` process tree, and rebuilding
 mid-session can corrupt in-flight extension invocations. Have them
 exit Pi first.
@@ -130,8 +130,8 @@ exit Pi first.
 1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
-4. **Capture sessions** — At the end of a session, run `mem dump "Descriptive Title"` via a slash command to persist the conversation
-5. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `mem onboard` once. Do not nag on subsequent turns.
+4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` via a slash command to persist the conversation
+5. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
 
 ## How Extraction Works
 

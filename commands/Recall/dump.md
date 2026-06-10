@@ -9,7 +9,7 @@ Run this at the end of every session or when you want to persist the current con
 ## Usage
 
 ```bash
-mem dump "$1"
+recall dump "$1"
 ```
 
 **Arguments:**
@@ -25,16 +25,16 @@ mem dump "$1"
 
 ```bash
 # Basic dump
-mem dump "Debugging the webhook handler"
+recall dump "Debugging the webhook handler"
 
 # With project tag
-mem dump "API redesign session" -p my-api
+recall dump "API redesign session" -p my-api
 
 # Continue a previous conversation thread
-mem dump "Auth refactor part 2" -c 15
+recall dump "Auth refactor part 2" -c 15
 
 # Quick import without Fabric extraction
-mem dump "Quick fix session" --skip-fabric
+recall dump "Quick fix session" --skip-fabric
 ```
 
 $@

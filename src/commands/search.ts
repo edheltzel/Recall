@@ -1,4 +1,4 @@
-// mem search command
+// recall search command
 
 import { search, SEARCH_TABLES, type SearchTable } from '../lib/memory.js';
 

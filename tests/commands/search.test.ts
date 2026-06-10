@@ -7,7 +7,7 @@ describe('runSearch --bias-type guard', () => {
 
   afterEach(() => {
     console.error = originalError;
-    process.exitCode = originalExitCode;
+    process.exitCode = originalExitCode ?? 0;
   });
 
   test('rejects an invalid bias-type before searching', () => {

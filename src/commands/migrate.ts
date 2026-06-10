@@ -1,10 +1,10 @@
-// mem migrate — relocate the SQLite database to a new path and rewrite the
+// recall migrate — relocate the SQLite database to a new path and rewrite the
 // MCP / hook configs across detected platforms so everything keeps pointing
 // at the same file.
 //
 // Usage:
-//   mem migrate --to /new/path/recall.db
-//   mem migrate --to /new/path/recall.db --dry-run
+//   recall migrate --to /new/path/recall.db
+//   recall migrate --to /new/path/recall.db --dry-run
 //
 // Behavior:
 //   - Refuses to overwrite a non-empty file at the destination.
@@ -119,7 +119,7 @@ export function runMigrate(opts: MigrateOptions): void {
   const src = resolve(getDbPath());
   const dest = resolve(expandHome(opts.to));
 
-  console.log(`mem migrate${dryRun ? ' (dry-run)' : ''}`);
+  console.log(`recall migrate${dryRun ? ' (dry-run)' : ''}`);
   console.log(`  source:      ${src}`);
   console.log(`  destination: ${dest}`);
   console.log('');
@@ -148,7 +148,7 @@ export function runMigrate(opts: MigrateOptions): void {
   // is treated as "probably safe" — best-effort check.
   if (isOpen(src)) {
     console.error(`Error: source database is currently open: ${src}`);
-    console.error('Stop mem-mcp (`pkill -f mem-mcp`) and any active `mem` CLI, then retry.');
+    console.error('Stop recall-mcp (`pkill -f recall-mcp`) and any active `recall` CLI, then retry.');
     process.exit(1);
   }
 

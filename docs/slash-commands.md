@@ -23,7 +23,7 @@ FTS5 full-text search across all memory tables.
 
 **Usage:** `/Recall:search kubernetes auth`
 
-Searches messages, LoA entries, decisions, learnings, and breadcrumbs. The slash command wraps `mem search`, so human CLI flags work here too:
+Searches messages, LoA entries, decisions, learnings, and breadcrumbs. The slash command wraps `recall search`, so human CLI flags work here too:
 
 - `/Recall:search database choice -t decisions` — hard-filter to decisions only
 - `/Recall:search database choice --bias-type decisions` — prefer decisions first, while still returning matching learnings/messages/LoA/breadcrumbs
@@ -76,7 +76,7 @@ Check whether a newer Recall release is available on GitHub.
 
 **Usage:** `/Recall:update`
 
-Check-only — prints the current version, the latest release tag, a short excerpt of the release notes, and the exact `cd <path> && ./update.sh` recipe. It never runs `update.sh` inline because rebuilding the `mem` binary mid-session can corrupt in-flight hook invocations. Exit Claude Code, run the recipe, and restart.
+Check-only — prints the current version, the latest release tag, a short excerpt of the release notes, and the exact `cd <path> && ./update.sh` recipe. It never runs `update.sh` inline because rebuilding the `recall` binary mid-session can corrupt in-flight hook invocations. Exit Claude Code, run the recipe, and restart.
 
 Rate limit: GitHub's anonymous API is 60 requests/hour per IP. On throttle, the command falls back to pointing at <https://github.com/edheltzel/Recall/releases>.
 

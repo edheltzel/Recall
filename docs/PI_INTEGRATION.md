@@ -9,7 +9,7 @@ Recall's core (SQLite DB, MCP server, CLI) is platform-agnostic. Pi connects to 
 The integration follows the same three-layer pattern as other platforms:
 1. **MCP registration** — `~/.pi/agent/mcp.json`
 2. **Session extraction** — tree JSONL → linearized markdown → drop dir → RecallBatchExtract cron
-3. **Memory injection** — `before_agent_start` hook → `mem search` → system prompt append
+3. **Memory injection** — `before_agent_start` hook → `recall search` → system prompt append
 
 ## Architecture
 
@@ -49,25 +49,25 @@ A JSON tracker at `~/.claude/MEMORY/pi-sessions/.extraction_tracker.json` record
 
 ## Memory Injection
 
-Before each agent turn, the `before_agent_start` hook runs `mem search <query>` and appends results to the system prompt. This is per-turn injection, not persistent session state — the context is re-fetched on every turn. Humans can narrow manual keyword searches with `-t <table>` or softly prefer a type with `--bias-type <table>`.
+Before each agent turn, the `before_agent_start` hook runs `recall search <query>` and appends results to the system prompt. This is per-turn injection, not persistent session state — the context is re-fetched on every turn. Humans can narrow manual keyword searches with `-t <table>` or softly prefer a type with `--bias-type <table>`.
 
 The hook lives in `~/.pi/agent/extensions/RecallPreCompact.ts` (named for consistency with the OpenCode equivalent, though it handles injection rather than compaction context).
 
 Injection flow:
 ```
 before_agent_start → extract project/task keywords from input
-                   → mem search <keywords> --limit 5
+                   → recall search <keywords> --limit 5
                    → append to system prompt as "## Persistent Memory"
                    → agent runs with context
 ```
 
 Manual targeted search examples:
 ```bash
-mem search "database choice" -t decisions          # decisions only
-mem search "database choice" --bias-type decisions # decisions first, broader context preserved
+recall search "database choice" -t decisions          # decisions only
+recall search "database choice" --bias-type decisions # decisions first, broader context preserved
 ```
 
-If `mem` is unavailable or times out (5s limit), the hook skips silently.
+If `recall` is unavailable or times out (5s limit), the hook skips silently.
 
 ## File Locations
 
@@ -114,7 +114,7 @@ decisions with `recall-memory_memory_add`. Before delegating tasks, call
 
 ## Database
 
-Pi shares `~/.agents/Recall/recall.db` with Claude Code and OpenCode. WAL mode handles concurrent access. Pi session extractions go through the same markdown pipeline as OpenCode — they appear in flat memory files (DISTILLED.md, SESSION_INDEX.json, DECISIONS.log, etc.), labeled `pi/<sessionId>`. They do not insert into the SQLite `sessions` table with a `source` field (that column is only populated via `mem import` or `mem dump`, not the drop-dir extraction pipeline).
+Pi shares `~/.agents/Recall/recall.db` with Claude Code and OpenCode. WAL mode handles concurrent access. Pi session extractions go through the same markdown pipeline as OpenCode — they appear in flat memory files (DISTILLED.md, SESSION_INDEX.json, DECISIONS.log, etc.), labeled `pi/<sessionId>`. They do not insert into the SQLite `sessions` table with a `source` field (that column is only populated via `recall import` or `recall dump`, not the drop-dir extraction pipeline).
 
 No schema changes beyond what OpenCode already added (the `source` column in schema v3).
 

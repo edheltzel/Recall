@@ -61,8 +61,8 @@ cd Recall
 Verify it works:
 
 ```bash
-mem stats        # Database overview
-mem doctor       # Health check
+recall stats        # Database overview
+recall doctor       # Health check
 ```
 
 Restart your agent (Claude Code, Pi, or OpenCode) to load the MCP server and hooks.
@@ -75,7 +75,7 @@ preferences). Without it, L0 is empty and every new session has to
 re-learn the basics.
 
 ```bash
-mem onboard
+recall onboard
 ```
 
 A 7-question interview that writes `~/.claude/MEMORY/identity.md`. Run
@@ -120,8 +120,8 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 │                                                                      │
 │  ┌────────────┐  ┌────────────┐  ┌──────────────┐  ┌────────────┐    │
 │  │ CLI Direct │  │ MCP Server │  │  Stop Hook   │  │   Batch    │    │
-│  │  mem add   │  │ (Claude    │  │ SessionExt-  │  │  Extract   │    │
-│  │  mem dump  │  │  Code)     │  │  ract.ts     │  │  (cron)    │    │
+│  │  recall add   │  │ (Claude    │  │ SessionExt-  │  │  Extract   │    │
+│  │  recall dump  │  │  Code)     │  │  ract.ts     │  │  (cron)    │    │
 │  └─────┬──────┘  └─────┬──────┘  └──────┬───────┘  └─────┬──────┘    │
 └────────┼────────────────┼────────────────┼────────────────┼──────────┘
          │                │                │                │
@@ -130,9 +130,9 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 │                      PROCESSING LAYER                                 │
 │                                                                       │
 │  Direct Inserts:              Session Extraction Pipeline:            │
-│  mem add breadcrumb ──┐       Read JSONL                              │
-│  mem add decision  ───┤         → Filter noise (tool results)         │
-│  mem add learning  ───┤         → Dedup check (.extraction_tracker)   │
+│  recall add breadcrumb ──┐       Read JSONL                              │
+│  recall add decision  ───┤         → Filter noise (tool results)         │
+│  recall add learning  ───┤         → Dedup check (.extraction_tracker)   │
 │  memory_add (MCP)  ───┤         → Acquire lock                        │
 │                       │         → Claude Haiku extract                │
 │                       │           (>120K? chunk → meta-extract)       │
@@ -164,17 +164,17 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 │                                                                      │
 │  ┌───────────────┐  ┌────────────────┐  ┌─────────────────────────┐  │
 │  │Keyword (FTS5) │  │Semantic (Embed)│  │  Hybrid (RRF Fusion)    │  │
-│  │mem search     │  │mem semantic    │  │  mem hybrid (DEFAULT)   │  │
+│  │recall search     │  │recall semantic    │  │  recall hybrid (DEFAULT)   │  │
 │  │memory_search  │  │embed → Ollama  │  │  FTS5 rank ─┐           │  │
 │  │               │  │cosine sim      │  │  Embed rank ─┤→ merged  │  │
 │  └───────────────┘  └────────────────┘  │  RRF(k=60) ◄┘           │  │
 │                                         └─────────────────────────┘  │
-│  Direct: mem recent · mem show · memory_recall · context_for_agent   │
+│  Direct: recall recent · recall show · memory_recall · context_for_agent   │
 └──────────────────────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  CONSUMERS:  Coding agents (MCP)  ·  CLI user (mem)  ·  Sub-agents   │
+│  CONSUMERS:  Coding agents (MCP)  ·  CLI user (recall)  ·  Sub-agents   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -191,41 +191,41 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 5. **PreCompact flush** — When Claude Code is about to compact its context, a `PreCompact` hook (`RecallPreCompact.ts`) flushes the in-flight messages first, so the squashed window is never lost.
 6. **Dual-write storage** — Results are written to SQLite (the only query surface — every CLI/MCP read hits this) and to markdown artifacts (`DISTILLED.md`, `HOT_RECALL.md`, etc., write-only, human-readable).
 7. **Batch catchup (optional)** — A cron job (`RecallBatchExtract.ts`) sweeps any sessions the Stop hook missed during crashes or interruptions, and ingests sessions dropped by the OpenCode plugin and Pi extension into `~/.claude/MEMORY/{opencode,pi}-sessions/`. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled.
-8. **TELOS auto-sync (PAI users)** — If you use [Personal AI Infrastructure (PAI)](https://github.com/danielmiessler/Personal_AI_Infrastructure), Recall ships a `RecallTelosSync.ts` SessionStart hook that watches `~/.claude/skills/PAI/USER/TELOS/` for changes and silently runs `mem telos import --update` when any file is newer than the last import. This is **automatic** — no action required once Recall is installed and PAI's TELOS directory exists. You can also import manually at any time with `mem telos import --yes`. If you don't use PAI, the hook checks for the directory, finds nothing, and exits in under 1ms.
+8. **TELOS auto-sync (PAI users)** — If you use [Personal AI Infrastructure (PAI)](https://github.com/danielmiessler/Personal_AI_Infrastructure), Recall ships a `RecallTelosSync.ts` SessionStart hook that watches `~/.claude/skills/PAI/USER/TELOS/` for changes and silently runs `recall telos import --update` when any file is newer than the last import. This is **automatic** — no action required once Recall is installed and PAI's TELOS directory exists. You can also import manually at any time with `recall telos import --yes`. If you don't use PAI, the hook checks for the directory, finds nothing, and exits in under 1ms.
 
 ### Search Strategies
 
 | Strategy             | Command                      | How it works                                                                                                            |
 | -------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **Keyword**          | `mem search "query"`         | FTS5 full-text search across all tables. Use `-t decisions` to hard-filter, or `--bias-type decisions` to prefer decisions while keeping other matches. |
-| **Semantic**         | `mem embed semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama)                                                                 |
-| **Hybrid** (default) | `mem "query"`                | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
+| **Keyword**          | `recall search "query"`         | FTS5 full-text search across all tables. Use `-t decisions` to hard-filter, or `--bias-type decisions` to prefer decisions while keeping other matches. |
+| **Semantic**         | `recall embed semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama)                                                                 |
+| **Hybrid** (default) | `recall "query"`                | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
 
 **Narrowing by record type — `table` vs `bias_type`.** Both let you steer results toward decisions, learnings, breadcrumbs, LoA entries, or raw messages, but they differ in strength:
 
 - **`-t` / `table`** is a **hard filter** — only the named record type comes back.
 - **`--bias-type` / `bias_type`** is a **soft boost** — matching records of that type rank higher, but every other type can still appear when it's relevant.
 
-**Where it's available:** `table` and `bias_type` act on FTS5 ranking, so they exist **only on the keyword path** — `mem search`, `mem "query" -k`, and the MCP `memory_search` tool. They are silently ignored elsewhere: plain `mem "query"` (default hybrid), `mem "query" -v` (semantic), and `memory_hybrid_search` rank by embedding distance and have no `bias_type`. Valid types: `messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`.
+**Where it's available:** `table` and `bias_type` act on FTS5 ranking, so they exist **only on the keyword path** — `recall search`, `recall "query" -k`, and the MCP `memory_search` tool. They are silently ignored elsewhere: plain `recall "query"` (default hybrid), `recall "query" -v` (semantic), and `memory_hybrid_search` rank by embedding distance and have no `bias_type`. Valid types: `messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`.
 
 > [Architecture deep-dive](docs/architecture.md) — database tables, FTS5 indexes, extraction pipeline details
 
 ## What You Get
 
 - **Auto-captured session memory** — extracted incrementally (Stop hook on every turn) via Claude Haiku, with `RecallBatchExtract.ts` cron sweeper as a crash-recovery safety net
-- **MCP server (`mem-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
+- **MCP server (`recall-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
 - **Tiered RecallStart (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
-- **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `mem pin` / `mem unpin` / `mem importance backfill`
+- **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `recall pin` / `recall unpin` / `recall importance backfill`
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
-- **Decision lifecycle** — `mem decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
+- **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
 - **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.claude/MEMORY/{opencode,pi}-sessions/`; RecallBatchExtract pulls them into the same SQLite DB. One memory layer across agents
 - **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
-- **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `mem telos import --yes`
-- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`mem add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
+- **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
+- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
 - **Codebase scouting** — `/Recall:scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
-- **Benchmark harness** — `mem benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
-- **Onboarding** — `mem onboard` runs a 7-question interview that writes your L0 identity file
+- **Benchmark harness** — `recall benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
+- **Onboarding** — `recall onboard` runs a 7-question interview that writes your L0 identity file
 
 ## Measured wake-up efficiency
 
@@ -237,21 +237,21 @@ Suite B measures the byte cost of session-start memory injection. Latest tracked
 | v1 flat-blob RecallStart (simulated)       |     8,020 |                 ~2,005 |
 | CLAUDE.md static baseline                    |     8,760 |                 ~2,190 |
 
-v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `mem benchmark run B`. Methodology and caveats live in [`benchmarks/README.md`](benchmarks/README.md).
+v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `recall benchmark run B`. Methodology and caveats live in [`benchmarks/README.md`](benchmarks/README.md).
 
 ## CLI at a Glance
 
 ```bash
-mem "kubernetes auth"          # Search your memory
-mem onboard                    # Seed your L0 identity tier (one-time)
-mem dump "Session Title"       # Save this session
-mem add decision "Use X" ...   # Record a decision
-mem decision list              # List decisions with status and confidence
-mem pin decisions 42           # Pin a record to high importance
-mem benchmark run B            # Measure wake-up context efficiency
-mem prune                      # Preview stale records for removal
-mem stats                      # See what's stored
-mem doctor                     # Health check
+recall "kubernetes auth"          # Search your memory
+recall onboard                    # Seed your L0 identity tier (one-time)
+recall dump "Session Title"       # Save this session
+recall add decision "Use X" ...   # Record a decision
+recall decision list              # List decisions with status and confidence
+recall pin decisions 42           # Pin a record to high importance
+recall benchmark run B            # Measure wake-up context efficiency
+recall prune                      # Preview stale records for removal
+recall stats                      # See what's stored
+recall doctor                     # Health check
 ```
 
 <details>
@@ -259,11 +259,11 @@ mem doctor                     # Health check
 
 | Search                                | Stats                               |
 | ------------------------------------- | ----------------------------------- |
-| ![mem search](assets/demo-search.gif) | ![mem stats](assets/demo-stats.gif) |
+| ![recall search](assets/demo-search.gif) | ![recall stats](assets/demo-stats.gif) |
 
 | Health Check                          | Recent Memory                         |
 | ------------------------------------- | ------------------------------------- |
-| ![mem doctor](assets/demo-doctor.gif) | ![mem recent](assets/demo-recent.gif) |
+| ![recall doctor](assets/demo-doctor.gif) | ![recall recent](assets/demo-recent.gif) |
 
 </details>
 
@@ -304,6 +304,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |
 | [MCP Tools](docs/mcp-tools.md)             | Tools available to AI agents                                              |
 | [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
+| Codebase Map (local)                       | Interactive visual map at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html` — generated from the codegraph index, not committed (`.agents/` is gitignored) |
 | [Slash Commands](docs/slash-commands.md)   | `/Recall:*` commands for Claude Code                                      |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |

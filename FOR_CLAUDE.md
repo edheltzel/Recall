@@ -136,19 +136,19 @@ Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts �
 
 ## The CLI
 
-You can also use the `mem` CLI directly via Bash:
+You can also use the `recall` CLI directly via Bash:
 
 ```bash
-mem search "deployment pipeline"    # Search memory
-mem search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
-mem stats                           # Database statistics
-mem loa list                        # Browse curated knowledge
-mem dump "Session title"            # Capture current session
-mem onboard                         # Interactive L0 identity setup (run once per user)
-mem pin decisions 42 10             # Pin a record to high importance
-mem path                            # Show DB + install paths (handy for diagnostics)
-mem doctor --fix                    # Repair drifted/missing Recall symlinks
-mem migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
+recall search "deployment pipeline"    # Search memory
+recall search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
+recall stats                           # Database statistics
+recall loa list                        # Browse curated knowledge
+recall dump "Session title"            # Capture current session
+recall onboard                         # Interactive L0 identity setup (run once per user)
+recall pin decisions 42 10             # Pin a record to high importance
+recall path                            # Show DB + install paths (handy for diagnostics)
+recall doctor --fix                    # Repair drifted/missing Recall symlinks
+recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 
 ### L0 identity file
@@ -156,7 +156,7 @@ mem migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 The L0 tier reads from `~/.claude/MEMORY/identity.md` by default, with
 `./.atlas-recall/identity.md` taking precedence if present. The `RECALL_IDENTITY_PATH`
 env var overrides both. If the user has never created this file, the L0 section of
-session context is empty — recommend running `mem onboard` to fix it.
+session context is empty — recommend running `recall onboard` to fix it.
 
 ## Core Rules
 
@@ -166,7 +166,7 @@ session context is empty — recommend running `mem onboard` to fix it.
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
 6. **Session capture** — When the user says `/dump` or `/Recall:dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
-7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `mem onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `mem onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
+7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `recall onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `recall onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
 
 ### Context Resolution Order
 

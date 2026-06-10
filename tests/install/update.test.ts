@@ -1,15 +1,16 @@
 // update.sh: version check, dry-run, rollback recipe emission.
 //
-// The script shells out to git/gh/curl and `mem`. Tests here exercise the
+// The script shells out to git/gh/curl and `recall`. Tests here exercise the
 // orchestration logic that does NOT require network or a real release —
 // --check in the current repo's state and --dry-run against a scratch tree.
 //
-// Destructive paths (git pull, bun install, mem init) are validated only
+// Destructive paths (git pull, bun install, recall init) are validated only
 // via --dry-run narration so we never mutate the working tree.
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 
 const REPO = process.cwd();
@@ -37,6 +38,26 @@ describe('update.sh', () => {
     expect(r.stdout).toContain('Current:');
   });
 
+  test('--check survives gum being unavailable (CI runners have no gum)', () => {
+    // Regression: _try_install_gum returned 1 after exhausting install paths,
+    // which killed update.sh under `set -e` + ERR trap before --check ran.
+    // Simulate a gum-less runner: local gum is "too old" via the min-version
+    // floor, and stub curl/brew so every install path fails fast.
+    const stubDir = mkdtempSync(join(tmpdir(), 'recall-no-gum-'));
+    try {
+      writeFileSync(join(stubDir, 'curl'), '#!/bin/bash\nexit 22\n', { mode: 0o755 });
+      writeFileSync(join(stubDir, 'brew'), '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+      const r = run(['--check'], {
+        PATH: `${stubDir}:${process.env.PATH}`,
+        RECALL_GUM_MIN_MAJOR: '99',
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Current:');
+    } finally {
+      rmSync(stubDir, { recursive: true, force: true });
+    }
+  });
+
   test('--help prints usage without mutating', () => {
     const r = run(['--help']);
     expect(r.status).toBe(0);
@@ -58,8 +79,91 @@ describe('update.sh', () => {
     expect(r.status).toBe(0);
   });
 
+  test('legacy CLI bin cleanup removes only Recall-managed symlinks', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-bin-cleanup-'));
+    try {
+      const fakeRepo = join(tempRoot, 'repo');
+      const distDir = join(fakeRepo, 'dist');
+      const bunBin = join(tempRoot, '.bun', 'bin');
+      const foreignDir = join(tempRoot, 'foreign');
+      mkdirSync(distDir, { recursive: true });
+      mkdirSync(bunBin, { recursive: true });
+      mkdirSync(foreignDir, { recursive: true });
+      writeFileSync(join(distDir, 'index.js'), '#!/usr/bin/env bun\n');
+      writeFileSync(join(foreignDir, 'mcp-server.js'), '#!/usr/bin/env bun\n');
+      symlinkSync(join(distDir, 'index.js'), join(bunBin, 'mem'));
+      symlinkSync(join(foreignDir, 'mcp-server.js'), join(bunBin, 'mem-mcp'));
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export RECALL_REPO_DIR="${fakeRepo}"`,
+        'log_success() { :; }',
+        'log_warn() { :; }',
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_cleanup_legacy_bins',
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO },
+      });
+
+      expect(r.status).toBe(0);
+      expect(existsSync(join(bunBin, 'mem'))).toBe(false);
+      expect(existsSync(join(bunBin, 'mem-mcp'))).toBe(true);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Claude MCP refresh rewrites legacy server path and preserves custom env', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-refresh-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(settingsFile, JSON.stringify({
+        mcpServers: {
+          'recall-memory': {
+            command: 'bun',
+            args: ['run', '/old/path/mem-mcp'],
+            env: { MEM_DB_PATH: '/old/db', MY_CUSTOM_VAR: 'keep-me' },
+          },
+        },
+      }, null, 2));
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        'log_success() { :; }',
+        'source "$REPO/lib/install-lib.sh"',
+        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO, RECALL_DB_PATH: '/new/db' },
+      });
+
+      expect(r.status).toBe(0);
+      const after = JSON.parse(readFileSync(settingsFile, 'utf-8')) as {
+        mcpServers: { 'recall-memory': { command: string; args: string[]; env: Record<string, string> } };
+      };
+      const entry = after.mcpServers['recall-memory'];
+      expect(entry.command).toBe('/bin/bun');
+      expect(entry.args).toEqual(['run', '/new/path/recall-mcp']);
+      expect(entry.env.RECALL_DB_PATH).toBe('/new/db');
+      expect(entry.env.MEM_DB_PATH).toBeUndefined();
+      expect(entry.env.MY_CUSTOM_VAR).toBe('keep-me');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('--dry-run --force narrates but does not mutate', () => {
-    // With --dry-run, no git/bun/mem commands should actually execute.
+    // With --dry-run, no git/bun/recall commands should actually execute.
     // The output should contain the telltale [dry-run] markers.
     const r = run(['--dry-run', '--force', '--no-confirm', '--no-migrate']);
     expect(r.status).toBe(0);
@@ -70,7 +174,7 @@ describe('update.sh', () => {
     expect(r.stdout).toMatch(/would: bun install/);
     expect(r.stdout).toMatch(/would: bun run build/);
     // Regression for 0.7.21: update.sh was missing `bun link` after
-    // rebuild. Without it, a stale or vanished ~/.bun/bin/mem-mcp
+    // rebuild. Without it, a stale or vanished ~/.bun/bin/recall-mcp
     // symlink is never repaired and MCP fails silently on next
     // Claude Code restart.
     expect(r.stdout).toMatch(/would: bun link/);

@@ -8,13 +8,13 @@ Manually add a structured record to the Recall memory database. Three record typ
 
 ```bash
 # Breadcrumb — quick context note
-mem add breadcrumb "$1"
+recall add breadcrumb "$1"
 
 # Decision — architectural or process decision
-mem add decision "$1" --why "reasoning"
+recall add decision "$1" --why "reasoning"
 
 # Learning — problem and solution pair
-mem add learning "$1" "solution"
+recall add learning "$1" "solution"
 ```
 
 **Breadcrumb options:**
@@ -36,16 +36,16 @@ mem add learning "$1" "solution"
 
 ```bash
 # Breadcrumb with high importance
-mem add breadcrumb "User prefers dark mode in all UIs" -p myproject -i 8
+recall add breadcrumb "User prefers dark mode in all UIs" -p myproject -i 8
 
 # Decision with reasoning
-mem add decision "Use TypeScript over Python" --why "Type safety, team preference" -p myproject
+recall add decision "Use TypeScript over Python" --why "Type safety, team preference" -p myproject
 
 # Learning with prevention
-mem add learning "Port conflict on 4000" "Kill process or change port" --prevention "Use dynamic port allocation"
+recall add learning "Port conflict on 4000" "Kill process or change port" --prevention "Use dynamic port allocation"
 
 # Tagged learning
-mem add learning "bun:sqlite uses \$param syntax" "Not :param like better-sqlite3" -t "bun,sqlite,gotcha"
+recall add learning "bun:sqlite uses \$param syntax" "Not :param like better-sqlite3" -t "bun,sqlite,gotcha"
 ```
 
 $@

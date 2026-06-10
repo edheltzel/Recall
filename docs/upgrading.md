@@ -12,7 +12,7 @@ From inside Claude Code:
 
 This is a **check-only** command — it prints the current vs. latest
 version and the exact command to run. It never rebuilds mid-session
-(that would corrupt hooks tied to the running `mem` binary).
+(that would corrupt hooks tied to the running `recall` binary).
 
 From a shell:
 
@@ -41,7 +41,7 @@ cd /path/to/Recall
 3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
    dirty tree; resolve manually and re-run).
 4. `bun install && bun run build`.
-5. `mem init` applies any pending SQLite migrations
+5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 6. Copies refreshed hooks, shared lib files, slash commands, and
    `FOR_CLAUDE.md`. `extract_prompt.md` gets a drift check — if you
@@ -51,7 +51,7 @@ cd /path/to/Recall
    RecallTelosSync, RecallStart, RecallPreCompact) — this permanently
    prevents the pre-0.7.1 bug class where a partial install could
    leave hooks missing.
-8. Verifies via `mem --version` and `mem stats`.
+8. Verifies via `recall --version` and `recall stats`.
 
 ### Update flags
 
@@ -60,7 +60,7 @@ cd /path/to/Recall
 | `--check` | Version check only; print recipe and exit |
 | `--dry-run` | Narrate every step with `[dry-run]` markers, touch nothing |
 | `--force` | Run even if already at latest (repair path) |
-| `--no-migrate` | Skip `mem init` migration step |
+| `--no-migrate` | Skip `recall init` migration step |
 | `--no-confirm` | Non-interactive |
 | `--help` | Show usage |
 
@@ -92,7 +92,7 @@ git pull
 bun install
 bun run build
 bun link
-mem init
+recall init
 ```
 
 Then re-run `./install.sh` to refresh hooks and slash commands — it's
@@ -102,23 +102,23 @@ idempotent.
 
 Purely additive hardening — no schema changes, no user action required.
 
-### Full version in `mem --help` and `mem stats`
+### Full version in `recall --help` and `recall stats`
 
 `DISPLAY_NAME` in `src/version.ts` was truncating the version to
 `major.minor` (showing "Recall 0.7" for any 0.7.x install). With
 meaningful patch cadence (0.7.11 → 0.7.2 → 0.7.21 → 0.7.22), the
 truncation hid which patch was actually running and made triage
-harder. `mem --help` and `mem stats` now show the full `X.Y.Z`.
+harder. `recall --help` and `recall stats` now show the full `X.Y.Z`.
 
 ### Post-link symlink verification
 
 `recall_link_global` (new in `lib/install-lib.sh`) runs `bun link` →
-**verifies** that `~/.bun/bin/mem` and `mem-mcp` exist, are symlinks,
+**verifies** that `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks,
 and resolve to readable files → falls back to `npm link` on failure.
 `install.sh` Step 4 and `update.sh` `step_link_global` both delegate
 to it. Catches the silent-no-op case where `bun link` exits 0 without
 refreshing the bin symlinks, which was the root cause of the "I ran
-`./update.sh` and then `mem` wasn't executable" class of issue.
+`./update.sh` and then `recall` wasn't executable" class of issue.
 
 ## v0.7.21 Migration Notes
 
@@ -130,9 +130,9 @@ v0.7.2's `update.sh` ran `bun install && bun run build` but never
 touched the global symlinks in `~/.bun/bin/`. If a prior `bun unlink`,
 `bun upgrade`, or homedir prune had removed them, rebuild didn't
 restore them — and the MCP server entry in `settings.json` (which
-points at `/Users/$USER/.bun/bin/mem-mcp`) failed silently on the
+points at `/Users/$USER/.bun/bin/recall-mcp`) failed silently on the
 next Claude Code / OpenCode / Pi restart. Especially insidious
-because a long-running `mem-mcp` process holds the deleted inode
+because a long-running `recall-mcp` process holds the deleted inode
 alive: the current session works, but the next restart drops the
 inode and MCP breaks with no diagnostic.
 
@@ -164,9 +164,9 @@ anyone upgrading from a 0.6.x database that still had
 Adds an `importance INTEGER` (1-10) column to `messages`, `decisions`,
 `learnings`, and `loa_entries`. Non-destructive — existing rows receive
 the default value (5 for most tables, 8 for LoA with a floor of 5). Runs
-automatically on `mem init` or `./install.sh`.
+automatically on `recall init` or `./install.sh`.
 
-### Recommended: run `mem onboard` post-upgrade
+### Recommended: run `recall onboard` post-upgrade
 
 v0.7.0 introduces a tiered session-start context (L0 identity + L1
 importance-ranked). The L0 tier reads from `~/.claude/MEMORY/identity.md`
@@ -174,8 +174,8 @@ importance-ranked). The L0 tier reads from `~/.claude/MEMORY/identity.md`
 the v2 design.
 
 ```bash
-mem onboard               # Interactive 7-question interview
-mem benchmark run B       # Confirm v2_l0_chars > 0 after onboarding
+recall onboard               # Interactive 7-question interview
+recall benchmark run B       # Confirm v2_l0_chars > 0 after onboarding
 ```
 
 ### New hooks
@@ -199,15 +199,15 @@ cp hooks/RecallPreCompact.ts ~/.claude/hooks/
 
 | Command | Purpose |
 |---------|---------|
-| `mem onboard` | Interactive L0 identity interview |
-| `mem importance backfill` | Backfill importance scores from confidence |
-| `mem pin <table> <id>` / `mem unpin <table> <id>` | Manual importance control |
-| `mem benchmark run/list/report` | Phase 2 benchmark harness |
+| `recall onboard` | Interactive L0 identity interview |
+| `recall importance backfill` | Backfill importance scores from confidence |
+| `recall pin <table> <id>` / `recall unpin <table> <id>` | Manual importance control |
+| `recall benchmark run/list/report` | Phase 2 benchmark harness |
 
 ### New environment variable
 
 `RECALL_IDENTITY_PATH` overrides the L0 identity file path. Honored by
-both `RecallStart` (read) and `mem onboard` (write).
+both `RecallStart` (read) and `recall onboard` (write).
 
 ### MCP: `memory_add` accepts `importance`
 
@@ -235,9 +235,9 @@ Without `hooks/lib/`, the hook scripts will fail to resolve imports at runtime.
 
 | Command | Purpose |
 |---------|---------|
-| `mem decision list` | List decisions with status and confidence |
-| `mem decision update <id>` | Update a decision's status (supersede/revert) |
-| `mem prune` | Preview and remove stale records (dry-run by default; use `--execute` to commit) |
+| `recall decision list` | List decisions with status and confidence |
+| `recall decision update <id>` | Update a decision's status (supersede/revert) |
+| `recall prune` | Preview and remove stale records (dry-run by default; use `--execute` to commit) |
 
 ### New MCP tool
 
@@ -247,7 +247,7 @@ Without `hooks/lib/`, the hook scripts will fail to resolve imports at runtime.
 
 ## Database Migrations
 
-Recall uses SQLite's `PRAGMA user_version` for schema version tracking. When you run `mem init` or `./install.sh`, the migration system:
+Recall uses SQLite's `PRAGMA user_version` for schema version tracking. When you run `recall init` or `./install.sh`, the migration system:
 
 1. Reads the current `PRAGMA user_version` from your database
 2. Compares it against the expected version in the codebase
@@ -262,7 +262,7 @@ graph TD
     B --> C[bun install]
     C --> D[bun run build]
     D --> E[bun link]
-    E --> F[mem init]
+    E --> F[recall init]
     F --> G{PRAGMA user_version}
     G -->|Current < Expected| H[Apply Migrations]
     G -->|Current = Expected| I[No Changes Needed]
