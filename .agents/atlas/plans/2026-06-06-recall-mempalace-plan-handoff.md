@@ -125,9 +125,17 @@ GitHub labels were also present/created for canonical triage. Current roadmap is
 - Issue #41 remains the next roadmap implementation target and is open/`ready-for-agent`.
 - The `code-simplifier` subagent failed during #40 cleanup because the configured model rejected strict tools. Before using that subagent as a #41+ cleanup gate, run a quick subagent-review smoke test or fix the agent model/tool configuration. This is a workflow/tooling follow-up, not a #40 product blocker.
 
+## Progress update — 2026-06-10
+
+- The #40 implementation was committed in `b504ce2` (`feat: complete Recall 1.0 foundations`) on branch `feat/multi-format-conversation-import`, pushed to origin, and opened as [PR #54](https://github.com/edheltzel/Recall/pull/54) with `Closes #40`.
+- `b504ce2` bundles three workstreams: the #40 CI/version-guard work, a multi-format conversation import feature (Claude.ai/ChatGPT/Slack — not on the roadmap; noted on #48 as new source-adapter-registry candidates), and the 06-06 planning artifacts (plans, ADRs, CONTEXT.md glossary, docs/agents/).
+- Local verification on 2026-06-10: `bun run lint` clean, `bun run check:version` passed (1.0.0), `bun test` 453 pass / 0 fail.
+- Issue #40 relabeled `ready-for-agent` → `ready-for-human`: implementation done, awaiting review/merge. It auto-closes when PR #54 merges.
+- The `code-simplifier` subagent smoke-test caveat (see 2026-06-08 note) is still outstanding before relying on it for #41+ cleanup.
+
 ## Recommended next step
 
-After committing/reviewing the local #40 implementation, start issue #41.
+Review and merge PR #54, then start issue #41.
 
 - #41 is the next implementation target because later large-data export, dedup, repair, and benchmark work depends on SQLite-safe chunking.
 - Before relying on cleanup subagents for #41, run the subagent-review smoke test noted above or fix the strict-tools/model configuration.

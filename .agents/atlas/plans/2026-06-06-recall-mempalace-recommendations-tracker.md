@@ -19,7 +19,7 @@ Track the accepted MemPalace-derived Recall improvement plan as independently gr
 
 | Priority | Issue | Work item | Status | Dependencies | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [#40](https://github.com/edheltzel/Recall/issues/40) | Add macOS-primary CI and release version guard | Local implementation complete; GitHub issue open | None | macOS required, Ubuntu smoke, no native Windows. Commit/PR still needed before closing issue. |
+| 1 | [#40](https://github.com/edheltzel/Recall/issues/40) | Add macOS-primary CI and release version guard | Committed in `b504ce2`; [PR #54](https://github.com/edheltzel/Recall/pull/54) open | None | macOS required, Ubuntu smoke, no native Windows. Issue auto-closes when PR #54 merges. |
 | 2 | [#41](https://github.com/edheltzel/Recall/issues/41) | Audit SQLite variable limits and add shared chunking | Open | None | Conservative chunking before large import/export/dedup paths. |
 | 3 | [#42](https://github.com/edheltzel/Recall/issues/42) | Add Record Provenance across memory records | Open | #41 recommended | Uses `CONTEXT.md` and ADR-0001. |
 | 4 | [#43](https://github.com/edheltzel/Recall/issues/43) | Add `mem export` with JSON, Markdown, SQL dump, and SQLite backup formats | Open | #42, #41 recommended | Includes `mem export --backup` to `~/.agents/Recall/backups/`. |
@@ -47,4 +47,5 @@ Track the accepted MemPalace-derived Recall improvement plan as independently gr
 - Keep normal user/MCP/hook capture frictionless when implementing provenance, export, dedup, and repair.
 
 - 2026-06-08 local #40 implementation added macOS-primary CI, Ubuntu smoke, version guard tests/script, release docs, and changelog entry. GitHub issue #40 remains open until committed/merged.
+- 2026-06-10 the #40 implementation was committed in `b504ce2` (bundled with multi-format conversation import and the planning artifacts), pushed as `feat/multi-format-conversation-import`, and opened as [PR #54](https://github.com/edheltzel/Recall/pull/54) with `Closes #40`. Local verification: lint clean, version guard passed (1.0.0), 453/453 tests pass. Issue #40 relabeled `ready-for-human` pending review/merge. #41 remains the next implementation target.
 - The `code-simplifier` review agent failed with an upstream strict-tools/model support error during #40 cleanup. Include a quick subagent-review smoke test in the next roadmap phase before relying on that agent for #41+ cleanup; this is tooling verification, not a blocker for #40 functionality.
