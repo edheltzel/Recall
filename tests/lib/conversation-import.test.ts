@@ -5,6 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
+  conversationSourceAdapters,
   detectConversationFormat,
   importConversations,
   parseSlackConversations,
@@ -157,5 +158,107 @@ describe('importConversations', () => {
     expect(loa.message_range_start).toBeGreaterThan(0);
     expect(loa.message_range_end).toBeGreaterThanOrEqual(loa.message_range_start);
     expect(loa.message_count).toBe(2);
+  });
+
+  test('returns zero sessions for unrecognized JSON under auto without throwing', async () => {
+    const file = join(tempDir, 'mystery.json');
+    writeFileSync(file, JSON.stringify({ foo: 'bar' }));
+
+    const result = await importConversations(file, { format: 'auto', noExtract: true });
+
+    expect(result.sessionsFound).toBe(0);
+    expect(result.sessionsImported).toBe(0);
+  });
+
+  test('returns zero sessions when an explicit format does not match the data', async () => {
+    const file = join(tempDir, 'chatgpt-as-slack.json');
+    writeFileSync(file, JSON.stringify([
+      {
+        id: 'chat-explicit-1',
+        title: 'Wrong format',
+        current_node: 'm1',
+        mapping: {
+          m1: {
+            id: 'm1', parent: null, children: [],
+            message: {
+              author: { role: 'user' },
+              create_time: 1710000000,
+              content: { content_type: 'text', parts: ['hi'] },
+            },
+          },
+        },
+      },
+    ]));
+
+    const result = await importConversations(file, { format: 'slack', noExtract: true });
+
+    expect(result.sessionsFound).toBe(0);
+    expect(result.sessionsImported).toBe(0);
+  });
+});
+
+describe('conversationSourceAdapters', () => {
+  test('registers exactly chatgpt, claude-ai, and slack in detection order', () => {
+    expect(conversationSourceAdapters.map(adapter => adapter.source)).toEqual([
+      'chatgpt',
+      'claude-ai',
+      'slack',
+    ]);
+  });
+
+  // Payload matches BOTH the chatgpt detector (object-valued `mapping`) and the
+  // claude-ai detector (`chat_messages` with a `sender`); chatgpt wins by registry order.
+  test('resolves a chatgpt/claude-ai dual-match payload as chatgpt', () => {
+    expect(detectConversationFormat([{ mapping: {}, chat_messages: [{ sender: 'human', text: 'hi' }] }])).toBe('chatgpt');
+  });
+
+  // Payload matches BOTH the claude-ai detector (`messages` with a `sender`) and the
+  // slack detector (`ts` + `text`); claude-ai wins by registry order.
+  test('resolves a claude-ai/slack dual-match payload as claude-ai', () => {
+    expect(detectConversationFormat({ messages: [{ sender: 'human', ts: '1710000000.000100', text: 'hi' }] })).toBe('claude-ai');
+  });
+
+  test('returns null for data no adapter recognizes', () => {
+    expect(detectConversationFormat({ foo: 'bar' })).toBeNull();
+  });
+
+  test('stamps every parsed session with its own adapter source', () => {
+    const minimalPayloadFor = (source: string): unknown => {
+      switch (source) {
+        case 'chatgpt':
+          return [{
+            id: 'c', title: 't', current_node: 'm1',
+            mapping: {
+              m1: {
+                id: 'm1', parent: null, children: [],
+                message: {
+                  author: { role: 'user' },
+                  create_time: 1710000000,
+                  content: { content_type: 'text', parts: ['hi'] },
+                },
+              },
+            },
+          }];
+        case 'claude-ai':
+          return [{
+            uuid: 'c1', name: 'n',
+            chat_messages: [{ sender: 'human', created_at: '2026-05-31T10:00:00Z', text: 'hi' }],
+          }];
+        case 'slack':
+          return [{ ts: '1710000000.000100', user: 'U1', text: 'hi' }];
+        default:
+          throw new Error(`Unhandled adapter source: ${source}`);
+      }
+    };
+
+    for (const adapter of conversationSourceAdapters) {
+      const filePath = join(tempDir, `${adapter.source}.json`);
+      const sessions = adapter.parse(minimalPayloadFor(adapter.source), { filePath, rootPath: tempDir });
+
+      expect(sessions.length).toBeGreaterThan(0);
+      for (const session of sessions) {
+        expect(session.source).toBe(adapter.source);
+      }
+    }
   });
 });

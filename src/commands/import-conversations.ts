@@ -1,6 +1,6 @@
 // recall import-conversations command
 
-import { importConversations, type ConversationFormat } from '../lib/conversation-import.js';
+import { conversationSourceAdapters, importConversations, type ConversationFormat } from '../lib/conversation-import.js';
 
 export interface ImportConversationsOptions {
   format?: ConversationFormat;
@@ -12,7 +12,7 @@ export interface ImportConversationsOptions {
 
 export const NO_EXTRACT_WARNING = 'Warning: --no-extract imports raw conversation messages only. This can reduce search precision because the Haiku extraction filter will not create curated LoA, decisions, or learnings.';
 
-const FORMATS: ConversationFormat[] = ['auto', 'claude-ai', 'chatgpt', 'slack'];
+const FORMATS: ConversationFormat[] = ['auto', ...conversationSourceAdapters.map(adapter => adapter.source)];
 
 function normalizeFormat(format: ConversationFormat | string | undefined): ConversationFormat {
   const value = format || 'auto';
