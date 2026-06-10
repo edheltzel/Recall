@@ -287,31 +287,34 @@ async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: strin
 // Exported for tests — bind count scales with the number of LoA entries,
 // so the IN lists are chunked (see src/lib/chunk.ts).
 //
-// Not atomic on its own: deletes run statement-by-statement per chunk, so
-// callers that need all-or-nothing semantics must wrap the call in
-// db.transaction() (as deleteSession does).
+// The chunked deletes run statement-by-statement, so the body runs inside
+// db.transaction() to keep the traversal all-or-nothing for every caller.
+// bun:sqlite nests transactions via SAVEPOINT, so calling this from within
+// an outer transaction (as deleteSession does) is safe.
 export function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: number[]): void {
   if (loaIds.length === 0) return;
 
-  const chunks = chunked(loaIds);
+  db.transaction(() => {
+    const chunks = chunked(loaIds);
 
-  const childIds: number[] = [];
-  for (const chunk of chunks) {
-    const rows = db.prepare(`
-      SELECT id FROM loa_entries WHERE parent_loa_id IN (${chunk.map(() => '?').join(',')})
-    `).all(...chunk) as Array<{ id: number }>;
-    for (const row of rows) childIds.push(row.id);
-  }
+    const childIds: number[] = [];
+    for (const chunk of chunks) {
+      const rows = db.prepare(`
+        SELECT id FROM loa_entries WHERE parent_loa_id IN (${chunk.map(() => '?').join(',')})
+      `).all(...chunk) as Array<{ id: number }>;
+      for (const row of rows) childIds.push(row.id);
+    }
 
-  if (childIds.length > 0) {
-    deleteLoaEntriesRecursive(db, childIds);
-  }
+    if (childIds.length > 0) {
+      deleteLoaEntriesRecursive(db, childIds);
+    }
 
-  for (const chunk of chunks) {
-    db.prepare(`
-      DELETE FROM loa_entries WHERE id IN (${chunk.map(() => '?').join(',')})
-    `).run(...chunk);
-  }
+    for (const chunk of chunks) {
+      db.prepare(`
+        DELETE FROM loa_entries WHERE id IN (${chunk.map(() => '?').join(',')})
+      `).run(...chunk);
+    }
+  })();
 }
 
 function deleteSession(sessionId: string): number {

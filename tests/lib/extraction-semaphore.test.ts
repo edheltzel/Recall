@@ -167,7 +167,7 @@ describe('concurrency', () => {
         CONV_PATH: '/test/crash-conv.jsonl',
       },
       stdout: 'ignore',
-      stderr: 'ignore',
+      stderr: 'pipe',
     });
 
     // Wait for the worker to acquire the lock — poll instead of a fixed
@@ -175,6 +175,14 @@ describe('concurrency', () => {
     const deadline = Date.now() + 10000;
     while (getActiveLockCount(dbPath) === 0 && Date.now() < deadline) {
       await Bun.sleep(50);
+    }
+    if (getActiveLockCount(dbPath) === 0) {
+      proc.kill(9);
+      await proc.exited;
+      const workerStderr = await new Response(proc.stderr).text();
+      throw new Error(
+        `setup: worker never acquired the extraction lock within 10s; worker stderr:\n${workerStderr}`
+      );
     }
 
     // SIGKILL the process
