@@ -20,7 +20,7 @@ The entire integration is **three thin adapter layers**:
 │                    (zero changes needed)                          │
 │                                                                  │
 │  ┌─────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
-│  │  recall.db   │  │  MCP Server      │  │  CLI (mem)         │  │
+│  │  recall.db   │  │  MCP Server      │  │  CLI (recall)         │  │
 │  │  (SQLite)    │←─│  (recall-memory)  │  │  search/add/stats  │  │
 │  │  FTS5 + Vec  │  │  7 tools, stdio  │  │  import/export     │  │
 │  └──────┬───────┘  └────────┬─────────┘  └────────────────────┘  │
@@ -39,7 +39,7 @@ The entire integration is **three thin adapter layers**:
   │                        │     │                             │
   │ Registration:          │     │ Registration:               │
   │  ~/.claude/settings.json│    │  ~/.config/opencode/        │
-  │  mcpServers.recall-mem │     │    opencode.json            │
+  │  mcpServers.recall-recall │     │    opencode.json            │
   │                        │     │  mcp.recall-memory          │
   │ Extraction:            │     │                             │
   │  hooks/RecallExtract  │     │ Extraction:                 │
@@ -93,7 +93,7 @@ The installer writes this to `~/.config/opencode/opencode.json`:
   "mcp": {
     "recall-memory": {
       "type": "local",
-      "command": ["bun", "run", "mem-mcp"],
+      "command": ["bun", "run", "recall-mcp"],
       "enabled": true,
       "environment": {
         "RECALL_DB_PATH": "/Users/username/.agents/Recall/recall.db"
@@ -104,7 +104,7 @@ The installer writes this to `~/.config/opencode/opencode.json`:
 ```
 
 **Key decisions:**
-- Uses `mem-mcp` symlink (created via `bun link`) — consistent with Recall codebase and works across users
+- Uses `recall-mcp` symlink (created via `bun link`) — consistent with Recall codebase and works across users
 - Uses `bun run` to execute the symlinked binary
 - `RECALL_DB_PATH` uses **absolute path** resolved at install time (not `~` — tilde doesn't expand in env vars)
 - Same binary, same tools — zero platform-specific MCP code
@@ -215,7 +215,7 @@ export const RecallCompaction: Plugin = async ({ project }) => {
     "experimental.session.compacting": async (input: any, output: any) => {
       try {
         const projectName = project?.name || project?.id || ""
-        const context = execFileSync("mem", [
+        const context = execFileSync("recall", [
           "search", projectName, "--limit", "5"
         ], { encoding: "utf-8", timeout: 5000 })
 
@@ -226,7 +226,7 @@ export const RecallCompaction: Plugin = async ({ project }) => {
           )
         }
       } catch {
-        // mem CLI unavailable or timed out — skip silently
+        // recall CLI unavailable or timed out — skip silently
       }
     }
   }
@@ -236,7 +236,7 @@ export const RecallCompaction: Plugin = async ({ project }) => {
 **Changes from v1:**
 - Hook signature: `(input, output)` not `(event)` — verified from official docs
 - Pushes to `output.context[]` array — not `{ inject: "..." }` which was fabricated
-- Added 5s timeout to `execFileSync` — prevents blocking compaction if `mem` hangs
+- Added 5s timeout to `execFileSync` — prevents blocking compaction if `recall` hangs
 - `project?.name || project?.id` — defensive project access
 
 ### 4. Agent Definition (`opencode/recall-memory.md`)
@@ -294,7 +294,7 @@ register_opencode_mcp() {
 
   # Use bun -e for safe JSON merge. Strip comments before parsing for JSONC safety.
   local mem_mcp_path
-  mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+  mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
 
   INSTALL_MCP_PATH="$mem_mcp_path" \
   DB_PATH_ABS="$resolved_db_path" \
@@ -427,7 +427,7 @@ OpenCode prefixes MCP tools with the server name + underscore:
 ### Phase 3: Context Injection
 - `RecallPreCompact.ts` plugin with verified `(input, output)` signature
 - Pushes to `output.context[]` array
-- 5s timeout on `mem` CLI calls
+- 5s timeout on `recall` CLI calls
 
 ### Phase 4: Testing + Polish
 - End-to-end test: OpenCode session → export → drop dir → RecallBatchExtract → search → retrieval
@@ -444,7 +444,7 @@ OpenCode prefixes MCP tools with the server name + underscore:
 | `session.idle` wrong property name | MEDIUM-HIGH | Defensive access: 3 property paths |
 | Compacting return type fabricated | MEDIUM | Corrected to `output.context.push()` |
 | Tilde in RECALL_DB_PATH | MEDIUM | Absolute path resolved at install |
-| `mem import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + RecallBatchExtract |
+| `recall import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + RecallBatchExtract |
 | Bun not guaranteed | LOW-MEDIUM | Documented as requirement (same as Claude Code) |
 | JSONC parsing | LOW | Comment stripping before `JSON.parse` |
 

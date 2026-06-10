@@ -1,4 +1,4 @@
-// mem cluster command — detect procedures from clustered learnings
+// recall cluster command — detect procedures from clustered learnings
 
 import { getDb } from '../db/connection.js';
 import { blobToEmbedding, cosineSimilarity } from '../lib/embeddings.js';
@@ -125,7 +125,7 @@ export function runCluster(options: ClusterOptions): void {
 
   if (learnings.length === 0) {
     console.log('No learnings with embeddings found.');
-    console.log('Run `mem embed backfill learnings` first to generate embeddings.');
+    console.log('Run `recall embed backfill learnings` first to generate embeddings.');
     return;
   }
 

@@ -150,7 +150,7 @@ describe('uninstall.sh', () => {
             ],
           },
           mcpServers: {
-            'recall-memory': { command: 'bun', args: ['run', '/path/mem-mcp'] },
+            'recall-memory': { command: 'bun', args: ['run', '/path/recall-mcp'] },
             'other-server': { command: 'other', args: [] },
           },
         },

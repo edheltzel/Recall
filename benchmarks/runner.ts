@@ -1,6 +1,6 @@
 // Benchmark runner — orchestrates suites and writes results.
 //
-// Usage from CLI: `mem benchmark run [suite]` (see src/commands/benchmark.ts).
+// Usage from CLI: `recall benchmark run [suite]` (see src/commands/benchmark.ts).
 // Direct invocation: `bun run benchmarks/runner.ts [suite]`.
 //
 // Output: a JSONL file at benchmarks/results/<timestamp>-<suite>.jsonl plus a

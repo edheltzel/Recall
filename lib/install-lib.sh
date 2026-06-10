@@ -287,8 +287,11 @@ _try_install_gum() {
     _detect_gum && return 0
   fi
 
+  # Bash-mode fallback is a supported outcome, not an error. Callers run
+  # under `set -e` (install.sh, update.sh) and must not die because gum
+  # could not be installed — HAS_GUM=false is the signal they act on.
   HAS_GUM=false
-  return 1
+  return 0
 }
 
 _install_gum_binary() {
@@ -631,7 +634,7 @@ recall_check_prerequisites() {
     echo ""
     log_warn "Recall is in a temporary directory ($install_dir)!"
     log_warn "bun link creates symlinks back here — if this directory"
-    log_warn "is cleaned (e.g. on reboot), 'mem' commands will break."
+    log_warn "is cleaned (e.g. on reboot), 'recall' commands will break."
     log_warn "Recommended: clone to a permanent directory instead."
     echo ""
   fi
@@ -1226,7 +1229,7 @@ recall_verify_install() {
   log_error ""
   log_error "Recovery options:"
   log_error "  1. Re-run ./install.sh (the collision rule is idempotent)."
-  log_error "  2. Run 'mem doctor --fix' (probes + repairs every symlink class)."
+  log_error "  2. Run 'recall doctor --fix' (probes + repairs every symlink class)."
   return 1
 }
 
@@ -1264,7 +1267,7 @@ recall_auto_migrate() {
 
   if [[ -z "$source" ]]; then
     # Nothing to migrate — fresh install. The empty target file will be
-    # created when `mem init` runs later in the install sequence.
+    # created when `recall init` runs later in the install sequence.
     return 0
   fi
 
@@ -1277,7 +1280,7 @@ recall_auto_migrate() {
   if command -v lsof >/dev/null 2>&1; then
     if lsof -- "$source" >/dev/null 2>&1; then
       log_error "Refusing to migrate: a process has $source open."
-      log_error "Stop mem-mcp (\`pkill -f mem-mcp\`) and any active \`mem\` CLI, then retry."
+      log_error "Stop recall-mcp (\`pkill -f recall-mcp\`) and any active \`recall\` CLI, then retry."
       return 1
     fi
   fi
@@ -1334,7 +1337,7 @@ recall_auto_migrate() {
 
 recall_configure_mcp() {
   local mem_mcp_path bun_path
-  mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+  mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
 
   mkdir -p "$CLAUDE_DIR"
@@ -1360,16 +1363,20 @@ recall_configure_mcp() {
   fi
 
   # `claude mcp add` does not let us set an env block, and historically left
-  # env: {} so mem-mcp resolved the DB path from defaults — which broke
-  # custom installs. Patch the env block in whichever config file owns the
-  # registration so RECALL_DB_PATH always reaches the spawned mem-mcp process.
-  _recall_ensure_mcp_env
+  # env: {} so recall-mcp resolved the DB path from defaults — which broke
+  # custom installs. Patch the existing entry in whichever config file owns
+  # the registration so it points at the renamed recall-mcp binary and passes
+  # RECALL_DB_PATH to the spawned process.
+  _recall_ensure_mcp_entry "$bun_path" "$mem_mcp_path"
 }
 
-# Ensure the recall-memory MCP registration has env.RECALL_DB_PATH pointing at
-# the resolved canonical DB path. Patches both ~/.claude.json and
-# ~/.claude/settings.json if either contains the registration. Idempotent.
-_recall_ensure_mcp_env() {
+# Ensure the recall-memory MCP registration points at recall-mcp and has
+# env.RECALL_DB_PATH set to the resolved canonical DB path. Patches both
+# ~/.claude.json and ~/.claude/settings.json if either contains the registration.
+# Idempotent, and preserves user-authored env keys.
+_recall_ensure_mcp_entry() {
+  local bun_path="$1"
+  local mem_mcp_path="$2"
   local db_path_abs
   db_path_abs="$(recall_resolve_db_path)"
 
@@ -1379,18 +1386,23 @@ _recall_ensure_mcp_env() {
     if ! grep -q "recall-memory" "$f"; then
       continue
     fi
-    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" bun -e '
+    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" bun -e '
       const fs = require("fs");
       const file = process.env.CFG_FILE;
       const dbPath = process.env.DB_PATH_ABS;
+      const bunPath = process.env.BUN_PATH;
+      const mcpPath = process.env.MCP_PATH;
       let cfg;
-      try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return; }
-      if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) return;
+      try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { process.exit(0); }
+      if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
       const entry = cfg.mcpServers["recall-memory"];
-      entry.env = entry.env || {};
+      entry.command = bunPath;
+      entry.args = ["run", mcpPath];
+      if (!entry.env || typeof entry.env !== "object" || Array.isArray(entry.env)) entry.env = {};
       entry.env.RECALL_DB_PATH = dbPath;
+      delete entry.env.MEM_DB_PATH;
       fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
-    ' 2>/dev/null && log_success "Patched env.RECALL_DB_PATH in $(basename "$f")"
+    ' 2>/dev/null && log_success "Patched recall-memory command/env in $(basename "$f")"
   done
 }
 
@@ -1792,7 +1804,7 @@ _recall_jsonc_merge_mcp_entry() {
 recall_configure_opencode_mcp() {
   local config="$OPENCODE_CONFIG_DIR/opencode.json"
   local mem_mcp_path bun_path
-  mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+  mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
 
   local db_path_abs
@@ -1894,7 +1906,7 @@ recall_configure_pi_mcp() {
   local db_path_abs
   db_path_abs="$(recall_resolve_db_path)"
   local mem_mcp_path
-  mem_mcp_path="$(which mem-mcp 2>/dev/null || echo "$HOME/.bun/bin/mem-mcp")"
+  mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
 
   mkdir -p "$PI_CONFIG_DIR"
 
@@ -2043,7 +2055,7 @@ recall_copy_runtime_files() {
 # ── Global link verification ─────────────────────────────────────────────────
 #
 # Confirm that `bun link` (or `npm link`) actually created the bin-level
-# symlinks we need: ~/.bun/bin/mem and ~/.bun/bin/mem-mcp, each pointing at
+# symlinks we need: ~/.bun/bin/recall and ~/.bun/bin/recall-mcp, each pointing at
 # a target file that exists and is readable.
 #
 # 0.7.22 hardening: `bun link` without args REGISTERS the package globally and
@@ -2057,8 +2069,8 @@ recall_copy_runtime_files() {
 # otherwise. Prints a diagnostic block on failure.
 recall_verify_global_link() {
   local bun_bin_dir="${HOME}/.bun/bin"
-  local mem_link="$bun_bin_dir/mem"
-  local mcp_link="$bun_bin_dir/mem-mcp"
+  local mem_link="$bun_bin_dir/recall"
+  local mcp_link="$bun_bin_dir/recall-mcp"
   local failed=0
 
   _recall_check_one_link() {
@@ -2079,8 +2091,8 @@ recall_verify_global_link() {
     return 0
   }
 
-  _recall_check_one_link "$mem_link" "mem" || true
-  _recall_check_one_link "$mcp_link" "mem-mcp" || true
+  _recall_check_one_link "$mem_link" "recall" || true
+  _recall_check_one_link "$mcp_link" "recall-mcp" || true
 
   if [[ $failed -ne 0 ]]; then
     echo ""
@@ -2089,14 +2101,41 @@ recall_verify_global_link() {
     log_error "  $mem_link"
     log_error "  $mcp_link"
     log_error ""
-    log_error "Current ~/.bun/bin listing for mem*:"
-    ls -la "$bun_bin_dir"/mem* 2>&1 | sed 's/^/  /' || true
+    log_error "Current ~/.bun/bin listing for recall*:"
+    ls -la "$bun_bin_dir"/recall* 2>&1 | sed 's/^/  /' || true
     return 1
   fi
   return 0
 }
 
-# Re-link the global `mem` and `mem-mcp` binaries with verification.
+# Remove legacy `mem` / `mem-mcp` bin symlinks left behind by older package
+# metadata after the new `recall` / `recall-mcp` links have been verified. This
+# only removes symlinks that resolve to this checkout's dist files or to Bun's
+# global `node_modules/recall/dist/*`; regular files and foreign symlinks are
+# left untouched.
+recall_cleanup_legacy_bins() {
+  local bun_bin_dir="${HOME}/.bun/bin"
+  local repo_real
+  repo_real="$(cd "$RECALL_REPO_DIR" 2>/dev/null && pwd -P || echo "$RECALL_REPO_DIR")"
+  local link target
+
+  for link in "$bun_bin_dir/mem" "$bun_bin_dir/mem-mcp"; do
+    [[ -L "$link" ]] || continue
+    target="$(readlink -f "$link" 2>/dev/null || readlink "$link" 2>/dev/null || true)"
+    case "$target" in
+      "$RECALL_REPO_DIR"/dist/*|"$repo_real"/dist/*|*/node_modules/recall/dist/*)
+        rm -f "$link"
+        log_success "Removed legacy bin symlink: $link"
+        ;;
+      *)
+        log_warn "Leaving non-Recall legacy bin symlink untouched: $link"
+        ;;
+    esac
+  done
+}
+
+
+# Re-link the global `recall` and `recall-mcp` binaries with verification.
 #
 # Flow: bun link → verify → (on failure) npm link → verify → (on failure)
 # exit 1 with diagnostic. Used by both install.sh Step 4 and update.sh
@@ -2105,7 +2144,8 @@ recall_link_global() {
   log_info "Linking globally (bun link)..."
   if bun link 2>&1 | grep -v '^$' | sed 's/^/  /'; then
     if recall_verify_global_link; then
-      log_success "Linked: mem and mem-mcp verified"
+      recall_cleanup_legacy_bins
+      log_success "Linked: recall and recall-mcp verified"
       return 0
     fi
     log_warn "bun link reported success but bin symlinks are missing/stale."
@@ -2122,7 +2162,8 @@ recall_link_global() {
   fi
 
   if [[ "$npm_link_ok" == "true" ]] && recall_verify_global_link; then
-    log_success "Linked via npm: mem and mem-mcp verified"
+    recall_cleanup_legacy_bins
+    log_success "Linked via npm: recall and recall-mcp verified"
     return 0
   fi
 
@@ -2130,6 +2171,6 @@ recall_link_global() {
   [[ "$RECALL_OS" != "linux" ]] && log_info "On macOS, try: sudo npm link"
   log_error "Recovery: exit Claude Code / OpenCode / Pi, then run:"
   log_error "  cd $RECALL_REPO_DIR && bun install && bun run build && bun link"
-  log_error "  ls -la ~/.bun/bin/mem ~/.bun/bin/mem-mcp"
+  log_error "  ls -la ~/.bun/bin/recall ~/.bun/bin/recall-mcp"
   return 1
 }

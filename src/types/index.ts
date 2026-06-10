@@ -10,6 +10,7 @@ export interface Session {
   cwd?: string;
   git_branch?: string;
   model?: string;
+  source?: string;
 }
 
 export interface Message {

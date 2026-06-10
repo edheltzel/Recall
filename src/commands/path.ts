@@ -1,12 +1,12 @@
-// mem path — print resolved file paths Recall uses on this machine.
+// recall path — print resolved file paths Recall uses on this machine.
 //
 // Useful for diagnostics (especially when symlinks, MEM_DB_PATH, and
 // RECALL_DB_PATH are interacting in unexpected ways) and for scripts that
 // want to discover the install root.
 //
 // Usage:
-//   mem path           Human-readable output
-//   mem path --json    JSON output for scripting
+//   recall path           Human-readable output
+//   recall path --json    JSON output for scripting
 
 import { getDbPath } from '../db/connection.js';
 import { existsSync, lstatSync, readlinkSync, statSync } from 'fs';

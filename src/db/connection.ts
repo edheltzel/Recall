@@ -11,25 +11,17 @@ const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
 let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
-let warnedAboutMemDbPath = false;
 
 // Precedence:
 //   1. RECALL_DB_PATH (primary)
-//   2. MEM_DB_PATH    (deprecated, accepted with one-time stderr warning)
+//   2. MEM_DB_PATH    (legacy fallback)
 //   3. DEFAULT_DB_PATH
 export function getDbPath(): string {
-  if (process.env.RECALL_DB_PATH) return process.env.RECALL_DB_PATH;
-  if (process.env.MEM_DB_PATH) {
-    if (!warnedAboutMemDbPath) {
-      warnedAboutMemDbPath = true;
-      console.error(
-        '[recall] MEM_DB_PATH is deprecated; use RECALL_DB_PATH. ' +
-        'Both are accepted for now; MEM_DB_PATH will be removed in a future release.'
-      );
-    }
-    return process.env.MEM_DB_PATH;
-  }
-  return DEFAULT_DB_PATH;
+  return (
+    process.env.RECALL_DB_PATH ||
+    process.env.MEM_DB_PATH ||
+    DEFAULT_DB_PATH
+  );
 }
 
 export function getDb(): Database {
@@ -59,7 +51,7 @@ export function getDb(): Database {
     const dbPath = getDbPath();
 
     if (!existsSync(dbPath)) {
-      throw new Error(`Database not found at ${dbPath}. Run 'mem init' first.`);
+      throw new Error(`Database not found at ${dbPath}. Run 'recall init' first.`);
     }
 
     db = new Database(dbPath);

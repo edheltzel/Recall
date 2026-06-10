@@ -5,13 +5,23 @@ All notable changes to Recall are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Recall is still pre-1.0. The public surface (CLI, MCP tools, DB schema) is
-settling but may still shift in minor versions. Breaking changes in 0.x
-releases are called out in the notes below.
+Recall is now 1.0.0. The CLI and MCP binaries use the project name (`recall`)
+while MCP tool names (`memory_search`, `memory_add`, etc.) remain stable.
 
 ## [Unreleased]
 
+### Added
+
+- Added macOS-primary GitHub Actions CI with Ubuntu portability smoke coverage
+  and deterministic release/tag version consistency checks.
+
+## [1.0.0] - 2026-06-08
+
 ### Changed (BREAKING for fresh installs; existing installs auto-migrate)
+
+- **CLI binary renamed from `mem` to `recall`.** The MCP server binary is now
+  `recall-mcp`. Existing installs are relinked on install/update, and
+  Recall-managed legacy `mem` / `mem-mcp` symlinks are removed when safe.
 
 - **Install layout moved to `~/.agents/Recall/`.** Canonical hook files, slash
   commands, agent guides, and the SQLite database now live under a Recall-owned
@@ -21,8 +31,7 @@ releases are called out in the notes below.
 - **Database renamed to `recall.db`.** Default path is now
   `~/.agents/Recall/recall.db` (sidecars: `recall.db-wal`, `recall.db-shm`).
 - **New env var: `RECALL_DB_PATH`.** Primary database-path override. The legacy
-  `MEM_DB_PATH` is still honored as a fallback and prints a one-time
-  deprecation warning to stderr when used.
+  `MEM_DB_PATH` is still honored as a silent fallback for this release.
 
 ### Added
 
@@ -47,7 +56,7 @@ releases are called out in the notes below.
 ### Fixed
 
 - Claude Code MCP registration was previously written with `env: {}`, so the
-  spawned `mem-mcp` process couldn't see any database-path override. The
+  spawned `recall-mcp` process couldn't see any database-path override. The
   installer now patches `env.RECALL_DB_PATH` in whichever config file
   (`~/.claude.json` or `~/.claude/settings.json`) holds the registration.
 
@@ -61,16 +70,16 @@ releases are called out in the notes below.
 
 ### Added (new CLI commands, Phase 3)
 
-- **`mem migrate --to <path>`** — relocate the SQLite database to a new path
+- **`recall migrate --to <path>`** — relocate the SQLite database to a new path
   and rewrite MCP/hook configs across all detected platforms. Refuses to
   overwrite non-empty destinations and refuses to run while a process has
   the source DB open. `--dry-run` prints the plan without mutation. A
   pre-migration snapshot of the DB + sidecars + relevant configs is written
   to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
-- **`mem path`** — print the resolved DB path, the install root, the active
+- **`recall path`** — print the resolved DB path, the install root, the active
   env var source (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the
   per-platform symlink state. `--json` for scripting.
-- **`mem doctor --fix`** — repair drifted or missing Recall-managed
+- **`recall doctor --fix`** — repair drifted or missing Recall-managed
   symlinks. Missing → created. User-modified files at symlink targets →
   backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` then
   replaced. Identical-content regular files → silently converted to
@@ -127,8 +136,8 @@ directory if present.
 - **Pre-flight summary panel** — before any state changes, shows target
   dir, platforms to configure, backup destination, and total step
   count. `_confirm` to proceed; skipped on `--yes`.
-- **Post-flight self-check** — after install, runs `mem stats` and
-  `mem doctor` and surfaces a `✓` / `⚠` summary line inline so broken
+- **Post-flight self-check** — after install, runs `recall stats` and
+  `recall doctor` and surfaces a `✓` / `⚠` summary line inline so broken
   installs are caught immediately.
 - **Structured error panel** — when the EXIT trap fires, renders a
   bordered panel with the failing step name (auto-tracked via
@@ -172,7 +181,7 @@ directory if present.
 ### Fixed
 
 - **Lifecycle: `update.sh` verify hardened** — `step_verify` now fails
-  the run when `mem` is missing instead of warning-and-skipping. If
+  the run when `recall` is missing instead of warning-and-skipping. If
   anything between `step_link_global` and the end of the script removes
   the symlinks (parallel `bun upgrade`, homebrew cleanup, etc.),
   update will now report failure rather than declaring success while
@@ -181,7 +190,7 @@ directory if present.
   `run_bun_unlink` honors a new `RECALL_SKIP_BUN_UNLINK` escape hatch.
   The uninstall test suite drives `uninstall.sh` against a tmpdir
   `CLAUDE_DIR`, but `bun unlink` was running globally regardless and
-  wiping the host's live `mem` / `mem-mcp` symlinks — leaving the next
+  wiping the host's live `recall` / `recall-mcp` symlinks — leaving the next
   Claude Code session unable to connect to the Recall MCP server.
   Production uninstall behavior is unchanged.
 
@@ -249,7 +258,7 @@ Two fixes. Minor, but both were real papercuts.
 
 ### Fixed
 
-- **`mem --help` and `mem stats` showed "Recall 0.7"** instead of the
+- **`recall --help` and `recall stats` showed "Recall 0.7"** instead of the
   actual patch version. `src/version.ts` was truncating `DISPLAY_NAME`
   to `major.minor`. With the 0.7.11 → 0.7.2 → 0.7.21 → 0.7.22
   patch-level cadence, truncation hid real state and made install
@@ -258,19 +267,19 @@ Two fixes. Minor, but both were real papercuts.
 - **`bun link` silent no-op was undetectable.** Prior install/update
   ran `bun link 2>/dev/null` and trusted the exit code. In edge
   cases `bun link` can exit 0 while failing to refresh
-  `~/.bun/bin/mem` / `mem-mcp` (e.g., race with an in-use file,
+  `~/.bun/bin/recall` / `recall-mcp` (e.g., race with an in-use file,
   a bin dir timing glitch, a bun quirk). The script would report
   "[OK] Re-linked" while the bin dir stayed stale — and MCP would
   silently break on the next Claude Code restart. Root cause of the
-  "I ran `./update.sh` and then `mem` wasn't executable" class of
+  "I ran `./update.sh` and then `recall` wasn't executable" class of
   issue.
 
 ### Added
 
 - **`recall_verify_global_link`** in `lib/install-lib.sh`. Confirms
-  both `~/.bun/bin/mem` and `~/.bun/bin/mem-mcp` exist, are symlinks,
+  both `~/.bun/bin/recall` and `~/.bun/bin/recall-mcp` exist, are symlinks,
   and resolve to readable dist files. Returns non-zero with a
-  diagnostic `ls -la` dump of `~/.bun/bin/mem*` on failure.
+  diagnostic `ls -la` dump of `~/.bun/bin/recall*` on failure.
 - **`recall_link_global`** in `lib/install-lib.sh`. Shared hardened
   link flow used by both `install.sh` Step 4 and `update.sh`
   `step_link_global`. Path: bun link → verify → (on failure) npm
@@ -285,7 +294,7 @@ Two fixes. Minor, but both were real papercuts.
   the old block handled is still handled, and the silent-no-op case
   now surfaces instead of being swallowed.
 - `update.sh` `step_link_global` same — delegates to `recall_link_global`.
-  `--dry-run` now narrates `would: bun link (+ verify ~/.bun/bin/mem, mem-mcp)`.
+  `--dry-run` now narrates `would: bun link (+ verify ~/.bun/bin/recall, recall-mcp)`.
 
 ### Tests
 
@@ -313,10 +322,10 @@ and `/recall:update` should treat it as latest.
   `step_install_and_build` ran `bun install && bun run build` but
   never touched the global symlinks in `~/.bun/bin/`. If a previous
   `bun unlink`, `bun upgrade`, or homedir prune had removed the
-  symlinks, rebuild did not restore them. Symptom: `mem` and
-  `mem-mcp` vanished from PATH; the `mcpServers["recall-memory"]`
+  symlinks, rebuild did not restore them. Symptom: `recall` and
+  `recall-mcp` vanished from PATH; the `mcpServers["recall-memory"]`
   entry in `settings.json` (which points at
-  `/Users/$USER/.bun/bin/mem-mcp`) failed silently on the next Claude
+  `/Users/$USER/.bun/bin/recall-mcp`) failed silently on the next Claude
   Code / OpenCode / Pi restart. A long-running MCP process could mask
   the failure because Unix keeps deleted-but-open inodes alive — the
   next restart dropped the inode and MCP broke with no diagnostic.
@@ -374,17 +383,17 @@ does not touch runtime behavior.
 - **`update.sh`** — automated update flow. Version check against GitHub
   Releases API, timestamped backup with `PRE_SHA` recorded in the
   manifest, `git pull --ff-only`, `bun install && bun run build`,
-  `mem init` migrations, refresh of hooks + slash commands + guide,
+  `recall init` migrations, refresh of hooks + slash commands + guide,
   forced re-registration of all four hooks (permanently prevents the
-  Bug 1 class), verification via `mem stats`. On failure, writes a
+  Bug 1 class), verification via `recall stats`. On failure, writes a
   `ROLLBACK.txt` recipe to the backup dir with the exact
   `git reset --hard <PRE_SHA>` + rebuild + `install.sh restore`
   commands. Flags: `--check`, `--dry-run`, `--force`, `--no-migrate`,
   `--no-confirm`.
 - **`/recall:update` slash command** — check-only. Resolves the Recall
-  source via `readlink -f "$(which mem)"`, delegates to
+  source via `readlink -f "$(which recall)"`, delegates to
   `./update.sh --check`, prints the exact `cd <path> && ./update.sh`
-  recipe. Never runs `update.sh` inline — rebuilding the `mem` binary
+  recipe. Never runs `update.sh` inline — rebuilding the `recall` binary
   mid-session can corrupt `bun link`'s process tree.
 - **`lib/install-lib.sh`** — shared library sourced by `install.sh`,
   `update.sh`, and `uninstall.sh`. Contains backup/log helpers, OS and
@@ -397,7 +406,7 @@ does not touch runtime behavior.
 - **`## Uninstalling` section** in `docs/installation.md` covering the
   preserve-default behavior and flag matrix.
 - **`### Onboard` subsection** in `docs/cli-reference.md` documenting
-  `mem onboard`, the `|` (pipe) separator rule, and L0-tier rationale.
+  `recall onboard`, the `|` (pipe) separator rule, and L0-tier rationale.
 
 ### Changed
 
@@ -411,7 +420,7 @@ does not touch runtime behavior.
   manual fallback.
 - **`README.md`** — new "First run: set your identity", "Updating",
   and "Uninstalling" subsections under Quick Start.
-- **`FOR_CLAUDE.md`** — new Core Rule 7 (suggest `mem onboard` once
+- **`FOR_CLAUDE.md`** — new Core Rule 7 (suggest `recall onboard` once
   per session if the L0 tier is empty); added `/recall:update` to the
   slash-commands table.
 
@@ -448,7 +457,7 @@ originally scoped as 0.7.2 in the plan keeps its slot open.
   `idx_learnings_importance`, `idx_loa_importance` — failed on any DB still
   at `PRAGMA user_version = 7`, with `SQLiteError: no such column:
   importance`. The migration step never ran because the index creation
-  aborted first. Effect: `install.sh` step 5 (`mem init`) crashed for every
+  aborted first. Effect: `install.sh` step 5 (`recall init`) crashed for every
   user upgrading from 0.6.x, which is why Ed's live install had to be
   hand-migrated via `sqlite3 ALTER TABLE` before step 5 could succeed.
 
@@ -499,7 +508,7 @@ Surgical fix release for two v0.7.0 regressions surfaced by live verification.
   the happy path, which is why the existing test suite did not catch it.
   Each per-hook `bun -e` block already has `.some(...includes(...))`
   idempotency guards, so removing the outer early-return is the whole fix.
-- **`mem onboard --yes` default used deprecated `.atlas-plans/` path.** The
+- **`recall onboard --yes` default used deprecated `.atlas-plans/` path.** The
   Atlas namespace moved to `.atlas/plans/` + `.atlas/handoffs/` on
   2026-04-18; `src/commands/onboard.ts` still referenced the old path,
   baking the wrong convention into every non-interactive onboarding run.
@@ -553,26 +562,26 @@ for the new L0 tier.
   hook's extraction lock so the two don't race.
 - **Benchmark harness** — `benchmarks/runner.ts` with Suite B (token
   efficiency). Produces JSONL result files plus human-readable reports.
-- **`mem onboard`** — interactive 7-question interview that creates the L0
+- **`recall onboard`** — interactive 7-question interview that creates the L0
   identity file. Flags: `--project` (write project-local), `--print`
   (preview without writing), `--yes` (accept all defaults for CI),
   `--out <path>` (override destination). Backs up existing file to `.bak`
   before overwrite; atomic write via `.tmp + renameSync`.
-- **`mem importance backfill`** — heuristic backfill for the new importance
+- **`recall importance backfill`** — heuristic backfill for the new importance
   column using confidence signals. Dry-run by default; pass `--execute`.
   Scopes: `decisions`, `learnings`, `loa_entries`, or `all`.
-- **`mem pin <table> <id> [importance]`** / **`mem unpin <table> <id>`** —
+- **`recall pin <table> <id> [importance]`** / **`recall unpin <table> <id>`** —
   manually pin a record to a high importance (default 10) or reset to
   table default. LoA floor of 5 is enforced.
-- **`mem benchmark run/list/report`** — run benchmark suites, list
+- **`recall benchmark run/list/report`** — run benchmark suites, list
   available suites, show the latest report.
 - **MCP `memory_add` `importance` param** — accepts 1-10 on insert.
 - **`RECALL_IDENTITY_PATH` environment variable** — override the L0
   identity file location. Honored by both `hooks/RecallStart.ts` (read)
-  and `mem onboard` (write). Precedence order in `mem onboard`:
+  and `recall onboard` (write). Precedence order in `recall onboard`:
   `--out > RECALL_IDENTITY_PATH > --project > global default`.
 - **`install.sh` post-install recommendation** — installer now prints a
-  step recommending `mem onboard` so the L0 tier is populated on first
+  step recommending `recall onboard` so the L0 tier is populated on first
   run.
 
 ### Changed
@@ -581,11 +590,11 @@ for the new L0 tier.
   parsing locally.
 - **Schema migration 7→8** — adds the `importance` column to four tables.
   Additive, non-destructive; existing rows receive the default value. Runs
-  automatically on first `mem init` (including via `./install.sh`).
+  automatically on first `recall init` (including via `./install.sh`).
 - **Wake-up context size** — measured at 5,961 chars / ~1,491 tokens for
   the v2 default bundle, down from 8,020 chars for the v1 baseline
   (34.5% smaller) and 8,760 chars for the CLAUDE.md baseline (47% smaller).
-  Numbers are project-dependent; run `mem benchmark run B` locally to see
+  Numbers are project-dependent; run `recall benchmark run B` locally to see
   your own.
 
 ### Infrastructure
@@ -596,7 +605,7 @@ for the new L0 tier.
 
 ### Migration notes
 No user action is required to upgrade — schema migrations apply
-automatically. **Recommended post-upgrade:** run `mem onboard` once to
+automatically. **Recommended post-upgrade:** run `recall onboard` once to
 seed the L0 identity tier (otherwise `v2_l0_chars` stays at 0 in
 benchmarks and the L0 section of session context is empty).
 
@@ -614,4 +623,4 @@ tentenco) whose analyses shaped our reshape decisions.
 
 See git history and GitHub releases for earlier changelog entries. The
 0.6.x line introduced decision confidence and lifecycle management,
-`mem prune`, and the `decision_update` MCP tool.
+`recall prune`, and the `decision_update` MCP tool.

@@ -1,4 +1,4 @@
-// mem import command
+// recall import command
 
 import { importAllSessions, previewImport } from '../lib/import.js';
 

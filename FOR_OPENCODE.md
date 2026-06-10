@@ -15,7 +15,7 @@ Recall is a persistent memory framework. It gives you:
 
 The L0 tier reads from `~/.claude/MEMORY/identity.md` (or project-local
 `./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set). If the
-user has never written one, recommend `mem onboard` via Bash to create it.
+user has never written one, recommend `recall onboard` via Bash to create it.
 
 ## Your MCP Tools
 
@@ -81,17 +81,17 @@ Show a full Library of Alexandria entry with its extracted wisdom.
 
 ## The CLI
 
-You can also use the `mem` CLI directly via Bash tool:
+You can also use the `recall` CLI directly via Bash tool:
 
 ```bash
-mem search "deployment pipeline"    # Search memory
-mem search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
-mem stats                           # Database statistics
-mem loa list                        # Browse curated knowledge
-mem onboard                         # Interactive L0 identity setup (run once per user)
-mem path                            # Show DB + install paths (diagnostics)
-mem doctor --fix                    # Repair drifted/missing Recall symlinks
-mem migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
+recall search "deployment pipeline"    # Search memory
+recall search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
+recall stats                           # Database statistics
+recall loa list                        # Browse curated knowledge
+recall onboard                         # Interactive L0 identity setup (run once per user)
+recall path                            # Show DB + install paths (diagnostics)
+recall doctor --fix                    # Repair drifted/missing Recall symlinks
+recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 
 ## Codebase Scouting
@@ -121,7 +121,7 @@ They are platform-agnostic — OpenCode, Claude Code, and Pi share them.
 If the user asks about updating or uninstalling, point them at these
 scripts rather than instructing per-platform manual steps. Never run
 `./update.sh` while the user is actively in an OpenCode session — the
-`mem` binary lives in the same `bun link` process tree, and rebuilding
+`recall` binary lives in the same `bun link` process tree, and rebuilding
 mid-session can corrupt in-flight plugin invocations. Have them exit
 OpenCode first.
 
@@ -130,7 +130,7 @@ OpenCode first.
 1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Context for agents** — Before spawning subagents via `@agent`, call `recall-memory_context_for_agent`
-4. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `mem onboard` once. Do not nag on subsequent turns.
+4. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
 
 ## How Extraction Works
 

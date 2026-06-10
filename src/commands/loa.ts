@@ -1,4 +1,4 @@
-// mem loa command - Library of Alexandria capture
+// recall loa command - Library of Alexandria capture
 
 import { execSync } from 'child_process';
 import { createLoaEntry, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages } from '../lib/memory.js';
@@ -205,7 +205,7 @@ export function runLoaList(limit: number = 10): void {
   const entries = recentLoaEntries(limit);
 
   if (entries.length === 0) {
-    console.log('No LoA entries yet. Use "mem loa <title>" to create one.');
+    console.log('No LoA entries yet. Use "recall loa <title>" to create one.');
     return;
   }
 

@@ -141,11 +141,11 @@ do_install() {
     exit 1
   fi
 
-  _step "Linking" "Linking mem + mem-mcp globally"
+  _step "Linking" "Linking recall + recall-mcp globally"
   # recall_link_global does bun link → verify → npm link fallback → verify.
   # 0.7.22 hardening: the verify step catches the silent-no-op case where
-  # `bun link` exits 0 but doesn't actually refresh ~/.bun/bin/mem{,-mcp},
-  # which was the root cause of the "mem not on PATH after install" class
+  # `bun link` exits 0 but doesn't actually refresh ~/.bun/bin/recall{,-mcp},
+  # which was the root cause of the "recall not on PATH after install" class
   # of failures.
   if ! recall_link_global; then
     exit 1
@@ -153,12 +153,12 @@ do_install() {
 
   _step "Database" "Initializing memory database"
   mkdir -p "$CLAUDE_DIR/MEMORY"
-  local mem_bin="$HOME/.bun/bin/mem"
+  local mem_bin="$HOME/.bun/bin/recall"
   if [[ ! -x "$mem_bin" ]]; then
-    mem_bin="$(which mem 2>/dev/null || echo "")"
+    mem_bin="$(which recall 2>/dev/null || echo "")"
   fi
   if [[ -z "$mem_bin" ]]; then
-    log_error "mem binary not found after linking. Check that ~/.bun/bin is in your PATH."
+    log_error "recall binary not found after linking. Check that ~/.bun/bin is in your PATH."
     exit 1
   fi
   "$mem_bin" init
@@ -235,13 +235,13 @@ do_install() {
   if "$mem_bin" stats >/dev/null 2>&1; then
     log_success "Database initialized"
   else
-    log_warn "mem stats failed — DB may not be initialized"
+    log_warn "recall stats failed — DB may not be initialized"
     _check_ok=false
   fi
   if "$mem_bin" doctor >/dev/null 2>&1; then
-    log_success "mem doctor — all checks passing"
+    log_success "recall doctor — all checks passing"
   else
-    log_warn "mem doctor reports issues — run 'mem doctor' to investigate"
+    log_warn "recall doctor reports issues — run 'recall doctor' to investigate"
     _check_ok=false
   fi
   echo ""
@@ -276,10 +276,10 @@ do_install() {
     echo "  $step. Restart Pi to load MCP adapter and extensions"
     step=$((step + 1))
   fi
-  echo "  $step. Test: mem stats"
+  echo "  $step. Test: recall stats"
   step=$((step + 1))
   echo "  $step. (Recommended) Set up your L0 identity tier:"
-  echo "     mem onboard"
+  echo "     recall onboard"
   echo "     A 7-question interview that writes ~/.claude/MEMORY/identity.md."
   echo "     Loads at every session start, gives every agent the same baseline."
   step=$((step + 1))

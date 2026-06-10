@@ -27,7 +27,7 @@ symlinks back to those canonicals.
 │   ├── extensions/                     # Pi extension canonicals
 │   └── Recall_GUIDE.md                 # Guide for Pi
 ├── MEMORY/                             # Migrated user-authored MEMORY files
-│   ├── identity.md                     # L0 identity (user-authored via mem onboard)
+│   ├── identity.md                     # L0 identity (user-authored via recall onboard)
 │   └── DISTILLED.md                    # All extracted session summaries (full archive)
 └── backups/                            # Pre-install + pre-update snapshots
 
@@ -42,7 +42,7 @@ symlinks back to those canonicals.
 │   ├── REJECTIONS.log                 # Things to avoid
 │   ├── ERROR_PATTERNS.json            # Known error/fix pairs
 │   ├── extract_prompt.md              # Extraction prompt template (used by hooks)
-│   ├── EXTRACT_LOG.txt                # Extraction run log (checked by mem doctor)
+│   ├── EXTRACT_LOG.txt                # Extraction run log (checked by recall doctor)
 │   └── .extraction_tracker.json       # Per-file extraction state (dedup + retry)
 ├── hooks/                              # All entries below are symlinks
 │   ├── RecallStart.ts                # → ~/.agents/Recall/shared/hooks/RecallStart.ts
@@ -75,8 +75,8 @@ All FTS5-indexed tables have automatic sync triggers.
 
 The `importance` column was added in schema migration 7→8 (v0.7.0) on four
 tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1
-tier ranking at session start. Manage manually with `mem pin` / `mem unpin`
-or backfill from confidence signals with `mem importance backfill`.
+tier ranking at session start. Manage manually with `recall pin` / `recall unpin`
+or backfill from confidence signals with `recall importance backfill`.
 
 ## Tiered RecallStart (v0.7.0+)
 
@@ -120,9 +120,9 @@ graph LR
 
 | Mode | Command | MCP Tool | How It Works |
 |------|---------|----------|-------------|
-| Keyword | `mem search "query"` | memory_search | SQLite FTS5. Supports AND, OR, NOT, prefix*, "exact phrases", hard table filters (`-t` / `table`), and soft type boosts (`--bias-type` / `bias_type`) |
-| Semantic | `mem semantic "query"` | — | Ollama embedding → cosine similarity against stored vectors |
-| Hybrid | `mem "query"` | memory_hybrid_search | Both combined via Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama unavailable |
+| Keyword | `recall search "query"` | memory_search | SQLite FTS5. Supports AND, OR, NOT, prefix*, "exact phrases", hard table filters (`-t` / `table`), and soft type boosts (`--bias-type` / `bias_type`) |
+| Semantic | `recall semantic "query"` | — | Ollama embedding → cosine similarity against stored vectors |
+| Hybrid | `recall "query"` | memory_hybrid_search | Both combined via Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama unavailable |
 
 ## Extraction Pipeline
 
@@ -159,9 +159,9 @@ If Haiku is unavailable, falls back to a local Ollama model (configurable via `R
 
 ### Lifecycle Management
 
-- **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `mem decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
+- **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `recall decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
 - **Breadcrumb sweep** — at session start, the `RecallStart` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
-- **Prune strategy** — `mem prune` removes stale records: superseded/reverted decisions older than a retention window, breadcrumbs below an importance threshold, and orphaned embeddings with no parent row. Prune is always dry-run by default; pass `--execute` to commit changes.
+- **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window, breadcrumbs below an importance threshold, and orphaned embeddings with no parent row. Prune is always dry-run by default; pass `--execute` to commit changes.
 
 - **WAL mode** for concurrent reads (no locking during MCP queries)
 - **FTS5** full-text search with automatic sync triggers
@@ -179,7 +179,7 @@ If Haiku is unavailable, falls back to a local Ollama model (configurable via `R
 `benchmarks/results/` as JSONL plus a human-readable `.md`. Suite B (token
 efficiency) compares v2 wake-up context against v1 and the CLAUDE.md
 baseline. Methodology is locked in via 5 rules documented in
-`benchmarks/README.md`. Run suites via `mem benchmark run [suite]`.
+`benchmarks/README.md`. Run suites via `recall benchmark run [suite]`.
 
 ## Lifecycle scripts (v0.7.2+)
 
@@ -205,8 +205,8 @@ Sourced by all three scripts. Key functions:
 | `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
 | `recall_register_hook <event> <name> <command> [timeout]` | Idempotent single-hook writer for `settings.json`. Every hook is registered independently — no blanket early-return (fixes the pre-0.7.1 bug class structurally) |
 | `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`RecallExtract`, `RecallTelosSync`, `RecallStart`, `RecallPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
-| `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/mem` / `mem-mcp` (added in 0.7.22) |
-| `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/mem` and `mem-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
+| `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
+| `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
 | `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/Recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |
 | `recall_configure_claude_md` | Appends a `## MEMORY` section to `~/.claude/CLAUDE.md` only if absent; uninstall's counterpart removes it via an AST-aware node script that preserves everything before and after the section |
 
@@ -231,7 +231,7 @@ sticks. The test harness uses this to drive the lib against a tmpdir
 
 Check-only. Reads the current version, polls GitHub Releases, and
 prints the exact `cd <path> && ./update.sh` recipe. **Never runs
-`update.sh` inline** — the `mem` binary lives in the same `bun link`
+`update.sh` inline** — the `recall` binary lives in the same `bun link`
 process tree as the running Claude Code session, and rebuilding
 mid-session can corrupt in-flight hook invocations. The safe
 sequence is: exit Claude Code → `./update.sh` → restart.

@@ -1,4 +1,4 @@
-// Unit tests for the symlink-repair primitive used by `mem doctor --fix`.
+// Unit tests for the symlink-repair primitive used by `recall doctor --fix`.
 //
 // We test probeSymlink() in isolation rather than invoking runDoctor end-to-end
 // because the rest of doctor's checks reach for the real $HOME (Ollama, MCP

@@ -1,5 +1,5 @@
 // Import standalone markdown documents into the database
-// mem docs import [--dry-run] [--yes]
+// recall docs import [--dry-run] [--yes]
 
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join, basename, dirname } from 'path';

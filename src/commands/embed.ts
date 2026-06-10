@@ -1,4 +1,4 @@
-// mem embed command - Generate and store embeddings for semantic search
+// recall embed command - Generate and store embeddings for semantic search
 
 import { getDb } from '../db/connection.js';
 import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL } from '../lib/embeddings.js';
@@ -172,7 +172,7 @@ export async function runSemanticSearch(query: string, options: { table?: string
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   if (embeddings.length === 0) {
-    console.log('No embeddings found. Run `mem embed --backfill` first.');
+    console.log('No embeddings found. Run `recall embed --backfill` first.');
     return;
   }
 
@@ -244,7 +244,7 @@ export function runEmbedStats(): void {
   `).all() as Array<{ source_table: string; count: number; model: string }>;
 
   if (stats.length === 0) {
-    console.log('No embeddings yet. Run `mem embed --backfill --table loa` to start.');
+    console.log('No embeddings yet. Run `recall embed --backfill --table loa` to start.');
     return;
   }
 

@@ -1,4 +1,4 @@
-// mem add command
+// recall add command
 
 import { addBreadcrumb, addDecision, addLearning } from '../lib/memory.js';
 import { detectProject } from '../lib/project.js';

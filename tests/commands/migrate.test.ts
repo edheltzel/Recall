@@ -1,4 +1,4 @@
-// Smoke tests for `mem migrate`. Exercises:
+// Smoke tests for `recall migrate`. Exercises:
 //   - dry-run prints a plan without touching files
 //   - real run moves DB + sidecars to the destination
 //   - refusal to overwrite a non-empty destination
@@ -52,7 +52,7 @@ afterEach(() => {
   if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe('mem migrate', () => {
+describe('recall migrate', () => {
   test('--dry-run prints a plan and changes nothing', () => {
     runMigrate({ to: destDb, dryRun: true });
     const out = captured.join('\n');

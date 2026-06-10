@@ -5,12 +5,12 @@ description: Check for the latest Recall release on GitHub and print the exact u
 Check whether Recall has a newer release on GitHub. This command is
 read-only — it prints the recommended next step but NEVER runs
 `update.sh` inline. Running the update while Claude Code is attached
-can corrupt in-flight hook invocations (the `mem` binary lives in the
+can corrupt in-flight hook invocations (the `recall` binary lives in the
 same process tree via `bun link`).
 
 ## What this does
 
-1. Reads the currently installed version via `mem --version`.
+1. Reads the currently installed version via `recall --version`.
 2. Fetches the latest release tag from the GitHub Releases API
    (`/repos/edheltzel/Recall/releases/latest` — unauthenticated, 60
    req/hr per IP).
@@ -26,7 +26,7 @@ same process tree via `bun link`).
 
 `update.sh` pulls, rebuilds, migrates the DB, and re-registers hooks.
 If Claude Code is currently attached to this session, rebuilding the
-`mem` binary mid-session can leave the running hook scripts in a
+`recall` binary mid-session can leave the running hook scripts in a
 half-updated state. The safe sequence is: exit Claude Code →
 `./update.sh` → restart Claude Code.
 
@@ -43,9 +43,9 @@ running the Recall-shipped helper (`./update.sh --check`) if the source
 directory is locatable — it implements all of the logic below.
 
 1. **Locate the source directory.** Resolve the symlink target of the
-   `mem` binary and strip `/dist/index.js` to get the Recall checkout:
+   `recall` binary and strip `/dist/index.js` to get the Recall checkout:
    ```bash
-   readlink -f "$(which mem)" | sed 's|/dist/index.js$||'
+   readlink -f "$(which recall)" | sed 's|/dist/index.js$||'
    ```
    Call this `RECALL_SRC`.
 
@@ -60,7 +60,7 @@ directory is locatable — it implements all of the logic below.
 3. **Manual path** (if `update.sh` is not present on older installs):
    - Capture the current version:
      ```bash
-     mem --version
+     recall --version
      ```
    - Fetch the latest release tag + body:
      ```bash

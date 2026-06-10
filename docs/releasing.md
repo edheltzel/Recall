@@ -29,6 +29,18 @@ Every release's notes live in `CHANGELOG.md` at the repo root, following
 process reads from it rather than duplicating notes elsewhere, so the
 file never drifts from the tag.
 
+## Version consistency
+
+`package.json.version` is the authoritative release version. `src/version.ts`
+loads that value at runtime and must not carry a semver fallback that can drift
+into a second release source.
+
+CI runs `bun run check:version` on every branch, PR, tag, and release event. On
+ordinary code changes the guard only validates that `package.json.version` is
+strict semver and that the runtime fallback is non-authoritative. On tag or
+release runs, the tag name (with an optional leading `v`) must match
+`package.json.version` exactly.
+
 ## Release recipe
 
 ```bash

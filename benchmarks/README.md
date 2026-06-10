@@ -12,16 +12,16 @@ This harness exists so every claim Recall makes about persistent memory is trace
 
 ```bash
 # Run all available suites
-mem benchmark run
+recall benchmark run
 
 # Run a single suite
-mem benchmark run B
+recall benchmark run B
 
 # Scope to a specific project
-mem benchmark run B --project atlas-recall
+recall benchmark run B --project atlas-recall
 
 # List what's available
-mem benchmark list
+recall benchmark list
 ```
 
 Direct invocation also works:

@@ -232,7 +232,7 @@ function extractMessages(jsonlPath: string): string {
 function wasAlreadyExtracted(convPath: string): boolean {
   const dbPath = getDbPath();
   if (!existsSync(dbPath)) {
-    // DB hasn't been initialized (`mem init` not run). Without the tracker
+    // DB hasn't been initialized (`recall init` not run). Without the tracker
     // table we can't dedup — return false so the caller proceeds. The lock
     // primitive still prevents duplicate concurrent extractions.
     return false;

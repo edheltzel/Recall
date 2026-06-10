@@ -1,4 +1,4 @@
-// mem decision command — lifecycle management for decisions
+// recall decision command — lifecycle management for decisions
 
 import { getDecision, supersedeDecision, revertDecision, listDecisions } from '../lib/memory.js';
 

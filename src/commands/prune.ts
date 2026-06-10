@@ -1,4 +1,4 @@
-// mem prune command — table lifecycle management
+// recall prune command — table lifecycle management
 
 import { getDb } from '../db/connection.js';
 

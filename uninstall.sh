@@ -130,7 +130,7 @@ print_summary() {
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + AGENTS.md MEMORY section"
-  echo "  • bun unlink (removes mem/mem-mcp from PATH)"
+  echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
   if [[ "$PURGE" == "true" ]]; then
     echo "Will DESTROY (--purge):"
@@ -350,7 +350,7 @@ run_bun_unlink() {
   # global registry regardless of CLAUDE_DIR. The uninstall test suite runs
   # this script against a tmpdir CLAUDE_DIR, but without RECALL_SKIP_BUN_UNLINK
   # the test would still wipe the developer's live `recall` link, breaking
-  # `mem` and the recall-memory MCP server on the host.
+  # `recall` and the recall-memory MCP server on the host.
   if [[ "${RECALL_SKIP_BUN_UNLINK:-false}" == "true" ]]; then
     log_info "Skipping bun unlink (RECALL_SKIP_BUN_UNLINK=true)"
     return
@@ -361,7 +361,7 @@ run_bun_unlink() {
       echo "  [dry-run] would run: bun unlink"
     else
       bun unlink 2>/dev/null || true
-      log_success "bun unlink (mem, mem-mcp)"
+      log_success "bun unlink (recall, recall-mcp)"
     fi
   elif command -v npm &>/dev/null; then
     if [[ "$DRY_RUN" == "true" ]]; then

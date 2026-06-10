@@ -33,7 +33,7 @@ Verify: `bun --version` — [bun.sh](https://bun.sh)
 
 ### Node.js and npm
 
-Required for global linking so `mem` and `mem-mcp` are available on your PATH. Minimum version: **Node 18+**.
+Required for global linking so `recall` and `recall-mcp` are available on your PATH. Minimum version: **Node 18+**.
 
 ```bash
 # macOS (Homebrew)
@@ -111,7 +111,7 @@ cd Recall
 ./install.sh
 ```
 
-> **Note:** Do not clone to a temporary directory. `bun link` creates symlinks back to the clone location — if the directory is removed (e.g. on reboot), `mem` commands will break.
+> **Note:** Do not clone to a temporary directory. `bun link` creates symlinks back to the clone location — if the directory is removed (e.g. on reboot), `recall` commands will break.
 
 The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
@@ -120,7 +120,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `recall.db`) to `~/.claude/backups/recall/` |
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
-| 4. Link | Links `mem` and `mem-mcp` globally via `bun link` (falls back to `npm link` on failure) |
+| 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
 | 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
 | 7. Setup hooks | Copies `RecallExtract.ts` and `RecallBatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
@@ -139,7 +139,7 @@ flowchart LR
     B --> C[bun install]
     C --> D[bun run build]
     D --> E[bun link]
-    E --> F[mem init\nInit DB]
+    E --> F[recall init\nInit DB]
     F --> G[Register MCP\nsettings.json]
     G --> H[Register Hooks\nsettings.json]
     H --> I[Copy Guide\nRecall_GUIDE.md]
@@ -153,13 +153,13 @@ flowchart LR
 After the installer completes and you have restarted Claude Code, run these checks:
 
 ```bash
-which mem mem-mcp          # Both CLIs should resolve to a path
+which recall recall-mcp          # Both CLIs should resolve to a path
 ls -la ~/.agents/Recall/recall.db # Database file should exist
-mem stats                  # Should return record counts (zeros on fresh install)
-mem doctor                 # Full health check — database, MCP, hooks, embeddings
+recall stats                  # Should return record counts (zeros on fresh install)
+recall doctor                 # Full health check — database, MCP, hooks, embeddings
 ```
 
-`mem doctor` is the authoritative health check. Run it first any time something seems wrong.
+`recall doctor` is the authoritative health check. Run it first any time something seems wrong.
 
 ### Recommended: seed your L0 identity tier
 
@@ -168,8 +168,8 @@ the top of every session (the L0 tier). Without it, the L0 section is empty
 and the v2 tiered context is only half-populated.
 
 ```bash
-mem onboard                 # Interactive 7-question interview
-mem onboard --print --yes   # Preview what would be written (no side effects)
+recall onboard                 # Interactive 7-question interview
+recall onboard --print --yes   # Preview what would be written (no side effects)
 ```
 
 This writes `~/.claude/MEMORY/identity.md` (global) or
@@ -214,7 +214,7 @@ crontab -e
 |----------|---------|---------|
 | `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
 | `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
-| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `mem onboard` (write). |
+| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `recall onboard` (write). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used for embeddings (768-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
@@ -267,7 +267,7 @@ cd /path/to/Recall
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
 - OpenCode MCP entry + plugins + agent (unless `--skip-opencode`)
 - Pi MCP entry + extensions + `AGENTS.md` MEMORY section (unless `--skip-pi`)
-- `bun unlink` (removes `mem` and `mem-mcp` from your PATH)
+- `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
 ### What is preserved (default)
 

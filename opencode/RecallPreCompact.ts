@@ -8,7 +8,7 @@
 //   - experimental.session.compacting(input, output) — confirmed signature
 //   - output.context (array) — push strings to inject context
 //   - output.prompt (string) — replaces entire compaction prompt (not used here)
-//   - execFileSync for mem CLI — standard Node/Bun API
+//   - execFileSync for recall CLI — standard Node/Bun API
 
 import type { Plugin } from "@opencode-ai/plugin"
 import { execFileSync } from "child_process"
@@ -22,7 +22,7 @@ export const RecallCompaction: Plugin = async ({ project }) => {
         if (!output || !Array.isArray(output.context)) return
 
         const projectName = project?.name || project?.id || ""
-        const context = execFileSync("mem", [
+        const context = execFileSync("recall", [
           "search", projectName, "--limit", "5"
         ], { encoding: "utf-8", timeout: 5000 })
 
@@ -33,7 +33,7 @@ export const RecallCompaction: Plugin = async ({ project }) => {
           )
         }
       } catch {
-        // mem CLI unavailable (ENOENT), timed out, or other error — skip silently
+        // recall CLI unavailable (ENOENT), timed out, or other error — skip silently
       }
     }
   }
