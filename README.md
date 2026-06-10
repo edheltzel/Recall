@@ -304,6 +304,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |
 | [MCP Tools](docs/mcp-tools.md)             | Tools available to AI agents                                              |
 | [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
+| Codebase Map (local)                       | Interactive visual map at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html` — generated from the codegraph index, not committed (`.agents/` is gitignored) |
 | [Slash Commands](docs/slash-commands.md)   | `/Recall:*` commands for Claude Code                                      |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |

@@ -166,6 +166,8 @@ Codebase scout reports (`/Recall:scout`, see `commands/Recall/scout.md`) are **c
 - File naming: `YYYY-MM-DD-scout-<focus>.md` (kebab-case)
 - `.agents/atlas/handoffs/` stays **reserved for session handoff documents** — never write scout artifacts there
 
+**Codebase map:** an interactive visual map of this codebase (topology diagram + module cards, built from the codegraph index) lives at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html`. It is a local artifact (`.agents/` is gitignored) — open it in a browser for orientation, and regenerate it after major structural changes rather than hand-editing it.
+
 ## Agent skills
 
 ### Issue tracker
