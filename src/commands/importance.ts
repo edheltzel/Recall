@@ -1,4 +1,4 @@
-// mem importance — heuristic backfill + pin/unpin for the importance column.
+// recall importance — heuristic backfill + pin/unpin for the importance column.
 //
 // Background:
 // Migration 7→8 added `importance INTEGER` to messages/decisions/learnings/loa_entries
@@ -157,8 +157,8 @@ function backfillBreadcrumbs(db: ReturnType<typeof getDb>, dryRun: boolean): Bac
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// mem pin — force importance to 10 on a specific record.
-// mem unpin — reset importance to table default.
+// recall pin — force importance to 10 on a specific record.
+// recall unpin — reset importance to table default.
 
 const PIN_DEFAULTS: Record<string, number> = {
   messages: 5,

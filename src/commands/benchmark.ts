@@ -1,4 +1,4 @@
-// mem benchmark — Phase 2 benchmarking CLI integration.
+// recall benchmark — Phase 2 benchmarking CLI integration.
 //
 // Thin wrapper over benchmarks/runner.ts. We keep the actual implementation
 // outside src/ so the CLI binary stays small and benchmarks can be run
@@ -46,7 +46,7 @@ export async function runBenchmark(options: RunBenchmarkOptions = {}): Promise<v
 
   const suite = (options.suite || '').toUpperCase() as SuiteId | '';
   if (suite && !SUITES_AVAILABLE.some(s => s.id === suite)) {
-    console.error(`Unknown suite: ${options.suite}. Run 'mem benchmark list' to see available suites.`);
+    console.error(`Unknown suite: ${options.suite}. Run 'recall benchmark list' to see available suites.`);
     process.exit(1);
   }
 
@@ -77,7 +77,7 @@ export function listBenchmarks(): void {
     console.log(`  ${tag} ${s.id}  ${s.name.padEnd(36)} ${s.status}`);
   }
   console.log('');
-  console.log("Run with 'mem benchmark run <suite-id>' (e.g. 'mem benchmark run B').");
+  console.log("Run with 'recall benchmark run <suite-id>' (e.g. 'recall benchmark run B').");
 }
 
 export function reportLatestBenchmark(): void {
@@ -88,7 +88,7 @@ export function reportLatestBenchmark(): void {
   }
   const resultsDir = join(dir, 'results');
   if (!existsSync(resultsDir)) {
-    console.log('No benchmark results yet. Run `mem benchmark run` first.');
+    console.log('No benchmark results yet. Run `recall benchmark run` first.');
     return;
   }
   const mdFiles = readdirSync(resultsDir)
@@ -97,7 +97,7 @@ export function reportLatestBenchmark(): void {
     .sort((a, b) => b.mtime - a.mtime);
 
   if (mdFiles.length === 0) {
-    console.log('No benchmark results yet. Run `mem benchmark run` first.');
+    console.log('No benchmark results yet. Run `recall benchmark run` first.');
     return;
   }
   console.log(`# Latest benchmark report: ${mdFiles[0].name}\n`);

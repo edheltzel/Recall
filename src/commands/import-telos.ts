@@ -283,7 +283,7 @@ export function runTelosList(options: { type?: string; limit?: number }): void {
   }>;
 
   if (rows.length === 0) {
-    console.log('No TELOS entries found. Run `mem telos import --yes` to import.');
+    console.log('No TELOS entries found. Run `recall telos import --yes` to import.');
     return;
   }
 

@@ -26,6 +26,7 @@ export interface DualWriteContext {
   topics: string[];
   summary: string;
   extracted: string;
+  messageCount?: number | null;
 }
 
 export interface DualWriteResult {
@@ -207,6 +208,7 @@ export function dualWriteToSqlite(
       sessionId: ctx.sessionId,
       project: ctx.project,
       tags: ctx.topics.join(','),
+      messageCount: ctx.messageCount ?? null,
     });
     result.loa = loaId ? 1 : 0;
   } catch (e: any) {

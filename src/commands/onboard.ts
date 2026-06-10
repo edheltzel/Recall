@@ -1,4 +1,4 @@
-// mem onboard — interactive interview that creates the L0 identity tier.
+// recall onboard — interactive interview that creates the L0 identity tier.
 //
 // The L0 tier is a small user-authored markdown file that RecallStart
 // loads at the very top of every session. Without it, that tier is silently
@@ -363,8 +363,8 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
   if (exceedsMaxL0(markdown)) {
     process.stderr.write(
       `  Warning: file is ${markdown.length} chars; RecallStart truncates L0 at ${MAX_L0_CHARS}.\n` +
-      `  Edit the file to shorten or run \`mem onboard --print\` first to preview length.\n`,
+      `  Edit the file to shorten or run \`recall onboard --print\` first to preview length.\n`,
     );
   }
-  process.stdout.write('\n  Try it: `mem benchmark run B` should now show v2_l0_chars > 0.\n\n');
+  process.stdout.write('\n  Try it: `recall benchmark run B` should now show v2_l0_chars > 0.\n\n');
 }

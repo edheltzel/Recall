@@ -1,4 +1,4 @@
-// mem doctor — health check for all memory subsystems
+// recall doctor — health check for all memory subsystems
 
 import { existsSync, statSync, readFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
@@ -299,7 +299,7 @@ function checkMcpServer(): CheckResult {
   });
 
   try {
-    const result = spawnSync('mem-mcp', [], {
+    const result = spawnSync('recall-mcp', [], {
       input: initMsg + '\n',
       encoding: 'utf-8',
       timeout: 5000,
@@ -467,7 +467,7 @@ function buildSymlinkProbes(): SymlinkProbe[] {
   // under the install root, so doctor adapts as commands are added/removed.
   // We hit this class of breakage in one user's install (install.sh ran
   // recall_copy_canonical but never reached recall_link for the commands
-  // step); covering it here lets `mem doctor --fix` repair without reinstall.
+  // step); covering it here lets `recall doctor --fix` repair without reinstall.
   const cmdCanonicalDir = join(root, 'claude', 'commands', 'Recall');
   if (existsSync(cmdCanonicalDir)) {
     let entries: string[] = [];
@@ -591,7 +591,7 @@ export function probeSymlink(probe: SymlinkProbe): SymlinkCheck {
 // ─────────────────────────────────────────
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   console.log('');
-  console.log(`${C.bold}mem doctor — Memory Subsystem Health Check${C.reset}`);
+  console.log(`${C.bold}recall doctor — Memory Subsystem Health Check${C.reset}`);
   console.log(`${C.dim}${'─'.repeat(50)}${C.reset}`);
   console.log('');
 

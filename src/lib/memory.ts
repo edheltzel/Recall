@@ -9,8 +9,8 @@ import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats,
 export function createSession(session: Omit<Session, 'id'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO sessions (session_id, started_at, ended_at, summary, project, cwd, git_branch, model)
-    VALUES ($session_id, $started_at, $ended_at, $summary, $project, $cwd, $git_branch, $model)
+    INSERT INTO sessions (session_id, started_at, ended_at, summary, project, cwd, git_branch, model, source)
+    VALUES ($session_id, $started_at, $ended_at, $summary, $project, $cwd, $git_branch, $model, $source)
   `);
   const result = stmt.run({
     $session_id: session.session_id,
@@ -20,7 +20,8 @@ export function createSession(session: Omit<Session, 'id'>): number {
     $project: session.project || null,
     $cwd: session.cwd || null,
     $git_branch: session.git_branch || null,
-    $model: session.model || null
+    $model: session.model || null,
+    $source: session.source || 'claude-code'
   });
   return result.lastInsertRowid as number;
 }

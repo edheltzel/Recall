@@ -5,7 +5,7 @@
 ## First Step: Run Doctor
 
 ```bash
-mem doctor
+recall doctor
 ```
 
 This checks all subsystems: database, MCP registration, hooks, extraction tracker, CLI paths, and Ollama. **Start here before debugging individual issues.**
@@ -15,7 +15,7 @@ This checks all subsystems: database, MCP registration, hooks, extraction tracke
 ### "Database not found"
 
 ```bash
-mem init
+recall init
 ```
 
 Re-initializes the database. Safe to re-run — won't destroy existing data.
@@ -26,8 +26,8 @@ The `RecallStart` hook loads `identity.md` for the L0 tier. If you've never
 written one, the L0 section of your session-start context is empty.
 
 ```bash
-mem onboard                 # Interactive interview — creates identity.md
-mem benchmark run B         # Confirm v2_l0_chars > 0 after onboarding
+recall onboard                 # Interactive interview — creates identity.md
+recall benchmark run B         # Confirm v2_l0_chars > 0 after onboarding
 ```
 
 If onboard writes to the wrong location, check for `RECALL_IDENTITY_PATH` in
@@ -38,7 +38,7 @@ your shell env and for a stale project-local `./.atlas-recall/identity.md`
 
 `RecallStart` hard-caps L0 at `MAX_L0_CHARS = 1200` on read and appends
 `[identity truncated — edit <path> to shorten]`. Trim your identity file or
-re-run `mem onboard --print` to preview length before writing.
+re-run `recall onboard --print` to preview length before writing.
 
 ### "Bun install fails — unzip required" (Linux only)
 
@@ -50,7 +50,7 @@ Then re-run `./install.sh`.
 
 ### "Fabric extraction failed"
 
-Fabric is optional — only needed for `mem loa write` and `mem dump`. Core functionality (search, add, MCP tools) works without it. 
+Fabric is optional — only needed for `recall loa write` and `recall dump`. Core functionality (search, add, MCP tools) works without it. 
 
 Verify Fabric works:
 
@@ -62,10 +62,10 @@ If Fabric isn't installed, Recall falls back to an inline extraction prompt (low
 
 ### "MCP server not connecting"
 
-1. Run diagnostics: `mem doctor`
+1. Run diagnostics: `recall doctor`
 2. Check config: `grep recall-memory ~/.claude/settings.json`
-3. Verify PATH: `which mem-mcp`
-4. Test manually: `mem-mcp` (should hang waiting for stdin — Ctrl+C to exit)
+3. Verify PATH: `which recall-mcp`
+4. Test manually: `recall-mcp` (should hang waiting for stdin — Ctrl+C to exit)
 5. Restart Claude Code
 
 The MCP server is registered in `~/.claude/settings.json` under `mcpServers` (user scope).
@@ -74,8 +74,8 @@ The MCP server is registered in `~/.claude/settings.json` under `mcpServers` (us
 
 The MCP entry in `settings.json` is an absolute path to
 `~/.claude/install/global/node_modules/recall/dist/mcp-server.js`
-(via a symlink at `~/.bun/bin/mem-mcp`). If the symlink is gone or
-stale, the running `mem-mcp` process keeps the deleted inode open —
+(via a symlink at `~/.bun/bin/recall-mcp`). If the symlink is gone or
+stale, the running `recall-mcp` process keeps the deleted inode open —
 so the current session works, but the next Claude Code restart can't
 spawn a fresh MCP server and it silently fails.
 
@@ -92,7 +92,7 @@ Common causes:
 ```bash
 cd /path/to/Recall       # the MAIN checkout, not a worktree
 bun install && bun run build && bun link
-ls -la ~/.bun/bin/mem ~/.bun/bin/mem-mcp    # verify symlinks exist
+ls -la ~/.bun/bin/recall ~/.bun/bin/recall-mcp    # verify symlinks exist
 # Restart Claude Code
 ```
 
@@ -111,7 +111,7 @@ symlinks resolve to readable files after linking — so a silent
 
 ### "Session extraction not running"
 
-1. Run diagnostics: `mem doctor`
+1. Run diagnostics: `recall doctor`
 2. Check hook registered: `grep RecallExtract ~/.claude/settings.json`
 3. Check hook file exists: `ls ~/.claude/hooks/RecallExtract.ts`
 4. Check bun accessible: `which bun` (hooks resolve bun dynamically — not hardcoded)
@@ -132,20 +132,20 @@ curl http://localhost:11434/api/tags   # Verify Ollama is running
 
 Set `OLLAMA_URL` environment variable if Ollama runs on a different host (default: `http://localhost:11434`).
 
-### "Command not found: mem"
+### "Command not found: recall"
 
-The `mem` CLI is linked globally via `bun link`, producing a symlink
-at `~/.bun/bin/mem` → the Recall checkout's `dist/index.js`. If that
+The `recall` CLI is linked globally via `bun link`, producing a symlink
+at `~/.bun/bin/recall` → the Recall checkout's `dist/index.js`. If that
 symlink is missing or stale:
 
 ```bash
 cd /path/to/Recall       # the MAIN checkout, not a worktree
 bun install && bun run build && bun link
-ls -la ~/.bun/bin/mem    # verify
-mem --version            # should print X.Y.Z (e.g. "0.7.22")
+ls -la ~/.bun/bin/recall    # verify
+recall --version            # should print X.Y.Z (e.g. "0.7.22")
 ```
 
-If `mem --version` still fails, confirm `~/.bun/bin` is on your PATH:
+If `recall --version` still fails, confirm `~/.bun/bin` is on your PATH:
 
 ```bash
 echo $PATH | tr ':' '\n' | grep bun
@@ -170,4 +170,4 @@ cd /path/to/Recall
 ```
 
 See also: ["MCP worked yesterday but broke after I restarted Claude Code"](#mcp-worked-yesterday-but-broke-after-i-restarted-claude-code)
-for the `mem-mcp` counterpart — same root cause, same repair path.
+for the `recall-mcp` counterpart — same root cause, same repair path.

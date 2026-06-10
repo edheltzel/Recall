@@ -42,10 +42,10 @@ describe('connection', () => {
       const originalRecall = process.env.RECALL_DB_PATH;
       const originalMem = process.env.MEM_DB_PATH;
       delete process.env.RECALL_DB_PATH;
-      process.env.MEM_DB_PATH = '/tmp/legacy-mem-db-path.db';
+      process.env.MEM_DB_PATH = '/tmp/legacy-recall-db-path.db';
 
       try {
-        expect(getDbPath()).toBe('/tmp/legacy-mem-db-path.db');
+        expect(getDbPath()).toBe('/tmp/legacy-recall-db-path.db');
       } finally {
         if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
         if (originalMem !== undefined) {
@@ -60,7 +60,7 @@ describe('connection', () => {
       const originalRecall = process.env.RECALL_DB_PATH;
       const originalMem = process.env.MEM_DB_PATH;
       process.env.RECALL_DB_PATH = '/tmp/recall-primary.db';
-      process.env.MEM_DB_PATH = '/tmp/legacy-mem-db.db';
+      process.env.MEM_DB_PATH = '/tmp/legacy-recall-db.db';
 
       try {
         expect(getDbPath()).toBe('/tmp/recall-primary.db');

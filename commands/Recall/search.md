@@ -7,7 +7,7 @@ Search across all Recall memory tables (messages, LoA entries, decisions, learni
 ## Usage
 
 ```bash
-mem search "$1"
+recall search "$1"
 ```
 
 **Arguments:**
@@ -23,22 +23,22 @@ mem search "$1"
 
 ```bash
 # Search all memory
-mem search "kubernetes deployment"
+recall search "kubernetes deployment"
 
 # Search decisions only (hard filter)
-mem search "database choice" -t decisions
+recall search "database choice" -t decisions
 
 # Prefer decisions first, but still show matching learnings/messages/etc.
-mem search "database choice" --bias-type decisions
+recall search "database choice" --bias-type decisions
 
 # Filter by project
-mem search "auth middleware" -p my-api
+recall search "auth middleware" -p my-api
 
 # Exact phrase with limit
-mem search '"rate limiting strategy"' -l 5
+recall search '"rate limiting strategy"' -l 5
 
 # FTS5 operators
-mem search "webpack OR vite" -t learnings
+recall search "webpack OR vite" -t learnings
 
 # Rule of thumb: use -t when you want ONLY that table; use --bias-type when you want that table first.
 ```

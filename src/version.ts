@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-let _version = "0.4.1"; // fallback
+let _version = "unknown"; // fallback, never an authoritative release version
 
 try {
 	const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,6 @@ try {
 export const VERSION = _version;
 // Full version — not truncated to major.minor. Patch releases (0.7.11,
 // 0.7.21, 0.7.22) are meaningful signals; showing "Recall 0.7" in
-// `mem --help` / `mem stats` hides which patch level is running and
+// `recall --help` / `recall stats` hides which patch level is running and
 // makes install issues harder to triage.
 export const DISPLAY_NAME = `Recall ${_version}`;

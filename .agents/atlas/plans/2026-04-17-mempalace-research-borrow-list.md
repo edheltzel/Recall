@@ -284,6 +284,15 @@ Worktree: `.claude/worktrees/mempalace-sprint-14`
 Branch: `worktree-mempalace-sprint-14`
 Tests: 267 pass, 0 fail. Build: clean.
 
+## Sprint #6 — Status: **IMPLEMENTED 2026-06-01** (branch `feat/multi-format-conversation-import`)
+
+**Multi-format conversation import implementation locked-in:**
+- `mem import-conversations <path>` with `--format auto|claude-ai|chatgpt|slack`, `--project`, `--dry-run`, `--verbose`, and `--no-extract`.
+- Adapters normalize Claude.ai exports, ChatGPT `conversations.json`, and Slack JSON exports into `sessions` + `messages` with source attribution.
+- Default path runs imported transcripts through the existing Haiku/Fabric extraction shape and writes LoA, decisions, learnings, breadcrumbs, extraction errors, and extraction session metadata.
+- `--no-extract` is explicit raw-only mode and warns that bypassing curated extraction can reduce search precision.
+- Verification: `bun test` (443 pass), `bun run lint`, `bun run build`.
+
 **Sprint #2 (PreCompact hook) implementation locked-in:**
 - `hooks/SessionPreCompact.ts` — flush-only to SQLite; no Haiku, no LoA.
 - Per-conversation byte-offset watermark in `~/.claude/MEMORY/.precompact_tracker.json` (separate from Stop's `.extraction_tracker.json`).

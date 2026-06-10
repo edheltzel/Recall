@@ -1,4 +1,4 @@
-// mem init command
+// recall init command
 
 import { initDb } from '../db/connection.js';
 
