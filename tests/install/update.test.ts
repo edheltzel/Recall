@@ -38,6 +38,26 @@ describe('update.sh', () => {
     expect(r.stdout).toContain('Current:');
   });
 
+  test('--check survives gum being unavailable (CI runners have no gum)', () => {
+    // Regression: _try_install_gum returned 1 after exhausting install paths,
+    // which killed update.sh under `set -e` + ERR trap before --check ran.
+    // Simulate a gum-less runner: local gum is "too old" via the min-version
+    // floor, and stub curl/brew so every install path fails fast.
+    const stubDir = mkdtempSync(join(tmpdir(), 'recall-no-gum-'));
+    try {
+      writeFileSync(join(stubDir, 'curl'), '#!/bin/bash\nexit 22\n', { mode: 0o755 });
+      writeFileSync(join(stubDir, 'brew'), '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+      const r = run(['--check'], {
+        PATH: `${stubDir}:${process.env.PATH}`,
+        RECALL_GUM_MIN_MAJOR: '99',
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Current:');
+    } finally {
+      rmSync(stubDir, { recursive: true, force: true });
+    }
+  });
+
   test('--help prints usage without mutating', () => {
     const r = run(['--help']);
     expect(r.status).toBe(0);

@@ -287,8 +287,11 @@ _try_install_gum() {
     _detect_gum && return 0
   fi
 
+  # Bash-mode fallback is a supported outcome, not an error. Callers run
+  # under `set -e` (install.sh, update.sh) and must not die because gum
+  # could not be installed — HAS_GUM=false is the signal they act on.
   HAS_GUM=false
-  return 1
+  return 0
 }
 
 _install_gum_binary() {
