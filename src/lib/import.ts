@@ -184,8 +184,8 @@ export function importAllSessions(options?: { dryRun?: boolean; verbose?: boolea
         summary: `Imported from ${basename(file)}`
       });
 
-      // Insert messages in batch
-      const count = addMessagesBatch(parsed.messages);
+      // Insert messages in batch — raw conversation capture is verbatim (ADR-0001)
+      const count = addMessagesBatch(parsed.messages.map(m => ({ ...m, provenance: 'verbatim' as const })));
 
       result.sessionsImported++;
       result.messagesImported += count;

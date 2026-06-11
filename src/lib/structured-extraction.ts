@@ -164,6 +164,7 @@ function writeLoa(ctx: StructuredExtractionContext): number {
     project: ctx.project,
     tags: ctx.topics.join(','),
     message_count: ctx.messageCount ?? range.count,
+    provenance: 'extracted',
   });
 }
 
@@ -194,6 +195,7 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
         decision: item.decision,
         status: 'active',
         confidence: item.confidence,
+        provenance: 'extracted',
       });
       result.decisions++;
     }
@@ -211,6 +213,7 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
         solution: item.solution,
         tags: ctx.sessionLabel,
         confidence: 'medium',
+        provenance: 'extracted',
       });
       result.learnings++;
     }
@@ -226,6 +229,7 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
         project: ctx.project,
         content,
         importance: 5,
+        provenance: 'extracted',
       });
       result.breadcrumbs++;
     }

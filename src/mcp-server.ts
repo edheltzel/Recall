@@ -66,7 +66,14 @@ import {
 	reciprocalRankFusion,
 	checkEmbeddingService,
 } from "./lib/embeddings.js";
+import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
+
+// Record Provenance display (ADR-0001): structured results always carry
+// provenance; legacy NULL is reported as "unknown", never guessed.
+function provenanceLabel(provenance: Provenance | null | undefined): string {
+	return `provenance: ${provenance ?? "unknown"}`;
+}
 
 /**
  * Hybrid search combining FTS5 + vector embeddings with RRF fusion
@@ -82,6 +89,7 @@ async function hybridSearch(
 		content: string;
 		score: number;
 		source: "fts" | "vec" | "both";
+		provenance: Provenance | null;
 	}>;
 	embeddingsAvailable: boolean;
 }> {
@@ -159,6 +167,7 @@ async function hybridSearch(
 				content: string;
 				score: number;
 				source: "fts" | "vec" | "both";
+				provenance: Provenance | null;
 			}
 		>();
 
@@ -171,6 +180,7 @@ async function hybridSearch(
 				content: r.content,
 				score,
 				source: "fts",
+				provenance: r.provenance ?? null,
 			});
 		}
 
@@ -182,25 +192,29 @@ async function hybridSearch(
 			} else {
 				// Need to fetch content
 				let content = "";
+				let provenance: Provenance | null = null;
 				if (r.source_table === "loa_entries") {
 					const loa = db
 						.prepare(
-							"SELECT title, fabric_extract FROM loa_entries WHERE id = ?",
+							"SELECT title, fabric_extract, provenance FROM loa_entries WHERE id = ?",
 						)
 						.get(r.source_id) as any;
 					content = loa
 						? `${loa.title}: ${loa.fabric_extract?.slice(0, 200)}`
 						: "";
+					provenance = loa?.provenance ?? null;
 				} else if (r.source_table === "decisions") {
 					const dec = db
-						.prepare("SELECT decision FROM decisions WHERE id = ?")
+						.prepare("SELECT decision, provenance FROM decisions WHERE id = ?")
 						.get(r.source_id) as any;
 					content = dec?.decision || "";
+					provenance = dec?.provenance ?? null;
 				} else if (r.source_table === "messages") {
 					const msg = db
-						.prepare("SELECT content FROM messages WHERE id = ?")
+						.prepare("SELECT content, provenance FROM messages WHERE id = ?")
 						.get(r.source_id) as any;
 					content = msg?.content?.slice(0, 200) || "";
+					provenance = msg?.provenance ?? null;
 				}
 
 				resultMap.set(key, {
@@ -209,6 +223,7 @@ async function hybridSearch(
 					content,
 					score: fusedScores.get(key) || 0,
 					source: "vec",
+					provenance,
 				});
 			}
 		}
@@ -229,6 +244,7 @@ async function hybridSearch(
 				content: r.content,
 				score: r.rank || 0,
 				source: "fts" as const,
+				provenance: r.provenance ?? null,
 			}))
 			.slice(0, limit),
 		embeddingsAvailable: false,
@@ -288,7 +304,7 @@ server.tool(
 						r.content.length > 200
 							? r.content.slice(0, 200) + "..."
 							: r.content;
-					return `[${r.table}#${r.id}] ${r.project || "no-project"} | ${r.created_at}\n${preview}`;
+					return `[${r.table}#${r.id}] ${r.project || "no-project"} | ${r.created_at} | ${provenanceLabel(r.provenance)}\n${preview}`;
 				})
 				.join("\n\n---\n\n");
 
@@ -356,7 +372,7 @@ server.tool(
 							? r.content.slice(0, 200) + "..."
 							: r.content;
 					const score = (r.score * 100).toFixed(1);
-					return `${score}% ${sourceTag} [${r.table}#${r.id}]\n${preview}`;
+					return `${score}% ${sourceTag} [${r.table}#${r.id}] | ${provenanceLabel(r.provenance)}\n${preview}`;
 				})
 				.join("\n\n---\n\n");
 
@@ -405,7 +421,7 @@ server.tool(
 				output += "### Library of Alexandria (Curated Knowledge)\n";
 				for (const e of loa) {
 					const preview = e.fabric_extract.slice(0, 300).replace(/\n/g, " ");
-					output += `- **LoA #${e.id}** [${e.project || "no-project"}] ${e.created_at?.split("T")[0]}: ${e.title}\n  ${preview}...\n`;
+					output += `- **LoA #${e.id}** [${e.project || "no-project"}] ${e.created_at?.split("T")[0]} (${provenanceLabel(e.provenance)}): ${e.title}\n  ${preview}...\n`;
 				}
 				output += "\n";
 			}
@@ -413,7 +429,7 @@ server.tool(
 			if (decisions.length > 0) {
 				output += "### Recent Decisions\n";
 				for (const d of decisions) {
-					output += `- **#${d.id}** [${d.project || "no-project"}]: ${d.decision}${d.reasoning ? ` (${d.reasoning})` : ""}\n`;
+					output += `- **#${d.id}** [${d.project || "no-project"}] (${provenanceLabel(d.provenance)}): ${d.decision}${d.reasoning ? ` (${d.reasoning})` : ""}\n`;
 				}
 				output += "\n";
 			}
@@ -421,7 +437,7 @@ server.tool(
 			if (breadcrumbs.length > 0) {
 				output += "### Breadcrumbs\n";
 				for (const b of breadcrumbs) {
-					output += `- **#${b.id}** [${b.project || "no-project"}]: ${b.content}\n`;
+					output += `- **#${b.id}** [${b.project || "no-project"}] (${provenanceLabel(b.provenance)}): ${b.content}\n`;
 				}
 				output += "\n";
 			}
@@ -555,6 +571,9 @@ server.tool(
 						}
 					}
 
+					// ADR-0001: provenance is stamped from the write path. memory_add
+					// deliberately exposes no provenance parameter — agents must not
+					// be able to launder extracted content as something else.
 					id = addDecision({
 						decision: content,
 						reasoning: detail,
@@ -562,6 +581,7 @@ server.tool(
 						status: "active",
 						confidence: confidence || "medium",
 						importance,
+						provenance: "user_authored",
 					});
 
 					let resultText = `Added decision #${id}: ${content}`;
@@ -583,6 +603,7 @@ server.tool(
 						tags,
 						confidence: confidence || "medium",
 						importance,
+						provenance: "user_authored",
 					});
 					return {
 						content: [
@@ -595,6 +616,7 @@ server.tool(
 						content,
 						project,
 						importance: importance ?? 5,
+						provenance: "user_authored",
 					});
 					return {
 						content: [
