@@ -17,7 +17,7 @@
 // - --backup: timestamped SQL dump into ~/.agents/Recall/backups/ (created if
 //   needed), never overwrites an existing file, prints the output path.
 
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { Database } from 'bun:sqlite';
 import { getDb } from '../db/connection.js';
@@ -33,6 +33,7 @@ import {
   renderSqlDump,
   resolveNonClobbering,
   timestampSlug,
+  writeNonClobbering,
   type ExportFormat,
   type ExportManifest,
 } from '../lib/export.js';
@@ -91,9 +92,8 @@ function runBackup(options: ExportOptions): void {
   const now = options.now ?? new Date();
   const dir = options.backupDir ?? defaultBackupDir();
   mkdirSync(dir, { recursive: true });
-  const target = resolveNonClobbering(join(dir, `recall-backup-${timestampSlug(now)}.sql`));
   const { content, manifest } = renderTextExport(db, 'sql', now);
-  writeFileSync(target, content);
+  const target = writeNonClobbering(join(dir, `recall-backup-${timestampSlug(now)}.sql`), content);
   console.log(manifestSummary(manifest, [target]));
 }
 
@@ -133,7 +133,15 @@ export function runExport(options: ExportOptions): void {
       mkdirSync(dirname(output), { recursive: true });
       target = output;
     }
-    db.prepare('VACUUM INTO ?').run(target);
+    try {
+      db.prepare('VACUUM INTO ?').run(target);
+    } catch (err) {
+      // SQLite documents that an interrupted VACUUM INTO can leave a partial
+      // output file the application must delete. Without this cleanup a
+      // retry hits the refuse-to-overwrite guard on a corrupt remnant.
+      try { unlinkSync(target); } catch { /* nothing was created */ }
+      throw err;
+    }
     const paths = [target];
     if (isDir) {
       // Manifest written only after the backup exists — a failed VACUUM must
@@ -157,9 +165,11 @@ export function runExport(options: ExportOptions): void {
 
   if (isDir) {
     mkdirSync(output, { recursive: true });
-    const artifact = resolveNonClobbering(join(output, `recall-export-${timestampSlug(now)}.${ARTIFACT_EXT[format]}`));
+    const artifact = writeNonClobbering(
+      join(output, `recall-export-${timestampSlug(now)}.${ARTIFACT_EXT[format]}`),
+      content
+    );
     const manifestPath = join(output, 'manifest.json');
-    writeFileSync(artifact, content);
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
     console.log(manifestSummary(manifest, [artifact, manifestPath]));
     return;

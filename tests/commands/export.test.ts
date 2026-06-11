@@ -172,6 +172,48 @@ describe('SQL dump', () => {
     expect(sql).not.toContain('INSERT INTO "embeddings"');
     expect(sql).not.toContain('CREATE TABLE embeddings');
   });
+
+  test('keeps NULL provenance and restores cleanly into an empty database', () => {
+    seed();
+    const file = join(outDir, 'roundtrip.sql');
+    runExport({ format: 'sql', output: file, now: NOW });
+    const sql = readFileSync(file, 'utf-8');
+
+    // The dump must never contain the display literal 'unknown' — the schema
+    // CHECK constraint would reject it on restore. NULL is the on-disk truth.
+    expect(sql).not.toContain("'unknown'");
+
+    const restored = new Database(':memory:');
+    try {
+      restored.exec(sql);
+
+      // Counts match the seeded source for every durable table
+      const counts: Record<string, number> = {};
+      for (const table of EXPORT_TABLES) {
+        counts[table] = (restored.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+      }
+      expect(counts).toEqual({
+        sessions: 1,
+        messages: 2,
+        decisions: 2,
+        learnings: 1,
+        breadcrumbs: 1,
+        loa_entries: 1,
+      });
+
+      // Legacy NULL restores as NULL; known values survive verbatim
+      const messages = restored.prepare('SELECT content, provenance FROM messages ORDER BY id').all() as Array<{ content: string; provenance: string | null }>;
+      const legacy = messages.find(m => m.content.startsWith('legacy'))!;
+      const known = messages.find(m => m.content.startsWith('known'))!;
+      expect(legacy.provenance).toBeNull();
+      expect(known.provenance).toBe('verbatim');
+
+      // Quote + newline content round-trips byte-for-byte
+      expect(legacy.content).toBe("legacy 'quoted' message\nsecond line");
+    } finally {
+      restored.close();
+    }
+  });
 });
 
 describe('SQLite backup format', () => {

@@ -8,7 +8,7 @@
 // - timestampSlug yields filesystem-safe UTC slugs
 
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -16,6 +16,7 @@ import {
   sqlQuote,
   timestampSlug,
   toExportRow,
+  writeNonClobbering,
 } from '../../src/lib/export';
 
 describe('sqlQuote', () => {
@@ -54,6 +55,31 @@ describe('resolveNonClobbering', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('writeNonClobbering', () => {
+  test('writes atomically with O_EXCL and never disturbs existing files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-export-'));
+    try {
+      const path = join(dir, 'backup.sql');
+      expect(writeNonClobbering(path, 'first')).toBe(path);
+
+      // Same target again: lands on -1, original content untouched
+      expect(writeNonClobbering(path, 'second')).toBe(join(dir, 'backup-1.sql'));
+      expect(readFileSync(path, 'utf-8')).toBe('first');
+
+      // Pre-claimed -2 (a racing writer) is skipped, not truncated
+      writeFileSync(join(dir, 'backup-2.sql'), 'racer');
+      expect(writeNonClobbering(path, 'third')).toBe(join(dir, 'backup-3.sql'));
+      expect(readFileSync(join(dir, 'backup-2.sql'), 'utf-8')).toBe('racer');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('propagates non-EEXIST errors', () => {
+    expect(() => writeNonClobbering(join(tmpdir(), 'no-such-dir-xyz', 'f.sql'), 'x')).toThrow();
   });
 });
 

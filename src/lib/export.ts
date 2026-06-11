@@ -5,10 +5,11 @@
 // Everything here takes an open Database handle and plain data so it stays
 // unit-testable (issue #44 phase 2 adds property tests over these functions).
 //
-// Provenance contract (ADR-0001, issue #42): JSON/Markdown exports carry an
-// explicit `provenance` field for every row of a provenance-bearing table.
-// Legacy NULL provenance is rendered as the literal string 'unknown' — never
-// omitted, never guessed (matches the search/recent display contract).
+// Provenance contract (issue #43; storage semantics from issue #42/ADR-0001):
+// JSON/Markdown exports carry an explicit `provenance` field for every row of
+// a provenance-bearing table. Legacy NULL provenance is rendered as the
+// literal string 'unknown' — never omitted, never guessed (the same rendering
+// search.ts uses for its display contract).
 //
 // Bind-count note (see src/lib/chunk.ts): export reads bind a fixed number of
 // parameters per statement — keyset pagination (`WHERE id > ? LIMIT ?`) — so
@@ -17,7 +18,7 @@
 // size so large exports stream in bounded batches instead of one giant read.
 
 import { Database } from 'bun:sqlite';
-import { existsSync } from 'fs';
+import { existsSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, extname, dirname, basename } from 'path';
 import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
@@ -67,17 +68,44 @@ export function timestampSlug(date: Date): string {
   return date.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
 }
 
+const MAX_NAME_CANDIDATES = 1000;
+
+/** Candidate n for a non-clobbering name: the path itself, then name-N.ext. */
+function nthCandidate(path: string, n: number): string {
+  if (n === 0) return path;
+  const ext = extname(path);
+  return `${join(dirname(path), basename(path, ext))}-${n}${ext}`;
+}
+
 /**
  * Return `path` if free, otherwise the first `name-N.ext` variant that does
- * not exist. Used by --backup, which must never overwrite an existing file.
+ * not exist. Check-then-act: only safe when the subsequent writer itself
+ * refuses an existing file (VACUUM INTO does — a lost race fails loudly
+ * instead of overwriting). Text writes must use writeNonClobbering instead.
  */
 export function resolveNonClobbering(path: string): string {
-  if (!existsSync(path)) return path;
-  const ext = extname(path);
-  const stem = join(dirname(path), basename(path, ext));
-  for (let i = 1; i < 1000; i++) {
-    const candidate = `${stem}-${i}${ext}`;
+  for (let i = 0; i < MAX_NAME_CANDIDATES; i++) {
+    const candidate = nthCandidate(path, i);
     if (!existsSync(candidate)) return candidate;
+  }
+  throw new Error(`Could not find a non-clobbering name for ${path}`);
+}
+
+/**
+ * Atomically write `content` to `path`, or to the first `name-N.ext` variant
+ * not yet taken. O_EXCL (flag 'wx') makes the claim atomic: concurrent
+ * writers racing for the same name each land on a distinct file — no
+ * check-then-act window. Returns the path actually written.
+ */
+export function writeNonClobbering(path: string, content: string): string {
+  for (let i = 0; i < MAX_NAME_CANDIDATES; i++) {
+    const candidate = nthCandidate(path, i);
+    try {
+      writeFileSync(candidate, content, { flag: 'wx' });
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
   }
   throw new Error(`Could not find a non-clobbering name for ${path}`);
 }
