@@ -1,0 +1,461 @@
+// Property-based tests for dedup invariants (issue #44 phase 2; dedup from
+// issue #45, merged in PR #60).
+//
+// Every oracle is computed from generator inputs only (the tuple-multiset
+// pattern from PR #57). Duplicate groups are built structurally: each group
+// has a canonical lowercase single-spaced text and members vary only by
+// case/whitespace/quoting, so expected grouping is generator-known without
+// calling normalizeText. The survivor comparator and cosine similarity are
+// restated from the issue #45 spec (provenance > richness > importance >
+// recency > lowest id; cos of the angle difference), never read back from
+// the implementation.
+//
+// Scope note: the one-hop lineage guarantee is WITHIN a single plan ("a
+// planned survivor never re-marked" — the PR #60 blocker fix). Across runs,
+// a prior survivor may legitimately be re-marked by a later semantic pass;
+// the repeated-runs property therefore asserts auditability (uniqueness,
+// record preservation, no re-marking of marked records), not cross-run
+// one-hop.
+//
+// Generator sizes are bounded (≤5 groups × ≤4 members) so the suite stays
+// practical under normal `bun test` runs.
+
+import { describe, test, expect } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import fc from 'fast-check';
+import {
+  applyDedupPlan,
+  MIN_DEDUP_TEXT_LENGTH,
+  planDedup,
+  type DedupPlan,
+} from '../../src/lib/dedup';
+import { embeddingToBlob } from '../../src/lib/embeddings';
+import { createMemoryDb } from '../helpers/memdb';
+
+type Prov = 'user_authored' | 'verbatim' | 'extracted' | 'derived' | null;
+type DedupTestTable = 'breadcrumbs' | 'decisions';
+
+// Spec restated (issue #45 / ADR-0001): survivor priority order, unknown
+// (NULL) last. Deliberately not imported from src/types so a reordering
+// regression fails here instead of silently reordering the oracle too.
+const SURVIVOR_PRIORITY = ['user_authored', 'verbatim', 'extracted', 'derived'] as const;
+const specRank = (p: Prov): number =>
+  p === null ? SURVIVOR_PRIORITY.length : SURVIVOR_PRIORITY.indexOf(p);
+
+interface InsRecord {
+  table: DedupTestTable;
+  id: number;
+  project: string | null;
+  provenance: Prov;
+  importance: number;
+  createdAt: string;
+  /** Generator-known normalized text (the group canonical). */
+  normalized: string;
+  angleDeg: number;
+}
+
+// Spec comparator: provenance rank, richness (longer normalized text),
+// importance, recency (lexicographic created_at desc), lowest id.
+function specCompare(a: InsRecord, b: InsRecord): number {
+  const rank = specRank(a.provenance) - specRank(b.provenance);
+  if (rank !== 0) return rank;
+  if (a.normalized.length !== b.normalized.length) return b.normalized.length - a.normalized.length;
+  if (a.importance !== b.importance) return b.importance - a.importance;
+  if (a.createdAt !== b.createdAt) return a.createdAt > b.createdAt ? -1 : 1;
+  return a.id - b.id;
+}
+
+// Cosine of two unit vectors at the generated angles — pure math over
+// generator inputs. Stored vectors round-trip through float32 blobs, so
+// comparisons against implementation output use F32_TOLERANCE.
+const specCos = (aDeg: number, bDeg: number): number =>
+  Math.cos(((aDeg - bDeg) * Math.PI) / 180);
+const F32_TOLERANCE = 1e-4;
+
+const provArb = fc.constantFrom<Prov>('user_authored', 'verbatim', 'extracted', 'derived', null);
+const importanceArb = fc.integer({ min: 1, max: 10 });
+const dayArb = fc.integer({ min: 1, max: 28 });
+const angleArb = fc.integer({ min: 0, max: 359 });
+
+const createdAt = (day: number): string => `2026-01-${String(day).padStart(2, '0')} 12:00:00`;
+
+// Canonical group text: lowercase, single-spaced — its own normalized form.
+const canonical = (groupIdx: number): string => `dedup group ${groupIdx} canonical body text`;
+
+interface GenMember {
+  table: DedupTestTable;
+  project: 'p-a' | 'p-b' | null;
+  provenance: Prov;
+  importance: number;
+  day: number;
+  angleDeg: number;
+  upper: boolean;
+  pad: boolean;
+  quote: boolean;
+}
+
+// Members vary only by case, whitespace, and quoting — all of which the
+// documented normalization erases — so every member of a group shares the
+// canonical normalized text by construction.
+function decorate(text: string, m: GenMember): string {
+  let t = text;
+  if (m.upper) t = t.toUpperCase();
+  if (m.pad) t = `  ${t.split(' ').join('  ')}  `;
+  if (m.quote) t = `"${t}"`;
+  return t;
+}
+
+const memberArb: fc.Arbitrary<GenMember> = fc.record({
+  table: fc.constantFrom<DedupTestTable>('breadcrumbs', 'decisions'),
+  project: fc.constantFrom<'p-a' | 'p-b' | null>('p-a', 'p-b', null),
+  provenance: provArb,
+  importance: importanceArb,
+  day: dayArb,
+  angleDeg: angleArb,
+  upper: fc.boolean(),
+  pad: fc.boolean(),
+  quote: fc.boolean(),
+});
+
+interface GenCorpus {
+  groups: GenMember[][];
+  /** Records below MIN_DEDUP_TEXT_LENGTH — must never become candidates. */
+  shorts: number;
+}
+
+const corpusArb: fc.Arbitrary<GenCorpus> = fc.record({
+  groups: fc.array(fc.array(memberArb, { minLength: 1, maxLength: 4 }), { minLength: 1, maxLength: 5 }),
+  shorts: fc.integer({ min: 0, max: 2 }),
+});
+
+function insertRecord(
+  db: Database,
+  table: DedupTestTable,
+  text: string,
+  m: Pick<GenMember, 'project' | 'provenance' | 'importance' | 'day'>
+): number {
+  const sql = table === 'breadcrumbs'
+    ? `INSERT INTO breadcrumbs (content, project, importance, provenance, created_at) VALUES (?, ?, ?, ?, ?)`
+    : `INSERT INTO decisions (decision, project, importance, provenance, created_at) VALUES (?, ?, ?, ?, ?)`;
+  const result = db.prepare(sql).run(text, m.project, m.importance, m.provenance, createdAt(m.day));
+  return result.lastInsertRowid as number;
+}
+
+function insertCorpus(db: Database, corpus: GenCorpus): InsRecord[] {
+  const records: InsRecord[] = [];
+  corpus.groups.forEach((members, groupIdx) => {
+    const base = canonical(groupIdx);
+    expect(base.length).toBeGreaterThanOrEqual(MIN_DEDUP_TEXT_LENGTH); // generator validity guard
+    for (const m of members) {
+      const id = insertRecord(db, m.table, decorate(base, m), m);
+      records.push({
+        table: m.table,
+        id,
+        project: m.project,
+        provenance: m.provenance,
+        importance: m.importance,
+        createdAt: createdAt(m.day),
+        normalized: base,
+        angleDeg: m.angleDeg,
+      });
+    }
+  });
+  for (let i = 0; i < corpus.shorts; i++) {
+    insertRecord(db, 'breadcrumbs', 'tiny note', { project: null, provenance: null, importance: 5, day: 1 });
+  }
+  return records;
+}
+
+function insertEmbeddings(db: Database, records: InsRecord[]): void {
+  const stmt = db.prepare(
+    `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding) VALUES (?, ?, 'test', 2, ?)`
+  );
+  for (const r of records) {
+    const rad = (r.angleDeg * Math.PI) / 180;
+    stmt.run(r.table, r.id, embeddingToBlob([Math.cos(rad), Math.sin(rad)]));
+  }
+}
+
+type LineageTuple = [string, number, string, number, string, number | null];
+
+const sortedTuples = (tuples: LineageTuple[]): string[] =>
+  tuples.map(t => JSON.stringify(t)).sort();
+
+function plannedTuples(plan: DedupPlan): LineageTuple[] {
+  return plan.tables.flatMap(t => t.planned).map(e =>
+    [e.survivor_table, e.survivor_id, e.duplicate_table, e.duplicate_id, e.reason, e.similarity] as LineageTuple
+  );
+}
+
+// Generator oracle for the exact pass: group by (table, project, canonical),
+// survivor by the spec comparator, one lineage tuple per other member.
+function expectedExactTuples(records: InsRecord[]): LineageTuple[] {
+  const byKey = new Map<string, InsRecord[]>();
+  for (const r of records) {
+    const k = `${r.table}|${r.project ?? '<null>'}|${r.normalized}`;
+    const group = byKey.get(k);
+    if (group) group.push(r);
+    else byKey.set(k, [r]);
+  }
+  const tuples: LineageTuple[] = [];
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(specCompare);
+    for (const dup of sorted.slice(1)) {
+      tuples.push([sorted[0].table, sorted[0].id, dup.table, dup.id, 'exact', 1]);
+    }
+  }
+  return tuples;
+}
+
+const SNAPSHOT_TABLES = [
+  'sessions', 'messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries', 'dedup_lineage', 'embeddings',
+];
+
+function snapshot(db: Database): string {
+  return JSON.stringify(
+    SNAPSHOT_TABLES.map(t => [t, db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()])
+  );
+}
+
+function markedLineageTuples(db: Database): LineageTuple[] {
+  const rows = db.prepare(
+    `SELECT survivor_table, survivor_id, duplicate_table, duplicate_id, reason, similarity
+     FROM dedup_lineage WHERE status = 'marked'`
+  ).all() as Array<{
+    survivor_table: string; survivor_id: number;
+    duplicate_table: string; duplicate_id: number;
+    reason: string; similarity: number | null;
+  }>;
+  return rows.map(r =>
+    [r.survivor_table, r.survivor_id, r.duplicate_table, r.duplicate_id, r.reason, r.similarity] as LineageTuple
+  );
+}
+
+function withDb<T>(fn: (db: Database) => T): T {
+  const db = createMemoryDb();
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
+describe('dedup exact-pass properties', () => {
+  test('planned lineage is exactly the generator-expected (survivor, duplicate) tuple multiset; non-duplicates and too-short records never appear', () => {
+    fc.assert(
+      fc.property(corpusArb, corpus => {
+        withDb(db => {
+          const records = insertCorpus(db, corpus);
+          const plan = planDedup(db, { semantic: false });
+
+          // Tuple-multiset equality pins survivor order under arbitrary
+          // provenance mixes AND non-duplicate preservation in one oracle:
+          // singletons and short records appear in no expected tuple.
+          expect(sortedTuples(plannedTuples(plan))).toEqual(sortedTuples(expectedExactTuples(records)));
+
+          for (const table of ['breadcrumbs', 'decisions'] as const) {
+            const report = plan.tables.find(t => t.table === table)!;
+            const inserted = records.filter(r => r.table === table).length
+              + (table === 'breadcrumbs' ? corpus.shorts : 0);
+            expect(report.scanned).toBe(inserted);
+            if (table === 'breadcrumbs') expect(report.tooShort).toBe(corpus.shorts);
+          }
+        });
+      })
+    );
+  });
+});
+
+describe('dedup semantic threshold properties', () => {
+  interface SemRecord {
+    angleDeg: number;
+    extraLen: number;
+    provenance: Prov;
+    importance: number;
+    day: number;
+  }
+  const semRecordArb: fc.Arbitrary<SemRecord> = fc.record({
+    angleDeg: angleArb,
+    extraLen: fc.integer({ min: 0, max: 30 }),
+    provenance: provArb,
+    importance: importanceArb,
+    day: dayArb,
+  });
+  const semCorpusArb = fc.array(semRecordArb, { minLength: 2, maxLength: 7 });
+
+  // Unique texts (no exact groups), varied lengths (richness tie-breaker is
+  // live, unlike exact groups where normalized lengths are equal by
+  // definition), one table + project so every pair is actionable.
+  function insertSemCorpus(db: Database, corpus: SemRecord[]): InsRecord[] {
+    const records: InsRecord[] = corpus.map((r, i) => {
+      const text = `semantic record ${i} body text${'x'.repeat(r.extraLen)}`;
+      const id = insertRecord(db, 'breadcrumbs', text, { project: null, ...r });
+      return {
+        table: 'breadcrumbs' as const,
+        id,
+        project: null,
+        provenance: r.provenance,
+        importance: r.importance,
+        createdAt: createdAt(r.day),
+        normalized: text,
+        angleDeg: r.angleDeg,
+      };
+    });
+    insertEmbeddings(db, records);
+    return records;
+  }
+
+  test('a threshold above every pairwise similarity plans nothing — never merge below the threshold', () => {
+    fc.assert(
+      fc.property(semCorpusArb, fc.integer({ min: 1, max: 10 }), (corpus, gapPct) => {
+        withDb(db => {
+          insertSemCorpus(db, corpus);
+          let maxSim = -1;
+          for (let i = 0; i < corpus.length; i++) {
+            for (let j = i + 1; j < corpus.length; j++) {
+              maxSim = Math.max(maxSim, specCos(corpus[i].angleDeg, corpus[j].angleDeg));
+            }
+          }
+          const plan = planDedup(db, { semantic: true, threshold: maxSim + gapPct / 100 });
+          expect(plannedTuples(plan)).toEqual([]);
+        });
+      })
+    );
+  });
+
+  test('every planned semantic pair is at/above the threshold, records its true similarity, and keeps the spec-ordered survivor', () => {
+    fc.assert(
+      fc.property(semCorpusArb, fc.integer({ min: 30, max: 99 }), (corpus, thresholdPct) => {
+        withDb(db => {
+          const records = insertSemCorpus(db, corpus);
+          const byId = new Map(records.map(r => [r.id, r]));
+          const threshold = thresholdPct / 100;
+          const plan = planDedup(db, { semantic: true, threshold });
+
+          for (const entry of plan.tables.flatMap(t => t.planned)) {
+            expect(entry.reason).toBe('semantic');
+            const survivor = byId.get(entry.survivor_id)!;
+            const duplicate = byId.get(entry.duplicate_id)!;
+            const expectedSim = specCos(survivor.angleDeg, duplicate.angleDeg);
+            expect(expectedSim).toBeGreaterThanOrEqual(threshold - F32_TOLERANCE);
+            expect(Math.abs((entry.similarity ?? 0) - expectedSim)).toBeLessThanOrEqual(F32_TOLERANCE);
+            expect(specCompare(survivor, duplicate)).toBeLessThan(0);
+          }
+        });
+      })
+    );
+  });
+});
+
+describe('dedup one-hop lineage and write-freeness', () => {
+  const thresholdArb = fc.integer({ min: 50, max: 99 }).map(n => n / 100);
+
+  test('within a plan, survivor and duplicate key sets are disjoint and every duplicate is marked at most once', () => {
+    fc.assert(
+      fc.property(corpusArb, thresholdArb, (corpus, threshold) => {
+        withDb(db => {
+          const records = insertCorpus(db, corpus);
+          insertEmbeddings(db, records);
+          const entries = planDedup(db, { semantic: true, threshold }).tables.flatMap(t => t.planned);
+
+          const duplicateKeys = entries.map(e => `${e.duplicate_table}:${e.duplicate_id}`);
+          const duplicateSet = new Set(duplicateKeys);
+          expect(duplicateKeys.length).toBe(duplicateSet.size);
+          for (const e of entries) {
+            // A planned survivor is never re-marked — lineage stays one hop.
+            expect(duplicateSet.has(`${e.survivor_table}:${e.survivor_id}`)).toBe(false);
+          }
+        });
+      })
+    );
+  });
+
+  test('planDedup is write-free: the database is byte-identical before and after planning', () => {
+    fc.assert(
+      fc.property(corpusArb, thresholdArb, (corpus, threshold) => {
+        withDb(db => {
+          const records = insertCorpus(db, corpus);
+          insertEmbeddings(db, records);
+          const before = snapshot(db);
+          planDedup(db, { semantic: true, threshold });
+          expect(snapshot(db)).toBe(before);
+        });
+      })
+    );
+  });
+});
+
+describe('dedup apply, idempotence, and repeated-run auditability', () => {
+  test('apply marks exactly the planned tuples, preserves every record, and a re-plan finds nothing (exact pass)', () => {
+    fc.assert(
+      fc.property(corpusArb, corpus => {
+        withDb(db => {
+          const records = insertCorpus(db, corpus);
+          const expected = sortedTuples(expectedExactTuples(records));
+
+          const plan1 = planDedup(db, { semantic: false });
+          const result1 = applyDedupPlan(db, plan1);
+          expect(result1).toEqual({ marked: expected.length, deleted: 0, fkProtected: 0 });
+          expect(sortedTuples(markedLineageTuples(db))).toEqual(expected);
+
+          // Non-destructive default: every generated record is still there.
+          for (const table of ['breadcrumbs', 'decisions'] as const) {
+            const inserted = records.filter(r => r.table === table).length
+              + (table === 'breadcrumbs' ? corpus.shorts : 0);
+            const { c } = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number };
+            expect(c).toBe(inserted);
+          }
+
+          // Idempotence: marked duplicates are excluded, surviving groups
+          // are singletons, so the second plan is empty and changes nothing.
+          const plan2 = planDedup(db, { semantic: false });
+          expect(plannedTuples(plan2)).toEqual([]);
+          for (const table of ['breadcrumbs', 'decisions'] as const) {
+            const report = plan2.tables.find(t => t.table === table)!;
+            const expectedMarked = expectedExactTuples(records)
+              .filter(t => t[2] === table).length;
+            expect(report.alreadyMarked).toBe(expectedMarked);
+          }
+          expect(applyDedupPlan(db, plan2)).toEqual({ marked: 0, deleted: 0, fkProtected: 0 });
+          expect(sortedTuples(markedLineageTuples(db))).toEqual(expected);
+        });
+      })
+    );
+  });
+
+  test('repeated semantic plan/apply cycles stay auditable: unique active marks, no re-marking, all records preserved', () => {
+    fc.assert(
+      fc.property(corpusArb, fc.integer({ min: 50, max: 99 }).map(n => n / 100), (corpus, threshold) => {
+        withDb(db => {
+          const records = insertCorpus(db, corpus);
+          insertEmbeddings(db, records);
+          const totalRows = (table: DedupTestTable): number =>
+            records.filter(r => r.table === table).length + (table === 'breadcrumbs' ? corpus.shorts : 0);
+
+          applyDedupPlan(db, planDedup(db, { semantic: true, threshold }));
+          const markedAfterFirst = new Set(
+            markedLineageTuples(db).map(t => `${t[2]}:${t[3]}`)
+          );
+
+          const plan2 = planDedup(db, { semantic: true, threshold });
+          // Already-marked records are excluded from later runs entirely.
+          for (const e of plan2.tables.flatMap(t => t.planned)) {
+            expect(markedAfterFirst.has(`${e.duplicate_table}:${e.duplicate_id}`)).toBe(false);
+            expect(markedAfterFirst.has(`${e.survivor_table}:${e.survivor_id}`)).toBe(false);
+          }
+          applyDedupPlan(db, plan2);
+
+          // Each record is an actively marked duplicate at most once, and
+          // the non-destructive default never removes rows.
+          const allMarked = markedLineageTuples(db).map(t => `${t[2]}:${t[3]}`);
+          expect(allMarked.length).toBe(new Set(allMarked).size);
+          for (const table of ['breadcrumbs', 'decisions'] as const) {
+            const { c } = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number };
+            expect(c).toBe(totalRows(table));
+          }
+        });
+      })
+    );
+  });
+});
