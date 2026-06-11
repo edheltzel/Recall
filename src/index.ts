@@ -29,6 +29,7 @@ import { runBenchmark, listBenchmarks, reportLatestBenchmark } from './commands/
 import { runOnboard } from './commands/onboard.js';
 import { runMigrate } from './commands/migrate.js';
 import { runPath } from './commands/path.js';
+import { runExport } from './commands/export.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -634,6 +635,29 @@ program
     closeDb();
   });
 
+// recall export — portable + disaster-recovery exports (issue #43)
+// --format has no Commander default: runExport defaults to json, and --backup
+// must be able to tell an explicitly passed --format from an omitted one.
+program
+  .command('export')
+  .description('Export memory to JSON, Markdown, SQL dump, or SQLite backup')
+  .option('-f, --format <format>', 'Format: json, markdown, sql, sqlite (default: json)')
+  .option('-o, --output <path>', 'Output file or directory (directory exports also write manifest.json)')
+  .option('--backup', 'Write a timestamped SQL dump to ~/.agents/Recall/backups/ (never overwrites)')
+  .action((options) => {
+    try {
+      runExport({
+        format: options.format,
+        output: options.output,
+        backup: options.backup
+      });
+    } catch (err) {
+      console.error(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+    closeDb();
+  });
+
 // Default command: recall <query> → hybrid search (Phase 3: best of both worlds)
 program
   .arguments('[query]')
@@ -644,7 +668,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

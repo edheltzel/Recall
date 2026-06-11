@@ -12,6 +12,11 @@ while MCP tool names (`memory_search`, `memory_add`, etc.) remain stable.
 
 ### Added
 
+- **`recall export`** — portable and disaster-recovery exports (#43): JSON,
+  Markdown, SQL dump, and SQLite (`VACUUM INTO`) formats with a manifest
+  (counts + provenance counts including explicit `unknown`), a stdout/file/
+  directory output contract, and `--backup` writing timestamped, never-
+  overwritten SQL dumps to `~/.agents/Recall/backups/`.
 - Added macOS-primary GitHub Actions CI with Ubuntu portability smoke coverage
   and deterministic release/tag version consistency checks.
 

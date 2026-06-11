@@ -31,9 +31,9 @@
 // variables — bulk UPDATEs with literal predicates — so no chunking applies.
 
 import { getDb } from '../db/connection.js';
+import { PROVENANCE_TABLES } from '../types/index.js';
 
-const BACKFILL_TABLES = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'] as const;
-type BackfillTable = typeof BACKFILL_TABLES[number];
+type BackfillTable = typeof PROVENANCE_TABLES[number];
 
 export interface ProvenanceBackfillOptions {
   dryRun?: boolean;
@@ -93,8 +93,8 @@ export function runProvenanceBackfill(options: ProvenanceBackfillOptions = {}): 
   const dryRun = options.dryRun ?? true;
   const target = options.table ?? 'all';
 
-  if (target !== 'all' && !(BACKFILL_TABLES as readonly string[]).includes(target)) {
-    console.error(`Unknown table: ${target}. Use one of: ${BACKFILL_TABLES.join(', ')}, all`);
+  if (target !== 'all' && !(PROVENANCE_TABLES as readonly string[]).includes(target)) {
+    console.error(`Unknown table: ${target}. Use one of: ${PROVENANCE_TABLES.join(', ')}, all`);
     process.exitCode = 1;
     return [];
   }
