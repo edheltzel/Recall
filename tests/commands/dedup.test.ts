@@ -213,6 +213,37 @@ describe('semantic pass', () => {
     expect(result.applied?.marked).toBe(0);
     expect(lineageRows().length).toBe(0);
   });
+
+  test('a planned survivor is never re-marked by a weaker pair (no transitive chaining)', () => {
+    // PR #60 review repro: cos(A,B)=0.99, cos(B,C)=0.96, cos(A,C)≈0.91 with
+    // the default 0.95 threshold. Ascending text length pins the survivor
+    // orientation: B survives the strongest pair, so without the survivor
+    // guard the weaker B/C pair re-marks B — leaving A's only visible
+    // neighbor at 0.91, below the threshold.
+    const a = addBreadcrumb({ content: 'Review queue triage happens before standup.', importance: 5 });
+    const b = addBreadcrumb({ content: 'Review queue triage always happens before the standup.', importance: 5 });
+    const c = addBreadcrumb({ content: 'Review queue triage must always happen before the morning standup.', importance: 5 });
+    insertEmbedding('breadcrumbs', a, [0.99, Math.sqrt(1 - 0.99 * 0.99), 0]);
+    insertEmbedding('breadcrumbs', b, [1, 0, 0]);
+    insertEmbedding('breadcrumbs', c, [0.96, -Math.sqrt(1 - 0.96 * 0.96), 0]);
+
+    const result = runDedup({ execute: true })!;
+
+    // Only the strongest pair is marked; B/C is skipped because B already
+    // survives A.
+    expect(result.applied?.marked).toBe(1);
+    const rows = lineageRows();
+    expect(rows.length).toBe(1);
+    expect(rows[0].duplicate_id).toBe(a);
+    expect(rows[0].survivor_id).toBe(b);
+    expect(rows[0].similarity as number).toBeCloseTo(0.99, 3);
+
+    // One-hop lineage invariant: no survivor is itself marked as a duplicate.
+    const duplicates = new Set(rows.map(r => `${r.duplicate_table}:${r.duplicate_id}`));
+    for (const row of rows) {
+      expect(duplicates.has(`${row.survivor_table}:${row.survivor_id}`)).toBe(false);
+    }
+  });
 });
 
 describe('idempotence', () => {
