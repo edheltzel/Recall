@@ -636,6 +636,8 @@ program
   });
 
 // recall export — portable + disaster-recovery exports (issue #43)
+// --format has no Commander default: runExport defaults to json, and --backup
+// must be able to tell an explicitly passed --format from an omitted one.
 program
   .command('export')
   .description('Export memory to JSON, Markdown, SQL dump, or SQLite backup')

@@ -47,11 +47,11 @@ export interface ExportOptions {
   now?: Date;
 }
 
-const ARTIFACT_EXT: Record<ExportFormat, string> = {
+// sqlite takes its own branch in runExport and never reaches this map.
+const ARTIFACT_EXT: Record<'json' | 'markdown' | 'sql', string> = {
   json: 'json',
   markdown: 'md',
   sql: 'sql',
-  sqlite: 'db',
 };
 
 function manifestSummary(manifest: ExportManifest, paths: string[]): string {
@@ -68,18 +68,16 @@ function manifestSummary(manifest: ExportManifest, paths: string[]): string {
   return lines.join('\n');
 }
 
-function renderAppExport(db: Database, format: 'json' | 'markdown', createdAt: Date): { content: string; manifest: ExportManifest } {
+function renderTextExport(db: Database, format: 'json' | 'markdown' | 'sql', createdAt: Date): { content: string; manifest: ExportManifest } {
   const manifest = buildManifest(db, format, [...EXPORT_TABLES], { includesEmbeddings: false, createdAt });
+  if (format === 'sql') {
+    return { content: renderSqlDump(db, manifest), manifest };
+  }
   const data = collectExportData(db);
   const content = format === 'json'
     ? renderJsonExport(manifest, data)
     : renderMarkdownExport(manifest, data);
   return { content, manifest };
-}
-
-function renderSqlExport(db: Database, createdAt: Date): { content: string; manifest: ExportManifest } {
-  const manifest = buildManifest(db, 'sql', [...EXPORT_TABLES], { includesEmbeddings: false, createdAt });
-  return { content: renderSqlDump(db, manifest), manifest };
 }
 
 function runBackup(options: ExportOptions): void {
@@ -94,7 +92,7 @@ function runBackup(options: ExportOptions): void {
   const dir = options.backupDir ?? defaultBackupDir();
   mkdirSync(dir, { recursive: true });
   const target = resolveNonClobbering(join(dir, `recall-backup-${timestampSlug(now)}.sql`));
-  const { content, manifest } = renderSqlExport(db, now);
+  const { content, manifest } = renderTextExport(db, 'sql', now);
   writeFileSync(target, content);
   console.log(manifestSummary(manifest, [target]));
 }
@@ -125,29 +123,30 @@ export function runExport(options: ExportOptions): void {
     // Manifest first — VACUUM INTO copies the live DB, so counts match it.
     const manifest = buildManifest(db, 'sqlite', listPhysicalTables(db), { includesEmbeddings: true, createdAt: now });
     let target: string;
-    const paths: string[] = [];
     if (isDir) {
       mkdirSync(output, { recursive: true });
       target = resolveNonClobbering(join(output, `recall-export-${timestampSlug(now)}.db`));
-      const manifestPath = join(output, 'manifest.json');
-      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
-      paths.push(target, manifestPath);
     } else {
       if (existsSync(output)) {
         throw new Error(`Refusing to overwrite existing database backup at ${output}`);
       }
       mkdirSync(dirname(output), { recursive: true });
       target = output;
-      paths.push(target);
     }
     db.prepare('VACUUM INTO ?').run(target);
+    const paths = [target];
+    if (isDir) {
+      // Manifest written only after the backup exists — a failed VACUUM must
+      // not leave a manifest describing a backup that was never created.
+      const manifestPath = join(output, 'manifest.json');
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+      paths.push(manifestPath);
+    }
     console.log(manifestSummary(manifest, paths));
     return;
   }
 
-  const { content, manifest } = format === 'sql'
-    ? renderSqlExport(db, now)
-    : renderAppExport(db, format, now);
+  const { content, manifest } = renderTextExport(db, format, now);
 
   if (!output) {
     // Piping contract: stdout carries only the export data.

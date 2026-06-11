@@ -95,6 +95,8 @@ export function toExportRow(table: string, row: ExportRow): ExportRow {
 /**
  * Read every row of a durable table in bounded batches via keyset pagination.
  * Fixed two-parameter bind per statement regardless of table size.
+ * Relies on every EXPORT_TABLES table having an INTEGER PRIMARY KEY `id`
+ * (schema.ts) — a future table without one cannot use this pagination.
  */
 export function collectTableRows(
   db: Database,

@@ -286,7 +286,9 @@ Output contract:
 - `--output <file>`: writes a single export file and prints the manifest
   summary to stdout.
 - `--output <dir>`: writes the export artifact plus `manifest.json` into the
-  directory. Directory exports always write `manifest.json`.
+  directory. Directory exports always write `manifest.json`. A path that does
+  not exist yet is treated as a file — add a trailing slash (`exports/`) to
+  request a new directory.
 
 The manifest records the Recall version, timestamp, schema version
 (`PRAGMA user_version`), format, included tables, row counts per table,
