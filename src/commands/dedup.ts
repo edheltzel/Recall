@@ -83,6 +83,7 @@ export function runDedup(options: DedupOptions = {}): DedupRunResult | undefined
     const skipped: string[] = [];
     if (report.alreadyMarked > 0) skipped.push(`${report.alreadyMarked} already marked`);
     if (report.tooShort > 0) skipped.push(`${report.tooShort} too short`);
+    if (report.stickySkipped > 0) skipped.push(`${report.stickySkipped} prior survivor(s) kept visible`);
     const skippedNote = skipped.length > 0 ? ` (${skipped.join(', ')})` : '';
     console.log(
       `${report.table}: scanned ${report.scanned}, exact groups ${report.exactGroups}, ` +
@@ -132,7 +133,16 @@ export function runDedup(options: DedupOptions = {}): DedupRunResult | undefined
     return { plan, applied: null };
   }
 
-  const applied = applyDedupPlan(db, plan, { destructive });
+  let applied: ApplyResult;
+  try {
+    applied = applyDedupPlan(db, plan, { destructive });
+  } catch (err) {
+    // The destructive survivor guard (issue #63) throws before writing;
+    // surface its message as a clean refusal instead of a stack trace.
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+    return undefined;
+  }
   if (destructive) {
     const fkNote = applied.fkProtected > 0
       ? ` (${applied.fkProtected} kept as marked — referenced by LoA lineage)`

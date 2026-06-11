@@ -18,6 +18,13 @@
 // - Semantic detection compares stored embeddings pairwise — no embedding
 //   service call is needed. Pairs are never chained transitively: every
 //   marked duplicate has a direct similarity >= threshold to its survivor.
+// - Survivors are sticky across runs (issue #63): a record recorded as a
+//   survivor in dedup_lineage (status 'marked' or 'deleted') is never
+//   re-marked as a duplicate by a later run, so every hidden or deleted
+//   record keeps a visible survivor. Conservative and order-dependent by
+//   design — an early survivor is never consolidated under a later record.
+//   Destructive mode independently refuses to delete a recorded survivor
+//   (defense-in-depth should planning ever regress).
 //
 // Bind-count note (see src/lib/chunk.ts): scans use keyset pagination
 // (`WHERE id > ? LIMIT ?`, fixed binds). Destructive deletion builds
@@ -347,6 +354,21 @@ export function loadMarkedDuplicates(db: Database): Set<string> {
   return new Set(rows.map(r => `${r.duplicate_table}:${r.duplicate_id}`));
 }
 
+/**
+ * (table, id) pairs recorded as survivors in dedup_lineage — sticky across
+ * runs (issue #63): their hidden ('marked') or removed ('deleted')
+ * duplicates rely on the survivor staying visible, so these records are
+ * never re-marked. 'reverted' rows carry no such obligation — the duplicate
+ * is visible again.
+ */
+export function loadRecordedSurvivors(db: Database): Set<string> {
+  const rows = db.prepare(
+    `SELECT DISTINCT survivor_table, survivor_id FROM dedup_lineage
+     WHERE status IN ('marked', 'deleted')`
+  ).all() as Array<{ survivor_table: string; survivor_id: number }>;
+  return new Set(rows.map(r => `${r.survivor_table}:${r.survivor_id}`));
+}
+
 /** Stored embeddings for one table, keyed by source row id. */
 export function loadEmbeddings(db: Database, table: ProvenanceTable): Map<number, number[]> {
   const rows = db.prepare(
@@ -394,6 +416,8 @@ export interface DedupTableReport {
   scanned: number;
   tooShort: number;
   alreadyMarked: number;
+  /** Marks not planned because a sticky prior survivor was involved (issue #63). */
+  stickySkipped: number;
   exactGroups: number;
   semanticPairs: number;
   planned: LineageEntry[];
@@ -451,13 +475,18 @@ export function planDedup(db: Database, options: PlanDedupOptions = {}): DedupPl
   const threshold = options.threshold ?? DEFAULT_SEMANTIC_THRESHOLD;
   const semantic = options.semantic ?? true;
   const marked = loadMarkedDuplicates(db);
+  // Sticky survivors (issue #63): seeding plannedSurvivorKeys with survivors
+  // recorded by prior runs extends the within-plan one-hop guard across
+  // runs — a recorded survivor is never re-marked, so its hidden or deleted
+  // duplicates always keep a visible representative.
+  const stickySurvivors = loadRecordedSurvivors(db);
 
   const reports = new Map<ProvenanceTable, DedupTableReport>();
   const eligible = new Map<ProvenanceTable, DedupCandidate[]>();
 
   // Exact pass — within table + project.
   const plannedDuplicateKeys = new Set<string>();
-  const plannedSurvivorKeys = new Set<string>();
+  const plannedSurvivorKeys = new Set<string>(stickySurvivors);
   for (const table of tables) {
     const scan = scanCandidates(db, table, options.project);
     const fresh = scan.candidates.filter(c => !marked.has(`${c.table}:${c.id}`));
@@ -466,6 +495,7 @@ export function planDedup(db: Database, options: PlanDedupOptions = {}): DedupPl
       scanned: scan.scanned,
       tooShort: scan.tooShort,
       alreadyMarked: scan.candidates.length - fresh.length,
+      stickySkipped: 0,
       exactGroups: 0,
       semanticPairs: 0,
       planned: [],
@@ -475,6 +505,12 @@ export function planDedup(db: Database, options: PlanDedupOptions = {}): DedupPl
       const { survivor, duplicates } = selectSurvivor(group);
       plannedSurvivorKeys.add(`${survivor.table}:${survivor.id}`);
       for (const dup of duplicates) {
+        // A sticky prior survivor stays visible even when a newer record
+        // out-ranks it within its exact group (issue #63).
+        if (stickySurvivors.has(`${dup.table}:${dup.id}`)) {
+          report.stickySkipped++;
+          continue;
+        }
         report.planned.push(toLineage(survivor, dup, 'exact', 1.0));
         plannedDuplicateKeys.add(`${dup.table}:${dup.id}`);
       }
@@ -520,10 +556,16 @@ export function planDedup(db: Database, options: PlanDedupOptions = {}): DedupPl
         const bKey = `${pair.b.table}:${pair.b.id}`;
         // Greedy, strongest-first: a record planned as a duplicate can
         // neither survive nor be re-marked, and a record planned as a
-        // survivor (in either pass) can never be re-marked by a weaker
-        // pair — lineage stays one hop deep, no transitive chaining.
+        // survivor (in either pass, this run or — via the sticky seed — any
+        // prior run) can never be re-marked by a weaker pair — lineage stays
+        // one hop deep, no transitive chaining.
         if (plannedDuplicateKeys.has(aKey) || plannedDuplicateKeys.has(bKey)) continue;
-        if (plannedSurvivorKeys.has(aKey) || plannedSurvivorKeys.has(bKey)) continue;
+        if (plannedSurvivorKeys.has(aKey) || plannedSurvivorKeys.has(bKey)) {
+          if (stickySurvivors.has(aKey) || stickySurvivors.has(bKey)) {
+            reports.get(pair.a.table)!.stickySkipped++;
+          }
+          continue;
+        }
         const { survivor, duplicates } = selectSurvivor([pair.a, pair.b]);
         const report = reports.get(pair.a.table)!;
         report.semanticPairs++;
@@ -553,7 +595,10 @@ export interface ApplyResult {
  * Apply a plan: insert lineage rows ('marked' by default). With
  * `destructive`, duplicate rows are hard-deleted (with their embeddings) and
  * lineage status is 'deleted' — except FK-referenced rows, which stay marked.
- * Runs in one transaction; failures roll back everything.
+ * Runs in one transaction; failures roll back everything. Destructive mode
+ * refuses (throws, nothing written) when a planned duplicate is itself a
+ * recorded survivor in dedup_lineage — planDedup never produces such a plan,
+ * so this guard is defense-in-depth for issue #63.
  */
 export function applyDedupPlan(
   db: Database,
@@ -564,6 +609,19 @@ export function applyDedupPlan(
   const entries = plan.tables.flatMap(t => t.planned);
   const result: ApplyResult = { marked: 0, deleted: 0, fkProtected: 0 };
   if (entries.length === 0) return result;
+
+  if (destructive) {
+    const survivors = loadRecordedSurvivors(db);
+    const conflicts = entries.filter(e => survivors.has(`${e.duplicate_table}:${e.duplicate_id}`));
+    if (conflicts.length > 0) {
+      const sample = conflicts[0];
+      throw new Error(
+        `destructive dedup refused: ${conflicts.length} planned duplicate(s) are recorded survivors ` +
+        `in dedup_lineage (e.g. ${sample.duplicate_table}#${sample.duplicate_id}). Deleting a survivor ` +
+        `would leave its marked or deleted duplicates with no visible record. No changes were made.`
+      );
+    }
+  }
 
   const insert = db.prepare(`
     INSERT INTO dedup_lineage

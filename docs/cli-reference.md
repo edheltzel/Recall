@@ -336,6 +336,13 @@ Safety model:
   exist; records are never merged below the configured `--threshold`
   (conservative default: 0.95 cosine similarity). Records with fewer than 20
   significant characters are never candidates.
+- **Survivors are sticky.** A record recorded as a survivor in
+  `dedup_lineage` is never re-marked as a duplicate by a later run, so every
+  hidden or deleted record keeps a visible survivor across runs. The
+  tradeoff is order-dependence: an early survivor is never consolidated
+  under a later, higher-priority record. As defense-in-depth, `--delete`
+  refuses outright (no changes written) if a plan would delete a recorded
+  survivor.
 - **Lifecycle-aware.** Only `active` decisions participate; superseded and
   reverted decisions are managed by the decision lifecycle, not dedup.
 
