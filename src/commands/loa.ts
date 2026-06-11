@@ -115,7 +115,8 @@ export async function runLoa(title: string, options: LoaOptions): Promise<void> 
     process.exit(1);
   }
 
-  // Create LoA entry
+  // Create LoA entry — Fabric extract_wisdom output is generated from the
+  // session messages, so the record is extracted (ADR-0001).
   const id = createLoaEntry({
     title,
     description: `Captured ${messages.length} messages`,
@@ -125,7 +126,8 @@ export async function runLoa(title: string, options: LoaOptions): Promise<void> 
     parent_loa_id: options.continues,
     project,
     tags: options.tags,
-    message_count: messages.length
+    message_count: messages.length,
+    provenance: 'extracted'
   });
 
   console.log(`\n✓ LoA #${id} captured: "${title}"`);

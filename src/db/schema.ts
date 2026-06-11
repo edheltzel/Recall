@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   project TEXT,
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+  provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   alternatives TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'reverted')),
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+  provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS learnings (
   prevention TEXT,
   tags TEXT,
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+  provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -67,6 +70,7 @@ CREATE TABLE IF NOT EXISTS breadcrumbs (
   category TEXT,
   project TEXT,
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+  provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   expires_at DATETIME,
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
@@ -92,6 +96,7 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   tags TEXT,
   message_count INTEGER,
   importance INTEGER DEFAULT 8 CHECK (importance BETWEEN 1 AND 10),
+  provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   FOREIGN KEY (parent_loa_id) REFERENCES loa_entries(id),
   FOREIGN KEY (message_range_start) REFERENCES messages(id),
   FOREIGN KEY (message_range_end) REFERENCES messages(id)

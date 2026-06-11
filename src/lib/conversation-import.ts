@@ -567,7 +567,9 @@ export async function importConversations(
         source: session.source,
       });
 
-      const count = addMessagesBatch(session.messages);
+      // Raw conversation capture is verbatim (ADR-0001); the structured
+      // extraction below stamps its own records as extracted.
+      const count = addMessagesBatch(session.messages.map(m => ({ ...m, provenance: 'verbatim' as const })));
       result.sessionsImported++;
       result.messagesImported += count;
 

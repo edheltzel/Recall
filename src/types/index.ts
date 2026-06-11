@@ -1,5 +1,14 @@
 // Core types for RECALL
 
+// Record Provenance (ADR-0001, CONTEXT.md): the declared origin and
+// transformation level of a memory record. Automatic write-path metadata —
+// never a public MCP parameter or CLI classification input. Survivor-order
+// vocabulary: user_authored > verbatim > extracted > derived. Legacy unknown
+// is NULL/absent, never guessed. `derived` is reserved for future paths that
+// mechanically produce records from existing memory records.
+export const PROVENANCE_VALUES = ['user_authored', 'verbatim', 'extracted', 'derived'] as const;
+export type Provenance = typeof PROVENANCE_VALUES[number];
+
 export interface Session {
   id?: number;
   session_id: string;
@@ -21,6 +30,7 @@ export interface Message {
   content: string;
   project?: string;
   importance?: number;
+  provenance?: Provenance | null;
 }
 
 export interface Decision {
@@ -35,6 +45,7 @@ export interface Decision {
   status: 'active' | 'superseded' | 'reverted';
   confidence?: 'high' | 'medium' | 'low';
   importance?: number;
+  provenance?: Provenance | null;
 }
 
 export interface Learning {
@@ -49,6 +60,7 @@ export interface Learning {
   tags?: string;
   confidence?: 'high' | 'medium' | 'low';
   importance?: number;
+  provenance?: Provenance | null;
 }
 
 export interface Breadcrumb {
@@ -60,6 +72,7 @@ export interface Breadcrumb {
   project?: string;
   importance: number;
   expires_at?: string;
+  provenance?: Provenance | null;
 }
 
 export interface LoaEntry {
@@ -76,6 +89,7 @@ export interface LoaEntry {
   tags?: string;
   message_count?: number;
   importance?: number;
+  provenance?: Provenance | null;
 }
 
 export interface SearchResult {
@@ -85,6 +99,7 @@ export interface SearchResult {
   project?: string;
   created_at: string;
   rank?: number;
+  provenance?: Provenance | null;
 }
 
 export interface Stats {

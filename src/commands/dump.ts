@@ -387,7 +387,8 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     summary: `Dumped: ${title}`
   });
 
-  const importedCount = addMessagesBatch(session.messages);
+  // Raw conversation capture is verbatim (ADR-0001).
+  const importedCount = addMessagesBatch(session.messages.map(m => ({ ...m, provenance: 'verbatim' as const })));
 
   // Get imported message IDs for LoA
   const db = getDb();
@@ -429,7 +430,10 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     parent_loa_id: options.continues,
     project: options.project || session.project,
     tags: options.tags,
-    message_count: importedMessages.length
+    message_count: importedMessages.length,
+    // Fabric output and the basic-summary fallback are both generated from
+    // the session messages — extracted either way (ADR-0001).
+    provenance: 'extracted'
   });
 
   await autoEmbedLoaEntry(loaId, title, fabricExtract);
