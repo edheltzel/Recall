@@ -343,6 +343,53 @@ Marked duplicates are hidden from all search paths by default; see
 `recall search --include-duplicates`. Lineage is included in
 `recall export`, so the audit trail is portable.
 
+## Repair
+
+Explicit data/index maintenance — deliberately separate from
+`recall doctor --fix`, which only repairs install-layout symlinks and never
+touches data.
+
+```bash
+recall repair                           # Dry-run report (default — writes nothing)
+recall repair --execute                 # Apply the planned repairs
+recall repair -t messages               # Scope to one table
+recall repair --no-embed                # Skip the embedding pass
+```
+
+What repair covers:
+
+- **FTS5 index rebuild.** Each search index (`messages`, `decisions`,
+  `learnings`, `breadcrumbs`, `loa_entries`, `telos`, `documents`) is checked
+  against its source table — indexed row count (via the docsize shadow
+  table), sync-trigger presence, and the FTS5 `integrity-check` command. A
+  drifted index is rebuilt from its source table; a missing index or missing
+  sync triggers (the classic symptom: search silently returns nothing on an
+  un-migrated database) are recreated from the canonical schema DDL and then
+  rebuilt.
+- **Re-embedding.** Rows expected to carry embeddings (`loa_entries`,
+  `decisions`, `learnings`, assistant `messages`) that have none are
+  re-embedded when the Ollama embedding service is available and the row has
+  enough source text. If the service is unavailable, repair reports the
+  missing embeddings and still exits successfully — unless another requested
+  repair failed. Partial results are never hidden: embedded, skipped
+  (too short), and failed counts are all reported.
+- **Orphan/invariant reporting.** Named, unambiguous integrity checks —
+  orphaned embeddings, dedup lineage pointing at missing rows, messages
+  without a session, broken LoA message ranges and parent links, pending
+  schema migrations — are **report-only**. Repair never attempts heuristic
+  data mutation; pending migrations are fixed by `recall init`.
+
+Safety model:
+
+- **Dry-run by default.** Mutations require `--execute`. Run
+  `recall export --backup` before applying repairs.
+- **Repair never hard-deletes rows.**
+- **Repair never changes [Record Provenance](#record-provenance).** FTS
+  rebuild regenerates index shadow tables; re-embedding only inserts into
+  the `embeddings` table. No source-table column is written.
+- `recall doctor` may recommend `recall repair`, but `doctor --fix` never
+  runs data repair implicitly.
+
 ## Admin
 
 ```bash
@@ -359,7 +406,7 @@ recall onboard                          # Interactive L0 identity interview (see
 
 `recall init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
 
-`recall doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created; user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced.
+`recall doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created; user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced. `--fix` only ever repairs symlinks — data and index maintenance is the explicit job of [`recall repair`](#repair), which doctor recommends when an FTS index is out of sync.
 
 `recall stats` reports row counts per table and total database size.
 

@@ -6,6 +6,7 @@ import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { homedir } from 'os';
 import { getDb, getDbPath } from '../db/connection.js';
+import { checkAllFts } from '../lib/repair.js';
 import { VERSION } from '../version.js';
 
 export interface DoctorOptions {
@@ -135,6 +136,38 @@ function checkStructuredData(): CheckResult {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { label, status: 'FAIL', message: `Query failed: ${msg}` };
+  }
+}
+
+// ─────────────────────────────────────────
+// Check: FTS5 index health
+// ─────────────────────────────────────────
+//
+// Read-only by design (issue #46): doctor only RECOMMENDS `recall repair`.
+// This check is exported as a plain CheckResult with no repair fn, so the
+// --fix loop (symlinks only) can never run data repair implicitly.
+export function checkFtsIndexes(): CheckResult {
+  const label = 'FTS5 search indexes in sync';
+
+  try {
+    const reports = checkAllFts(getDb());
+    const problems = reports.filter(r => r.status !== 'ok');
+
+    if (problems.length === 0) {
+      return { label, status: 'PASS', message: `All ${reports.length} FTS indexes in sync with source tables` };
+    }
+
+    const summary = problems
+      .map(p => `${p.ftsTable}: ${p.status} (${p.detail})`)
+      .join('; ');
+    return {
+      label,
+      status: 'WARN',
+      message: `${summary} — run 'recall repair' to inspect, 'recall repair --execute' to fix`,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { label, status: 'FAIL', message: `Check failed: ${msg}` };
   }
 }
 
@@ -601,6 +634,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   results.push(checkDatabase());
   results.push(checkMessages());
   results.push(checkStructuredData());
+  results.push(checkFtsIndexes());
   results.push(checkExtractionFiles());
   results.push(checkExtractLog());
   results.push(checkTrackerLockouts());
