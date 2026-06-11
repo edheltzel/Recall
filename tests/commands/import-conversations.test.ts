@@ -55,4 +55,13 @@ describe('runImportConversations', () => {
     expect(warns.join('\n')).toContain(NO_EXTRACT_WARNING);
     expect(logs.join('\n')).toContain('Sessions imported: 1');
   });
+
+  test('rejects an unrecognized format before importing', async () => {
+    const file = join(tempDir, 'empty.json');
+    writeFileSync(file, JSON.stringify([]));
+
+    await expect(
+      runImportConversations(file, { format: 'invalid' as any })
+    ).rejects.toThrow('Invalid format');
+  });
 });
