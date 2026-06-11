@@ -9,6 +9,11 @@
 export const PROVENANCE_VALUES = ['user_authored', 'verbatim', 'extracted', 'derived'] as const;
 export type Provenance = typeof PROVENANCE_VALUES[number];
 
+// Tables carrying the provenance column (migration 8→9). Single source of
+// truth — consumed by the export renderers and the provenance backfill.
+export const PROVENANCE_TABLES = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'] as const;
+export type ProvenanceTable = typeof PROVENANCE_TABLES[number];
+
 export interface Session {
   id?: number;
   session_id: string;

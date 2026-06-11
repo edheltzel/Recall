@@ -125,19 +125,23 @@ export function runExport(options: ExportOptions): void {
     // Manifest first — VACUUM INTO copies the live DB, so counts match it.
     const manifest = buildManifest(db, 'sqlite', listPhysicalTables(db), { includesEmbeddings: true, createdAt: now });
     let target: string;
+    const paths: string[] = [];
     if (isDir) {
       mkdirSync(output, { recursive: true });
       target = resolveNonClobbering(join(output, `recall-export-${timestampSlug(now)}.db`));
-      writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+      const manifestPath = join(output, 'manifest.json');
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+      paths.push(target, manifestPath);
     } else {
       if (existsSync(output)) {
         throw new Error(`Refusing to overwrite existing database backup at ${output}`);
       }
       mkdirSync(dirname(output), { recursive: true });
       target = output;
+      paths.push(target);
     }
     db.prepare('VACUUM INTO ?').run(target);
-    console.log(manifestSummary(manifest, isDir ? [target, join(output, 'manifest.json')] : [target]));
+    console.log(manifestSummary(manifest, paths));
     return;
   }
 

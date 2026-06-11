@@ -35,14 +35,10 @@ export const EXPORT_TABLES = [
 ] as const;
 export type ExportTable = typeof EXPORT_TABLES[number];
 
-/** Subset of EXPORT_TABLES carrying the provenance column (migration 8→9). */
-export const PROVENANCE_TABLES = [
-  'messages',
-  'decisions',
-  'learnings',
-  'breadcrumbs',
-  'loa_entries',
-] as const;
+// Subset of EXPORT_TABLES carrying the provenance column — canonical list
+// lives in types/index.ts; re-exported here as part of the export surface.
+export { PROVENANCE_TABLES } from '../types/index.js';
+import { PROVENANCE_TABLES } from '../types/index.js';
 
 export const EXPORT_FORMATS = ['json', 'markdown', 'sql', 'sqlite'] as const;
 export type ExportFormat = typeof EXPORT_FORMATS[number];
