@@ -252,6 +252,52 @@ Suite B (token efficiency) compares the v2 wake-up bundle against v1 and the
 CLAUDE.md baseline. Results are written to `benchmarks/results/` as JSONL plus
 a human-readable `.md` alongside. See `benchmarks/README.md` for methodology.
 
+## Export & Backup
+
+Portable and disaster-recovery exports of the memory database.
+
+```bash
+recall export                                   # JSON export to stdout (summary on stderr)
+recall export --format markdown                 # Human-readable Markdown export
+recall export --format sql --output dump.sql    # Textual SQL dump (schema + INSERTs)
+recall export --format sqlite --output copy.db  # Full database backup (VACUUM INTO)
+recall export --output exports/                 # Directory mode: artifact + manifest.json
+recall export --backup                          # Timestamped SQL dump to ~/.agents/Recall/backups/
+```
+
+Formats:
+
+- **json / markdown** — app-level export of the durable memory tables
+  (`sessions`, `messages`, `decisions`, `learnings`, `breadcrumbs`,
+  `loa_entries`). Every row of a provenance-bearing table carries an explicit
+  `provenance` field; legacy `NULL` provenance is exported as the literal
+  `unknown` — never omitted, never guessed (see Record Provenance above).
+  Embeddings are excluded.
+- **sql** — textual SQL dump (CREATE TABLE + INSERT statements) of the same
+  durable tables. Restorable into an empty database; one-command restore is
+  intentionally not provided.
+- **sqlite** — binary database backup via `VACUUM INTO`: the full DB including
+  embeddings and internal tables. Always requires `--output`.
+
+Output contract:
+
+- No `--output`: export data goes to stdout, the manifest summary to stderr —
+  stdout stays clean for piping.
+- `--output <file>`: writes a single export file and prints the manifest
+  summary to stdout.
+- `--output <dir>`: writes the export artifact plus `manifest.json` into the
+  directory. Directory exports always write `manifest.json`.
+
+The manifest records the Recall version, timestamp, schema version
+(`PRAGMA user_version`), format, included tables, row counts per table,
+provenance counts per table (including `unknown`), and whether embeddings were
+included.
+
+`recall export --backup` writes a timestamped SQL dump to
+`~/.agents/Recall/backups/` (creating the directory if needed), never
+overwrites an existing file (a `-N` suffix is added on collision), and prints
+the output path.
+
 ## Admin
 
 ```bash
