@@ -119,6 +119,26 @@ symlinks resolve to readable files after linking — so a silent
 
 Extraction hooks fire on the `Stop` event. If the hook isn't registered in `settings.json`, re-run `./install.sh`.
 
+### "Search returns nothing, but the data is there"
+
+`recall show` / `recall recent` find records that `recall search` never
+returns. The usual cause is an FTS5 index out of sync with its source table —
+classically a database created by an older version where the index or its
+sync triggers were never created, so every write since has been silently
+unindexed.
+
+```bash
+recall doctor            # the FTS index check reports which indexes drifted
+recall repair            # dry-run: shows the planned rebuilds, writes nothing
+recall export --backup   # recommended before any repair
+recall repair --execute  # rebuild the indexes from the source tables
+```
+
+See [Repair in the CLI reference](cli-reference.md#repair) for the full
+safety model. `recall doctor --fix` does **not** fix this — doctor's `--fix`
+only repairs symlinks; data and index maintenance always goes through
+`recall repair`.
+
 ### "Embedding service unavailable"
 
 Embeddings are optional. Hybrid search falls back to FTS5-only automatically.

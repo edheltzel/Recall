@@ -259,7 +259,21 @@ CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
   ON dedup_lineage(survivor_table, survivor_id);
 `;
 
-export const CREATE_FTS = `
+// Per-source-table FTS5 DDL. Single source of truth: the CREATE_FTS /
+// CREATE_FTS_TRIGGERS strings consumed by initDb are derived from this map,
+// and `recall repair` uses individual entries to recreate one missing index
+// without touching the others. All statements are idempotent (IF NOT EXISTS).
+export interface FtsTableSchema {
+  /** FTS5 virtual table name (e.g. messages_fts). */
+  ftsTable: string;
+  createTable: string;
+  createTriggers: string;
+}
+
+export const FTS_SCHEMA: Record<string, FtsTableSchema> = {
+  messages: {
+    ftsTable: 'messages_fts',
+    createTable: `
 -- FTS5 virtual table for messages (conversation search)
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   content,
@@ -267,70 +281,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   content='messages',
   content_rowid='id'
 );
-
--- FTS5 virtual table for decisions
-CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
-  decision,
-  reasoning,
-  project,
-  content='decisions',
-  content_rowid='id'
-);
-
--- FTS5 virtual table for learnings
-CREATE VIRTUAL TABLE IF NOT EXISTS learnings_fts USING fts5(
-  problem,
-  solution,
-  tags,
-  project,
-  content='learnings',
-  content_rowid='id'
-);
-
--- FTS5 virtual table for breadcrumbs
-CREATE VIRTUAL TABLE IF NOT EXISTS breadcrumbs_fts USING fts5(
-  content,
-  category,
-  project,
-  content='breadcrumbs',
-  content_rowid='id'
-);
-
--- FTS5 virtual table for LoA entries
-CREATE VIRTUAL TABLE IF NOT EXISTS loa_fts USING fts5(
-  title,
-  description,
-  fabric_extract,
-  tags,
-  project,
-  content='loa_entries',
-  content_rowid='id'
-);
-
--- FTS5 virtual table for TELOS
-CREATE VIRTUAL TABLE IF NOT EXISTS telos_fts USING fts5(
-  code,
-  type,
-  title,
-  content,
-  category,
-  content='telos',
-  content_rowid='id'
-);
-
--- FTS5 virtual table for documents
-CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-  title,
-  type,
-  content,
-  summary,
-  path,
-  content='documents',
-  content_rowid='id'
-);
-`;
-
-export const CREATE_FTS_TRIGGERS = `
+`,
+    createTriggers: `
 -- Messages FTS triggers
 CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
   INSERT INTO messages_fts(rowid, content, project) VALUES (new.id, new.content, new.project);
@@ -342,7 +294,21 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, content, project) VALUES('delete', old.id, old.content, old.project);
   INSERT INTO messages_fts(rowid, content, project) VALUES (new.id, new.content, new.project);
 END;
-
+`,
+  },
+  decisions: {
+    ftsTable: 'decisions_fts',
+    createTable: `
+-- FTS5 virtual table for decisions
+CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
+  decision,
+  reasoning,
+  project,
+  content='decisions',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
 -- Decisions FTS triggers
 CREATE TRIGGER IF NOT EXISTS decisions_ai AFTER INSERT ON decisions BEGIN
   INSERT INTO decisions_fts(rowid, decision, reasoning, project) VALUES (new.id, new.decision, new.reasoning, new.project);
@@ -354,7 +320,22 @@ CREATE TRIGGER IF NOT EXISTS decisions_au AFTER UPDATE ON decisions BEGIN
   INSERT INTO decisions_fts(decisions_fts, rowid, decision, reasoning, project) VALUES('delete', old.id, old.decision, old.reasoning, old.project);
   INSERT INTO decisions_fts(rowid, decision, reasoning, project) VALUES (new.id, new.decision, new.reasoning, new.project);
 END;
-
+`,
+  },
+  learnings: {
+    ftsTable: 'learnings_fts',
+    createTable: `
+-- FTS5 virtual table for learnings
+CREATE VIRTUAL TABLE IF NOT EXISTS learnings_fts USING fts5(
+  problem,
+  solution,
+  tags,
+  project,
+  content='learnings',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
 -- Learnings FTS triggers
 CREATE TRIGGER IF NOT EXISTS learnings_ai AFTER INSERT ON learnings BEGIN
   INSERT INTO learnings_fts(rowid, problem, solution, tags, project) VALUES (new.id, new.problem, new.solution, new.tags, new.project);
@@ -366,7 +347,21 @@ CREATE TRIGGER IF NOT EXISTS learnings_au AFTER UPDATE ON learnings BEGIN
   INSERT INTO learnings_fts(learnings_fts, rowid, problem, solution, tags, project) VALUES('delete', old.id, old.problem, old.solution, old.tags, old.project);
   INSERT INTO learnings_fts(rowid, problem, solution, tags, project) VALUES (new.id, new.problem, new.solution, new.tags, new.project);
 END;
-
+`,
+  },
+  breadcrumbs: {
+    ftsTable: 'breadcrumbs_fts',
+    createTable: `
+-- FTS5 virtual table for breadcrumbs
+CREATE VIRTUAL TABLE IF NOT EXISTS breadcrumbs_fts USING fts5(
+  content,
+  category,
+  project,
+  content='breadcrumbs',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
 -- Breadcrumbs FTS triggers
 CREATE TRIGGER IF NOT EXISTS breadcrumbs_ai AFTER INSERT ON breadcrumbs BEGIN
   INSERT INTO breadcrumbs_fts(rowid, content, category, project) VALUES (new.id, new.content, new.category, new.project);
@@ -378,7 +373,23 @@ CREATE TRIGGER IF NOT EXISTS breadcrumbs_au AFTER UPDATE ON breadcrumbs BEGIN
   INSERT INTO breadcrumbs_fts(breadcrumbs_fts, rowid, content, category, project) VALUES('delete', old.id, old.content, old.category, old.project);
   INSERT INTO breadcrumbs_fts(rowid, content, category, project) VALUES (new.id, new.content, new.category, new.project);
 END;
-
+`,
+  },
+  loa_entries: {
+    ftsTable: 'loa_fts',
+    createTable: `
+-- FTS5 virtual table for LoA entries
+CREATE VIRTUAL TABLE IF NOT EXISTS loa_fts USING fts5(
+  title,
+  description,
+  fabric_extract,
+  tags,
+  project,
+  content='loa_entries',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
 -- LoA FTS triggers
 CREATE TRIGGER IF NOT EXISTS loa_ai AFTER INSERT ON loa_entries BEGIN
   INSERT INTO loa_fts(rowid, title, description, fabric_extract, tags, project) VALUES (new.id, new.title, new.description, new.fabric_extract, new.tags, new.project);
@@ -390,7 +401,23 @@ CREATE TRIGGER IF NOT EXISTS loa_au AFTER UPDATE ON loa_entries BEGIN
   INSERT INTO loa_fts(loa_fts, rowid, title, description, fabric_extract, tags, project) VALUES('delete', old.id, old.title, old.description, old.fabric_extract, old.tags, old.project);
   INSERT INTO loa_fts(rowid, title, description, fabric_extract, tags, project) VALUES (new.id, new.title, new.description, new.fabric_extract, new.tags, new.project);
 END;
-
+`,
+  },
+  telos: {
+    ftsTable: 'telos_fts',
+    createTable: `
+-- FTS5 virtual table for TELOS
+CREATE VIRTUAL TABLE IF NOT EXISTS telos_fts USING fts5(
+  code,
+  type,
+  title,
+  content,
+  category,
+  content='telos',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
 -- TELOS FTS triggers
 CREATE TRIGGER IF NOT EXISTS telos_ai AFTER INSERT ON telos BEGIN
   INSERT INTO telos_fts(rowid, code, type, title, content, category) VALUES (new.id, new.code, new.type, new.title, new.content, new.category);
@@ -402,7 +429,23 @@ CREATE TRIGGER IF NOT EXISTS telos_au AFTER UPDATE ON telos BEGIN
   INSERT INTO telos_fts(telos_fts, rowid, code, type, title, content, category) VALUES('delete', old.id, old.code, old.type, old.title, old.content, old.category);
   INSERT INTO telos_fts(rowid, code, type, title, content, category) VALUES (new.id, new.code, new.type, new.title, new.content, new.category);
 END;
-
+`,
+  },
+  documents: {
+    ftsTable: 'documents_fts',
+    createTable: `
+-- FTS5 virtual table for documents
+CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+  title,
+  type,
+  content,
+  summary,
+  path,
+  content='documents',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
 -- Documents FTS triggers
 CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
   INSERT INTO documents_fts(rowid, title, type, content, summary, path) VALUES (new.id, new.title, new.type, new.content, new.summary, new.path);
@@ -414,7 +457,13 @@ CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
   INSERT INTO documents_fts(documents_fts, rowid, title, type, content, summary, path) VALUES('delete', old.id, old.title, old.type, old.content, old.summary, old.path);
   INSERT INTO documents_fts(rowid, title, type, content, summary, path) VALUES (new.id, new.title, new.type, new.content, new.summary, new.path);
 END;
-`;
+`,
+  },
+};
+
+export const CREATE_FTS = Object.values(FTS_SCHEMA).map(s => s.createTable).join('');
+
+export const CREATE_FTS_TRIGGERS = Object.values(FTS_SCHEMA).map(s => s.createTriggers).join('');
 
 // Vector embeddings tables (requires sqlite-vec extension)
 export const CREATE_VECTOR_TABLES = `
