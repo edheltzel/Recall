@@ -1,6 +1,6 @@
 # Recall Benchmarks (Phase 2)
 
-> Status: Suite B (token efficiency) implemented. Suites A / C / D / E are scaffolded in the runner but not yet built. See `.atlas/plans/2026-04-17-mempalace-research-borrow-list.md` for the full Phase 2 design.
+> Status: Suite B (token efficiency) and Suite C (precision under noise) implemented. Suites A / D / E are scaffolded in the runner but not yet built. See `.atlas/plans/2026-04-17-mempalace-research-borrow-list.md` for the full Phase 2 design.
 
 ## Why this exists
 
@@ -51,9 +51,22 @@ Each run writes two files to `benchmarks/results/`:
 |---|---|---|---|
 | A | Cross-session recall | Planned | Retrieval@5 + answer accuracy across N-session synthetic gaps |
 | B | Token efficiency | **Built** | Wake-up bundle char/token cost vs v1 baseline and CLAUDE.md |
-| C | Precision under noise | Planned | Precision@5 and latency at corpus sizes 100 / 1k / 10k / 100k |
+| C | Precision under noise | **Built** | P@5 / R@5 / MRR@5 + latency p50/p95 at corpus sizes 100 / 1k / 10k / 100k |
 | D | Structured-knowledge fidelity | Planned | Supersession correctness, LoA elevation in mixed results |
 | E | Real-world replay | Planned | Help-rate and wrong-direction-rate on anonymized session history |
+
+## Suite C methodology — precision under noise
+
+Suite C answers one question: **when the database is full of junk, does `search()` still surface the right record?**
+
+- **Corpus.** For each size in the ladder (default 100 / 1,000 / 10,000 / 100,000 records), a synthetic corpus is built in a temporary DB using the real schema (`initDb()`) and the real write paths from `src/lib/memory.ts`, so FTS triggers populate exactly as in production. The user's real DB is never touched.
+- **Determinism.** Fixture generation is seeded (mulberry32, default seed 47). The same seed and size produce byte-identical record content, so runs are comparable across machines and over time. Tests assert this.
+- **Ground truth.** A fixed set of target records (constant across sizes) carries labels: table, project, and provenance. The rest of the corpus is noise in three roles: near-duplicates of targets (the precision trap), entity-name collisions, and low-signal filler. Noise spans all five searchable tables, including messages.
+- **Queries.** Four labeled categories: exact project/name lookup, paraphrased decision lookup, learning/problem lookup, and noisy ambiguous queries. Ambiguous queries carry explicit collision labels (name / project / topic) so failures can be attributed to entity ambiguity vs generic ranking noise.
+- **Metrics.** Precision@5, Recall@5, and MRR@5 per corpus size, plus breakdowns by query category, by ground-truth table (`r_at_5_table_*`), and by provenance (`r_at_5_prov_*`). No composite scores, per the methodology rules.
+- **Latency.** One unmeasured warmup pass per corpus size, then 5 measured repeats per query on a warm connection; p50/p95 are computed across all measured calls at that size. The report caveats state the protocol and whether the embedding service was available — Suite C exercises the FTS5 keyword path only.
+- **Baseline-first.** The first run records an honest baseline; there is no pass/fail threshold. Later regression gating can diff runs against the checked-in baseline JSONL in `benchmarks/results/`.
+- **Overrides.** `RECALL_BENCH_C_SIZES` (comma-separated) and `RECALL_BENCH_C_REPEATS` override the corpus ladder and repeat count — used by tests to keep CI fast; leave unset for comparable real runs.
 
 ## Adding a new suite
 
