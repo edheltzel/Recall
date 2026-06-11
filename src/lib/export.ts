@@ -25,7 +25,11 @@ import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { getMigrationVersion } from '../db/migrations.js';
 import { VERSION } from '../version.js';
 
-/** Durable memory tables included in app-level (JSON/Markdown/SQL) exports. */
+/**
+ * Durable tables included in app-level (JSON/Markdown/SQL) exports: the
+ * memory tables plus dedup_lineage (issue #45), so duplicate lineage stays
+ * portable and auditable alongside the records it describes.
+ */
 export const EXPORT_TABLES = [
   'sessions',
   'messages',
@@ -33,6 +37,7 @@ export const EXPORT_TABLES = [
   'learnings',
   'breadcrumbs',
   'loa_entries',
+  'dedup_lineage',
 ] as const;
 export type ExportTable = typeof EXPORT_TABLES[number];
 

@@ -30,6 +30,8 @@ import { runOnboard } from './commands/onboard.js';
 import { runMigrate } from './commands/migrate.js';
 import { runPath } from './commands/path.js';
 import { runExport } from './commands/export.js';
+import { runDedup } from './commands/dedup.js';
+import { DEFAULT_SEMANTIC_THRESHOLD } from './lib/dedup.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -180,13 +182,15 @@ program
   .option('--bias-type <table>', 'Softly boost one table without filtering others (messages, loa, decisions, learnings, breadcrumbs)')
   .option('-l, --limit <n>', 'Max results', '20')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
+  .option('--include-duplicates', 'Include records marked as duplicates by recall dedup (hidden by default)')
   .action((query, options) => {
     runSearch(query, {
       project: options.project,
       table: options.table,
       biasType: options.biasType,
       limit: parseInt(options.limit, 10),
-      showProvenance: options.showProvenance
+      showProvenance: options.showProvenance,
+      includeDuplicates: options.includeDuplicates
     });
     closeDb();
   });
@@ -658,6 +662,30 @@ program
     closeDb();
   });
 
+// recall dedup — non-destructive duplicate detection (issue #45)
+// Dry-run by default; --execute marks duplicates in dedup_lineage (records
+// stay intact, hidden from search); --delete is the destructive opt-in.
+program
+  .command('dedup')
+  .description('Detect and mark duplicate memory records (dry-run by default; non-destructive)')
+  .option('--execute', 'Apply the plan: mark duplicates (default is dry-run)')
+  .option('--delete', "Destructive opt-in: hard-delete duplicates instead of marking (requires --execute; run 'recall export --backup' first)")
+  .option('-t, --table <table>', 'Target table: messages, decisions, learnings, breadcrumbs, loa_entries, all', 'all')
+  .option('-p, --project <name>', 'Scope to one project')
+  .option('--threshold <n>', `Semantic similarity threshold (0-1)`, String(DEFAULT_SEMANTIC_THRESHOLD))
+  .option('--no-semantic', 'Skip the semantic (embeddings) pass')
+  .action((options) => {
+    runDedup({
+      execute: options.execute,
+      delete: options.delete,
+      table: options.table,
+      project: options.project,
+      threshold: parseFloat(options.threshold),
+      semantic: options.semantic
+    });
+    closeDb();
+  });
+
 // Default command: recall <query> → hybrid search (Phase 3: best of both worlds)
 program
   .arguments('[query]')
@@ -668,7 +696,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

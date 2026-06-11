@@ -84,12 +84,17 @@ export function embeddingToBlob(embedding: number[]): Buffer {
 }
 
 /**
- * Convert SQLite BLOB back to embedding array
+ * Convert SQLite BLOB back to embedding array.
+ * bun:sqlite returns BLOB columns as Uint8Array (not Buffer) — wrap without
+ * copying so readFloatLE is available either way.
  */
-export function blobToEmbedding(blob: Buffer): number[] {
+export function blobToEmbedding(blob: Buffer | Uint8Array): number[] {
+  const buf = Buffer.isBuffer(blob)
+    ? blob
+    : Buffer.from(blob.buffer, blob.byteOffset, blob.byteLength);
   const embedding: number[] = [];
-  for (let i = 0; i < blob.length; i += 4) {
-    embedding.push(blob.readFloatLE(i));
+  for (let i = 0; i < buf.length; i += 4) {
+    embedding.push(buf.readFloatLE(i));
   }
   return embedding;
 }

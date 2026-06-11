@@ -12,6 +12,18 @@ while MCP tool names (`memory_search`, `memory_add`, etc.) remain stable.
 
 ### Added
 
+- **`recall dedup`** — non-destructive dedup with provenance-aware survivor
+  selection (#45): dry-run by default, `--execute` marks duplicates in the new
+  `dedup_lineage` table (schema migration 9→10) without touching the records,
+  `--delete` is the destructive opt-in (take `recall export --backup` first).
+  Detection combines normalized-text matching with semantic matching over
+  stored embeddings (conservative 0.95 default threshold, skip reported when
+  embeddings are unavailable). Survivor priority is `user_authored > verbatim
+  > extracted > derived > unknown`, then richness, importance, recency.
+  Within-table only; cross-table candidates are report-only. Marked
+  duplicates are hidden from every search path unless
+  `recall search --include-duplicates` is passed, and lineage rows are
+  included in `recall export`.
 - **`recall export`** — portable and disaster-recovery exports (#43): JSON,
   Markdown, SQL dump, and SQLite (`VACUUM INTO`) formats with a manifest
   (counts + provenance counts including explicit `unknown`), a stdout/file/

@@ -198,6 +198,12 @@ export const MIGRATIONS: Migration[] = [
       }
     }
   },
+
+  // Migration 9 → 10: Dedup lineage table (issue #45).
+  // No-op — dedup_lineage and its indexes are brand new, handled by the
+  // CREATE TABLE IF NOT EXISTS DDL that runs before migrations (same
+  // precedent as migration 3 → 4 for the extraction tables).
+  (_db) => {},
 ];
 
 // ---------------------------------------------------------------------------

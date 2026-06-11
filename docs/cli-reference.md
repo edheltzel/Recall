@@ -17,6 +17,7 @@ recall search "query" -t decisions      # Hard-filter to decisions only
 recall search "query" --bias-type decisions # Prefer decisions, still show other matching tables
 recall search "query" -p myproject      # Filter by project
 recall search "query" --show-provenance # Show provenance for every result
+recall search "query" --include-duplicates # Include records marked by recall dedup
 recall semantic "query"                 # Semantic search (explicit)
 recall hybrid "query"                   # Hybrid search (explicit)
 ```
@@ -45,6 +46,8 @@ FTS5 supports boolean operators and prefix matching:
 - `"vpn config"` — exact phrase
 
 By default, search output stays quiet about [Record Provenance](#record-provenance) when a record carries a known value, and visibly flags records whose provenance is unknown (legacy rows that predate the provenance column). Pass `--show-provenance` to display the provenance of every result.
+
+Records marked as duplicates by [`recall dedup`](#dedup) are hidden from every search path (keyword, semantic, hybrid) by default — the records and their lineage remain in the database. Pass `--include-duplicates` to show them.
 
 ---
 
@@ -269,7 +272,7 @@ Formats:
 
 - **json / markdown** — app-level export of the durable memory tables
   (`sessions`, `messages`, `decisions`, `learnings`, `breadcrumbs`,
-  `loa_entries`). Every row of a provenance-bearing table carries an explicit
+  `loa_entries`, `dedup_lineage`). Every row of a provenance-bearing table carries an explicit
   `provenance` field; legacy `NULL` provenance is exported as the literal
   `unknown` — never omitted, never guessed (see Record Provenance above).
   Embeddings are excluded.
@@ -299,6 +302,46 @@ included.
 `~/.agents/Recall/backups/` (creating the directory if needed), never
 overwrites an existing file (a `-N` suffix is added on collision), and prints
 the output path.
+
+## Dedup
+
+Detect and mark duplicate memory records without erasing evidence or lineage.
+
+```bash
+recall dedup                            # Dry-run report (default — writes nothing)
+recall dedup --execute                  # Mark duplicates (non-destructive)
+recall dedup --execute --delete         # Destructive opt-in: hard-delete duplicates
+recall dedup -t breadcrumbs             # Scope to one table
+recall dedup -p myproject               # Scope to one project
+recall dedup --threshold 0.98           # Stricter semantic matching (default 0.95)
+recall dedup --no-semantic              # Exact/normalized text pass only
+```
+
+Safety model:
+
+- **Dry-run by default.** Mutations require `--execute`.
+- **Non-destructive by default.** `--execute` writes lineage rows to the
+  `dedup_lineage` table (survivor, duplicate, reason, similarity, status,
+  timestamp); the duplicate records themselves stay intact and are merely
+  hidden from search. `--delete` is the destructive opt-in and requires
+  `--execute` — run `recall export --backup` first.
+- **Within-table only.** Dedup never merges across tables (or across
+  projects). Cross-table duplicate candidates are report-only.
+- **Survivor priority** is `user_authored > verbatim > extracted > derived >
+  unknown` ([Record Provenance](#record-provenance)); ties break by richness
+  (longer normalized text), importance, recency, then lowest id.
+- **Detection** combines exact/normalized text matching with semantic
+  matching over stored embeddings (no embedding service call needed). The
+  semantic pass is skipped — and reported as skipped — when no embeddings
+  exist; records are never merged below the configured `--threshold`
+  (conservative default: 0.95 cosine similarity). Records with fewer than 20
+  significant characters are never candidates.
+- **Lifecycle-aware.** Only `active` decisions participate; superseded and
+  reverted decisions are managed by the decision lifecycle, not dedup.
+
+Marked duplicates are hidden from all search paths by default; see
+`recall search --include-duplicates`. Lineage is included in
+`recall export`, so the audit trail is portable.
 
 ## Admin
 
