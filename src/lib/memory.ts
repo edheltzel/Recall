@@ -2,6 +2,7 @@
 
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
+import { notMarkedDuplicateSql } from './dedup.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
 
 // ============ Sessions ============
@@ -271,6 +272,15 @@ export interface MemorySearchOptions {
   table?: string;
   limit?: number;
   biasType?: SearchTable;
+  /** Include records marked as duplicates by `recall dedup` (hidden by default). */
+  includeDuplicates?: boolean;
+}
+
+// Marked duplicates (issue #45) are hidden from search by default — the
+// lineage row in dedup_lineage keeps them recoverable and auditable.
+function duplicateFilter(options: MemorySearchOptions | undefined, physicalTable: string, idExpr: string): string {
+  if (options?.includeDuplicates) return '';
+  return `AND ${notMarkedDuplicateSql(`'${physicalTable}'`, idExpr)}`;
 }
 
 const TYPE_BIAS_RANK_MULTIPLIER = 4;
@@ -313,6 +323,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           FROM messages_fts f
           JOIN messages m ON m.id = f.rowid
           WHERE messages_fts MATCH ?
+          ${duplicateFilter(options, 'messages', 'm.id')}
           ${options?.project ? 'AND m.project = ?' : ''}
           ORDER BY f.rank
           LIMIT ?
@@ -325,6 +336,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           JOIN decisions d ON d.id = f.rowid
           WHERE decisions_fts MATCH ?
           AND d.status = 'active'
+          ${duplicateFilter(options, 'decisions', 'd.id')}
           ${options?.project ? 'AND d.project = ?' : ''}
           ORDER BY CASE d.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, f.rank
           LIMIT ?
@@ -336,6 +348,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           FROM learnings_fts f
           JOIN learnings l ON l.id = f.rowid
           WHERE learnings_fts MATCH ?
+          ${duplicateFilter(options, 'learnings', 'l.id')}
           ${options?.project ? 'AND l.project = ?' : ''}
           ORDER BY f.rank
           LIMIT ?
@@ -347,6 +360,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           FROM breadcrumbs_fts f
           JOIN breadcrumbs b ON b.id = f.rowid
           WHERE breadcrumbs_fts MATCH ?
+          ${duplicateFilter(options, 'breadcrumbs', 'b.id')}
           ${options?.project ? 'AND b.project = ?' : ''}
           ORDER BY f.rank
           LIMIT ?
@@ -358,6 +372,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           FROM loa_fts f
           JOIN loa_entries l ON l.id = f.rowid
           WHERE loa_fts MATCH ?
+          ${duplicateFilter(options, 'loa_entries', 'l.id')}
           ${options?.project ? 'AND l.project = ?' : ''}
           ORDER BY f.rank
           LIMIT ?

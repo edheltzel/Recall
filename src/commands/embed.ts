@@ -2,7 +2,16 @@
 
 import { getDb } from '../db/connection.js';
 import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL } from '../lib/embeddings.js';
+import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { search as ftsSearch } from '../lib/memory.js';
+
+// Marked duplicates (recall dedup, issue #45) keep their embeddings but are
+// hidden from the semantic search paths, matching the FTS5 default.
+function embeddingsWhere(table?: string): string {
+  const conditions = [notMarkedDuplicateSql('source_table', 'source_id')];
+  if (table) conditions.push(`source_table = '${table}'`);
+  return `WHERE ${conditions.join(' AND ')}`;
+}
 
 interface EmbedOptions {
   table?: 'loa' | 'decisions' | 'messages' | 'learnings';
@@ -164,11 +173,10 @@ export async function runSemanticSearch(query: string, options: { table?: string
   const queryEmbedding = queryResult.embedding;
 
   // Get all embeddings (for now, brute force - will optimize later)
-  const tableFilter = options.table ? `WHERE source_table = '${options.table}'` : '';
   const embeddings = db.prepare(`
     SELECT id, source_table, source_id, embedding
     FROM embeddings
-    ${tableFilter}
+    ${embeddingsWhere(options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   if (embeddings.length === 0) {
@@ -304,11 +312,10 @@ export async function runHybridSearch(query: string, options: { table?: string; 
   const queryEmbedding = queryResult.embedding;
 
   // Get embeddings from database
-  const tableFilter = options.table ? `WHERE source_table = '${options.table}'` : '';
   const embeddings = db.prepare(`
     SELECT id, source_table, source_id, embedding
     FROM embeddings
-    ${tableFilter}
+    ${embeddingsWhere(options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   // Calculate similarities

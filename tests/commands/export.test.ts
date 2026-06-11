@@ -134,6 +134,7 @@ describe('manifest', () => {
       learnings: 1,
       breadcrumbs: 1,
       loa_entries: 1,
+      dedup_lineage: 0,
     });
     expect(manifest.provenance_counts.messages).toEqual({ unknown: 1, verbatim: 1 });
     expect(manifest.provenance_counts.decisions).toEqual({ unknown: 1, user_authored: 1 });
@@ -199,6 +200,7 @@ describe('SQL dump', () => {
         learnings: 1,
         breadcrumbs: 1,
         loa_entries: 1,
+        dedup_lineage: 0,
       });
 
       // Legacy NULL restores as NULL; known values survive verbatim

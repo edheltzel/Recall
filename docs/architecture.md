@@ -70,6 +70,7 @@ both.
 | telos | Purpose framework entries (optional) | Yes |
 | documents | Imported standalone markdown documents (optional) | Yes |
 | embeddings | Vector embeddings for semantic search (768-dim, nomic-embed-text) | N/A |
+| dedup_lineage | Duplicate lineage audit trail from `recall dedup` (survivor, duplicate, reason, similarity, status) | No |
 
 All FTS5-indexed tables have automatic sync triggers.
 
@@ -87,6 +88,15 @@ never accepted from callers (see
 rows stay `NULL` (unknown) until classified with
 `recall provenance backfill`, which only acts on deterministic write-path
 evidence and never guesses.
+
+The `dedup_lineage` table was added in schema migration 9→10. `recall dedup`
+marks duplicate records non-destructively by writing lineage rows here
+(survivor table/id, duplicate table/id, reason, similarity, status); marked
+duplicates stay in their source tables but are hidden from search unless
+`--include-duplicates` is passed. Survivor selection follows provenance order
+(`user_authored > verbatim > extracted > derived > unknown`), then richness,
+importance, and recency. Dedup acts within a table only; cross-table
+candidates are report-only.
 
 ## Tiered RecallStart (v0.7.0+)
 

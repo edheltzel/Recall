@@ -181,6 +181,24 @@ CREATE TABLE IF NOT EXISTS procedures (
   times_observed INTEGER DEFAULT 2,
   confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low'))
 );
+
+-- Dedup lineage (issue #45): persistent audit trail of duplicate marking.
+-- Non-destructive by default — a 'marked' row hides the duplicate from search
+-- while the underlying record stays intact. 'deleted' records a destructive
+-- opt-in removal. 'reverted' is reserved vocabulary for a future unmark path
+-- (CHECK constraints cannot be widened later without a table rebuild).
+CREATE TABLE IF NOT EXISTS dedup_lineage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  survivor_table TEXT NOT NULL,
+  survivor_id INTEGER NOT NULL,
+  duplicate_table TEXT NOT NULL,
+  duplicate_id INTEGER NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('exact', 'semantic')),
+  similarity REAL,
+  status TEXT NOT NULL DEFAULT 'marked' CHECK (status IN ('marked', 'deleted', 'reverted')),
+  detail TEXT
+);
 `;
 
 export const CREATE_INDEXES = `
@@ -231,6 +249,14 @@ CREATE INDEX IF NOT EXISTS idx_documents_created ON documents(created_at);
 
 -- Extraction session indexes
 CREATE INDEX IF NOT EXISTS idx_extraction_sessions_ts ON extraction_sessions(timestamp DESC);
+
+-- Dedup lineage indexes: the partial unique index guarantees a record can be
+-- an actively marked duplicate at most once (idempotence); the survivor index
+-- supports lineage audits.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup_lineage_duplicate
+  ON dedup_lineage(duplicate_table, duplicate_id) WHERE status = 'marked';
+CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
+  ON dedup_lineage(survivor_table, survivor_id);
 `;
 
 export const CREATE_FTS = `
