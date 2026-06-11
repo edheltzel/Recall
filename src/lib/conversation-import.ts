@@ -195,23 +195,59 @@ function looksLikeSlackMessages(value: unknown): boolean {
   return messages.some(m => isObject(m) && ('ts' in m) && ('text' in m || 'blocks' in m || 'attachments' in m));
 }
 
-export function detectConversationFormat(data: unknown): ImportedConversationSource | null {
-  const conversations = Array.isArray(data)
-    ? data
-    : isObject(data) && Array.isArray(data.conversations)
-      ? data.conversations
-      : [data];
-
-  if (conversations.some(looksLikeChatGptConversation)) return 'chatgpt';
-  if (conversations.some(looksLikeClaudeAiConversation)) return 'claude-ai';
-  if (looksLikeSlackMessages(data)) return 'slack';
-  return null;
-}
-
 function getConversationArray(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
   if (isObject(data) && Array.isArray(data.conversations)) return data.conversations;
   return [data];
+}
+
+export interface ConversationSourceAdapterContext {
+  filePath: string;
+  project?: string;
+  rootPath?: string;
+}
+
+export interface ConversationSourceAdapter {
+  source: ImportedConversationSource;
+  detect(data: unknown): boolean;
+  parse(data: unknown, context: ConversationSourceAdapterContext): ParsedConversationSession[];
+}
+
+const chatGptAdapter: ConversationSourceAdapter = {
+  source: 'chatgpt',
+  detect: data => getConversationArray(data).some(looksLikeChatGptConversation),
+  parse: (data, { filePath, project }) => parseChatGptConversations(data, filePath, project),
+};
+
+const claudeAiAdapter: ConversationSourceAdapter = {
+  source: 'claude-ai',
+  detect: data => getConversationArray(data).some(looksLikeClaudeAiConversation),
+  parse: (data, { filePath, project }) => parseClaudeAiConversations(data, filePath, project),
+};
+
+const slackAdapter: ConversationSourceAdapter = {
+  source: 'slack',
+  detect: looksLikeSlackMessages,
+  parse: (data, { filePath, project, rootPath }) => parseSlackConversations(data, filePath, project, rootPath),
+};
+
+// Detection order is load-bearing: claude-ai's detector also matches generic
+// `messages` arrays, so chatgpt must be probed first.
+export const conversationSourceAdapters: readonly ConversationSourceAdapter[] = [
+  chatGptAdapter,
+  claudeAiAdapter,
+  slackAdapter,
+];
+
+function adapterFor(source: ImportedConversationSource): ConversationSourceAdapter | undefined {
+  return conversationSourceAdapters.find(adapter => adapter.source === source);
+}
+
+export function detectConversationFormat(data: unknown): ImportedConversationSource | null {
+  for (const adapter of conversationSourceAdapters) {
+    if (adapter.detect(data)) return adapter.source;
+  }
+  return null;
 }
 
 export function parseClaudeAiConversations(data: unknown, filePath: string, project?: string): ParsedConversationSession[] {
@@ -426,17 +462,10 @@ export function loadConversationSessions(inputPath: string, options: Conversatio
     const detected = format === 'auto' ? detectConversationFormat(data) : format;
     if (!detected) continue;
 
-    switch (detected) {
-      case 'claude-ai':
-        sessions.push(...parseClaudeAiConversations(data, file, options.project));
-        break;
-      case 'chatgpt':
-        sessions.push(...parseChatGptConversations(data, file, options.project));
-        break;
-      case 'slack':
-        sessions.push(...parseSlackConversations(data, file, options.project, inputPath));
-        break;
-    }
+    const adapter = adapterFor(detected);
+    if (!adapter) continue;
+
+    sessions.push(...adapter.parse(data, { filePath: file, project: options.project, rootPath: inputPath }));
   }
 
   return sessions;
