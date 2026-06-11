@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -114,6 +114,33 @@ describe('importConversations', () => {
     expect(sessions[0].messages.map(m => m.role)).toEqual(['user', 'assistant']);
     expect(sessions[0].messages[0].content).toContain('[Ada Lovelace] ship it');
     expect(sessions[0].messages[1].content).toContain('[Recall Bot] import finished');
+  });
+
+  // End-to-end through registry dispatch with a directory input: pins the
+  // rootPath re-wire (positional inputPath → context.rootPath) by asserting the
+  // channel-derived session ID — a miswire to the per-file path would yield
+  // 'slack:2026-05-31:2026-05-31' and break re-import dedup.
+  test('imports Slack exports from a directory via auto-detection, deriving the session ID from the channel directory', async () => {
+    const channelDir = join(tempDir, 'eng-recall');
+    mkdirSync(channelDir);
+    writeFileSync(join(channelDir, '2026-05-31.json'), JSON.stringify([
+      { ts: '1710000000.000100', user: 'U1', user_profile: { real_name: 'Ada Lovelace' }, text: 'ship it' },
+      { ts: '1710000001.000200', bot_id: 'B1', username: 'Recall Bot', subtype: 'bot_message', text: 'import finished' },
+    ]));
+
+    const result = await importConversations(tempDir, { format: 'auto', noExtract: true });
+
+    expect(result.sessionsFound).toBe(1);
+    expect(result.sessionsImported).toBe(1);
+    expect(result.messagesImported).toBe(2);
+
+    const db = readDb();
+    const session = db.prepare('SELECT session_id, source, project FROM sessions').get() as any;
+    db.close();
+
+    expect(session.session_id).toBe('slack:eng-recall:2026-05-31');
+    expect(session.source).toBe('slack');
+    expect(session.project).toBe('slack:eng-recall');
   });
 
   test('runs extraction by default and writes LoA, decisions, learnings, breadcrumbs, and extraction session metadata', async () => {
