@@ -8,6 +8,7 @@ interface SearchOptions {
   biasType?: string;
   limit?: number;
   showProvenance?: boolean;
+  includeDuplicates?: boolean;
 }
 
 export function runSearch(query: string, options: SearchOptions): void {
@@ -23,7 +24,8 @@ export function runSearch(query: string, options: SearchOptions): void {
     project: options.project,
     table: options.table,
     biasType: options.biasType as SearchTable | undefined,
-    limit: options.limit || 20
+    limit: options.limit || 20,
+    includeDuplicates: options.includeDuplicates
   });
 
   if (results.length === 0) {

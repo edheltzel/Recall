@@ -188,7 +188,8 @@ describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
     // 7 → 8: importance column on messages/decisions/learnings/loa_entries (Sprint #4)
     // 8 → 9: provenance column on all five memory tables (issue #42)
-    expect(MIGRATIONS.length).toBe(9);
+    // 9 → 10: dedup_lineage table (issue #45)
+    expect(MIGRATIONS.length).toBe(10);
   });
 
   test('all entries are functions', () => {

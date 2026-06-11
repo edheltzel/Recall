@@ -66,6 +66,7 @@ import {
 	reciprocalRankFusion,
 	checkEmbeddingService,
 } from "./lib/embeddings.js";
+import { notMarkedDuplicateSql } from "./lib/dedup.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
 
@@ -118,9 +119,12 @@ async function hybridSearch(
 			const queryResult = await embed(query);
 			const queryEmbedding = queryResult.embedding;
 
+			// Marked duplicates (recall dedup, issue #45) keep their embeddings
+			// but are hidden from the vector path, matching the FTS5 default.
 			const embeddings = db
 				.prepare(`
         SELECT source_table, source_id, embedding FROM embeddings
+        WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
       `)
 				.all() as Array<{
 				source_table: string;
