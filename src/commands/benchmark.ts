@@ -11,7 +11,7 @@ import { join } from 'path';
 const SUITES_AVAILABLE = [
   { id: 'A', name: 'Cross-session recall', status: 'planned' },
   { id: 'B', name: 'Token efficiency', status: 'built' },
-  { id: 'C', name: 'Precision under noise', status: 'planned' },
+  { id: 'C', name: 'Precision under noise', status: 'built' },
   { id: 'D', name: 'Structured-knowledge fidelity', status: 'planned' },
   { id: 'E', name: 'Real-world replay', status: 'planned' },
 ] as const;

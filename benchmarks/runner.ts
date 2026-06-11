@@ -11,6 +11,7 @@
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { runSuiteB } from './suites/suite-b-token-efficiency.js';
+import { runSuiteC } from './suites/suite-c-precision-noise.js';
 import type { RunResult, SuiteResult, SuiteId } from './types.js';
 
 const RESULTS_DIR = join(import.meta.dir, 'results');
@@ -38,8 +39,11 @@ async function dispatchSuite(suite: SuiteId, project?: string): Promise<SuiteRes
   switch (suite) {
     case 'B':
       return runSuiteB({ project });
-    case 'A':
     case 'C':
+      // Suite C builds its own synthetic corpora — the project scope does
+      // not apply to it.
+      return runSuiteC();
+    case 'A':
     case 'D':
     case 'E':
       // Stub — these suites are planned but not implemented in this slice.

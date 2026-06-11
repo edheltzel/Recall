@@ -241,10 +241,17 @@ describe('Runner — runBenchmarks', () => {
   });
 
   test('skips planned suites cleanly when running all', async () => {
-    const out = await runBenchmarks({ project: 'bench-test', dryRun: true });
-    // Only Suite B is built — others return null and are skipped
-    expect(out.result.suites.length).toBe(1);
-    expect(out.result.suites[0].suite).toBe('B');
+    // Suite C is built — cap its corpus ladder so this stays a fast test.
+    process.env.RECALL_BENCH_C_SIZES = '100';
+    process.env.RECALL_BENCH_C_REPEATS = '1';
+    try {
+      const out = await runBenchmarks({ project: 'bench-test', dryRun: true });
+      // Suites B and C are built — A / D / E return null and are skipped
+      expect(out.result.suites.map(s => s.suite)).toEqual(['B', 'C']);
+    } finally {
+      delete process.env.RECALL_BENCH_C_SIZES;
+      delete process.env.RECALL_BENCH_C_REPEATS;
+    }
   });
 });
 
