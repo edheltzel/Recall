@@ -18,6 +18,7 @@ recall search "$1"
 - `-t <table>` — Hard-filter to one table: messages, loa, decisions, learnings, breadcrumbs
 - `--bias-type <table>` — Softly boost one table without filtering other matches. Same values as `-t`.
 - `-l <n>` — Max results (default: 20)
+- `--show-provenance` — Show Record Provenance for every result (by default only unknown provenance is flagged)
 
 ## Examples
 

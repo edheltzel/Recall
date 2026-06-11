@@ -27,6 +27,7 @@ Searches messages, LoA entries, decisions, learnings, and breadcrumbs. The slash
 
 - `/Recall:search database choice -t decisions` — hard-filter to decisions only
 - `/Recall:search database choice --bias-type decisions` — prefer decisions first, while still returning matching learnings/messages/LoA/breadcrumbs
+- `/Recall:search database choice --show-provenance` — show Record Provenance for every result (by default only unknown provenance is flagged)
 
 Rule of thumb: use `-t` when you want only one table; use `--bias-type` when you want one table first without hiding other context.
 

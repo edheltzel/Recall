@@ -16,6 +16,7 @@ recall search "query"                   # FTS5 search with options
 recall search "query" -t decisions      # Hard-filter to decisions only
 recall search "query" --bias-type decisions # Prefer decisions, still show other matching tables
 recall search "query" -p myproject      # Filter by project
+recall search "query" --show-provenance # Show provenance for every result
 recall semantic "query"                 # Semantic search (explicit)
 recall hybrid "query"                   # Hybrid search (explicit)
 ```
@@ -42,6 +43,8 @@ FTS5 supports boolean operators and prefix matching:
 - `config NOT docker` — exclude a term
 - `auth*` — prefix match (authz, authentication, etc.)
 - `"vpn config"` — exact phrase
+
+By default, search output stays quiet about [Record Provenance](#record-provenance) when a record carries a known value, and visibly flags records whose provenance is unknown (legacy rows that predate the provenance column). Pass `--show-provenance` to display the provenance of every result.
 
 ---
 
@@ -208,6 +211,30 @@ recall unpin decisions 42               # Reset to table default (5, or 8 for Lo
 ```
 
 LoA entries have a write-time floor of 5; `recall pin` will not drop them below that.
+
+## Record Provenance
+
+The `provenance` column on `messages`, `decisions`, `learnings`, `breadcrumbs`,
+and `loa_entries` declares how each record was created: `verbatim` (exact source
+text), `user_authored` (directly authored via a user or agent command),
+`extracted` (generated from source material, possibly lossy), or `derived`
+(mechanically produced from existing memory records). Provenance is **automatic
+write-path metadata** — every write path stamps it; there is no flag or MCP
+parameter to set it (see `docs/adr/0001-record-provenance-automatic-write-path-metadata.md`).
+
+Legacy rows that predate the column have no declared provenance (`NULL`,
+reported as `unknown`). The backfill classifies them conservatively — only
+where the source table or a write-path marker gives deterministic evidence;
+everything else stays unknown rather than being guessed:
+
+```bash
+recall provenance backfill                      # Dry-run report (default)
+recall provenance backfill --execute            # Apply the classification
+recall provenance backfill --execute -t loa_entries  # Limit to one table
+```
+
+Allowed `-t/--table` values: `messages`, `decisions`, `learnings`,
+`breadcrumbs`, `loa_entries`, `all` (default).
 
 ## Benchmarks
 
