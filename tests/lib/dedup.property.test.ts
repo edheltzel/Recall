@@ -10,12 +10,13 @@
 // recency > lowest id; cos of the angle difference), never read back from
 // the implementation.
 //
-// Scope note: the one-hop lineage guarantee is WITHIN a single plan ("a
-// planned survivor never re-marked" — the PR #60 blocker fix). Across runs,
-// a prior survivor may legitimately be re-marked by a later semantic pass;
-// the repeated-runs property therefore asserts auditability (uniqueness,
-// record preservation, no re-marking of marked records), not cross-run
-// one-hop.
+// Scope note: the one-hop lineage guarantee holds WITHIN a single plan ("a
+// planned survivor never re-marked" — the PR #60 blocker fix) AND across
+// runs (issue #63 sticky survivors: a survivor recorded in dedup_lineage is
+// never re-marked by a later run, so every hidden or deleted record keeps a
+// visible survivor). The repeated-runs property asserts auditability
+// (uniqueness, record preservation, no re-marking of marked records); the
+// cross-run sticky-survivor property below pins the cross-run invariant.
 //
 // Generator sizes are bounded (≤5 groups × ≤4 members) so the suite stays
 // practical under normal `bun test` runs.
@@ -457,5 +458,204 @@ describe('dedup apply, idempotence, and repeated-run auditability', () => {
         });
       })
     );
+  });
+});
+
+describe('dedup cross-run sticky survivors (issue #63)', () => {
+  const thresholdArb = fc.integer({ min: 50, max: 99 }).map(n => n / 100);
+
+  // A challenger shadows one wave-1 record: same table, project, and
+  // embedding angle (so it pairs at/above any threshold with whatever
+  // visible record that angle reaches — recorded survivors included), with
+  // top provenance, importance, and richness so it out-ranks incumbents.
+  // Without sticky survivors, a challenger landing on a recorded survivor
+  // re-marks it — exactly the issue #63 hazard.
+  interface Challenger {
+    /** Index into the wave-1 records (mod length). */
+    target: number;
+    extraLen: number;
+    day: number;
+  }
+  const challengerArb: fc.Arbitrary<Challenger> = fc.record({
+    target: fc.nat({ max: 30 }),
+    extraLen: fc.integer({ min: 40, max: 60 }),
+    day: dayArb,
+  });
+
+  function insertChallengers(db: Database, challengers: Challenger[], wave1: InsRecord[]): void {
+    const records: InsRecord[] = challengers.map((c, i) => {
+      const target = wave1[c.target % wave1.length];
+      const text = `cross-run challenger ${i} body text ${'x'.repeat(c.extraLen)}`;
+      // Wave-1 records all come from GenMember, so the project narrowing is sound.
+      const meta = {
+        project: target.project as GenMember['project'],
+        provenance: 'user_authored' as Prov,
+        importance: 10,
+        day: c.day,
+      };
+      const id = insertRecord(db, target.table, text, meta);
+      return {
+        table: target.table,
+        id,
+        project: target.project,
+        provenance: meta.provenance,
+        importance: meta.importance,
+        createdAt: createdAt(c.day),
+        normalized: text,
+        angleDeg: target.angleDeg,
+      };
+    });
+    insertEmbeddings(db, records);
+  }
+
+  test('a recorded survivor is never re-marked by a later run, in plan or in final lineage', () => {
+    fc.assert(
+      fc.property(
+        corpusArb,
+        corpusArb,
+        fc.array(challengerArb, { minLength: 1, maxLength: 3 }),
+        thresholdArb,
+        (wave1Corpus, wave2Corpus, challengers, threshold) => {
+          withDb(db => {
+            const wave1 = insertCorpus(db, wave1Corpus);
+            insertEmbeddings(db, wave1);
+            applyDedupPlan(db, planDedup(db, { semantic: true, threshold }));
+            const survivorsAfterRun1 = new Set(
+              markedLineageTuples(db).map(t => `${t[0]}:${t[1]}`)
+            );
+
+            // Wave 2 arrives between runs: a second corpus reusing the same
+            // canonical texts (new members join wave-1 exact groups and can
+            // out-rank the recorded survivor) plus angle-targeted semantic
+            // challengers.
+            const wave2 = insertCorpus(db, wave2Corpus);
+            insertEmbeddings(db, wave2);
+            insertChallengers(db, challengers, wave1);
+
+            // Sticky: run 2 never plans a run-1 survivor as a duplicate.
+            const plan2 = planDedup(db, { semantic: true, threshold });
+            for (const e of plan2.tables.flatMap(t => t.planned)) {
+              expect(survivorsAfterRun1.has(`${e.duplicate_table}:${e.duplicate_id}`)).toBe(false);
+            }
+            applyDedupPlan(db, plan2);
+
+            // Visible-survivor property over the final lineage: no record is
+            // both a recorded survivor and an actively marked duplicate, so
+            // every hidden record's survivor is itself visible.
+            const finalTuples = markedLineageTuples(db);
+            const markedDupKeys = new Set(finalTuples.map(t => `${t[2]}:${t[3]}`));
+            for (const t of finalTuples) {
+              expect(markedDupKeys.has(`${t[0]}:${t[1]}`)).toBe(false);
+            }
+          });
+        }
+      )
+    );
+  });
+
+  test('destructive apply refuses, without writing, a plan that would delete a recorded survivor (defense-in-depth)', () => {
+    withDb(db => {
+      // Real run 1: an exact pair — the user-authored record survives.
+      const idA = insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: 'user_authored', importance: 10, day: 1,
+      });
+      insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: null, importance: 5, day: 1,
+      });
+      applyDedupPlan(db, planDedup(db, { semantic: false }));
+      expect(markedLineageTuples(db).map(t => `${t[0]}:${t[1]}`)).toEqual([`breadcrumbs:${idA}`]);
+
+      // Handcrafted plan claiming the recorded survivor as a duplicate —
+      // planDedup never produces this (the sticky-survivor exclusion), so
+      // the guard is exercised directly.
+      const idC = insertRecord(db, 'breadcrumbs', canonical(1), {
+        project: null, provenance: 'user_authored', importance: 10, day: 2,
+      });
+      const plan: DedupPlan = {
+        threshold: 0.95,
+        semanticSkipped: null,
+        crossTable: { textMatches: [], semanticPairs: 0 },
+        tables: [{
+          table: 'breadcrumbs',
+          scanned: 0,
+          tooShort: 0,
+          alreadyMarked: 0,
+          stickySkipped: 0,
+          exactGroups: 0,
+          semanticPairs: 1,
+          planned: [{
+            survivor_table: 'breadcrumbs',
+            survivor_id: idC,
+            duplicate_table: 'breadcrumbs',
+            duplicate_id: idA,
+            reason: 'semantic',
+            similarity: 0.99,
+            detail: '{}',
+          }],
+        }],
+      };
+
+      const before = snapshot(db);
+      expect(() => applyDedupPlan(db, plan, { destructive: true })).toThrow(/destructive dedup refused/);
+      expect(snapshot(db)).toBe(before);
+    });
+  });
+
+  test("a survivor recorded by a destructive run ('deleted' lineage) is sticky: never re-planned, and the guard still refuses", () => {
+    withDb(db => {
+      // Run 1, destructive: exact pair — A survives, B is hard-deleted, so
+      // the only lineage row carries status 'deleted' (not 'marked').
+      const idA = insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: 'user_authored', importance: 10, day: 1,
+      });
+      insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: null, importance: 5, day: 1,
+      });
+      const run1 = applyDedupPlan(db, planDedup(db, { semantic: false }), { destructive: true });
+      expect(run1).toEqual({ marked: 0, deleted: 1, fkProtected: 0 });
+      const lineage = db.prepare(
+        `SELECT survivor_id, status FROM dedup_lineage`
+      ).all() as Array<{ survivor_id: number; status: string }>;
+      expect(lineage).toEqual([{ survivor_id: idA, status: 'deleted' }]);
+
+      // Run 2: an equally-ranked but newer exact duplicate of A arrives and
+      // wins the group on recency — without 'deleted'-status stickiness, A
+      // (the only visible trace of hard-deleted B) would be re-marked.
+      const idC = insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: 'user_authored', importance: 10, day: 2,
+      });
+      const plan2 = planDedup(db, { semantic: false });
+      expect(plan2.tables.flatMap(t => t.planned)).toEqual([]);
+      expect(plan2.tables.find(t => t.table === 'breadcrumbs')!.stickySkipped).toBe(1);
+
+      // Defense-in-depth shares the same loader: a handcrafted destructive
+      // plan against the 'deleted'-row survivor must still refuse.
+      const handcrafted: DedupPlan = {
+        threshold: 0.95,
+        semanticSkipped: null,
+        crossTable: { textMatches: [], semanticPairs: 0 },
+        tables: [{
+          table: 'breadcrumbs',
+          scanned: 0,
+          tooShort: 0,
+          alreadyMarked: 0,
+          stickySkipped: 0,
+          exactGroups: 1,
+          semanticPairs: 0,
+          planned: [{
+            survivor_table: 'breadcrumbs',
+            survivor_id: idC,
+            duplicate_table: 'breadcrumbs',
+            duplicate_id: idA,
+            reason: 'exact',
+            similarity: 1.0,
+            detail: '{}',
+          }],
+        }],
+      };
+      const before = snapshot(db);
+      expect(() => applyDedupPlan(db, handcrafted, { destructive: true })).toThrow(/destructive dedup refused/);
+      expect(snapshot(db)).toBe(before);
+    });
   });
 });
