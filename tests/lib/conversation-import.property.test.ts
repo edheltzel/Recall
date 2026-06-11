@@ -107,6 +107,19 @@ function slackPayload(messages: Array<{ isBot: boolean; text: string; atSeconds:
 
 const survives = (m: { text: string }): boolean => m.text.trim() !== '';
 
+const isoFromSeconds = (seconds: number): string => new Date(seconds * 1000).toISOString();
+
+// Multiset equality of (role, timestamp, content) tuples: every surviving
+// message comes through normalization exactly once with its role mapping,
+// derived timestamp, and body pinned — none invented, dropped, or restamped
+// (a parser that stamps every message with the `new Date()` fallback, or
+// mis-maps claude-ai's `human` sender, must fail here). JSON-encoding the
+// tuple gives a collision-free sortable key.
+function expectMessageTuples(session: ParsedConversationSession, expected: string[]): void {
+  const actual = session.messages.map(m => JSON.stringify([m.role, m.timestamp, m.content]));
+  expect([...actual].sort()).toEqual([...expected].sort());
+}
+
 const SANITIZED_ID = /^[a-zA-Z0-9:._-]+$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -175,10 +188,11 @@ describe('conversation import normalization properties', () => {
           expect(sessions.length).toBe(surviving.length);
           sessions.forEach((session, i) => {
             expectSessionInvariants(session, adapterCase.source, expectedProject);
-            // Multiset equality: every non-empty message body survives
-            // normalization exactly once, none invented.
-            const expectedContents = surviving[i].messages.filter(survives).map(m => m.text);
-            expect([...session.messages.map(m => m.content)].sort()).toEqual([...expectedContents].sort());
+            // Generator roles round-trip for both adapters: claude-ai sends
+            // `user` as the `human` sender, which roleFrom must map back.
+            const expected = surviving[i].messages.filter(survives)
+              .map(m => JSON.stringify([m.role, isoFromSeconds(m.atSeconds), m.text]));
+            expectMessageTuples(session, expected);
           });
 
           expect(detectConversationFormat(payload)).toBe(adapterCase.detectable(convos) ? adapterCase.source : null);
@@ -203,8 +217,14 @@ describe('conversation import normalization properties', () => {
           expectSessionInvariants(session, 'slack', expectedProject);
           // Channel and date label are derived from the file path.
           expect(session.sessionId).toBe('slack:team-channel:2026-05-31');
-          expect(session.messages.length).toBe(surviving.length);
-          expect(session.messages.filter(m => m.role === 'assistant').length).toBe(surviving.filter(m => m.isBot).length);
+          // Sub-millisecond ts suffixes (the padded index) truncate away, so
+          // the derived timestamp is the whole-second ISO string.
+          const expected = surviving.map(m => JSON.stringify([
+            m.isBot ? 'assistant' : 'user',
+            isoFromSeconds(m.atSeconds),
+            `[${m.isBot ? 'Recall Bot' : 'Ada Lovelace'}] ${m.text}`,
+          ]));
+          expectMessageTuples(session, expected);
         }
 
         expect(detectConversationFormat(payload)).toBe(msgs.length > 0 ? 'slack' : null);
