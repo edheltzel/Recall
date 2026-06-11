@@ -132,6 +132,8 @@ exit Pi first.
 3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
 4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` via a slash command to persist the conversation
 5. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
+6. **Never store secrets** — `recall-memory_memory_add` and `recall dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+7. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ## How Extraction Works
 

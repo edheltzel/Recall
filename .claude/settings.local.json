@@ -11,5 +11,9 @@
       "Read(//Users/ed/.bun/bin/**)",
       "Bash(bun install *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "codegraph"
+  ],
+  "enableAllProjectMcpServers": true
 }

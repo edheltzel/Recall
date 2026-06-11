@@ -25,6 +25,10 @@ if (!DB_PATH) {
 
 const db = new Database(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');
+// Retry on transient SQLITE_BUSY instead of crashing — without this, a
+// busy collision with the parent test's connections kills the worker
+// before it ever records a result.
+db.exec('PRAGMA busy_timeout = 5000');
 
 // Create results table if not exists (for test assertions)
 db.exec(`

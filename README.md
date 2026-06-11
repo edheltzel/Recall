@@ -2,7 +2,12 @@
   <img src="assets/banner.png" alt="Recall — Persistent Memory for Coding Agents" width="100%">
 </p>
 
-> **Recall is a SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions as you work, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records at every session start. Works across Claude Code, OpenCode, and Pi from one local database.
+## TL;DR
+
+Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected at session start, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
+
+
+> **A SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions as you work, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records at every session start. Works across Claude Code, OpenCode, and Pi from one local database.
 
 Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
 

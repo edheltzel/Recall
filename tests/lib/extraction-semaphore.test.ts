@@ -167,11 +167,23 @@ describe('concurrency', () => {
         CONV_PATH: '/test/crash-conv.jsonl',
       },
       stdout: 'ignore',
-      stderr: 'ignore',
+      stderr: 'pipe',
     });
 
-    // Wait a moment for the worker to acquire the lock
-    await Bun.sleep(300);
+    // Wait for the worker to acquire the lock — poll instead of a fixed
+    // sleep; bun process startup can exceed 300ms on loaded CI runners.
+    const deadline = Date.now() + 10000;
+    while (getActiveLockCount(dbPath) === 0 && Date.now() < deadline) {
+      await Bun.sleep(50);
+    }
+    if (getActiveLockCount(dbPath) === 0) {
+      proc.kill(9);
+      await proc.exited;
+      const workerStderr = await new Response(proc.stderr).text();
+      throw new Error(
+        `setup: worker never acquired the extraction lock within 10s; worker stderr:\n${workerStderr}`
+      );
+    }
 
     // SIGKILL the process
     proc.kill(9);
