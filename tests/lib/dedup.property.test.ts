@@ -600,4 +600,62 @@ describe('dedup cross-run sticky survivors (issue #63)', () => {
       expect(snapshot(db)).toBe(before);
     });
   });
+
+  test("a survivor recorded by a destructive run ('deleted' lineage) is sticky: never re-planned, and the guard still refuses", () => {
+    withDb(db => {
+      // Run 1, destructive: exact pair — A survives, B is hard-deleted, so
+      // the only lineage row carries status 'deleted' (not 'marked').
+      const idA = insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: 'user_authored', importance: 10, day: 1,
+      });
+      insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: null, importance: 5, day: 1,
+      });
+      const run1 = applyDedupPlan(db, planDedup(db, { semantic: false }), { destructive: true });
+      expect(run1).toEqual({ marked: 0, deleted: 1, fkProtected: 0 });
+      const lineage = db.prepare(
+        `SELECT survivor_id, status FROM dedup_lineage`
+      ).all() as Array<{ survivor_id: number; status: string }>;
+      expect(lineage).toEqual([{ survivor_id: idA, status: 'deleted' }]);
+
+      // Run 2: an equally-ranked but newer exact duplicate of A arrives and
+      // wins the group on recency — without 'deleted'-status stickiness, A
+      // (the only visible trace of hard-deleted B) would be re-marked.
+      const idC = insertRecord(db, 'breadcrumbs', canonical(0), {
+        project: null, provenance: 'user_authored', importance: 10, day: 2,
+      });
+      const plan2 = planDedup(db, { semantic: false });
+      expect(plan2.tables.flatMap(t => t.planned)).toEqual([]);
+      expect(plan2.tables.find(t => t.table === 'breadcrumbs')!.stickySkipped).toBe(1);
+
+      // Defense-in-depth shares the same loader: a handcrafted destructive
+      // plan against the 'deleted'-row survivor must still refuse.
+      const handcrafted: DedupPlan = {
+        threshold: 0.95,
+        semanticSkipped: null,
+        crossTable: { textMatches: [], semanticPairs: 0 },
+        tables: [{
+          table: 'breadcrumbs',
+          scanned: 0,
+          tooShort: 0,
+          alreadyMarked: 0,
+          stickySkipped: 0,
+          exactGroups: 1,
+          semanticPairs: 0,
+          planned: [{
+            survivor_table: 'breadcrumbs',
+            survivor_id: idC,
+            duplicate_table: 'breadcrumbs',
+            duplicate_id: idA,
+            reason: 'exact',
+            similarity: 1.0,
+            detail: '{}',
+          }],
+        }],
+      };
+      const before = snapshot(db);
+      expect(() => applyDedupPlan(db, handcrafted, { destructive: true })).toThrow(/destructive dedup refused/);
+      expect(snapshot(db)).toBe(before);
+    });
+  });
 });
