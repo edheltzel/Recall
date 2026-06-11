@@ -164,7 +164,10 @@ export function runImportLegacy(options: ImportLegacyOptions): void {
         message_range_start: undefined,
         message_range_end: undefined,
         message_count: undefined,
-        tags: 'legacy,imported'
+        tags: 'legacy,imported',
+        // DISTILLED.md / HOT_RECALL.md content is prior extraction output —
+        // the record stays honest as extracted (ADR-0001).
+        provenance: 'extracted'
       });
 
       // Update the created_at to match the original date

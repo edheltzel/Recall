@@ -2,7 +2,7 @@
 
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
-import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult } from '../types/index.js';
+import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
 
 // ============ Sessions ============
 
@@ -48,8 +48,8 @@ export function endSession(sessionId: string, summary?: string): void {
 export function addMessage(message: Omit<Message, 'id'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO messages (session_id, timestamp, role, content, project, importance)
-    VALUES ($session_id, $timestamp, $role, $content, $project, $importance)
+    INSERT INTO messages (session_id, timestamp, role, content, project, importance, provenance)
+    VALUES ($session_id, $timestamp, $role, $content, $project, $importance, $provenance)
   `);
   const result = stmt.run({
     $session_id: message.session_id,
@@ -57,7 +57,8 @@ export function addMessage(message: Omit<Message, 'id'>): number {
     $role: message.role,
     $content: message.content,
     $project: message.project || null,
-    $importance: clampImportance(message.importance, 5)
+    $importance: clampImportance(message.importance, 5),
+    $provenance: message.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -65,8 +66,8 @@ export function addMessage(message: Omit<Message, 'id'>): number {
 export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO messages (session_id, timestamp, role, content, project, importance)
-    VALUES ($session_id, $timestamp, $role, $content, $project, $importance)
+    INSERT INTO messages (session_id, timestamp, role, content, project, importance, provenance)
+    VALUES ($session_id, $timestamp, $role, $content, $project, $importance, $provenance)
   `);
 
   const insertMany = db.transaction((msgs: Omit<Message, 'id'>[]) => {
@@ -78,7 +79,8 @@ export function addMessagesBatch(messages: Omit<Message, 'id'>[]): number {
         $role: msg.role,
         $content: msg.content,
         $project: msg.project || null,
-        $importance: clampImportance(msg.importance, 5)
+        $importance: clampImportance(msg.importance, 5),
+        $provenance: msg.provenance ?? null
       });
       count++;
     }
@@ -113,8 +115,8 @@ export function pinRecord(table: 'decisions' | 'learnings' | 'breadcrumbs' | 'lo
 export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence, importance)
-    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence, $importance)
+    INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence, importance, provenance)
+    VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence, $importance, $provenance)
   `);
   const result = stmt.run({
     $session_id: decision.session_id || null,
@@ -125,7 +127,8 @@ export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): numb
     $alternatives: decision.alternatives || null,
     $status: decision.status || 'active',
     $confidence: decision.confidence || 'medium',
-    $importance: clampImportance(decision.importance, 5)
+    $importance: clampImportance(decision.importance, 5),
+    $provenance: decision.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -207,8 +210,8 @@ export function findSimilarDecisions(text: string, limit = 3): Decision[] {
 export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance)
-    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence, $importance)
+    INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance, provenance)
+    VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence, $importance, $provenance)
   `);
   const result = stmt.run({
     $session_id: learning.session_id || null,
@@ -219,7 +222,8 @@ export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): numb
     $prevention: learning.prevention || null,
     $tags: learning.tags || null,
     $confidence: learning.confidence || 'medium',
-    $importance: clampImportance(learning.importance, 5)
+    $importance: clampImportance(learning.importance, 5),
+    $provenance: learning.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -234,8 +238,8 @@ export function getLearning(id: number): Learning | undefined {
 export function addBreadcrumb(breadcrumb: Omit<Breadcrumb, 'id' | 'created_at'>): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at)
-    VALUES ($session_id, $content, $category, $project, $importance, $expires_at)
+    INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at, provenance)
+    VALUES ($session_id, $content, $category, $project, $importance, $expires_at, $provenance)
   `);
   const result = stmt.run({
     $session_id: breadcrumb.session_id || null,
@@ -243,7 +247,8 @@ export function addBreadcrumb(breadcrumb: Omit<Breadcrumb, 'id' | 'created_at'>)
     $category: breadcrumb.category || null,
     $project: breadcrumb.project || null,
     $importance: breadcrumb.importance ?? 5,
-    $expires_at: breadcrumb.expires_at || null
+    $expires_at: breadcrumb.expires_at || null,
+    $provenance: breadcrumb.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -304,7 +309,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
     switch (table) {
       case 'messages':
         sql = `
-          SELECT m.id, m.content, m.project, m.timestamp as created_at, f.rank
+          SELECT m.id, m.content, m.project, m.timestamp as created_at, m.provenance, f.rank
           FROM messages_fts f
           JOIN messages m ON m.id = f.rowid
           WHERE messages_fts MATCH ?
@@ -315,7 +320,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         break;
       case 'decisions':
         sql = `
-          SELECT d.id, d.decision as content, d.project, d.created_at, f.rank
+          SELECT d.id, d.decision as content, d.project, d.created_at, d.provenance, f.rank
           FROM decisions_fts f
           JOIN decisions d ON d.id = f.rowid
           WHERE decisions_fts MATCH ?
@@ -327,7 +332,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         break;
       case 'learnings':
         sql = `
-          SELECT l.id, l.problem as content, l.project, l.created_at, f.rank
+          SELECT l.id, l.problem as content, l.project, l.created_at, l.provenance, f.rank
           FROM learnings_fts f
           JOIN learnings l ON l.id = f.rowid
           WHERE learnings_fts MATCH ?
@@ -338,7 +343,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         break;
       case 'breadcrumbs':
         sql = `
-          SELECT b.id, b.content, b.project, b.created_at, f.rank
+          SELECT b.id, b.content, b.project, b.created_at, b.provenance, f.rank
           FROM breadcrumbs_fts f
           JOIN breadcrumbs b ON b.id = f.rowid
           WHERE breadcrumbs_fts MATCH ?
@@ -349,7 +354,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         break;
       case 'loa':
         sql = `
-          SELECT l.id, l.title || ': ' || SUBSTR(l.fabric_extract, 1, 200) as content, l.project, l.created_at, f.rank
+          SELECT l.id, l.title || ': ' || SUBSTR(l.fabric_extract, 1, 200) as content, l.project, l.created_at, l.provenance, f.rank
           FROM loa_fts f
           JOIN loa_entries l ON l.id = f.rowid
           WHERE loa_fts MATCH ?
@@ -373,6 +378,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         content: string;
         project: string | null;
         created_at: string;
+        provenance: Provenance | null;
         rank: number;
       }>;
 
@@ -383,6 +389,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           content: row.content,
           project: row.project || undefined,
           created_at: row.created_at,
+          provenance: row.provenance ?? null,
           rank: row.rank
         });
       }
@@ -453,8 +460,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
   // so a careless caller cannot demote curated knowledge below neutral.
   const importance = Math.max(5, clampImportance(entry.importance, 8));
   const stmt = db.prepare(`
-    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance)
-    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance)
+    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance, provenance)
+    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance)
   `);
   const result = stmt.run({
     $title: entry.title,
@@ -467,7 +474,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
     $project: entry.project || null,
     $tags: entry.tags || null,
     $message_count: entry.message_count || null,
-    $importance: importance
+    $importance: importance,
+    $provenance: entry.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }

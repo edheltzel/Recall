@@ -289,3 +289,21 @@ describe('conversationSourceAdapters', () => {
     }
   });
 });
+
+describe('Record Provenance (ADR-0001, issue #42)', () => {
+  test('raw imported messages are stamped verbatim', async () => {
+    const file = join(tempDir, 'slack-export.json');
+    writeFileSync(file, JSON.stringify([
+      { ts: '1710000000.000100', user: 'U1', text: 'hello from slack history' },
+      { ts: '1710000001.000200', user: 'U2', text: 'a reply worth remembering' },
+    ]));
+
+    const result = await importConversations(file, { format: 'slack', noExtract: true });
+    expect(result.messagesImported).toBe(2);
+
+    const db = readDb();
+    const rows = db.prepare('SELECT provenance FROM messages ORDER BY timestamp').all() as any[];
+    db.close();
+    expect(rows.map(r => r.provenance)).toEqual(['verbatim', 'verbatim']);
+  });
+});

@@ -274,3 +274,35 @@ describe('RecallPreCompact — flushConversation', () => {
     expect(hookSource).not.toMatch(/extractWithClaude|extractWithOllama|fetch\(|http\.request/);
   });
 });
+
+describe('RecallPreCompact — Record Provenance (ADR-0001, issue #42)', () => {
+  test('stamps flushed messages verbatim when the DB has the provenance column', async () => {
+    // Migrated DB shape: messages carries the provenance column.
+    const db = new Database(dbPath);
+    db.exec(`ALTER TABLE messages ADD COLUMN provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived'))`);
+    db.close();
+
+    writeJsonlMessages([
+      { role: 'user', text: 'a message captured mid-session' },
+      { role: 'assistant', text: 'a reply captured mid-session' },
+    ]);
+
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
+    const result = flushConversation(convPath, '/tmp/proj');
+    expect(result.imported).toBe(2);
+
+    const readDb = new Database(dbPath, { readonly: true });
+    const rows = readDb.prepare('SELECT provenance FROM messages ORDER BY id').all() as Array<{ provenance: string }>;
+    readDb.close();
+    expect(rows.map(r => r.provenance)).toEqual(['verbatim', 'verbatim']);
+  });
+
+  test('keeps working against a pre-provenance DB (column guard)', async () => {
+    // CORE_SCHEMA above has no provenance column — the flush must not fail.
+    writeJsonlMessages([{ role: 'user', text: 'legacy database flush message' }]);
+
+    const { flushConversation } = await import('../../hooks/RecallPreCompact');
+    const result = flushConversation(convPath, '/tmp/proj');
+    expect(result.imported).toBe(1);
+  });
+});

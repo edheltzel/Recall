@@ -7,6 +7,7 @@ interface SearchOptions {
   table?: string;
   biasType?: string;
   limit?: number;
+  showProvenance?: boolean;
 }
 
 export function runSearch(query: string, options: SearchOptions): void {
@@ -40,7 +41,16 @@ export function runSearch(query: string, options: SearchOptions): void {
     const projectTag = result.project ? ` [${result.project}]` : '';
     const date = result.created_at.split('T')[0];
 
-    console.log(`[${result.table}#${result.id}]${projectTag} ${date}`);
+    // Display contract (issue #42): known provenance stays quiet by default;
+    // unknown (NULL) is always flagged. --show-provenance shows every value.
+    let provenanceTag = '';
+    if (options.showProvenance) {
+      provenanceTag = ` [provenance: ${result.provenance ?? 'unknown'}]`;
+    } else if (!result.provenance) {
+      provenanceTag = ' ⚠ [provenance: unknown]';
+    }
+
+    console.log(`[${result.table}#${result.id}]${projectTag} ${date}${provenanceTag}`);
     console.log(`  ${preview.replace(/\n/g, ' ')}`);
     console.log('');
   }

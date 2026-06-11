@@ -24,6 +24,7 @@ import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
+import { runProvenanceBackfill } from './commands/provenance.js';
 import { runBenchmark, listBenchmarks, reportLatestBenchmark } from './commands/benchmark.js';
 import { runOnboard } from './commands/onboard.js';
 import { runMigrate } from './commands/migrate.js';
@@ -177,12 +178,14 @@ program
   .option('-t, --table <table>', 'Hard-filter to one table (messages, loa, decisions, learnings, breadcrumbs)')
   .option('--bias-type <table>', 'Softly boost one table without filtering others (messages, loa, decisions, learnings, breadcrumbs)')
   .option('-l, --limit <n>', 'Max results', '20')
+  .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action((query, options) => {
     runSearch(query, {
       project: options.project,
       table: options.table,
       biasType: options.biasType,
-      limit: parseInt(options.limit, 10)
+      limit: parseInt(options.limit, 10),
+      showProvenance: options.showProvenance
     });
     closeDb();
   });
@@ -535,6 +538,27 @@ importanceCmd
     closeDb();
   });
 
+// recall provenance — conservative backfill for Record Provenance (ADR-0001).
+// Provenance is automatic write-path metadata: there is intentionally no
+// flag to set it on add commands; this maintenance path only classifies
+// legacy NULL rows where deterministic evidence exists.
+const provenanceCmd = program
+  .command('provenance')
+  .description('Manage Record Provenance metadata on memory records');
+
+provenanceCmd
+  .command('backfill')
+  .description('Classify legacy rows with unknown provenance using deterministic write-path evidence (dry-run by default; never guesses)')
+  .option('--execute', 'Apply changes (default is dry-run)')
+  .option('-t, --table <table>', 'Target table: messages, decisions, learnings, breadcrumbs, loa_entries, all', 'all')
+  .action((options) => {
+    runProvenanceBackfill({
+      dryRun: !options.execute,
+      table: options.table
+    });
+    closeDb();
+  });
+
 // recall pin <table> <id> [importance] — force a record to a high importance (default 10)
 program
   .command('pin <table> <id> [importance]')
@@ -620,7 +644,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

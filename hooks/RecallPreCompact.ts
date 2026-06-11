@@ -358,10 +358,13 @@ export function flushConversation(convPath: string, cwd: string): FlushResult {
 
       // Insert messages. importance defaults to 5 — these are mid-session
       // captures, not curated, and the Stop hook may later promote a subset
-      // to LoA at importance 8.
+      // to LoA at importance 8. Raw transcript capture is verbatim
+      // (ADR-0001); the column guard keeps pre-provenance DBs working.
+      const hasProvenance = (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+        .some((c) => c.name === 'provenance');
       const insertMessage = db.prepare(`
-        INSERT INTO messages (session_id, timestamp, role, content, project, importance)
-        VALUES (?, ?, ?, ?, ?, 5)
+        INSERT INTO messages (session_id, timestamp, role, content, project, importance${hasProvenance ? ', provenance' : ''})
+        VALUES (?, ?, ?, ?, ?, 5${hasProvenance ? ", 'verbatim'" : ''})
       `);
 
       const tx = db.transaction((rows: ParsedMessage[]) => {

@@ -22,7 +22,7 @@ Use `table` when you need a **hard filter** to one record type. Use `bias_type` 
 | bias_type | string | no | — | Softly boost one table type in ranking without filtering other matches. Same allowed values as `table`; prefer `table` when you need only one type. |
 | limit | number | no | 10 | Maximum number of results to return |
 
-**Returns:** Array of matching records with table name, id, content, project, and snippet highlighting.
+**Returns:** Array of matching records with table name, id, content, project, snippet highlighting, and Record Provenance (`verbatim`, `user_authored`, `extracted`, `derived`, or `unknown` for legacy rows that predate provenance).
 
 ```js
 // Only decisions
@@ -48,7 +48,7 @@ Combined keyword + semantic search using Reciprocal Rank Fusion. Best for natura
 | project | string | no | — | Filter results to a specific project name |
 | limit | number | no | 10 | Maximum number of results to return |
 
-**Returns:** Array of matching records ranked by fused keyword and semantic relevance scores.
+**Returns:** Array of matching records ranked by fused keyword and semantic relevance scores, each with its Record Provenance.
 
 ```js
 memory_hybrid_search({ query: "how did we handle rate limiting", project: "my-app" })
@@ -67,7 +67,7 @@ Get recent context — LoA entries, decisions, and breadcrumbs. Good for orienti
 | limit | number | no | 5 | Number of recent entries to return per category |
 | project | string | no | — | Filter results to a specific project name |
 
-**Returns:** Recent records grouped by category: Library of Alexandria entries, decisions, and breadcrumbs.
+**Returns:** Recent records grouped by category: Library of Alexandria entries, decisions, and breadcrumbs — each annotated with its Record Provenance.
 
 ```js
 memory_recall({ limit: 5, project: "my-app" })
@@ -111,6 +111,8 @@ Add structured records during a session. Use this to capture decisions, learning
 | importance | number | no | 5 | Importance on a 1-10 scale. Surfaces higher-importance records earlier in L1 at session start. LoA has a floor of 5. (Added in v0.7.0.) |
 
 **Returns:** Confirmation with the new record's id and table.
+
+Records created through `memory_add` are automatically stamped with Record Provenance `user_authored`. There is intentionally no provenance parameter — provenance is write-path metadata, not a caller claim (see `docs/adr/0001-record-provenance-automatic-write-path-metadata.md`).
 
 ```js
 memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and JSONB indexing" })

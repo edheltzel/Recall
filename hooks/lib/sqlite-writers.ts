@@ -42,6 +42,16 @@ function columnExists(db: Database, table: string, column: string): boolean {
   }
 }
 
+// ADR-0001: every writer in this file is an extraction path, so records are
+// stamped provenance = 'extracted'. The value is a SQL literal (not a bind
+// param) so the legacy-DB column guard stays a simple string switch — older
+// databases without the provenance column keep working unchanged.
+function provenanceFragment(db: Database, table: string): { col: string; val: string } {
+  return columnExists(db, table, 'provenance')
+    ? { col: ', provenance', val: ", 'extracted'" }
+    : { col: '', val: '' };
+}
+
 // ---------------------------------------------------------------------------
 // extraction_sessions
 // ---------------------------------------------------------------------------
@@ -105,11 +115,12 @@ export function writeDecisionsBatch(dbPath: string, items: DecisionInput[]): num
   try {
     if (!tableExists(db, 'decisions')) return 0;
     const hasConfidence = columnExists(db, 'decisions', 'confidence');
+    const provenance = provenanceFragment(db, 'decisions');
     const sql = hasConfidence
-      ? `INSERT INTO decisions (session_id, category, project, decision, status, confidence, importance)
-         VALUES (?, ?, ?, ?, 'active', ?, ?)`
-      : `INSERT INTO decisions (session_id, category, project, decision, status, importance)
-         VALUES (?, ?, ?, ?, 'active', ?)`;
+      ? `INSERT INTO decisions (session_id, category, project, decision, status, confidence, importance${provenance.col})
+         VALUES (?, ?, ?, ?, 'active', ?, ?${provenance.val})`
+      : `INSERT INTO decisions (session_id, category, project, decision, status, importance${provenance.col})
+         VALUES (?, ?, ?, ?, 'active', ?${provenance.val})`;
     const stmt = db.prepare(sql);
     const insertMany = db.transaction((batch: DecisionInput[]) => {
       let n = 0;
@@ -165,11 +176,12 @@ export function writeLearningsBatch(dbPath: string, items: LearningInput[]): num
   try {
     if (!tableExists(db, 'learnings')) return 0;
     const hasConfidence = columnExists(db, 'learnings', 'confidence');
+    const provenance = provenanceFragment(db, 'learnings');
     const sql = hasConfidence
-      ? `INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      : `INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, importance)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+      ? `INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance${provenance.col})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?${provenance.val})`
+      : `INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, importance${provenance.col})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?${provenance.val})`;
     const stmt = db.prepare(sql);
     const insertMany = db.transaction((batch: LearningInput[]) => {
       let n = 0;
@@ -227,9 +239,10 @@ export function writeBreadcrumbsBatch(dbPath: string, items: BreadcrumbInput[]):
   const db = openDb(dbPath);
   try {
     if (!tableExists(db, 'breadcrumbs')) return 0;
+    const provenance = provenanceFragment(db, 'breadcrumbs');
     const stmt = db.prepare(
-      `INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at${provenance.col})
+       VALUES (?, ?, ?, ?, ?, ?${provenance.val})`
     );
     const insertMany = db.transaction((batch: BreadcrumbInput[]) => {
       let n = 0;
@@ -273,11 +286,12 @@ export function writeLoaEntryFromExtraction(dbPath: string, entry: LoaInput): nu
     if (!tableExists(db, 'loa_entries')) return 0;
     // LoA importance is floored at 5 (curated tier guardrail).
     const importance = Math.max(5, clampImportance(entry.importance, 8));
+    const provenance = provenanceFragment(db, 'loa_entries');
     const result = db
       .prepare(
         `INSERT INTO loa_entries
-           (title, description, fabric_extract, session_id, project, tags, message_count, importance)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (title, description, fabric_extract, session_id, project, tags, message_count, importance${provenance.col})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?${provenance.val})`
       )
       .run(
         entry.title,

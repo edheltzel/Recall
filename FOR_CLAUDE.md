@@ -141,6 +141,8 @@ You can also use the `recall` CLI directly via Bash:
 ```bash
 recall search "deployment pipeline"    # Search memory
 recall search "database choice" --bias-type decisions  # Prefer decisions, keep other matches
+recall search "auth" --show-provenance # Show Record Provenance for every result
+recall provenance backfill             # Classify legacy unknown-provenance rows (dry-run; --execute to apply)
 recall stats                           # Database statistics
 recall loa list                        # Browse curated knowledge
 recall dump "Session title"            # Capture current session

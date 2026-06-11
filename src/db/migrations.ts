@@ -179,6 +179,25 @@ export const MIGRATIONS: Migration[] = [
     db.prepare('CREATE INDEX IF NOT EXISTS idx_learnings_importance ON learnings(importance)').run();
     db.prepare('CREATE INDEX IF NOT EXISTS idx_loa_importance ON loa_entries(importance)').run();
   },
+
+  // Migration 8 → 9: Record Provenance (ADR-0001, issue #42).
+  // Additive nullable column on all memory tables. Provenance is automatic
+  // write-path metadata; legacy rows stay NULL ("unknown") until explicitly
+  // backfilled via `recall provenance backfill` — never guessed, no default.
+  // The CHECK constraint passes for NULL (IN() evaluates to NULL → allowed),
+  // so unknown remains representable.
+  (db) => {
+    const tables = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'];
+    for (const table of tables) {
+      try {
+        db.prepare(
+          `ALTER TABLE ${table} ADD COLUMN provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived'))`
+        ).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install case)
+      }
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------

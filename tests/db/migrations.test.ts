@@ -110,10 +110,85 @@ describe('migration failure handling', () => {
   });
 });
 
+describe('provenance migration (8 to 9)', () => {
+  const PROVENANCE_TABLES = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'];
+
+  test('all memory tables have provenance column after migrations', () => {
+    applyMigrations(db);
+    for (const table of PROVENANCE_TABLES) {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+      expect(cols.map((c: any) => c.name)).toContain('provenance');
+    }
+  });
+
+  test('upgrade path: ALTER adds provenance to a legacy table without it', () => {
+    // Simulate a pre-provenance install: legacy table shape, version 8.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-legacy-test-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy.db'));
+    try {
+      legacyDb.exec(`
+        CREATE TABLE messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          timestamp DATETIME NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          project TEXT,
+          importance INTEGER DEFAULT 5
+        );
+        CREATE TABLE decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, decision TEXT NOT NULL);
+        CREATE TABLE learnings (id INTEGER PRIMARY KEY AUTOINCREMENT, problem TEXT NOT NULL);
+        CREATE TABLE breadcrumbs (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL);
+        CREATE TABLE loa_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, fabric_extract TEXT NOT NULL);
+      `);
+      legacyDb.prepare('INSERT INTO messages (session_id, timestamp, role, content) VALUES (?, ?, ?, ?)')
+        .run('s1', '2026-01-01T00:00:00Z', 'user', 'legacy row');
+      legacyDb.prepare('PRAGMA user_version = 8').run();
+
+      const result = applyMigrations(legacyDb);
+      expect(result.from).toBe(8);
+      expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
+
+      for (const table of PROVENANCE_TABLES) {
+        const cols = legacyDb.prepare(`PRAGMA table_info(${table})`).all() as any[];
+        expect(cols.map((c: any) => c.name)).toContain('provenance');
+      }
+
+      // Legacy rows stay NULL — unknown is never laundered into a value.
+      const row = legacyDb.prepare('SELECT provenance FROM messages WHERE session_id = ?').get('s1') as any;
+      expect(row.provenance).toBeNull();
+
+      // CHECK on the ALTERed column enforces the vocabulary but allows NULL.
+      expect(() => {
+        legacyDb.prepare('INSERT INTO messages (session_id, timestamp, role, content, provenance) VALUES (?, ?, ?, ?, ?)')
+          .run('s1', '2026-01-01T00:00:01Z', 'user', 'bad', 'guessed');
+      }).toThrow();
+      legacyDb.prepare('INSERT INTO messages (session_id, timestamp, role, content, provenance) VALUES (?, ?, ?, ?, ?)')
+        .run('s1', '2026-01-01T00:00:02Z', 'user', 'ok', 'verbatim');
+    } finally {
+      legacyDb.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('CHECK constraint enforces vocabulary on fresh-install DDL', () => {
+    applyMigrations(db);
+    const insert = (provenance: string | null) =>
+      db.prepare('INSERT INTO breadcrumbs (content, provenance) VALUES (?, ?)').run('x', provenance);
+
+    for (const valid of ['verbatim', 'user_authored', 'extracted', 'derived', null]) {
+      expect(() => insert(valid)).not.toThrow();
+    }
+    expect(() => insert('unknown')).toThrow();
+    expect(() => insert('VERBATIM')).toThrow();
+  });
+});
+
 describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
     // 7 → 8: importance column on messages/decisions/learnings/loa_entries (Sprint #4)
-    expect(MIGRATIONS.length).toBe(8);
+    // 8 → 9: provenance column on all five memory tables (issue #42)
+    expect(MIGRATIONS.length).toBe(9);
   });
 
   test('all entries are functions', () => {

@@ -78,6 +78,16 @@ tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1
 tier ranking at session start. Manage manually with `recall pin` / `recall unpin`
 or backfill from confidence signals with `recall importance backfill`.
 
+The `provenance` column was added in schema migration 8→9 on all five memory
+tables (`messages`, `decisions`, `learnings`, `breadcrumbs`, `loa_entries`).
+It declares how each record was created — `verbatim`, `user_authored`,
+`extracted`, or `derived` — and is stamped automatically by every write path,
+never accepted from callers (see
+`docs/adr/0001-record-provenance-automatic-write-path-metadata.md`). Legacy
+rows stay `NULL` (unknown) until classified with
+`recall provenance backfill`, which only acts on deterministic write-path
+evidence and never guesses.
+
 ## Tiered RecallStart (v0.7.0+)
 
 The `RecallStart` hook injects two tiers at the top of every session:

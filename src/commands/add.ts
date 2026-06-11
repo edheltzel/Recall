@@ -21,7 +21,9 @@ export function runAddBreadcrumb(content: string, options: AddBreadcrumbOptions)
     content,
     project,
     category: options.category,
-    importance: options.importance ?? 5
+    importance: options.importance ?? 5,
+    // ADR-0001: provenance is stamped from the write path, never a CLI flag.
+    provenance: 'user_authored'
   });
 
   console.log(`✓ Added breadcrumb #${id}${project ? ` [${project}]` : ''}`);
@@ -51,7 +53,8 @@ export function runAddDecision(decision: string, options: AddDecisionOptions): v
     reasoning: options.why,
     alternatives: options.alternatives,
     status: 'active',
-    confidence
+    confidence,
+    provenance: 'user_authored'
   });
 
   console.log(`✓ Added decision #${id}${project ? ` [${project}]` : ''} (${confidence})`);
@@ -78,7 +81,8 @@ export function runAddLearning(problem: string, solution: string, options: AddLe
     project,
     category: options.category,
     prevention: options.prevention,
-    tags: options.tags
+    tags: options.tags,
+    provenance: 'user_authored'
   });
 
   console.log(`✓ Added learning #${id}${project ? ` [${project}]` : ''}`);
