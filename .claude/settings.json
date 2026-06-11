@@ -8,7 +8,15 @@
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
       "mcp__claude_ai_Cloudflare_Developer_Platform__search_cloudflare_documentation",
-      "mcp__claude_ai_Google_Drive__list_recent_files"
+      "mcp__claude_ai_Google_Drive__list_recent_files",
+      "mcp__codegraph__codegraph_explore",
+      "mcp__codegraph__codegraph_search",
+      "mcp__codegraph__codegraph_node",
+      "mcp__codegraph__codegraph_callers",
+      "mcp__codegraph__codegraph_callees",
+      "mcp__codegraph__codegraph_impact",
+      "mcp__codegraph__codegraph_files",
+      "mcp__codegraph__codegraph_status"
     ]
   }
 }

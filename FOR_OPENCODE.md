@@ -131,6 +131,8 @@ OpenCode first.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Context for agents** — Before spawning subagents via `@agent`, call `recall-memory_context_for_agent`
 4. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
+5. **Never store secrets** — `recall-memory_memory_add` persists content verbatim into `recall.db` (and automatic extraction captures session text), and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`).
+6. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ## How Extraction Works
 

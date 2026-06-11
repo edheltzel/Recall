@@ -27,6 +27,15 @@ You have access to persistent memory via the recall-memory MCP server.
    - `recall-memory_memory_dump` with a descriptive title
    - Messages become immediately searchable from any new session
 
+6. **Never store secrets** — `recall-memory_memory_add` and `recall-memory_memory_dump` persist content verbatim:
+   - Stored records can resurface in future sessions' L0/L1 context
+   - Redact API keys, tokens, passwords before recording (e.g. `[REDACTED:api-key]`)
+   - Confirm with the user before dumping a session that touched credentials
+
+7. **Record corrections** — When the user corrects you, capture it immediately:
+   - `recall-memory_memory_add` with type "learning", `confidence: "high"`, elevated importance
+   - Corrections are the highest-signal, most perishable memory — do not wait for session end
+
 ## Available Tools
 
 | Tool | Purpose |

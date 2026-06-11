@@ -7,6 +7,7 @@ import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 import { createSession, sessionExists, addMessagesBatch, createLoaEntry } from '../lib/memory.js';
 import { extractProjectFromPath } from '../lib/project.js';
+import { chunked } from '../lib/chunk.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
 import type { Message } from '../types/index.js';
@@ -283,20 +284,37 @@ async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: strin
   }
 }
 
-function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: number[]): void {
+// Exported for tests — bind count scales with the number of LoA entries,
+// so the IN lists are chunked (see src/lib/chunk.ts).
+//
+// The chunked deletes run statement-by-statement, so the body runs inside
+// db.transaction() to keep the traversal all-or-nothing for every caller.
+// bun:sqlite nests transactions via SAVEPOINT, so calling this from within
+// an outer transaction (as deleteSession does) is safe.
+export function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: number[]): void {
   if (loaIds.length === 0) return;
 
-  const childIds = db.prepare(`
-    SELECT id FROM loa_entries WHERE parent_loa_id IN (${loaIds.map(() => '?').join(',')})
-  `).all(...loaIds) as Array<{ id: number }>;
+  db.transaction(() => {
+    const chunks = chunked(loaIds);
 
-  if (childIds.length > 0) {
-    deleteLoaEntriesRecursive(db, childIds.map(c => c.id));
-  }
+    const childIds: number[] = [];
+    for (const chunk of chunks) {
+      const rows = db.prepare(`
+        SELECT id FROM loa_entries WHERE parent_loa_id IN (${chunk.map(() => '?').join(',')})
+      `).all(...chunk) as Array<{ id: number }>;
+      for (const row of rows) childIds.push(row.id);
+    }
 
-  db.prepare(`
-    DELETE FROM loa_entries WHERE id IN (${loaIds.map(() => '?').join(',')})
-  `).run(...loaIds);
+    if (childIds.length > 0) {
+      deleteLoaEntriesRecursive(db, childIds);
+    }
+
+    for (const chunk of chunks) {
+      db.prepare(`
+        DELETE FROM loa_entries WHERE id IN (${chunk.map(() => '?').join(',')})
+      `).run(...chunk);
+    }
+  })();
 }
 
 function deleteSession(sessionId: string): number {
