@@ -31,6 +31,7 @@ import { runMigrate } from './commands/migrate.js';
 import { runPath } from './commands/path.js';
 import { runExport } from './commands/export.js';
 import { runDedup } from './commands/dedup.js';
+import { runRepair } from './commands/repair.js';
 import { DEFAULT_SEMANTIC_THRESHOLD } from './lib/dedup.js';
 import { closeDb } from './db/connection.js';
 
@@ -686,6 +687,24 @@ program
     closeDb();
   });
 
+// recall repair — data/index maintenance (issue #46)
+// Dry-run by default; --execute rebuilds FTS5 indexes and re-embeds rows
+// missing embeddings. Separate from `recall doctor --fix` (symlinks only).
+program
+  .command('repair')
+  .description('Rebuild FTS5 indexes and re-embed missing embeddings (dry-run by default)')
+  .option('--execute', 'Apply the planned repairs (default is dry-run)')
+  .option('-t, --table <table>', 'Target table: messages, decisions, learnings, breadcrumbs, loa_entries, telos, documents, all', 'all')
+  .option('--no-embed', 'Skip the embedding pass')
+  .action(async (options) => {
+    await runRepair({
+      execute: options.execute,
+      table: options.table,
+      embed: options.embed
+    });
+    closeDb();
+  });
+
 // Default command: recall <query> → hybrid search (Phase 3: best of both worlds)
 program
   .arguments('[query]')
@@ -696,7 +715,7 @@ program
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

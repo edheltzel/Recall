@@ -3,6 +3,7 @@
 import { getDb } from '../db/connection.js';
 import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL } from '../lib/embeddings.js';
 import { notMarkedDuplicateSql } from '../lib/dedup.js';
+import { embeddingTextFor } from '../lib/repair.js';
 import { search as ftsSearch } from '../lib/memory.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
@@ -20,21 +21,12 @@ interface EmbedOptions {
 }
 
 /**
- * Get content to embed for a given table
+ * Get content to embed for a given table. The per-table composition rules
+ * live in src/lib/repair.ts (shared with recall repair); this only maps the
+ * CLI's short 'loa' alias to the real table name.
  */
 function getContentForTable(table: string, row: any): string {
-  switch (table) {
-    case 'loa':
-      return `${row.title}\n\n${row.fabric_extract}`;
-    case 'decisions':
-      return `${row.decision}\n\nReasoning: ${row.reasoning || 'N/A'}`;
-    case 'learnings':
-      return `${row.problem}\n\nSolution: ${row.solution || 'N/A'}`;
-    case 'messages':
-      return row.content;
-    default:
-      return row.content || row.text || '';
-  }
+  return embeddingTextFor(table === 'loa' ? 'loa_entries' : table, row);
 }
 
 /**
