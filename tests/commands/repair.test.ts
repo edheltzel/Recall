@@ -14,8 +14,17 @@
 // - doctor recommends repair but doctor --fix never runs data repair
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import { dirname, join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
-import { getDb } from '../../src/db/connection';
+import { closeDb, getDb } from '../../src/db/connection';
+import {
+  CREATE_TABLES,
+  CREATE_INDEXES,
+  CREATE_FTS,
+  CREATE_FTS_TRIGGERS,
+  CREATE_VECTOR_TABLES,
+} from '../../src/db/schema';
 import { runRepair, type RepairDeps } from '../../src/commands/repair';
 import { checkFtsIndexes } from '../../src/commands/doctor';
 import { checkFts } from '../../src/lib/repair';
@@ -43,7 +52,9 @@ beforeEach(() => {
 afterEach(() => {
   console.log = originalLog;
   console.error = originalError;
-  process.exitCode = originalExitCode;
+  // Bun silently ignores assigning undefined to process.exitCode, so a bare
+  // restore would leave a poisoned exit code behind (CI-red with 0 failures).
+  process.exitCode = originalExitCode ?? 0;
   teardownTestDb();
 });
 
@@ -283,10 +294,37 @@ describe('safety invariants', () => {
     expect(remaining.c).toBe(1);
   });
 
-  test('an un-migrated database is reported with a recall init recommendation', async () => {
-    getDb().exec('PRAGMA user_version = 5');
+  test('a genuine pre-dedup legacy database does not crash and reports pending migrations', async () => {
+    // Build the schema an install older than the dedup migration actually
+    // has: full DDL of its era but no dedup_lineage table (that DDL ships
+    // via `recall init` on current versions; getDb() runs no DDL at all).
+    // PRAGMA user_version on a current schema would not reproduce this.
+    const legacyPath = join(dirname(process.env.RECALL_DB_PATH!), 'legacy.db');
+    closeDb();
+    const legacy = new Database(legacyPath);
+    legacy.exec(CREATE_TABLES);
+    legacy.exec(CREATE_INDEXES);
+    legacy.exec(CREATE_FTS);
+    legacy.exec(CREATE_FTS_TRIGGERS);
+    legacy.exec(CREATE_VECTOR_TABLES);
+    legacy.exec('DROP TABLE dedup_lineage');
+    legacy.exec('PRAGMA user_version = 9');
+    legacy.prepare(
+      `INSERT INTO decisions (decision, status) VALUES ('Adopt SQLite WAL mode for every database connection.', 'active')`
+    ).run();
+    legacy.close();
+    process.env.RECALL_DB_PATH = legacyPath;
+
+    // Plain dry-run — the path that crashed with a raw SQLiteError when the
+    // embed gap query referenced the missing dedup_lineage table.
     const result = (await runRepair({}, upDeps))!;
+
+    // The plan completes: the recall init recommendation can actually print.
     expect(result.plan.migrations.pending).toBeGreaterThan(0);
+    // The embed pass still reports gaps — without the exclusion clause,
+    // since nothing can be marked as a duplicate on this schema.
+    expect(result.plan.embedGaps.find(g => g.table === 'decisions')?.missing).toBe(1);
+    expect(process.exitCode).not.toBe(1);
   });
 });
 

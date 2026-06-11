@@ -225,14 +225,17 @@ export interface EmbedGapReport {
   tooShort: number;
 }
 
-function embedGapQuery(config: EmbedSourceConfig): string {
+function embedGapQuery(config: EmbedSourceConfig, excludeMarkedDuplicates: boolean): string {
   const where = [
     't.id > ?',
     ...(config.extraWhere ? [config.extraWhere] : []),
     'e.id IS NULL',
     // Marked duplicates are hidden from every search path; embedding them
-    // would index records search can never return.
-    notMarkedDuplicateSql(`'${config.table}'`, 't.id'),
+    // would index records search can never return. On a pre-dedup legacy DB
+    // (no dedup_lineage table yet — its DDL ships via recall init) nothing
+    // can be marked, so the clause is dropped instead of referencing a
+    // missing table and crashing the plan.
+    ...(excludeMarkedDuplicates ? [notMarkedDuplicateSql(`'${config.table}'`, 't.id')] : []),
   ].join(' AND ');
   return `
     SELECT t.id, ${config.columns.map(c => `t.${c}`).join(', ')}
@@ -250,7 +253,7 @@ function* iterateEmbedGapRows(
   config: EmbedSourceConfig,
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): Generator<Record<string, unknown>> {
-  const stmt = db.prepare(embedGapQuery(config));
+  const stmt = db.prepare(embedGapQuery(config, tableExists(db, 'dedup_lineage')));
   let lastId = 0;
   for (;;) {
     const batch = stmt.all(lastId, batchSize) as Array<Record<string, unknown>>;
