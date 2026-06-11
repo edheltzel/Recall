@@ -177,3 +177,48 @@ describe('writeExtractionErrors', () => {
     expect(rows[0].fix).toBe('chmod +x');
   });
 });
+
+describe('Record Provenance stamping (ADR-0001, issue #42)', () => {
+  test('every extraction writer stamps provenance = extracted', () => {
+    writeDecisionsBatch(dbPath, [{ decision: 'stamped decision' }]);
+    writeLearningsBatch(dbPath, [{ problem: 'stamped problem', solution: 'fix' }]);
+    writeBreadcrumbsBatch(dbPath, [{ content: 'stamped crumb' }]);
+    writeLoaEntryFromExtraction(dbPath, {
+      title: 'stamped loa',
+      fabricExtract: '## ONE SENTENCE SUMMARY\ntext',
+      sessionId: 's1',
+    });
+
+    const db = openRead();
+    for (const table of ['decisions', 'learnings', 'breadcrumbs', 'loa_entries']) {
+      const row = db.prepare(`SELECT provenance FROM ${table} LIMIT 1`).get() as any;
+      expect(row.provenance).toBe('extracted');
+    }
+    db.close();
+  });
+
+  test('still writes into a legacy DB whose tables have no provenance column', () => {
+    const legacyPath = dbPath.replace('test.db', 'legacy-writers.db');
+    const legacy = new Database(legacyPath);
+    legacy.exec(`
+      CREATE TABLE decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT,
+        category TEXT,
+        project TEXT,
+        decision TEXT NOT NULL,
+        status TEXT DEFAULT 'active',
+        importance INTEGER DEFAULT 5
+      );
+    `);
+    legacy.close();
+
+    const n = writeDecisionsBatch(legacyPath, [{ decision: 'legacy write' }]);
+    expect(n).toBe(1);
+
+    const db = new Database(legacyPath, { readonly: true });
+    const row = db.prepare('SELECT decision FROM decisions').get() as any;
+    db.close();
+    expect(row.decision).toBe('legacy write');
+  });
+});
