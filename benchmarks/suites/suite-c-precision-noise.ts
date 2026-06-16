@@ -18,7 +18,7 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { search } from '../../src/lib/memory.js';
+import { search, getLastSearchErrors } from '../../src/lib/memory.js';
 import { initDb, closeDb } from '../../src/db/connection.js';
 import { checkEmbeddingService } from '../../src/lib/embeddings.js';
 import type { SuiteResult, MetricSample } from '../types.js';
@@ -74,6 +74,18 @@ interface QueryOutcome {
 
 function runQuery(query: FixtureQuery, targets: Map<string, SeededRecord>): QueryOutcome {
   const results = search(query.text, { project: query.project, limit: K });
+
+  // search() swallows per-table SQL failures into lastSearchErrors and keeps
+  // going, so a broken FTS path returns silently-empty results that look like
+  // genuine retrieval misses. Fail the run loudly instead of recording an
+  // all-zero baseline indistinguishable from real retrieval collapse.
+  const searchErrors = getLastSearchErrors();
+  if (searchErrors.length > 0) {
+    throw new Error(
+      `Suite C aborted: search() swallowed ${searchErrors.length} error(s) on query "${query.text}": ${searchErrors.join('; ')}`,
+    );
+  }
+
   const retrieved = results.map((r) => ({ table: r.table, id: r.id }));
 
   const expected = query.expected.map((key) => {
@@ -203,6 +215,22 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
     if (savedMemPath !== undefined) process.env.MEM_DB_PATH = savedMemPath;
     else delete process.env.MEM_DB_PATH;
     rmSync(tempRoot, { recursive: true, force: true });
+  }
+
+  // Canary — the smallest (least-noisy) corpus must produce a nonzero
+  // aggregate relevance score. A zero aggregate means a broken harness or a
+  // silently-erroring search path, not an honest baseline; refuse to return
+  // numbers that a baseline re-record would lock in as if they were real.
+  const smallestSize = Math.min(...sizes);
+  const smallestScope = `corpus=${smallestSize}`;
+  const aggregate = samples
+    .filter((s) => s.scope === smallestScope && (s.name === 'p_at_5' || s.name === 'r_at_5' || s.name === 'mrr'))
+    .reduce((sum, s) => sum + s.value, 0);
+  if (aggregate <= 0) {
+    throw new Error(
+      `Suite C canary failed: smallest corpus (${smallestSize}) produced a zero aggregate relevance score ` +
+        `(p_at_5 + r_at_5 + mrr = ${aggregate}). This indicates a broken harness or silent retrieval collapse, not a real baseline.`,
+    );
   }
 
   const durationMs = Math.round(performance.now() - t0);

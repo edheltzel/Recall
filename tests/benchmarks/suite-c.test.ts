@@ -286,6 +286,14 @@ describe('Suite C — runSuiteC report generation', () => {
     expect(names.some((n) => n.startsWith('r_at_5_prov_'))).toBe(true);
   });
 
+  test('smallest corpus produces a nonzero aggregate relevance score (silent-zero canary)', async () => {
+    const result = await runSuiteC({ sizes: [100], repeats: 1 });
+    const aggregate = result.samples
+      .filter((s) => s.scope === 'corpus=100' && ['p_at_5', 'r_at_5', 'mrr'].includes(s.name))
+      .reduce((sum, s) => sum + s.value, 0);
+    expect(aggregate).toBeGreaterThan(0);
+  });
+
   test('one sample group per requested corpus size', async () => {
     const result = await runSuiteC({ sizes: [100, 150], repeats: 1 });
     const scopes = new Set(result.samples.map((s) => s.scope));
