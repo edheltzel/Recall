@@ -19,120 +19,24 @@ bun run lint         # TypeScript type checking (tsc --noEmit)
 
 ## Project Structure
 
-```
-src/
-  index.ts             # CLI entry point (Commander)
-  mcp-server.ts        # MCP server entry point (@modelcontextprotocol/sdk)
-  version.ts           # Version from package.json
-  commands/            # CLI subcommands
-    add.ts             #   recall add breadcrumb/decision/learning
-    benchmark.ts       #   recall benchmark run (wake-up context efficiency)
-    cluster.ts         #   recall cluster (semantic clustering over embeddings)
-    decision.ts        #   recall decision supersede/revert/list
-    doctor.ts          #   recall doctor (health checks)
-    dump.ts             #   recall dump (session import + LoA capture)
-    embed.ts           #   recall embed backfill/stats, recall semantic, recall hybrid
-    import.ts          #   recall import (session JSONL import)
-    import-docs.ts     #   recall docs import/list/search/show
-    import-legacy.ts   #   recall import-legacy (DISTILLED.md → LoA)
-    import-telos.ts    #   recall telos import/list/show/search
-    importance.ts      #   recall pin / unpin / importance backfill
-    init.ts            #   recall init (database setup)
-    loa.ts             #   recall loa write/show/quote/list
-    onboard.ts         #   recall onboard (7-question L0 identity interview)
-    prune.ts           #   recall prune (table lifecycle cleanup)
-    recent.ts          #   recall recent [table]
-    search.ts          #   recall search (FTS5)
-    show.ts            #   recall show <table> <id>
-    stats.ts           #   recall stats
-  db/
-    connection.ts      # SQLite connection (bun:sqlite, WAL mode)
-    schema.ts          # Table definitions and FTS5 indexes
-  lib/
-    memory.ts          # Core memory operations (search, add, import)
-    embeddings.ts      # Ollama vector embeddings for semantic search
-    import.ts          # Session JSONL import logic
-    project.ts         # Project path utilities (with validateDirPath injection guard)
-  types/
-    index.ts           # Shared TypeScript types
-commands/
-  Recall/              # Slash commands (installed to ~/.claude/commands/Recall/)
-    add.md             #   /Recall:add — add breadcrumb/decision/learning
-    doctor.md          #   /Recall:doctor — health checks
-    dump.md            #   /Recall:dump — session flush + LoA capture
-    loa.md             #   /Recall:loa — Library of Alexandria browser
-    recent.md          #   /Recall:recent — recent records
-    scout.md           #   /Recall:scout — memory-first codebase scout report
-    search.md          #   /Recall:search — FTS5 search
-    stats.md           #   /Recall:stats — database statistics
-    update.md          #   /Recall:update — version check + update instructions
-hooks/
-  RecallExtract.ts     # Stop hook — extracts sessions via Claude Haiku on exit
-  RecallStart.ts      # SessionStart hook — tiered L0/L1 memory context injection
-  RecallPreCompact.ts  # PreCompact hook — flush in-flight messages before compaction
-  RecallBatchExtract.ts       # Cron job — batch extracts sessions missed during crashes
-  RecallTelosSync.ts          # Cron job — sync Telos goals/projects into memory
-  extract_prompt.md     # Extraction prompt template (copied to ~/.claude/MEMORY/)
-  lib/                 # Shared hook libraries
-    db-path.ts              # Shared DB-path resolver (CLI + hooks agree)
-    extraction-lock.ts      # Per-session extraction lock
-    extraction-migration.ts # Migrate legacy extraction state
-    extraction-quality.ts   # Quality gate (requires SUMMARY + MAIN IDEAS)
-    extraction-semaphore.ts # Global extraction concurrency limiter
-    extraction-tracker.ts   # .extraction_tracker dedup state
-    path-encoding.ts        # Claude Code project-folder path encoding (v0.7.23)
-    pid-utils.ts            # PID-based stale-lock detection
-tests/
-  benchmarks/          # Benchmark runner/suite tests
-  commands/            # CLI command tests
-  db/                  # Database tests (connection, schema)
-  fixtures/            # Static test fixtures (incl. extraction samples)
-  helpers/setup.ts     # Test harness
-  hooks/               # Hook tests (incl. path-encoding.test.ts)
-  install/             # install.sh / update.sh / uninstall.sh lifecycle tests
-  integration/         # End-to-end integration tests
-  lib/                 # Library tests (memory, embeddings, project)
-  mcp-server.test.ts   # MCP server tests
-  version.test.ts      # Version tests
-benchmarks/
-  runner.ts            # Benchmark entry point (recall benchmark run)
-  types.ts             # Shared benchmark types
-  suites/              # Benchmark suite definitions (e.g. Suite B wake-up)
-  baselines/           # Locked baseline runs for regression comparison
-  results/             # JSONL + Markdown results from benchmark runs
-  README.md            # Benchmark methodology and caveats
-docs/
-  architecture.md      # File layout, database tables, search, extraction pipeline
-  cli-reference.md     # Full CLI reference organized by category
-  installation.md      # Prerequisites, install, verify, session extraction, env vars
-  mcp-tools.md         # MCP tool reference with parameters and examples
-  OPENCODE_INTEGRATION.md  # OpenCode integration guide
-  PI_INTEGRATION.md    # Pi integration guide
-  releasing.md         # Release process (tagging, GitHub release, version bump)
-  slash-commands.md    # /Recall:* command reference
-  troubleshooting.md   # Common issues and fixes (start with recall doctor)
-  upgrading.md         # Update, backup/restore, migration system
-lib/
-  install-lib.sh       # Shared bash functions for install.sh / update.sh / uninstall.sh
-assets/
-  banner.png           # README banner image
-  demo-search.gif      # VHS recording: recall search
-  demo-stats.gif       # VHS recording: recall stats
-  demo-doctor.gif      # VHS recording: recall doctor
-  demo-recent.gif      # VHS recording: recall recent
-  demo-*.tape          # VHS tape scripts for re-recording demos
-ACKNOWLEDGMENTS.md     # Credits to MemPalace (ideas reshaped) + independent critics
-AGENTS.md              # Canonical agent dev guide (this file)
-CLAUDE.md              # Shim — @-imports AGENTS.md so Claude Code auto-loads it
-CHANGELOG.md           # Release notes and breaking changes
-FOR_CLAUDE.md          # Guide for Claude Code instances (copied to ~/.claude/Recall_GUIDE.md)
-FOR_OPENCODE.md        # Guide for OpenCode instances
-FOR_PI.md              # Guide for Pi instances
-install.sh             # Installer with backup/restore, OS detection, MCP + hook registration
-update.sh              # Updater: pull, rebuild, migrate, re-register hooks (--check for dry-run)
-uninstall.sh           # Surgical remove (preserves ~/.agents/Recall/); --purge for full wipe
-tsconfig.json          # TypeScript config
-```
+Top-level directories, by purpose (one line each — not a file enumeration):
+
+- `src/` — the `recall` CLI (Commander) + `recall-mcp` MCP server + SQLite data layer + core memory ops
+- `hooks/` — self-contained lifecycle hooks + cron jobs (never import from `src/`)
+- `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
+- `benchmarks/` — wake-up context-efficiency benchmark harness
+- `commands/` — `/Recall:*` slash-command definitions
+- `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
+- `lib/` — shared bash for the install / update / uninstall lifecycle scripts
+- `opencode/` — OpenCode host integration (plugins / hooks / guide)
+- `pi/` — Pi host integration (extensions / hooks)
+- `scripts/` — dev / CI helper scripts (version check, e2e)
+- `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`)
+- `assets/` — README banner + VHS demo tapes / gifs
+
+Key root files: `AGENTS.md` (canonical guide), `CLAUDE.md` (shim that `@`-imports it), `CHANGELOG.md`, `FOR_CLAUDE.md` / `FOR_OPENCODE.md` / `FOR_PI.md` (host usage guides), `CONTEXT.md`, `install.sh` / `update.sh` / `uninstall.sh`, `package.json`, `tsconfig.json`.
+
+For the **live source tree** (every file, current symbols, callers), use the **codegraph** index (`codegraph_*` MCP tools / `codegraph_explore`) or `fd` — never an enumerated tree that drifts. `docs/architecture.md` is complementary: it documents the installed/runtime layout under `~/.agents/Recall/`, not the source tree.
 
 ## Check GitHub Issues Before Planning (MANDATORY)
 
@@ -239,71 +143,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - AGENTS.md files are binding work contracts for their subtrees
 - Work products, source materials, instructions, records, assets, and durable docs must stay understandable from the nearest applicable AGENTS.md plus every parent AGENTS.md above it
 
-## Read Before Editing
-
-1. Read the root AGENTS.md
-2. Identify every file or folder you expect to touch
-3. Walk from the repository root to each target path
-4. Read every AGENTS.md found along each route
-5. If a parent AGENTS.md lists a child AGENTS.md whose scope contains the path, read that child and continue from there
-6. Use the nearest AGENTS.md as the local contract and parent docs for repo-wide rules
-7. If docs conflict, the closer doc controls local work details, but no child doc may weaken DOX
-
-Do not rely on memory. Re-read the applicable DOX chain in the current session before editing.
-
-## Update After Editing
-
-Every meaningful change requires a DOX pass before the task is done.
-
-Update the closest owning AGENTS.md when a change affects:
-
-- purpose, scope, ownership, or responsibilities
-- durable structure, contracts, workflows, or operating rules
-- required inputs, outputs, permissions, constraints, side effects, or artifacts
-- user preferences about behavior, communication, process, organization, or quality
-- AGENTS.md creation, deletion, move, rename, or index contents
-
-Update parent docs when parent-level structure, ownership, workflow, or child index changes. Update child docs when parent changes alter local rules. Remove stale or contradictory text immediately. Small edits that do not change behavior or contracts may leave docs unchanged, but the DOX pass still must happen.
-
-## Hierarchy
-
-- Root AGENTS.md is the DOX rail: project-wide instructions, global preferences, durable workflow rules, and the top-level Child DOX Index
-- Child AGENTS.md files own domain-specific instructions and their own Child DOX Index
-- Each parent explains what its direct children cover and what stays owned by the parent
-- The closer a doc is to the work, the more specific and practical it must be
-
-## Child Doc Shape
-
-- Create a child AGENTS.md when a folder becomes a durable boundary with its own purpose, rules, responsibilities, workflow, materials, or quality standards
-- Work Guidance must reflect the current standards of the project or user instructions; if there are no specific standards or instructions yet, leave it empty
-- Verification must reflect an existing check; if no verification framework exists yet, leave it empty and update it when one exists
-
-Default section order:
-- Purpose
-- Ownership
-- Local Contracts
-- Work Guidance
-- Verification
-- Child DOX Index
-
-## Style
-
-- Keep docs concise, current, and operational
-- Document stable contracts, not diary entries
-- Put broad rules in parent docs and concrete details in child docs
-- Prefer direct bullets with explicit names
-- Do not duplicate rules across many files unless each scope needs a local version
-- Delete stale notes instead of explaining history
-- Trim obvious statements, repeated rules, misplaced detail, and warnings for risks that no longer exist
-
-## Closeout
-
-1. Re-check changed paths against the DOX chain
-2. Update nearest owning docs and any affected parents or children
-3. Refresh every affected Child DOX Index
-4. Remove stale or contradictory text
-5. Run existing verification when relevant
-6. Report any docs intentionally left unchanged and why
+For the full editing procedure (read-before-editing, update-after-editing, hierarchy, child-doc shape, style, closeout), see [`docs/agents/dox-framework.md`](docs/agents/dox-framework.md).
 
 ## User Preferences
 

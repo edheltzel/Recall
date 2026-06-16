@@ -10,7 +10,7 @@ User-facing published documentation: installation, CLI / MCP / slash-command ref
 
 - Reference & guides — `installation.md`, `cli-reference.md`, `mcp-tools.md`, `slash-commands.md`, `architecture.md`, `troubleshooting.md`, `releasing.md`, `upgrading.md`, `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`
 - `adr/` — architectural decision records
-- `agents/` — agent skill docs (`issue-tracker.md`, `triage-labels.md`, `domain.md`)
+- `agents/` — agent skill docs (`issue-tracker.md`, `triage-labels.md`, `domain.md`, `dox-framework.md`)
 
 ## Local Contracts
 
