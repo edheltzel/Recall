@@ -203,6 +203,31 @@ describe('embedding repair', () => {
     expect(embeddingsCount()).toBe(1);
   });
 
+  test('per-row embed failures with the service up set a non-zero exit code (#71)', async () => {
+    addDecision({ decision: 'Adopt SQLite WAL mode for every database connection.', status: 'active' });
+
+    // Service reachable, but every row fails to embed — a requested repair
+    // that did not succeed must not exit 0.
+    const failingDeps: RepairDeps = {
+      checkService: async () => ({ available: true, model: 'test', url: 'http://test' }),
+      embedFn: async () => { throw new Error('boom'); },
+    };
+
+    const result = (await runRepair({ execute: true }, failingDeps))!;
+    expect(result.embeddings?.embedded).toBe(0);
+    expect(result.embeddings?.failed.length).toBe(1);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test('a fully successful embed pass leaves the exit code clean (#71)', async () => {
+    addDecision({ decision: 'Adopt SQLite WAL mode for every database connection.', status: 'active' });
+
+    const result = (await runRepair({ execute: true }, upDeps))!;
+    expect(result.embeddings?.embedded).toBe(1);
+    expect(result.embeddings?.failed.length).toBe(0);
+    expect(process.exitCode).not.toBe(1);
+  });
+
   test('--no-embed skips the embedding pass entirely', async () => {
     addDecision({ decision: 'Adopt SQLite WAL mode for every database connection.', status: 'active' });
 

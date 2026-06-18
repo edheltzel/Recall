@@ -12,6 +12,7 @@
 // - migration state report
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
 import { MIGRATIONS } from '../../src/db/migrations';
@@ -85,6 +86,41 @@ describe('FTS health detection', () => {
     expect(report.action).toBe('rebuild');
     expect(report.sourceRows).toBe(1);
     expect(report.indexedRows).toBe(0);
+  });
+
+  test('a locked DB during the integrity check is never reported consistent (#71)', () => {
+    // In-sync index: counts and triggers match, so checkFts reaches the
+    // integrity-check write — which is where a locked DB used to be swallowed
+    // as "consistent".
+    addBreadcrumb({ content: CRUMB, importance: 5 });
+    expect(checkFts(getDb(), 'breadcrumbs').status).toBe('ok'); // sanity: in sync
+
+    const dbPath = process.env.RECALL_DB_PATH!;
+
+    // Hold the single WAL write lock on a separate connection.
+    const locker = new Database(dbPath);
+    locker.exec('PRAGMA journal_mode = WAL');
+    locker.exec('PRAGMA busy_timeout = 0');
+    locker.exec('BEGIN IMMEDIATE');
+
+    // The check runs on its own connection with no busy timeout: WAL lets its
+    // reads through, but the integrity-check write hits the held lock and
+    // fails immediately with 'database is locked'.
+    const checker = new Database(dbPath);
+    checker.exec('PRAGMA journal_mode = WAL');
+    checker.exec('PRAGMA busy_timeout = 0');
+
+    try {
+      const report = checkFts(checker, 'breadcrumbs');
+      // Before the fix this returned 'ok' — the locked write was read as a
+      // passing integrity check. It must surface as drift instead.
+      expect(report.status).not.toBe('ok');
+      expect(report.status).toBe('drift');
+    } finally {
+      checker.close();
+      locker.exec('ROLLBACK');
+      locker.close();
+    }
   });
 
   test('missing sync triggers are drift even when counts match', () => {

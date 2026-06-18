@@ -153,6 +153,11 @@ function ftsIndexConsistent(db: Database, ftsTable: string): boolean {
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // A locked DB is a normal transient state given Recall's concurrent
+    // writers — NOT evidence the index is in sync. Reporting "consistent"
+    // here masks a check that never actually ran. Flag it as drift so the
+    // check is surfaced for retry rather than silently passing. (#71)
+    if (/database( table)? is locked/i.test(msg)) return false;
     return !/malformed|corrupt/i.test(msg);
   }
 }
