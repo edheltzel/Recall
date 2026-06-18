@@ -256,6 +256,25 @@ export function notMarkedDuplicateSql(tableExpr: string, idExpr: string): string
   )`;
 }
 
+/**
+ * SQL fragment excluding records that are recorded dedup survivors. Mirrors
+ * `notMarkedDuplicateSql` for the survivor side: active lineage is status
+ * IN ('marked', 'deleted') — the same set `loadRecordedSurvivors` treats as
+ * binding ('reverted' rows carry no obligation). `prune` uses this so it never
+ * deletes a survivor and orphans the duplicates marked under it (#80) —
+ * mirroring PR #79's destructive-mode survivor guard (ADR-0003). `tableExpr`
+ * and `idExpr` are SQL expressions (a quoted literal or column reference),
+ * never user input.
+ */
+export function notRecordedSurvivorSql(tableExpr: string, idExpr: string): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM dedup_lineage dl
+    WHERE dl.survivor_table = ${tableExpr}
+      AND dl.survivor_id = ${idExpr}
+      AND dl.status IN ('marked', 'deleted')
+  )`;
+}
+
 // ---------------------------------------------------------------------------
 // Database plumbing — scans, lineage, deletion
 // ---------------------------------------------------------------------------

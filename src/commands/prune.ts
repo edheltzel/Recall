@@ -1,6 +1,7 @@
 // recall prune command — table lifecycle management
 
 import { getDb } from '../db/connection.js';
+import { notRecordedSurvivorSql } from '../lib/dedup.js';
 
 interface PruneOptions {
   execute?: boolean;
@@ -12,6 +13,8 @@ interface PruneResult {
   table: string;
   description: string;
   count: number;
+  /** Rows matching the prune criteria but withheld as recorded dedup survivors (#80). */
+  protected?: number;
 }
 
 function parseDays(value: string): number {
@@ -40,13 +43,21 @@ export function runPrune(options: PruneOptions): void {
 
   const results: PruneResult[] = [];
 
+  // Survivor guard (#80, ADR-0003): a record recorded as a dedup survivor must
+  // never be pruned — deleting it orphans the duplicates marked under it (they
+  // stay hidden from search while their visible representative is gone). Each
+  // guard is appended to BOTH the count and the DELETE so the reported count
+  // matches what is actually removed; withheld rows are surfaced as `protected`
+  // so the exclusion is never silent (mirroring PR #79's destructive guard).
+
   // 1. Messages: delete where session has LoA entry AND older than N days
-  const messageCount = countRows(db,
-    `SELECT COUNT(*) as count FROM messages
-     WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-     AND timestamp < ${cutoff}`
-  );
-  results.push({ table: 'messages', description: `Consolidated messages older than ${days}d`, count: messageCount });
+  const messageWhere =
+    `WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
+     AND timestamp < ${cutoff}`;
+  const messageGuard = `AND ${notRecordedSurvivorSql("'messages'", 'messages.id')}`;
+  const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM messages ${messageWhere}`);
+  const messageCount = countRows(db, `SELECT COUNT(*) as count FROM messages ${messageWhere} ${messageGuard}`);
+  results.push({ table: 'messages', description: `Consolidated messages older than ${days}d`, count: messageCount, protected: messageMatched - messageCount });
 
   // 2. Sessions: delete orphaned sessions (no messages, no LoA) older than N days
   const sessionCount = countRows(db,
@@ -58,20 +69,22 @@ export function runPrune(options: PruneOptions): void {
   results.push({ table: 'sessions', description: `Orphaned sessions older than ${days}d`, count: sessionCount });
 
   // 3. Breadcrumbs: delete expired
-  const breadcrumbCount = countRows(db,
-    `SELECT COUNT(*) as count FROM breadcrumbs
-     WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`
-  );
-  results.push({ table: 'breadcrumbs', description: 'Expired breadcrumbs', count: breadcrumbCount });
+  const breadcrumbWhere = `WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`;
+  const breadcrumbGuard = `AND ${notRecordedSurvivorSql("'breadcrumbs'", 'breadcrumbs.id')}`;
+  const breadcrumbMatched = countRows(db, `SELECT COUNT(*) as count FROM breadcrumbs ${breadcrumbWhere}`);
+  const breadcrumbCount = countRows(db, `SELECT COUNT(*) as count FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`);
+  results.push({ table: 'breadcrumbs', description: 'Expired breadcrumbs', count: breadcrumbCount, protected: breadcrumbMatched - breadcrumbCount });
 
   // 4. Decisions: superseded/reverted older than N days
+  const decisionWhere =
+    `WHERE status IN ('superseded', 'reverted')
+     AND created_at < ${decisionCutoff}`;
+  const decisionGuard = `AND ${notRecordedSurvivorSql("'decisions'", 'decisions.id')}`;
+  let decisionCount = 0;
   if (!keepDecisions) {
-    const decisionCount = countRows(db,
-      `SELECT COUNT(*) as count FROM decisions
-       WHERE status IN ('superseded', 'reverted')
-       AND created_at < ${decisionCutoff}`
-    );
-    results.push({ table: 'decisions', description: `Inactive decisions older than ${decisionDays}d`, count: decisionCount });
+    const decisionMatched = countRows(db, `SELECT COUNT(*) as count FROM decisions ${decisionWhere}`);
+    decisionCount = countRows(db, `SELECT COUNT(*) as count FROM decisions ${decisionWhere} ${decisionGuard}`);
+    results.push({ table: 'decisions', description: `Inactive decisions older than ${decisionDays}d`, count: decisionCount, protected: decisionMatched - decisionCount });
   } else {
     results.push({ table: 'decisions', description: 'Skipped (--keep-decisions)', count: 0 });
   }
@@ -102,7 +115,10 @@ export function runPrune(options: PruneOptions): void {
 
   for (const r of results) {
     const icon = r.count > 0 ? '[prune]' : '[ok]';
-    console.log(`  ${icon} ${r.table}: ${r.count.toLocaleString()} rows - ${r.description}`);
+    const protectedNote = r.protected && r.protected > 0
+      ? ` (${r.protected.toLocaleString()} kept as dedup survivors)`
+      : '';
+    console.log(`  ${icon} ${r.table}: ${r.count.toLocaleString()} rows - ${r.description}${protectedNote}`);
   }
 
   console.log(`\n  Total: ${totalPrunable.toLocaleString()} rows to prune`);
@@ -123,11 +139,7 @@ export function runPrune(options: PruneOptions): void {
 
   // Execute deletes
   if (messageCount > 0) {
-    db.prepare(
-      `DELETE FROM messages
-       WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-       AND timestamp < ${cutoff}`
-    ).run();
+    db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}`).run();
   }
 
   if (sessionCount > 0) {
@@ -140,18 +152,11 @@ export function runPrune(options: PruneOptions): void {
   }
 
   if (breadcrumbCount > 0) {
-    db.prepare(
-      `DELETE FROM breadcrumbs
-       WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`
-    ).run();
+    db.prepare(`DELETE FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`).run();
   }
 
-  if (!keepDecisions && results.find(r => r.table === 'decisions')!.count > 0) {
-    db.prepare(
-      `DELETE FROM decisions
-       WHERE status IN ('superseded', 'reverted')
-       AND created_at < ${decisionCutoff}`
-    ).run();
+  if (!keepDecisions && decisionCount > 0) {
+    db.prepare(`DELETE FROM decisions ${decisionWhere} ${decisionGuard}`).run();
   }
 
   if (trackerCount > 0) {
