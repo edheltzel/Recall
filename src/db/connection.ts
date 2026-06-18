@@ -57,6 +57,10 @@ export function getDb(): Database {
     db = new Database(dbPath);
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA foreign_keys = ON');
+    // Concurrent CLI/MCP/hook invocations share this file. Without a busy
+    // timeout, a writer that finds the lock held fails immediately with
+    // 'database is locked'; wait up to 5s for the lock to clear instead. (#72)
+    db.exec('PRAGMA busy_timeout = 5000');
 
     return db;
   } finally {
