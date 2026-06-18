@@ -29,6 +29,7 @@ import {
   getBreadcrumb,
   createLoaEntry,
   createSession,
+  vectorRowContentProvenance,
 } from '../src/lib/memory';
 
 // ---------------------------------------------------------------------------
@@ -344,5 +345,54 @@ describe('loa_show workflow', () => {
     expect(entry!.tags).toBe('caching,redis,architecture');
     expect(entry!.message_count).toBe(32);
     expect(entry!.created_at).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hybrid vector-branch provenance (issue #67)
+//
+// memory_hybrid_search → hybridSearch() in mcp-server.ts resolves content +
+// provenance for vector-only matches via vectorRowContentProvenance(). The
+// learnings case used to be missing, so a vector-only learnings match
+// reported its provenance as unknown. mcp-server.ts cannot be imported (it
+// starts a server on load), so we test the delegate the vec-branch calls.
+// ---------------------------------------------------------------------------
+
+describe('hybrid vector-branch provenance (issue #67)', () => {
+  test('vectorRowContentProvenance reports a learnings match real provenance, not unknown', () => {
+    const sessionId = makeSession('-vec-learning');
+    const id = addLearning({
+      session_id: sessionId,
+      problem: 'Vector-only learnings matches dropped their provenance in hybrid search',
+      solution: 'Add the learnings branch to the hybrid vec-branch row fetch',
+      provenance: 'user_authored',
+      project: 'test-project',
+    });
+
+    const { content, provenance } = vectorRowContentProvenance('learnings', id);
+
+    // The bug: this came back null ("unknown") because learnings had no branch.
+    expect(provenance).toBe('user_authored');
+    expect(content).toContain('Vector-only learnings matches dropped their provenance');
+  });
+
+  test('vectorRowContentProvenance still resolves the other embedded tables', () => {
+    const sessionId = makeSession('-vec-decision');
+    const id = addDecision({
+      session_id: sessionId,
+      decision: 'Centralize the hybrid vec-branch row fetch in one helper',
+      provenance: 'extracted',
+      status: 'active',
+      project: 'test-project',
+    });
+
+    const dec = vectorRowContentProvenance('decisions', id);
+    expect(dec.provenance).toBe('extracted');
+    expect(dec.content).toBe('Centralize the hybrid vec-branch row fetch in one helper');
+
+    // Unknown / non-embedded table falls through to empty content, null provenance.
+    const unknown = vectorRowContentProvenance('breadcrumbs', id);
+    expect(unknown.content).toBe('');
+    expect(unknown.provenance).toBeNull();
   });
 });
