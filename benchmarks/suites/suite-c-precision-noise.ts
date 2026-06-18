@@ -20,8 +20,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { search, getLastSearchErrors } from '../../src/lib/memory.js';
 import { initDb, closeDb, getDb } from '../../src/db/connection.js';
-import { planDedup, applyDedupPlan } from '../../src/lib/dedup.js';
-import { checkEmbeddingService } from '../../src/lib/embeddings.js';
+import { planDedup, applyDedupPlan, DEDUP_TABLES, DEFAULT_SEMANTIC_THRESHOLD } from '../../src/lib/dedup.js';
+import { checkEmbeddingService, embed, embeddingToBlob } from '../../src/lib/embeddings.js';
+import { embeddingTextFor } from '../../src/lib/repair.js';
 import type { SuiteResult, MetricSample } from '../types.js';
 import {
   K,
@@ -48,6 +49,14 @@ export interface SuiteCOptions {
   repeats?: number;
   /** Run `recall dedup --execute` over each corpus before measuring (issue #78). Default off; env RECALL_BENCH_C_DEDUP overrides. */
   dedup?: boolean;
+  /**
+   * Backfill embeddings for every dedup-eligible record before the dedup pass,
+   * so the semantic pass actually runs (issue #99). Mirrors `recall embed
+   * backfill` over the seeded corpus and requires a live embedding service.
+   * Only meaningful together with `dedup`. Default off; env
+   * RECALL_BENCH_C_EMBED_BACKFILL overrides.
+   */
+  embedBackfill?: boolean;
 }
 
 const DEFAULT_SIZES = [100, 1_000, 10_000, 100_000];
@@ -160,6 +169,41 @@ function pushBreakdown(
   byDimension('provenance', 'r_at_5_prov');
 }
 
+/** Minimum content length to embed — matches `recall embed backfill`. */
+const MIN_BACKFILL_TEXT_LENGTH = 10;
+
+/**
+ * Backfill embeddings for every dedup-eligible record in the current corpus
+ * DB (issue #99), so `planDedup`'s semantic pass has stored vectors to compare.
+ *
+ * This is the embedding-backed counterpart to #78's exact-only dedup run. It
+ * uses the production primitives — `embeddingTextFor` (the same per-table
+ * content composition `recall embed backfill` and `recall repair` use), `embed`
+ * (the real Ollama nomic-embed-text client), and `embeddingToBlob` — and writes
+ * to the same `embeddings` table the CLI does. It covers ALL `DEDUP_TABLES`
+ * (including breadcrumbs, which the `recall embed` CLI omits) so the semantic
+ * pass gets maximal coverage: a superset of what a user running `recall embed
+ * backfill` per supported table would store. Returns the number embedded.
+ */
+async function backfillCorpusEmbeddings(db: ReturnType<typeof getDb>): Promise<number> {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  let embedded = 0;
+  for (const table of DEDUP_TABLES) {
+    const rows = db.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const text = embeddingTextFor(table, row).trim();
+      if (text.length < MIN_BACKFILL_TEXT_LENGTH) continue;
+      const result = await embed(text);
+      insert.run(table, row.id as number, result.model, result.dimensions, embeddingToBlob(result.embedding));
+      embedded++;
+    }
+  }
+  return embedded;
+}
+
 export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResult> {
   const t0 = performance.now();
 
@@ -167,8 +211,26 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
   const seed = options.seed ?? DEFAULT_SEED;
   const repeats = options.repeats ?? parseEnvInts('RECALL_BENCH_C_REPEATS')?.[0] ?? DEFAULT_REPEATS;
   const dedup = options.dedup ?? parseEnvFlag('RECALL_BENCH_C_DEDUP');
+  const embedBackfill = options.embedBackfill ?? parseEnvFlag('RECALL_BENCH_C_EMBED_BACKFILL');
 
   const embedding = await checkEmbeddingService().catch(() => ({ available: false, model: 'unknown', url: 'unknown' }));
+
+  // The embedding-backed variant (issue #99) only does anything alongside the
+  // dedup pass it feeds. Fail loudly rather than silently no-op, and refuse to
+  // run without a real embedding service rather than fabricate vectors.
+  if (embedBackfill) {
+    if (!dedup) {
+      throw new Error(
+        'RECALL_BENCH_C_EMBED_BACKFILL=1 requires RECALL_BENCH_C_DEDUP=1 — the embedding backfill only feeds the dedup semantic pass.',
+      );
+    }
+    if (!embedding.available) {
+      throw new Error(
+        `RECALL_BENCH_C_EMBED_BACKFILL=1 requires a live embedding service, but checkEmbeddingService reported unavailable at ${embedding.url}. ` +
+          'Start Ollama with the nomic-embed-text model (or point OLLAMA_URL/EMBEDDING_MODEL at a compatible service). Refusing to fabricate embeddings.',
+      );
+    }
+  }
 
   const samples: MetricSample[] = [];
   let totalMarked = 0;
@@ -198,12 +260,25 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
       // is skipped when the corpus has none.
       if (dedup) {
         const db = getDb();
+        // Embedding-backed variant (issue #99): backfill stored embeddings
+        // first so planDedup's semantic pass runs instead of skipping. Without
+        // this the corpus has no embeddings and only the exact pass acts —
+        // exactly the #78 path. New samples are recorded only on this variant,
+        // so a plain RECALL_BENCH_C_DEDUP=1 run still matches #78 sample-for-sample.
+        if (embedBackfill) {
+          const backfilled = await backfillCorpusEmbeddings(db);
+          samples.push({ name: 'embeddings_backfilled', value: backfilled, unit: 'count', scope });
+        }
         const plan = planDedup(db);
         const planned = plan.tables.reduce((sum, t) => sum + t.planned.length, 0);
+        const semanticPairs = plan.tables.reduce((sum, t) => sum + t.semanticPairs, 0);
         const applied = applyDedupPlan(db, plan, { destructive: false });
         totalMarked += applied.marked;
         samples.push({ name: 'dedup_planned', value: planned, unit: 'count', scope });
         samples.push({ name: 'dedup_marked', value: applied.marked, unit: 'count', scope });
+        if (embedBackfill) {
+          samples.push({ name: 'dedup_semantic_pairs', value: semanticPairs, unit: 'count', scope });
+        }
       }
 
       // Warmup — unmeasured pass(es) so first-touch page cache and statement
@@ -277,7 +352,9 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
       `Embedding service available: ${embedding.available ? `yes (${embedding.model})` : 'no'}. Suite C exercises the FTS5 keyword path (search()) only — semantic/hybrid retrieval is NOT measured in this baseline either way.`,
       'FTS5 MATCH is implicit AND with no stemming — paraphrase-category queries are expected to score near zero on keyword search. That gap is part of the honest baseline this suite records.',
       dedup
-        ? `Dedup WAS run before measurement (issue #78): \`recall dedup --execute\` semantics — exact + stored-embedding-semantic detection, non-destructive marking (no --delete). ${totalMarked} record(s) marked across all sizes; search() excludes records marked in dedup_lineage. The semantic pass uses stored embeddings only, of which the seeded corpus has none, so only the exact pass runs.`
+        ? embedBackfill
+          ? `Dedup WAS run before measurement WITH embedding backfill (issue #99): every dedup-eligible record was embedded via ${embedding.model} (\`recall embed backfill\` semantics) before \`recall dedup --execute\`, so the semantic pass ran on stored embeddings at threshold ${DEFAULT_SEMANTIC_THRESHOLD} (the CLI default) in addition to the exact pass. Non-destructive marking (no --delete). ${totalMarked} record(s) marked across all sizes; search() excludes records marked in dedup_lineage.`
+          : `Dedup WAS run before measurement (issue #78): \`recall dedup --execute\` semantics — exact + stored-embedding-semantic detection, non-destructive marking (no --delete). ${totalMarked} record(s) marked across all sizes; search() excludes records marked in dedup_lineage. The semantic pass uses stored embeddings only, of which the seeded corpus has none, so only the exact pass runs.`
         : 'Dedup was NOT run before measurement: the corpus contains unmarked near-duplicates that legitimately compete in ranking. search() excludes only records already marked in dedup_lineage.',
       'Ground truth never includes messages-table records — messages are noise-only in this corpus. The project column is part of every FTS index, so unscoped queries can match records via their project name alone.',
       'No pass/fail threshold — baseline-first. Later regression gating can diff future runs against the checked-in baseline JSONL.',
