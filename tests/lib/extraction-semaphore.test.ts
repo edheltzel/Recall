@@ -166,22 +166,33 @@ describe('concurrency', () => {
         HOLD_MS: '30000',
         CONV_PATH: '/test/crash-conv.jsonl',
       },
-      stdout: 'ignore',
+      stdout: 'pipe',
       stderr: 'pipe',
     });
 
-    // Wait for the worker to acquire the lock — poll instead of a fixed
-    // sleep; bun process startup can exceed 300ms on loaded CI runners.
-    const deadline = Date.now() + 10000;
-    while (getActiveLockCount(dbPath) === 0 && Date.now() < deadline) {
-      await Bun.sleep(50);
+    // Startup handshake: wait for the worker to announce (on stdout) that it
+    // committed the lock, rather than polling the DB against a wall-clock
+    // deadline. Bun cold-start under CI load can exceed any fixed budget, so a
+    // clock-based poll flakes; waiting on the worker's own signal removes that
+    // race entirely. If the worker dies during startup its stdout closes
+    // (`done`) before announcing, and the lock-count check below fails loudly
+    // with the captured stderr. The bun:test timeout is the ultimate backstop.
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    let handshake = '';
+    while (!handshake.includes('ACQUIRED')) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      handshake += decoder.decode(value);
     }
+    reader.releaseLock();
+
     if (getActiveLockCount(dbPath) === 0) {
       proc.kill(9);
       await proc.exited;
       const workerStderr = await new Response(proc.stderr).text();
       throw new Error(
-        `setup: worker never acquired the extraction lock within 10s; worker stderr:\n${workerStderr}`
+        `setup: worker exited before acquiring the extraction lock; worker stderr:\n${workerStderr}`
       );
     }
 
@@ -212,5 +223,7 @@ describe('concurrency', () => {
     // Verify we can acquire again
     const acquired = acquireSemaphore(dbPath, '/test/crash-conv.jsonl', process.pid, 3);
     expect(acquired).toBe(true);
-  }, 15000);
+    // Backstop only: the handshake above gates progress, so this generous
+    // budget just bounds a worker that never starts under extreme CI load.
+  }, 30000);
 });
