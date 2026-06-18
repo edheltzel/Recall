@@ -334,4 +334,19 @@ describe('Suite C — runSuiteC report generation', () => {
   test('K cutoff is 5 — the metric names match the measurement', () => {
     expect(K).toBe(5);
   });
+
+  test('dedup pass (issue #78) is opt-in: emits dedup samples and updates the caveat only when enabled', async () => {
+    const off = await runSuiteC({ sizes: [100], repeats: 1 });
+    expect(off.samples.some((s) => s.name === 'dedup_marked')).toBe(false);
+    expect(off.caveats.some((c) => c.startsWith('Dedup was NOT run'))).toBe(true);
+
+    const on = await runSuiteC({ sizes: [100], repeats: 1, dedup: true });
+    const planned = on.samples.find((s) => s.name === 'dedup_planned' && s.scope === 'corpus=100');
+    const marked = on.samples.find((s) => s.name === 'dedup_marked' && s.scope === 'corpus=100');
+    expect(planned).toBeDefined();
+    expect(marked).toBeDefined();
+    expect(marked!.value).toBeGreaterThanOrEqual(0);
+    expect(marked!.value).toBeLessThanOrEqual(planned!.value);
+    expect(on.caveats.some((c) => c.startsWith('Dedup WAS run'))).toBe(true);
+  });
 });
