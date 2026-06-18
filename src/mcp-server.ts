@@ -58,6 +58,7 @@ import {
 	revertDecision,
 	findSimilarDecisions,
 	getStats,
+	vectorRowContentProvenance,
 } from "./lib/memory.js";
 import {
 	embed,
@@ -194,32 +195,14 @@ async function hybridSearch(
 			if (existing) {
 				existing.source = "both";
 			} else {
-				// Need to fetch content
-				let content = "";
-				let provenance: Provenance | null = null;
-				if (r.source_table === "loa_entries") {
-					const loa = db
-						.prepare(
-							"SELECT title, fabric_extract, provenance FROM loa_entries WHERE id = ?",
-						)
-						.get(r.source_id) as any;
-					content = loa
-						? `${loa.title}: ${loa.fabric_extract?.slice(0, 200)}`
-						: "";
-					provenance = loa?.provenance ?? null;
-				} else if (r.source_table === "decisions") {
-					const dec = db
-						.prepare("SELECT decision, provenance FROM decisions WHERE id = ?")
-						.get(r.source_id) as any;
-					content = dec?.decision || "";
-					provenance = dec?.provenance ?? null;
-				} else if (r.source_table === "messages") {
-					const msg = db
-						.prepare("SELECT content, provenance FROM messages WHERE id = ?")
-						.get(r.source_id) as any;
-					content = msg?.content?.slice(0, 200) || "";
-					provenance = msg?.provenance ?? null;
-				}
+				// Resolve content + provenance for a vector-only match. The
+				// shared helper covers every embedded table — issue #67: the
+				// learnings case was missing here, so vector-only learnings
+				// matches reported provenance as unknown.
+				const { content, provenance } = vectorRowContentProvenance(
+					r.source_table,
+					r.source_id,
+				);
 
 				resultMap.set(key, {
 					table: r.source_table === "loa_entries" ? "loa" : r.source_table,

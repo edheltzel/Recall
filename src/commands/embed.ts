@@ -7,8 +7,10 @@ import { embeddingTextFor } from '../lib/repair.js';
 import { search as ftsSearch } from '../lib/memory.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
-// hidden from the semantic search paths, matching the FTS5 default.
-function embeddingsWhere(table?: string): string {
+// hidden from the semantic search paths, matching the FTS5 default. Exported
+// so the dedup-hiding contract for the semantic + hybrid vector paths can be
+// pinned by tests (issue #74).
+export function embeddingsWhere(table?: string): string {
   const conditions = [notMarkedDuplicateSql('source_table', 'source_id')];
   if (table) conditions.push(`source_table = '${table}'`);
   return `WHERE ${conditions.join(' AND ')}`;

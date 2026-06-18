@@ -17,6 +17,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runDedup } from '../../src/commands/dedup';
+import { embeddingsWhere } from '../../src/commands/embed';
+import { notMarkedDuplicateSql } from '../../src/lib/dedup';
 import { embeddingToBlob } from '../../src/lib/embeddings';
 import { getDb } from '../../src/db/connection';
 import { search } from '../../src/lib/memory';
@@ -341,5 +343,74 @@ describe('destructive opt-in (--execute --delete)', () => {
     // The record still exists, just hidden.
     const msg = getDb().prepare('SELECT id FROM messages WHERE id = ?').get(referenced);
     expect(msg).toBeDefined();
+  });
+});
+
+// Issue #74: duplicate hiding works across FTS5, `recall semantic`, `recall
+// hybrid`, and the MCP vector path through one shared SQL fragment
+// (notMarkedDuplicateSql), but only the FTS5 path (search(), tested above)
+// was covered. The vector paths build their embedding-candidate set with the
+// same fragment — `recall semantic`/`recall hybrid` via embeddingsWhere()
+// (src/commands/embed.ts), the MCP vector path via the inline fragment in
+// hybridSearch() (src/mcp-server.ts). Those functions hit the embedding
+// service and print to stdout (and mcp-server.ts cannot be imported — it
+// starts a server on load), so each test below exercises the exact
+// embedding-candidate query its path runs, asserting the marked duplicate is
+// hidden by default and revealed when the dedup filter is dropped (the
+// include-duplicates equivalent for the vector paths).
+describe('duplicate hiding across vector search paths (issue #74)', () => {
+  // Long enough to clear MIN_DEDUP_TEXT_LENGTH after normalization.
+  const DECISION = 'Adopt the shared notMarkedDuplicateSql fragment across every search path.';
+
+  /** Two identical decisions, both embedded; dedup marks one. */
+  function seedMarkedDecisionPair(): { survivorId: number; markedId: number } {
+    const id1 = addDecision({ decision: DECISION, status: 'active' });
+    const id2 = addDecision({ decision: DECISION, status: 'active' });
+    insertEmbedding('decisions', id1, [1, 0, 0, 0]);
+    insertEmbedding('decisions', id2, [1, 0, 0, 0]);
+
+    const result = runDedup({ execute: true })!;
+    expect(result.applied?.marked).toBe(1);
+
+    const row = lineageRows().find(r => r.status === 'marked')!;
+    return { survivorId: row.survivor_id as number, markedId: row.duplicate_id as number };
+  }
+
+  /** source_ids returned by an embedding-candidate query with this WHERE clause. */
+  function candidateSourceIds(whereClause: string): number[] {
+    return (
+      getDb()
+        .prepare(`SELECT source_id FROM embeddings ${whereClause}`)
+        .all() as Array<{ source_id: number }>
+    ).map(r => r.source_id);
+  }
+
+  function expectHidesMarkedByDefault(defaultWhere: string): void {
+    const { survivorId, markedId } = seedMarkedDecisionPair();
+
+    // Hidden by default: the marked duplicate's embedding is filtered out.
+    const visible = candidateSourceIds(defaultWhere);
+    expect(visible).toContain(survivorId);
+    expect(visible).not.toContain(markedId);
+
+    // Revealed when the dedup filter is dropped (include-duplicates equivalent).
+    const all = candidateSourceIds(`WHERE source_table = 'decisions'`);
+    expect(all).toContain(survivorId);
+    expect(all).toContain(markedId);
+  }
+
+  test('recall semantic hides marked duplicates (runSemanticSearch → embeddingsWhere)', () => {
+    expectHidesMarkedByDefault(embeddingsWhere('decisions'));
+  });
+
+  test('recall hybrid hides marked duplicates (runHybridSearch → embeddingsWhere)', () => {
+    expectHidesMarkedByDefault(embeddingsWhere('decisions'));
+  });
+
+  test('MCP vector path hides marked duplicates (hybridSearch → notMarkedDuplicateSql)', () => {
+    // Verbatim WHERE clause from hybridSearch() in src/mcp-server.ts. The test
+    // DB holds only the two seeded decision embeddings, so no table filter is
+    // needed (the MCP path itself queries every embedding).
+    expectHidesMarkedByDefault(`WHERE ${notMarkedDuplicateSql('source_table', 'source_id')}`);
   });
 });
