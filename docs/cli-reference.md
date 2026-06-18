@@ -342,7 +342,25 @@ Safety model:
   tradeoff is order-dependence: an early survivor is never consolidated
   under a later, higher-priority record. As defense-in-depth, `--delete`
   refuses outright (no changes written) if a plan would delete a recorded
-  survivor.
+  survivor. A consequence of stickiness is an intentional asymmetry: because a
+  sticky survivor is excluded from the *duplicate* side of later scans, it
+  never acquires **new** semantic duplicates after the run that established it.
+  The exact/normalized pass is unaffected — exact-duplicate chains share
+  normalized text, so a survivor that gathers further exact matches stays safe
+  by construction.
+- **Marking is terminal until acted on.** Once `--execute` marks a record a
+  duplicate, a later `--execute --delete` run does **not** auto-escalate that
+  prior mark to deletion — `--delete` acts only on duplicates identified within
+  its own run. Marking is the conservative, reversible state; silently
+  escalating it to irreversible deletion would violate non-destructive-by-default
+  ([ADR-0003](adr/0003-dedup-mark-delete-non-escalating.md)). A user who wants
+  prior marks deleted must act on them explicitly.
+- **Prune respects survivors.** [`recall prune`](#prune) never deletes a record
+  that is a recorded survivor in active `dedup_lineage` (status `marked` or
+  `deleted`) — doing so would orphan the duplicates marked under it (they would
+  stay hidden from search while their visible representative is gone). Withheld
+  rows are reported in the prune summary, never silently skipped — the same
+  conservative stance as `--delete`'s survivor guard above.
 - **Lifecycle-aware.** Only `active` decisions participate; superseded and
   reverted decisions are managed by the decision lifecycle, not dedup.
 
@@ -463,3 +481,9 @@ recall prune --execute --keep-decisions
 | extraction_tracker | Older than N days |
 
 **Never pruned:** loa_entries, learnings, extraction_errors
+
+**Dedup-aware.** Prune never deletes a record that is a recorded survivor in
+active `dedup_lineage` (status `marked`/`deleted`), even when it otherwise
+matches the retention rule above — deleting a survivor would orphan the
+duplicates marked under it. Withheld rows are counted and reported in the
+summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
