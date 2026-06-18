@@ -80,7 +80,11 @@ Issues and PRDs are tracked in GitHub Issues for `edheltzel/Recall`; use the `gh
 
 ### Triage labels
 
-Use the canonical triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+The tracker uses colon-namespaced labels — `type:*` (kind), `agent:*` (`ready` / `blocked` / `complete`), `risk:*` (judgement required), `needs:human`, plus `needs-triage` / `needs-info` for intake. Labels carry signal the board `Status` field can't; they never mirror a board column. See `docs/agents/triage-labels.md`.
+
+### Board status
+
+Work is tracked on GitHub Project #15, whose `Status` field is the single source of truth for position-in-flow. When a PR opens for an item (or a reviewer is dispatched), move its board Status to `In Review`; on merge, to `Done`. No labels mirror Status. Canonical rule + `gh` commands and field IDs: `docs/agents/board-status.md`.
 
 ### Domain docs
 
