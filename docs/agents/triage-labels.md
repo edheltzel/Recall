@@ -6,8 +6,10 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | -------------------------- | -------------------- | ---------------------------------------- |
 | `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
 | `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+| `ready-for-agent`          | `agent:ready`        | Fully specified, ready for an AFK agent  |
+| `ready-for-human`          | `needs:human`        | Requires human implementation            |
+| `wontfix`                  | _(no label)_         | Close as "not planned" with a comment    |
 
 When a skill mentions a role, use the corresponding label string from this table.
+
+The tracker uses colon-namespaced labels: `type:*` (kind), `agent:*` (`ready` / `blocked` / `complete`), `risk:*` (judgement required), `needs:human`. These are orthogonal signals — they say what the board's `Status` field can't. **Position-in-flow (Todo / In Progress / In Review / Done) is owned by the board Status field, not by labels** — see [`board-status.md`](board-status.md).
