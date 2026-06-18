@@ -95,6 +95,27 @@ describe('data migration (4 to 5)', () => {
     expect(result.applied).toBe(MIGRATIONS.length - 4);
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
   });
+
+  test('RECALL_SKIP_LEGACY_DATA_MIGRATIONS skips the import but still advances version', () => {
+    // The skip flag must suppress only the legacy JSON ingestion — the
+    // migration chain must still complete so user_version reaches latest and
+    // the extraction_* tables stay empty regardless of host ~/.claude/MEMORY.
+    const prev = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
+    process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS = '1';
+    try {
+      db.prepare('PRAGMA user_version = 4').run();
+      const result = applyMigrations(db);
+      expect(result.applied).toBe(MIGRATIONS.length - 4);
+      expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+      for (const t of ['extraction_sessions', 'extraction_tracker', 'extraction_errors']) {
+        const { n } = db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number };
+        expect(n).toBe(0);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
+      else process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS = prev;
+    }
+  });
 });
 
 describe('migration failure handling', () => {
