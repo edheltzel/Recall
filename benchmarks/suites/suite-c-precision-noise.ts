@@ -19,7 +19,8 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { search, getLastSearchErrors } from '../../src/lib/memory.js';
-import { initDb, closeDb } from '../../src/db/connection.js';
+import { initDb, closeDb, getDb } from '../../src/db/connection.js';
+import { planDedup, applyDedupPlan } from '../../src/lib/dedup.js';
 import { checkEmbeddingService } from '../../src/lib/embeddings.js';
 import type { SuiteResult, MetricSample } from '../types.js';
 import {
@@ -45,6 +46,8 @@ export interface SuiteCOptions {
   seed?: number;
   /** Measured repeats per query (after 1 unmeasured warmup pass). Default 5; env RECALL_BENCH_C_REPEATS overrides. */
   repeats?: number;
+  /** Run `recall dedup --execute` over each corpus before measuring (issue #78). Default off; env RECALL_BENCH_C_DEDUP overrides. */
+  dedup?: boolean;
 }
 
 const DEFAULT_SIZES = [100, 1_000, 10_000, 100_000];
@@ -56,6 +59,11 @@ function parseEnvInts(name: string): number[] | undefined {
   if (!raw) return undefined;
   const values = raw.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0);
   return values.length > 0 ? values : undefined;
+}
+
+function parseEnvFlag(name: string): boolean {
+  const v = process.env[name]?.trim().toLowerCase();
+  return v != null && v !== '' && v !== '0' && v !== 'false';
 }
 
 const round = (value: number, places: number): number => {
@@ -158,10 +166,12 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
   const sizes = options.sizes ?? parseEnvInts('RECALL_BENCH_C_SIZES') ?? DEFAULT_SIZES;
   const seed = options.seed ?? DEFAULT_SEED;
   const repeats = options.repeats ?? parseEnvInts('RECALL_BENCH_C_REPEATS')?.[0] ?? DEFAULT_REPEATS;
+  const dedup = options.dedup ?? parseEnvFlag('RECALL_BENCH_C_DEDUP');
 
   const embedding = await checkEmbeddingService().catch(() => ({ available: false, model: 'unknown', url: 'unknown' }));
 
   const samples: MetricSample[] = [];
+  let totalMarked = 0;
 
   // Suite C must never touch the user's real DB: every corpus lives in a
   // temp dir, and the env override + module connection are restored after.
@@ -179,6 +189,22 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
       initDb();
       const targets = seedFixture(spec);
       const scope = `corpus=${size}`;
+
+      // Optional dedup pass (issue #78): mirror `recall dedup --execute` over
+      // the seeded corpus before measuring, so the diff vs the no-dedup
+      // baseline is dedup's efficacy report. Non-destructive marking (no
+      // --delete); search() then excludes records marked in dedup_lineage.
+      // Uses stored embeddings only, exactly like the CLI — the semantic pass
+      // is skipped when the corpus has none.
+      if (dedup) {
+        const db = getDb();
+        const plan = planDedup(db);
+        const planned = plan.tables.reduce((sum, t) => sum + t.planned.length, 0);
+        const applied = applyDedupPlan(db, plan, { destructive: false });
+        totalMarked += applied.marked;
+        samples.push({ name: 'dedup_planned', value: planned, unit: 'count', scope });
+        samples.push({ name: 'dedup_marked', value: applied.marked, unit: 'count', scope });
+      }
 
       // Warmup — unmeasured pass(es) so first-touch page cache and statement
       // compilation don't pollute the latency distribution.
@@ -250,7 +276,9 @@ export async function runSuiteC(options: SuiteCOptions = {}): Promise<SuiteResul
       `Latency protocol: ${WARMUP_PASSES} unmeasured warmup pass per corpus size, then ${repeats} measured repeats per query on a warm connection; p50/p95 are computed across all measured calls at that size. Relevance metrics come from the first measured pass (retrieval is deterministic for a fixed corpus).`,
       `Embedding service available: ${embedding.available ? `yes (${embedding.model})` : 'no'}. Suite C exercises the FTS5 keyword path (search()) only — semantic/hybrid retrieval is NOT measured in this baseline either way.`,
       'FTS5 MATCH is implicit AND with no stemming — paraphrase-category queries are expected to score near zero on keyword search. That gap is part of the honest baseline this suite records.',
-      'Dedup was NOT run before measurement: the corpus contains unmarked near-duplicates that legitimately compete in ranking. search() excludes only records already marked in dedup_lineage.',
+      dedup
+        ? `Dedup WAS run before measurement (issue #78): \`recall dedup --execute\` semantics — exact + stored-embedding-semantic detection, non-destructive marking (no --delete). ${totalMarked} record(s) marked across all sizes; search() excludes records marked in dedup_lineage. The semantic pass uses stored embeddings only, of which the seeded corpus has none, so only the exact pass runs.`
+        : 'Dedup was NOT run before measurement: the corpus contains unmarked near-duplicates that legitimately compete in ranking. search() excludes only records already marked in dedup_lineage.',
       'Ground truth never includes messages-table records — messages are noise-only in this corpus. The project column is part of every FTS index, so unscoped queries can match records via their project name alone.',
       'No pass/fail threshold — baseline-first. Later regression gating can diff future runs against the checked-in baseline JSONL.',
     ],
