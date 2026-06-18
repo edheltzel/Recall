@@ -8,7 +8,7 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `needs-info`               | `needs-info`         | Waiting on reporter for more information |
 | `ready-for-agent`          | `agent:ready`        | Fully specified, ready for an AFK agent  |
 | `ready-for-human`          | `needs:human`        | Requires human implementation            |
-| `wontfix`                  | _(no label)_         | Close as "not planned" with a comment    |
+| `wontfix`                  | `wontfix`         | Close as "not planned" with a comment    |
 
 When a skill mentions a role, use the corresponding label string from this table.
 
