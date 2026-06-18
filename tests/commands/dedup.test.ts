@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   console.log = originalLog;
   console.error = originalError;
-  process.exitCode = originalExitCode;
+  process.exitCode = originalExitCode ?? 0;
   teardownTestDb();
 });
 
