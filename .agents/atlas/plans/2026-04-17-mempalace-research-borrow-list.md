@@ -2,10 +2,11 @@
 title: MemPalace Research → Recall Borrow List
 status: In Progress
 percent_complete: 70
-last_updated: 2026-06-01
-phase: Phase 3 (Postgres/Turso backend) + Phase 4 (non-coding agents) — DRAFT, awaiting decision
-blockers: Awaiting Ed's go/no-go on Phase 3 (Turso/libSQL multi-device) and Phase 4 (Slack bot, etc.)
-next_action: Review/merge #7 bias_type + --bias-type implementation; then decide Phase 3 priority vs. CLI rename + npm publish
+last_updated: 2026-06-18
+phase: Boards stood up 2026-06-18, consistent Phase namespace — Phase 0 Hardening & Dedup Proof (#15, COMPLETE), Phase 1 Memory Intelligence (#16), Phase 2 Distribution & Packaging (#17), Phase 3 Backend Portability (#18), Phase 4 Beyond Coding Agents (#19).
+boards: '#16 Memory Intelligence (near-term: context-quality sprint #100 Tiered SessionRecall + #101 Importance scoring, + MemPalace features #49/#50/#51/#52/#53/#39, + carry-forward hygiene #91/#96/#97/#98) · #17 Distribution & Packaging (#35/#34/#30/#32) · #18 Phase 3 epic #102 · #19 Phase 4 epic #103'
+blockers: Phase 3 (#102) and Phase 4 (#103) epics filed but PENDING Ed's go/no-go — Phase 3 only matters if Phase 4 is a yes. Phase 3-vs-npm-publish priority still Ed's call.
+next_action: Greenlight the context-quality sprint (#100 + #101, ship together) as the first Memory Intelligence work; decide Phase 4 direction (which unlocks/kills Phase 3). Embedding-backed Suite-C experiment (#99) is running — its result informs whether #49 entity-keying is still needed.
 ---
 
 # MemPalace Research → Recall Borrow List

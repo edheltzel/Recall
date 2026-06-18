@@ -84,7 +84,7 @@ The tracker uses colon-namespaced labels — `type:*` (kind), `agent:*` (`ready`
 
 ### Board status
 
-Work is tracked on GitHub Project #15, whose `Status` field is the single source of truth for position-in-flow. When a PR opens for an item (or a reviewer is dispatched), move its board Status to `In Review`; on merge, to `Done`. No labels mirror Status. Canonical rule + `gh` commands and field IDs: `docs/agents/board-status.md`.
+Work is tracked across **per-phase GitHub Project boards** (one board per phase: #15 Phase 0 complete, #16 Phase 1, #17 Phase 2, #18 Phase 3, #19 Phase 4). Each board's `Status` field is the single source of truth for position-in-flow. When a PR opens for an item (or a reviewer is dispatched) move its Status to `In Review`; move to `Done` **only after the PR merges** (Done auto-closes the issue). No labels mirror Status. Note: the newer boards ship with only Todo/In Progress/Done — no `In Review` option. Canonical rule, per-board field IDs, and the auto-close/In-Review caveats: `docs/agents/board-status.md`.
 
 ### Domain docs
 
