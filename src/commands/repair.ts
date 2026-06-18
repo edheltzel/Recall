@@ -135,6 +135,12 @@ export async function runRepair(
         if (embedResult.failed.length > 5) {
           console.error(`  ...and ${embedResult.failed.length - 5} more failures`);
         }
+        // Re-embedding is a requested repair: per-row failures with the
+        // service reachable mean it did not fully succeed, so the exit code
+        // must reflect that — matching the FTS-failure policy above. (#71)
+        if (embedResult.failed.length > 0) {
+          process.exitCode = 1;
+        }
       }
     } else if (execute && embeddable === 0) {
       console.log('  Nothing to embed.');
