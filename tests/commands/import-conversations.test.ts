@@ -18,7 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   teardownTestDb();
   rmSync(tempDir, { recursive: true, force: true });
-  process.exitCode = undefined;
+  process.exitCode = 0;
 });
 
 describe('runImportConversations', () => {
