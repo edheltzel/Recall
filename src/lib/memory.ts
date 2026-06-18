@@ -429,6 +429,42 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
   return results.slice(0, limit);
 }
 
+/**
+ * Resolve display content + provenance for a record surfaced only by the
+ * vector (embeddings) branch of hybrid search, keyed by its embeddings
+ * source_table. Mirrors the four embedded tables (see EMBED_SOURCES in
+ * repair.ts); an unknown table yields empty content and null provenance.
+ * Centralizing this keeps the hybrid vec-branch from silently omitting a
+ * table — issue #67, where a vector-only learnings match misreported its
+ * provenance as unknown because the learnings case was missing.
+ */
+export function vectorRowContentProvenance(
+  sourceTable: string,
+  sourceId: number
+): { content: string; provenance: Provenance | null } {
+  const db = getDb();
+  if (sourceTable === 'loa_entries') {
+    const loa = db.prepare('SELECT title, fabric_extract, provenance FROM loa_entries WHERE id = ?').get(sourceId) as any;
+    return {
+      content: loa ? `${loa.title}: ${loa.fabric_extract?.slice(0, 200)}` : '',
+      provenance: loa?.provenance ?? null
+    };
+  }
+  if (sourceTable === 'decisions') {
+    const dec = db.prepare('SELECT decision, provenance FROM decisions WHERE id = ?').get(sourceId) as any;
+    return { content: dec?.decision || '', provenance: dec?.provenance ?? null };
+  }
+  if (sourceTable === 'messages') {
+    const msg = db.prepare('SELECT content, provenance FROM messages WHERE id = ?').get(sourceId) as any;
+    return { content: msg?.content?.slice(0, 200) || '', provenance: msg?.provenance ?? null };
+  }
+  if (sourceTable === 'learnings') {
+    const learn = db.prepare('SELECT problem, provenance FROM learnings WHERE id = ?').get(sourceId) as any;
+    return { content: learn?.problem?.slice(0, 200) || '', provenance: learn?.provenance ?? null };
+  }
+  return { content: '', provenance: null };
+}
+
 // ============ Recent ============
 
 export function recentMessages(limit: number = 10, project?: string): Message[] {
