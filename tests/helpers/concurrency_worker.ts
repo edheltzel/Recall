@@ -24,11 +24,13 @@ if (!DB_PATH) {
 }
 
 const db = new Database(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL');
-// Retry on transient SQLITE_BUSY instead of crashing — without this, a
-// busy collision with the parent test's connections kills the worker
-// before it ever records a result.
+// Set the busy handler FIRST, before any lock-requiring statement. Switching
+// journal_mode to WAL briefly needs an exclusive lock; if busy_timeout is set
+// afterwards, that WAL switch has no retry handler yet and throws SQLITE_BUSY
+// on a transient collision with the parent test's connections — killing the
+// worker before it ever acquires the semaphore.
 db.exec('PRAGMA busy_timeout = 5000');
+db.exec('PRAGMA journal_mode = WAL');
 
 // Create results table if not exists (for test assertions)
 db.exec(`
@@ -65,6 +67,10 @@ db.prepare(
 ).run(WORKER_ID, acquired ? 1 : 0);
 
 if (acquired) {
+  // Startup handshake: announce that the lock row is committed so a parent
+  // test can wait on readiness instead of polling the DB against a
+  // wall-clock deadline. Printed only after the INSERT above has committed.
+  console.log(`ACQUIRED ${WORKER_ID}`);
   // Hold the lock for HOLD_MS
   await Bun.sleep(HOLD_MS);
   // Release
