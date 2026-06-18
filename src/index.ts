@@ -256,7 +256,7 @@ program
   .action(async (inputPath, options) => {
     await runImportConversations(inputPath, {
       format: options.format,
-      noExtract: options.noExtract,
+      noExtract: options.extract === false,
       dryRun: options.dryRun,
       verbose: options.verbose,
       project: options.project
