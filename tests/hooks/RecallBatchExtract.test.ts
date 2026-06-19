@@ -217,4 +217,12 @@ describe('Static guarantees — legacy JSON tracker is retired', () => {
   test('(d) RecallBatchExtract.ts imports from extraction-tracker lib', () => {
     expect(BATCH_EXTRACT_SOURCE).toContain("from './lib/extraction-tracker'");
   });
+
+  test('(e) hasExtractionTracker open sets busy_timeout = 5000 (#96)', () => {
+    // The hook open isn't observable at runtime — the connection is opened and
+    // closed inside hasExtractionTracker, which returns only a boolean. So we
+    // assert the pragma at the source seam: the Database open must be followed
+    // by busy_timeout, mirroring getDb() (#72/#96).
+    expect(/db = new Database\(dbPath\);[\s\S]{0,200}PRAGMA busy_timeout = 5000/.test(BATCH_EXTRACT_SOURCE)).toBe(true);
+  });
 });

@@ -1,6 +1,6 @@
 // recall doctor — health check for all memory subsystems
 
-import { existsSync, statSync, readFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
+import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -527,7 +527,9 @@ function hashFile(path: string): string | null {
   }
 }
 
-interface SymlinkCheck {
+// Shared probe contract: a pure check plus an optional repair closure that
+// runDoctor invokes under --fix. Used by both probeSymlink and probeMcpEnv.
+interface ProbeCheck {
   result: CheckResult;
   repair?: () => CheckResult;
 }
@@ -535,7 +537,7 @@ interface SymlinkCheck {
 // Exported for unit tests. The probe is pure (state lives entirely in the
 // filesystem args, not in module globals); doctor's main loop iterates the
 // build-time list and accumulates results.
-export function probeSymlink(probe: SymlinkProbe): SymlinkCheck {
+export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
   const { label, target, canonical } = probe;
 
   if (!existsSync(canonical)) {
@@ -620,6 +622,124 @@ export function probeSymlink(probe: SymlinkProbe): SymlinkCheck {
 }
 
 // ─────────────────────────────────────────
+// Check: MCP registration carries env.RECALL_DB_PATH matching the resolved DB
+// ─────────────────────────────────────────
+//
+// Pre-Phase-1 installs registered recall-memory via `claude mcp add`, which
+// can't set an env block, leaving `env: {}`. The MCP server then resolves the
+// DB path from defaults instead of the user's explicit RECALL_DB_PATH, so the
+// server's DB view can silently diverge from the CLI's after the next Claude
+// restart (issue #28). This probe + repair is the in-place fix for installs
+// that predate `_recall_ensure_mcp_entry` in lib/install-lib.sh.
+//
+// Cross-language parallel (NOT a DRY violation — bash and TS can't share code):
+// the repair below mirrors `_recall_ensure_mcp_entry` in lib/install-lib.sh —
+// for each config file that owns the registration, ensure env is an object,
+// set env.RECALL_DB_PATH to the resolved path, and drop the legacy MEM_DB_PATH
+// key. Command/args rewrites stay owned by the installer; doctor only repairs
+// the env block, which is the surgical fix issue #28 calls for.
+export interface McpEnvProbe {
+  configPaths: string[];   // candidate config files, in resolution order
+  resolvedDbPath: string;  // getDbPath() — the value the env block should carry
+}
+
+interface McpEntry {
+  env?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface ClaudeConfig {
+  mcpServers?: Record<string, McpEntry>;
+  [key: string]: unknown;
+}
+
+interface McpRegistration {
+  configPath: string;
+  envDbPath: string | undefined; // value of env.RECALL_DB_PATH, if present
+}
+
+// Locate every config file that owns an mcpServers["recall-memory"] entry.
+// Mirrors the file selection in _recall_ensure_mcp_entry (exists + contains the
+// registration); malformed/unreadable JSON is skipped, never fatal.
+function findMcpRegistrations(configPaths: string[]): McpRegistration[] {
+  const owners: McpRegistration[] = [];
+  for (const configPath of configPaths) {
+    if (!existsSync(configPath)) continue;
+    let cfg: ClaudeConfig;
+    try {
+      cfg = JSON.parse(readFileSync(configPath, 'utf-8')) as ClaudeConfig;
+    } catch {
+      continue;
+    }
+    const entry = cfg.mcpServers?.['recall-memory'];
+    if (!entry || typeof entry !== 'object') continue;
+    const env = entry.env;
+    const raw = env && typeof env === 'object' && !Array.isArray(env) ? env.RECALL_DB_PATH : undefined;
+    owners.push({ configPath, envDbPath: typeof raw === 'string' ? raw : undefined });
+  }
+  return owners;
+}
+
+// Exported for unit tests. Pure with respect to its args (config-file paths +
+// resolved DB path); the repair closure patches the owning config file(s).
+export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
+  const label = 'MCP env carries RECALL_DB_PATH';
+  const { configPaths, resolvedDbPath } = probe;
+
+  const owners = findMcpRegistrations(configPaths);
+
+  // No config file owns the registration — nothing for doctor to patch.
+  if (owners.length === 0) {
+    return {
+      result: { label, status: 'INFO', message: 'No recall-memory MCP registration found in user config' },
+    };
+  }
+
+  // Healthy: every owner already carries the resolved DB path.
+  const stale = owners.filter(o => o.envDbPath !== resolvedDbPath);
+  if (stale.length === 0) {
+    return {
+      result: {
+        label,
+        status: 'PASS',
+        message: `env.RECALL_DB_PATH matches resolved DB path in ${owners.length} config file(s)`,
+      },
+    };
+  }
+
+  // At least one owner has a missing/empty env or a divergent value — the
+  // next-Claude-restart hazard from issue #28.
+  const detail = stale
+    .map(o => `${o.configPath} (${o.envDbPath === undefined ? 'env.RECALL_DB_PATH missing' : `has ${o.envDbPath}`})`)
+    .join('; ');
+  return {
+    result: {
+      label,
+      status: 'WARN',
+      message: `env.RECALL_DB_PATH should be ${resolvedDbPath} but ${detail} — MCP server may diverge from CLI on next Claude restart`,
+    },
+    repair: () => {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
+      const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+      const patched: string[] = [];
+      for (const owner of stale) {
+        mkdirSync(backupDir, { recursive: true });
+        copyFileSync(owner.configPath, join(backupDir, owner.configPath.replace(/[/\\]/g, '_')));
+        const cfg = JSON.parse(readFileSync(owner.configPath, 'utf-8')) as ClaudeConfig;
+        const entry = cfg.mcpServers?.['recall-memory'];
+        if (!entry) continue; // registration vanished between probe and repair
+        if (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env)) entry.env = {};
+        entry.env.RECALL_DB_PATH = resolvedDbPath;
+        delete entry.env.MEM_DB_PATH;
+        writeFileSync(owner.configPath, JSON.stringify(cfg, null, 2));
+        patched.push(owner.configPath);
+      }
+      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH=${resolvedDbPath} in ${patched.join(', ')}` };
+    },
+  };
+}
+
+// ─────────────────────────────────────────
 // Main entry point
 // ─────────────────────────────────────────
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
@@ -658,6 +778,20 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     } else {
       results.push(sc.result);
     }
+  }
+
+  // MCP env health (issue #28): the recall-memory registration must carry
+  // env.RECALL_DB_PATH matching the resolved DB path, or the MCP server can
+  // diverge from the CLI after the next Claude restart. Same repair contract as
+  // the symlink probes — with --fix we patch the owning config file(s).
+  const mcpEnvCheck = probeMcpEnv({
+    configPaths: [join(homedir(), '.claude.json'), join(homedir(), '.claude', 'settings.json')],
+    resolvedDbPath: getDbPath(),
+  });
+  if (opts.fix && mcpEnvCheck.repair && mcpEnvCheck.result.status !== 'PASS' && mcpEnvCheck.result.status !== 'INFO') {
+    results.push(mcpEnvCheck.repair());
+  } else {
+    results.push(mcpEnvCheck.result);
   }
 
   // Print all results
