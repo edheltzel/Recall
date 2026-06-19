@@ -80,7 +80,7 @@ import { existsSync } from "fs";
  * Hybrid search combining FTS5 + vector embeddings with RRF fusion
  * Used by context_for_agent and memory_hybrid_search
  */
-async function hybridSearch(
+export async function hybridSearch(
 	query: string,
 	options: { project?: string; limit?: number },
 ): Promise<{
@@ -998,4 +998,10 @@ async function main() {
 	console.error("RECALL MCP server running");
 }
 
-main().catch(console.error);
+// Only launch the stdio server when this module is the process entrypoint
+// (true for the `recall-mcp` bin → dist/mcp-server.js). When imported — e.g.
+// by a test driving the exported `hybridSearch` — `import.meta.main` is false,
+// so importing the module never starts a server. (#115)
+if (import.meta.main) {
+	main().catch(console.error);
+}
