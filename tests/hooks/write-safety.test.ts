@@ -92,6 +92,13 @@ describe('redactSecrets', () => {
     'x = y for all cases',
     'this is password protected content',
     'please review the secret plan tomorrow',
+    // High-entropy-looking but non-secret strings must NOT be over-redacted.
+    'data: aGVsbG8gd29ybGQgdGhpcyBpcyBiYXNlNjQ=', // base64 blob
+    'id 550e8400-e29b-41d4-a716-446655440000 here', // UUID
+    'commit e9d2037a1b2c3d4e5f6071829304a5b6c7d8e9f0 landed', // git SHA
+    'see src/lib/sqlite-writers.ts:124 for the writer', // file path:line
+    'sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', // hex hash
+    'set RECALL_DB_PATH and EXTRACTION_MAX_CONCURRENT then run', // env var names
   ];
   for (const prose of PROSE) {
     test(`does not over-redact prose: "${prose}"`, () => {
@@ -136,4 +143,26 @@ describe('scrub (compose: strip then redact)', () => {
     const s = 'the api key is in the vault';
     expect(scrub(s)).toEqual({ text: s, redactions: [] });
   });
+});
+
+// Regression: two secrets concatenated with NO separator. A naive greedy distinctive-
+// prefix class consumed the SECOND secret's anchor (`Bearer ` / assignment keyword),
+// stranding its value in cleartext. The tempered-greedy classes must stop at the anchor
+// so the second credential is redacted too. (Mutation: drop the NEXT_CRED lookahead =>
+// the prefix over-runs the anchor => the second value leaks => RED.)
+describe('concatenated secrets — no anchor-stranding leak (RedTeam HIGH)', () => {
+  const CONCAT_CASES: { name: string; input: string; leak: string }[] = [
+    { name: 'anthropic + bearer', input: 'sk-ant-api03-' + 'A'.repeat(40) + 'Bearer ' + 'p'.repeat(32), leak: 'p'.repeat(32) },
+    { name: 'openai + assignment', input: 'sk-' + 'C'.repeat(40) + 'api_key=supersecret123', leak: 'supersecret123' },
+    { name: 'github_pat + bearer', input: 'github_pat_' + 'e'.repeat(30) + 'Bearer ' + 'p'.repeat(32), leak: 'p'.repeat(32) },
+    { name: 'glpat + bearer', input: 'glpat-' + 'f'.repeat(24) + 'Bearer ' + 'p'.repeat(32), leak: 'p'.repeat(32) },
+    { name: 'bearer + assignment', input: 'Bearer ' + 'p'.repeat(32) + 'password=anothersecret99', leak: 'anothersecret99' },
+    { name: 'anthropic + assignment', input: 'sk-ant-api03-' + 'A'.repeat(40) + 'password=zzzzzzzzzzzz', leak: 'zzzzzzzzzzzz' },
+  ];
+  for (const { name, input, leak } of CONCAT_CASES) {
+    test(`${name}: second credential value fully redacted`, () => {
+      const { text } = scrub(input);
+      expect(text).not.toContain(leak);
+    });
+  }
 });
