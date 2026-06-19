@@ -90,6 +90,10 @@ Work is tracked across **per-phase GitHub Project boards** (one board per phase:
 
 This is a single-context repo: use root `CONTEXT.md` when present and root `docs/adr/` for architectural decisions. See `docs/agents/domain.md`.
 
+### Worker flow
+
+Workers run in an isolated worktree (`/ce-worktree`): verify `pwd` is the worktree root and use worktree-relative paths before the first edit, so changes never leak into the main checkout. See `docs/agents/worker-flow.md`.
+
 ## DRY — Single Source of Truth (MANDATORY)
 
 **Don't Repeat Yourself.** Every piece of knowledge — logic, configuration, prompt/workflow text, user-facing copy — must have exactly one authoritative definition. Duplication is treated as a defect, not a style preference.
