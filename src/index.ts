@@ -484,10 +484,12 @@ program
   .description('Semantic search using vector embeddings')
   .option('-t, --table <table>', 'Search specific table (loa_entries, decisions, messages)')
   .option('-l, --limit <n>', 'Max results', '10')
+  .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
     await runSemanticSearch(query, {
       table: options.table,
-      limit: parseInt(options.limit, 10)
+      limit: parseInt(options.limit, 10),
+      showProvenance: options.showProvenance
     });
     closeDb();
   });
@@ -498,10 +500,12 @@ program
   .description('Hybrid search combining keywords (FTS5) + semantics (embeddings) with RRF fusion')
   .option('-t, --table <table>', 'Search specific table (loa_entries, decisions, messages)')
   .option('-l, --limit <n>', 'Max results', '10')
+  .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
     await runHybridSearch(query, {
       table: options.table,
-      limit: parseInt(options.limit, 10)
+      limit: parseInt(options.limit, 10),
+      showProvenance: options.showProvenance
     });
     closeDb();
   });
@@ -714,6 +718,7 @@ program
   .option('-l, --limit <n>', 'Max results', '10')
   .option('-k, --keyword', 'Use keyword search only (FTS5)')
   .option('-v, --vector', 'Use vector search only (semantic)')
+  .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
     if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
       if (options.keyword) {
@@ -722,19 +727,22 @@ program
           project: options.project,
           table: options.table,
           biasType: options.biasType,
-          limit: parseInt(options.limit, 10)
+          limit: parseInt(options.limit, 10),
+          showProvenance: options.showProvenance
         });
       } else if (options.vector) {
         // Semantic only
         await runSemanticSearch(query, {
           table: options.table,
-          limit: parseInt(options.limit, 10)
+          limit: parseInt(options.limit, 10),
+          showProvenance: options.showProvenance
         });
       } else {
         // Default: hybrid (best results)
         await runHybridSearch(query, {
           table: options.table,
-          limit: parseInt(options.limit, 10)
+          limit: parseInt(options.limit, 10),
+          showProvenance: options.showProvenance
         });
       }
       closeDb();
