@@ -29,6 +29,8 @@ memory_search({ query: "database choice", bias_type: "decisions" })  // decision
 
 Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for curated summaries, `messages` for raw conversation traces.
 
+Lead with global search — leave `table` unset so a phrasing mismatch still finds the record. A global query with zero keyword hits auto-falls back to semantic search (labeled `showing semantic matches:`); set `table` only when you intentionally want to scope to one type and accept an empty result if nothing matches there.
+
 ### memory_hybrid_search
 
 Combines keyword (FTS5) and semantic (embedding) search. Best for natural language queries.
