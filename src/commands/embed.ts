@@ -4,7 +4,9 @@ import { getDb } from '../db/connection.js';
 import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL } from '../lib/embeddings.js';
 import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor } from '../lib/repair.js';
-import { search as ftsSearch } from '../lib/memory.js';
+import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
+import { formatProvenanceTag } from './provenance-display.js';
+import type { Provenance } from '../types/index.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
@@ -149,7 +151,7 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
 /**
  * Semantic search using embeddings
  */
-export async function runSemanticSearch(query: string, options: { table?: string; limit?: number }): Promise<void> {
+export async function runSemanticSearch(query: string, options: { table?: string; limit?: number; showProvenance?: boolean }): Promise<void> {
   const db = getDb();
   const limit = options.limit || 10;
 
@@ -197,35 +199,26 @@ export async function runSemanticSearch(query: string, options: { table?: string
   // Display top results
   console.log(`Found ${results.length} embeddings, showing top ${limit}:\n`);
 
+  const metaLabels: Record<string, string> = {
+    loa_entries: 'LoA',
+    decisions: 'Decision',
+    messages: 'Message',
+    learnings: 'Learning'
+  };
+
   for (let i = 0; i < Math.min(limit, results.length); i++) {
     const r = results[i];
     const score = (r.similarity * 100).toFixed(1);
 
-    // Get preview of content
-    let preview = '';
-    let meta = '';
+    // Resolve content + provenance for every embedded table via the shared
+    // resolver (issue #67) instead of ad-hoc per-table SELECTs. The provenance
+    // tag follows the same display contract as recall search (issue #75).
+    const { content, provenance } = vectorRowContentProvenance(r.source_table, r.source_id);
+    const meta = metaLabels[r.source_table] ? `[${metaLabels[r.source_table]} #${r.source_id}]` : '';
+    const preview = content.slice(0, 80).replace(/\n/g, ' ');
+    const provenanceTag = formatProvenanceTag(provenance, options.showProvenance);
 
-    if (r.source_table === 'loa_entries') {
-      const loa = db.prepare('SELECT title, fabric_extract FROM loa_entries WHERE id = ?').get(r.source_id) as any;
-      if (loa) {
-        preview = loa.title;
-        meta = `[LoA #${r.source_id}]`;
-      }
-    } else if (r.source_table === 'decisions') {
-      const dec = db.prepare('SELECT decision FROM decisions WHERE id = ?').get(r.source_id) as any;
-      if (dec) {
-        preview = dec.decision.slice(0, 80);
-        meta = `[Decision #${r.source_id}]`;
-      }
-    } else if (r.source_table === 'messages') {
-      const msg = db.prepare('SELECT content, project FROM messages WHERE id = ?').get(r.source_id) as any;
-      if (msg) {
-        preview = msg.content.slice(0, 80).replace(/\n/g, ' ');
-        meta = `[Message #${r.source_id}]`;
-      }
-    }
-
-    console.log(`${score}% ${meta} ${preview}...`);
+    console.log(`${score}% ${meta} ${preview}...${provenanceTag}`);
   }
 }
 
@@ -272,7 +265,7 @@ export function runEmbedStats(): void {
 /**
  * Hybrid search combining FTS5 keywords + vector semantics with RRF fusion
  */
-export async function runHybridSearch(query: string, options: { table?: string; limit?: number }): Promise<void> {
+export async function runHybridSearch(query: string, options: { table?: string; limit?: number; showProvenance?: boolean }): Promise<void> {
   const db = getDb();
   const limit = options.limit || 10;
 
@@ -285,7 +278,8 @@ export async function runHybridSearch(query: string, options: { table?: string; 
     const ftsResults = ftsSearch(query, { table: options.table === 'loa_entries' ? 'loa' : options.table, limit });
     console.log(`Keyword search results (${ftsResults.length}):\n`);
     for (const r of ftsResults) {
-      console.log(`[${r.table} #${r.id}] ${r.content?.slice(0, 80)}...`);
+      const provenanceTag = formatProvenanceTag(r.provenance, options.showProvenance);
+      console.log(`[${r.table} #${r.id}] ${r.content?.slice(0, 80)}...${provenanceTag}`);
     }
     return;
   }
@@ -367,44 +361,54 @@ export async function runHybridSearch(query: string, options: { table?: string; 
     const inSemantic = semanticRanked.some(r => r.id === key);
     const sourceIndicator = inFts && inSemantic ? 'FTS+VEC' : inFts ? 'FTS   ' : 'VEC   ';
 
-    // Get preview
+    // Get preview + provenance. The per-table SELECT already runs for the
+    // preview, so it is extended (not duplicated) to also carry provenance —
+    // covering breadcrumbs, which the embeddable-only resolver does not
+    // (issue #75 display contract).
     let preview = '';
     let meta = '';
+    let provenance: Provenance | null = null;
 
     if (table === 'loa_entries') {
-      const loa = db.prepare('SELECT title FROM loa_entries WHERE id = ?').get(id) as { title: string } | undefined;
+      const loa = db.prepare('SELECT title, provenance FROM loa_entries WHERE id = ?').get(id) as { title: string; provenance: Provenance | null } | undefined;
       if (loa) {
         preview = loa.title;
         meta = `LoA #${id}`;
+        provenance = loa.provenance ?? null;
       }
     } else if (table === 'decisions') {
-      const dec = db.prepare('SELECT decision FROM decisions WHERE id = ?').get(id) as { decision: string } | undefined;
+      const dec = db.prepare('SELECT decision, provenance FROM decisions WHERE id = ?').get(id) as { decision: string; provenance: Provenance | null } | undefined;
       if (dec) {
         preview = dec.decision.slice(0, 50);
         meta = `Decision #${id}`;
+        provenance = dec.provenance ?? null;
       }
     } else if (table === 'messages') {
-      const msg = db.prepare('SELECT content FROM messages WHERE id = ?').get(id) as { content: string } | undefined;
+      const msg = db.prepare('SELECT content, provenance FROM messages WHERE id = ?').get(id) as { content: string; provenance: Provenance | null } | undefined;
       if (msg) {
         preview = msg.content.slice(0, 50).replace(/\n/g, ' ');
         meta = `Message #${id}`;
+        provenance = msg.provenance ?? null;
       }
     } else if (table === 'learnings') {
-      const learn = db.prepare('SELECT problem FROM learnings WHERE id = ?').get(id) as { problem: string } | undefined;
+      const learn = db.prepare('SELECT problem, provenance FROM learnings WHERE id = ?').get(id) as { problem: string; provenance: Provenance | null } | undefined;
       if (learn) {
         preview = learn.problem.slice(0, 50);
         meta = `Learning #${id}`;
+        provenance = learn.provenance ?? null;
       }
     } else if (table === 'breadcrumbs') {
-      const bc = db.prepare('SELECT content FROM breadcrumbs WHERE id = ?').get(id) as { content: string } | undefined;
+      const bc = db.prepare('SELECT content, provenance FROM breadcrumbs WHERE id = ?').get(id) as { content: string; provenance: Provenance | null } | undefined;
       if (bc) {
         preview = bc.content.slice(0, 50);
         meta = `Breadcrumb #${id}`;
+        provenance = bc.provenance ?? null;
       }
     }
 
+    const provenanceTag = formatProvenanceTag(provenance, options.showProvenance);
     const scoreStr = (score * 100).toFixed(2).padStart(6);
-    console.log(`${scoreStr}% | ${sourceIndicator} | [${meta}] ${preview}...`);
+    console.log(`${scoreStr}% | ${sourceIndicator} | [${meta}] ${preview}...${provenanceTag}`);
   }
 
   // Summary stats
