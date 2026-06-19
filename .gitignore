@@ -18,6 +18,8 @@ dist/
 .claude/worktrees
 .maestro/
 .agents/
+.pi/*
+!.pi/APPEND_SYSTEM.md
 
 # OS
 .DS_Store
