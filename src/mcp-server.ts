@@ -72,14 +72,9 @@ import {
 	shouldFallbackToHybrid,
 	buildHybridFallbackOutcome,
 } from "./lib/search-fallback.js";
+import { provenanceLabel } from "./lib/provenance.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
-
-// Record Provenance display (ADR-0001): structured results always carry
-// provenance; legacy NULL is reported as "unknown", never guessed.
-function provenanceLabel(provenance: Provenance | null | undefined): string {
-	return `provenance: ${provenance ?? "unknown"}`;
-}
 
 /**
  * Hybrid search combining FTS5 + vector embeddings with RRF fusion
