@@ -11,8 +11,8 @@
 // config, not the backup.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { probeMcpEnv } from '../../src/commands/doctor';
 
@@ -41,6 +41,17 @@ function readEntry(): Record<string, unknown> {
 
 function probe() {
   return probeMcpEnv({ configPaths: [configPath], resolvedDbPath: RESOLVED });
+}
+
+// repair() backs files up under the real home (Bun's homedir() ignores $HOME),
+// so a backup is located by its mangled-path filename across the stamp dirs.
+const BACKUPS_ROOT = join(homedir(), '.agents', 'Recall', 'backups');
+function backupExistsFor(cfgPath: string): boolean {
+  if (!existsSync(BACKUPS_ROOT)) return false;
+  const mangled = cfgPath.replace(/[/\\]/g, '_');
+  return readdirSync(BACKUPS_ROOT).some(stamp =>
+    existsSync(join(BACKUPS_ROOT, stamp, 'doctor-fix', mangled))
+  );
 }
 
 describe('probeMcpEnv', () => {
@@ -135,9 +146,78 @@ describe('probeMcpEnv', () => {
     expect(repair).toBeUndefined();
   });
 
-  test('malformed JSON config is skipped, not fatal → INFO', () => {
+  // ── Fix 3 (issue #112): present-but-unparseable is WARN, not INFO ──
+  // A config that exists but is malformed must be surfaced (doctor refuses to
+  // touch a file it can't parse), distinct from a genuinely-absent registration
+  // (the "registration absent" test above, which stays INFO).
+  test('config present but unparseable JSON → WARN (refuses to touch it)', () => {
     writeFileSync(configPath, '{ not valid json ');
-    const { result } = probe();
-    expect(result.status).toBe('INFO');
+    const { result, repair } = probe();
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('unparseable');
+    expect(result.message).toContain(configPath);
+    expect(repair).toBeUndefined();
+  });
+
+  // ── Fix 2 (issue #112): atomic write leaves valid JSON and no .tmp orphan ──
+  test('successful repair leaves no .tmp orphan and writes valid JSON', () => {
+    writeConfig({
+      mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } },
+    });
+    const fixed = probe().repair!();
+    expect(fixed.status).toBe('PASS');
+    expect(existsSync(configPath + '.tmp')).toBe(false);
+    // Throws if the file is not intact, valid JSON.
+    const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(cfg.mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
+  });
+
+  // ── Fix 1 (issue #112): per-file error isolation ──
+  // A write failure on one owner must not throw out of the loop or abort the
+  // other owners. The result reflects partial success honestly (FAIL), and the
+  // healthy owner is still patched (and backed up).
+  test('write failure on one owner → FAIL, other owner still patched, no throw', () => {
+    const okDir = join(tempDir, 'ok');
+    const roDir = join(tempDir, 'readonly');
+    mkdirSync(okDir);
+    mkdirSync(roDir);
+    const okPath = join(okDir, '.claude.json');
+    const roPath = join(roDir, '.claude.json');
+    const stale = { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } };
+    writeFileSync(okPath, JSON.stringify(stale, null, 2));
+    writeFileSync(roPath, JSON.stringify(stale, null, 2));
+
+    chmodSync(roDir, 0o500); // creating the temp sibling inside this dir fails (EACCES)
+    try {
+      const { result, repair } = probeMcpEnv({ configPaths: [okPath, roPath], resolvedDbPath: RESOLVED });
+      expect(result.status).toBe('WARN');
+      const fixed = repair!(); // must not throw despite the read-only owner
+      expect(fixed.status).toBe('FAIL');
+      // Healthy owner patched and backed up ...
+      expect(JSON.parse(readFileSync(okPath, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
+      expect(backupExistsFor(okPath)).toBe(true);
+      // ... failed owner left untouched (env still empty) and no .tmp orphan.
+      expect(JSON.parse(readFileSync(roPath, 'utf-8')).mcpServers['recall-memory'].env).toEqual({});
+      expect(existsSync(roPath + '.tmp')).toBe(false);
+    } finally {
+      chmodSync(roDir, 0o700);
+    }
+  });
+
+  // ── Fix 4 (issue #112): no orphan backup when the registration vanishes ──
+  // If the registration disappears between probe and repair, the backup (taken
+  // only after the re-read + entry guard) must never be created for the
+  // unmodified file.
+  test('registration vanishing between probe and repair leaves no backup', () => {
+    writeConfig({
+      mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } },
+    });
+    const { repair } = probe();
+    writeConfig({ mcpServers: {} }); // registration vanishes before repair runs
+
+    const fixed = repair!();
+    expect(fixed.status).toBe('PASS'); // a vanished owner is not a failure
+    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual({ mcpServers: {} }); // untouched
+    expect(backupExistsFor(configPath)).toBe(false); // no orphan backup of the unmodified file
   });
 });

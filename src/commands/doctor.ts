@@ -1,6 +1,6 @@
 // recall doctor — health check for all memory subsystems
 
-import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
+import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -658,17 +658,28 @@ interface McpRegistration {
   envDbPath: string | undefined; // value of env.RECALL_DB_PATH, if present
 }
 
+interface McpScan {
+  owners: McpRegistration[];
+  // Config files that exist but failed to parse — doctor must never touch a
+  // file it can't read as JSON, so these are surfaced (WARN), not silently
+  // conflated with a genuinely-absent registration.
+  unparseable: string[];
+}
+
 // Locate every config file that owns an mcpServers["recall-memory"] entry.
 // Mirrors the file selection in _recall_ensure_mcp_entry (exists + contains the
-// registration); malformed/unreadable JSON is skipped, never fatal.
-function findMcpRegistrations(configPaths: string[]): McpRegistration[] {
+// registration). Malformed/unreadable JSON is never fatal, but it is recorded
+// (not dropped) so the caller can distinguish it from a missing registration.
+function findMcpRegistrations(configPaths: string[]): McpScan {
   const owners: McpRegistration[] = [];
+  const unparseable: string[] = [];
   for (const configPath of configPaths) {
     if (!existsSync(configPath)) continue;
     let cfg: ClaudeConfig;
     try {
       cfg = JSON.parse(readFileSync(configPath, 'utf-8')) as ClaudeConfig;
     } catch {
+      unparseable.push(configPath);
       continue;
     }
     const entry = cfg.mcpServers?.['recall-memory'];
@@ -677,7 +688,7 @@ function findMcpRegistrations(configPaths: string[]): McpRegistration[] {
     const raw = env && typeof env === 'object' && !Array.isArray(env) ? env.RECALL_DB_PATH : undefined;
     owners.push({ configPath, envDbPath: typeof raw === 'string' ? raw : undefined });
   }
-  return owners;
+  return { owners, unparseable };
 }
 
 // Exported for unit tests. Pure with respect to its args (config-file paths +
@@ -686,10 +697,21 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   const label = 'MCP env carries RECALL_DB_PATH';
   const { configPaths, resolvedDbPath } = probe;
 
-  const owners = findMcpRegistrations(configPaths);
+  const { owners, unparseable } = findMcpRegistrations(configPaths);
 
-  // No config file owns the registration — nothing for doctor to patch.
+  // No config file owns the registration. Distinguish a genuinely-absent
+  // registration (INFO — nothing to do) from a config that exists but is
+  // unparseable (WARN — doctor refuses to touch a file it can't parse).
   if (owners.length === 0) {
+    if (unparseable.length > 0) {
+      return {
+        result: {
+          label,
+          status: 'WARN',
+          message: `config present but unparseable — refusing to touch ${unparseable.join(', ')}`,
+        },
+      };
+    }
     return {
       result: { label, status: 'INFO', message: 'No recall-memory MCP registration found in user config' },
     };
@@ -722,17 +744,35 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
       const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
       const patched: string[] = [];
+      const failed: string[] = [];
       for (const owner of stale) {
-        mkdirSync(backupDir, { recursive: true });
-        copyFileSync(owner.configPath, join(backupDir, owner.configPath.replace(/[/\\]/g, '_')));
-        const cfg = JSON.parse(readFileSync(owner.configPath, 'utf-8')) as ClaudeConfig;
-        const entry = cfg.mcpServers?.['recall-memory'];
-        if (!entry) continue; // registration vanished between probe and repair
-        if (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env)) entry.env = {};
-        entry.env.RECALL_DB_PATH = resolvedDbPath;
-        delete entry.env.MEM_DB_PATH;
-        writeFileSync(owner.configPath, JSON.stringify(cfg, null, 2));
-        patched.push(owner.configPath);
+        // Per-file isolation: a write failure on one owner (EACCES, full disk,
+        // read-only settings.json) must not abort the others or escape the loop.
+        const tmpPath = owner.configPath + '.tmp';
+        try {
+          const cfg = JSON.parse(readFileSync(owner.configPath, 'utf-8')) as ClaudeConfig;
+          const entry = cfg.mcpServers?.['recall-memory'];
+          if (!entry) continue; // registration vanished between probe and repair — nothing to back up or patch
+          if (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env)) entry.env = {};
+          entry.env.RECALL_DB_PATH = resolvedDbPath;
+          delete entry.env.MEM_DB_PATH;
+          // Back up only once the write is confirmed to happen (after the re-read
+          // + entry guard), so a vanished registration leaves no orphan backup.
+          mkdirSync(backupDir, { recursive: true });
+          copyFileSync(owner.configPath, join(backupDir, owner.configPath.replace(/[/\\]/g, '_')));
+          // Atomic write: stage to a temp sibling then rename over the original,
+          // so an interrupt mid-write can't truncate the user's config.
+          writeFileSync(tmpPath, JSON.stringify(cfg, null, 2));
+          renameSync(tmpPath, owner.configPath);
+          patched.push(owner.configPath);
+        } catch {
+          try { if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort temp cleanup */ }
+          failed.push(owner.configPath);
+        }
+      }
+      if (failed.length > 0) {
+        const patchedNote = patched.length ? `patched ${patched.join(', ')}; ` : '';
+        return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}` };
       }
       return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH=${resolvedDbPath} in ${patched.join(', ')}` };
     },
@@ -814,7 +854,17 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     resolvedDbPath: getDbPath(),
   });
   if (opts.fix && mcpEnvCheck.repair && mcpEnvCheck.result.status !== 'PASS' && mcpEnvCheck.result.status !== 'INFO') {
-    results.push(mcpEnvCheck.repair());
+    // A thrown repair must not abort the whole doctor run before its summary
+    // prints — degrade it to a FAIL result and keep going.
+    try {
+      results.push(mcpEnvCheck.repair());
+    } catch (err) {
+      results.push({
+        label: mcpEnvCheck.result.label,
+        status: 'FAIL',
+        message: `Repair failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   } else {
     results.push(mcpEnvCheck.result);
   }
