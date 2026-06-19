@@ -14,6 +14,18 @@ import { homedir } from 'os';
 
 export type Migration = (db: Database) => void;
 
+// When set (to anything other than '0'/'false'), migration 4 → 5 skips its
+// one-shot import of legacy ~/.claude/MEMORY/*.json into the extraction_*
+// tables. Used by tests/CI/sandboxes so a fresh DB is never seeded from the
+// host's real home dir (issue #29).
+// WARNING: never set this in a real/persistent environment — the skipped
+// import is one-shot and does not re-run once user_version advances past 5,
+// so a DB created with the flag set will permanently lack the legacy data.
+function skipLegacyDataMigrations(): boolean {
+  const v = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
+  return !!v && v !== '0' && v !== 'false';
+}
+
 // ---------------------------------------------------------------------------
 // Migration definitions
 // ---------------------------------------------------------------------------
@@ -44,7 +56,16 @@ export const MIGRATIONS: Migration[] = [
   // Migration 4 → 5: JSON → SQLite data migration for extraction state.
   // Migrates .extraction_tracker.json, SESSION_INDEX.json, ERROR_PATTERNS.json
   // into extraction_tracker, extraction_sessions, extraction_errors tables.
+  //
+  // This is the one migration that reaches into the user's real filesystem
+  // (~/.claude/MEMORY/*.json). Tests, CI, and sandboxes create fresh DBs that
+  // would each be seeded from whatever happens to live in the host's home dir,
+  // breaking isolation (issue #29). RECALL_SKIP_LEGACY_DATA_MIGRATIONS skips the
+  // JSON ingestion entirely; the runner still bumps user_version, so the
+  // migration chain stays intact — only the legacy import is suppressed.
   (db) => {
+    if (skipLegacyDataMigrations()) return;
+
     const memoryDir = join(homedir(), '.claude', 'MEMORY');
 
     const trackerPath = join(memoryDir, '.extraction_tracker.json');
