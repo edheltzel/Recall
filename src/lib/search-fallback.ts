@@ -11,6 +11,7 @@
 // hybrid provenance tests use for vectorRowContentProvenance.
 
 import type { Provenance } from "../types/index.js";
+import { provenanceLabel } from "./provenance.js";
 
 /** A single hybridSearch result — mirrors the shape hybridSearch() returns. */
 export interface HybridSearchResult {
@@ -60,9 +61,9 @@ export function formatHybridResults(results: HybridSearchResult[]): string {
 			const preview =
 				r.content.length > 200 ? r.content.slice(0, 200) + "..." : r.content;
 			const score = (r.score * 100).toFixed(1);
-			// provenanceLabel shape mirrored from mcp-server.ts (ADR-0001): NULL is
-			// reported as "unknown", never guessed.
-			const provenance = `provenance: ${r.provenance ?? "unknown"}`;
+			// Shared provenanceLabel (ADR-0001): NULL is reported as "unknown",
+			// never guessed. Single-sourced in lib/provenance.ts.
+			const provenance = provenanceLabel(r.provenance);
 			return `${score}% ${sourceTag} [${r.table}#${r.id}] | ${provenance}\n${preview}`;
 		})
 		.join("\n\n---\n\n");
