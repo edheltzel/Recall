@@ -23,7 +23,9 @@ Each board's `Status` field is the **single source of truth for an item's positi
 | `In Review`   | A PR is open / under code review         |
 | `Done`        | PR merged (or item closed)               |
 
-> **Board caveat — `In Review` is not on every board.** The Phase 0 board (#15) has a custom `In Review` option that was added manually; the newer phase boards (#16–#19) ship with only the GitHub defaults **Todo / In Progress / Done**. On those boards, either add an `In Review` option via the project UI/API for consistency, or treat `In Progress` as covering "under review" until you do.
+> **All boards carry the full lifecycle.** As of 2026-06-18, every board (#15–#19) has all four options — `Todo` · `In Progress` · `In Review` · `Done` — with uniform Phase-0 colors (Todo BLUE / In Progress GREEN / In Review PINK / Done GRAY). Earlier, #16–#19 shipped with only the GitHub defaults; `In Review` was backfilled across them.
+>
+> **API gotcha (it bit us once).** GitHub has no "add one option" call. The only way to add an option via the API is the `updateProjectV2Field` mutation, which takes the **entire** option set and **regenerates every option id**, orphaning each item's Status assignment on that board. If you ever rewrite a Status field's options: first capture each item's Status by **item id** (item ids are stable; option ids are not), run the mutation, then re-assign every item to the new option id for its same status name. Prefer the project-settings **web UI** ("+ add option") when possible — that path is additive and non-destructive.
 
 > **Automation caveat — `Done` auto-closes the issue.** Setting an item's Status → `Done` fires a project workflow that **closes the linked issue**. So move an item to `Done` **only after its PR merges** — a premature `Done` closes the issue before the code lands (this bit #71/#72 once; recovered). Mirror reality: In Review while the PR is open, Done after merge.
 
@@ -40,13 +42,13 @@ gh project field-list <PROJECT_NUM> --owner edheltzel --format json \
   | jq -r '.fields[] | select(.name=="Status") | "field=\(.id)", (.options[] | "  \(.name)=\(.id)")'
 ```
 
-Worked example — **Phase 0 board #15** (the only board with `In Review`):
+Worked example — **Phase 0 board #15** (its ids are unchanged; it was never rewritten):
 
 - Project ID: `PVT_kwHOAAYl3s4Ba2Re`
 - `Status` field ID: `PVTSSF_lAHOAAYl3s4Ba2RezhVq6OA`
 - Option IDs: `Todo` `f75ad846` · `In Progress` `47fc9ee4` · `In Review` `6bc5feda` · `Done` `98236657`
 
-(The default boards #16–#19 share the standard option ids `Todo f75ad846` / `In Progress 47fc9ee4` / `Done 98236657` but each has its own project + field id — fetch per board.)
+(Boards #16–#19 had their Status options rewritten on 2026-06-18 to add `In Review`, so their option ids were **regenerated** and are now distinct per board — the old shared `f75ad846`/`47fc9ee4`/`98236657` ids no longer apply there. Always fetch per board with the command above.)
 
 ## Commands
 
