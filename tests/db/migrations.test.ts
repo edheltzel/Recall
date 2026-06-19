@@ -1,10 +1,18 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir, homedir } from 'os';
 import { join } from 'path';
 import { CREATE_TABLES, CREATE_INDEXES } from '../../src/db/schema';
 import { applyMigrations, getMigrationVersion, MIGRATIONS } from '../../src/db/migrations';
+
+// bun snapshots $HOME at process startup, so mutating process.env.HOME at
+// runtime does not change os.homedir(). To let a test point migration 4→5 at a
+// fixture home dir, mock os.homedir() to return `mockedHome` when set and the
+// real home otherwise — the passthrough keeps every other test unaffected.
+const realHomedir = homedir;
+let mockedHome: string | null = null;
+mock.module('os', () => ({ ...require('os'), homedir: () => mockedHome ?? realHomedir() }));
 
 let tempDir: string;
 let db: Database;
@@ -96,24 +104,114 @@ describe('data migration (4 to 5)', () => {
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
   });
 
-  test('RECALL_SKIP_LEGACY_DATA_MIGRATIONS skips the import but still advances version', () => {
-    // The skip flag must suppress only the legacy JSON ingestion — the
-    // migration chain must still complete so user_version reaches latest and
-    // the extraction_* tables stay empty regardless of host ~/.claude/MEMORY.
-    const prev = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
-    process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS = '1';
+  test('legacy JSON import runs when flag unset, is suppressed when flag set ($HOME fixture)', () => {
+    // A real ~/.claude/MEMORY/*.json fixture (via $HOME) makes the guard
+    // discriminating: Leg A proves the import path actually populates the
+    // extraction_* tables; Leg B proves the flag suppresses ingestion while
+    // the migration chain still advances user_version to latest. Without the
+    // fixture, "tables empty" is satisfied by an empty host home dir and the
+    // test would pass even if migration 4→5 were deleted.
+    const convPath = '/tmp/recall-fixture-conv.jsonl';
+    const homeDir = mkdtempSync(join(tmpdir(), 'recall-home-test-'));
+    const memoryDir = join(homeDir, '.claude', 'MEMORY');
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(
+      join(memoryDir, '.extraction_tracker.json'),
+      JSON.stringify({ [convPath]: { size: 1234, extractedAt: '2026-01-01T00:00:00Z', skipped: 0 } })
+    );
+    writeFileSync(
+      join(memoryDir, 'SESSION_INDEX.json'),
+      JSON.stringify([
+        {
+          sessionId: 'sess-1',
+          project: 'recall',
+          branch: 'main',
+          timestamp: '2026-01-02T00:00:00Z',
+          summary: 'did things',
+          topics: ['a', 'b'],
+          conversationPath: convPath,
+        },
+      ])
+    );
+    writeFileSync(
+      join(memoryDir, 'ERROR_PATTERNS.json'),
+      JSON.stringify({
+        patterns: [
+          {
+            error: 'boom',
+            fix: 'stop booming',
+            context: 'while booming',
+            firstSeen: '2026-01-03T00:00:00Z',
+            lastSeen: '2026-01-04T00:00:00Z',
+          },
+        ],
+      })
+    );
+
+    const count = (d: Database, t: string) =>
+      (d.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+
+    // Point migration 4→5's os.homedir() at the fixture home (see top-of-file mock).
+    const prevFlag = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
+    const dbsToClean: Array<{ d: Database; dir: string }> = [];
+    const freshV4Db = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'recall-leg-db-'));
+      const d = new Database(join(dir, 'test.db'));
+      d.exec(CREATE_TABLES);
+      d.exec(CREATE_INDEXES);
+      d.prepare('PRAGMA user_version = 4').run();
+      dbsToClean.push({ d, dir });
+      return d;
+    };
+
     try {
-      db.prepare('PRAGMA user_version = 4').run();
-      const result = applyMigrations(db);
+      mockedHome = homeDir;
+
+      // Leg A — flag UNSET: the import path runs and populates the tables.
+      delete process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
+      const a = freshV4Db();
+      expect(applyMigrations(a).to).toBe(MIGRATIONS.length);
+      expect(getMigrationVersion(a)).toBe(MIGRATIONS.length);
+
+      expect(count(a, 'extraction_tracker')).toBe(1);
+      const trackerRow = a.prepare(
+        'SELECT conversation_path, size FROM extraction_tracker'
+      ).get() as { conversation_path: string; size: number };
+      expect(trackerRow.conversation_path).toBe(convPath);
+      expect(trackerRow.size).toBe(1234);
+
+      expect(count(a, 'extraction_sessions')).toBe(1);
+      const sessionRow = a.prepare(
+        'SELECT session_id, timestamp FROM extraction_sessions'
+      ).get() as { session_id: string; timestamp: string };
+      expect(sessionRow.session_id).toBe('sess-1');
+      expect(sessionRow.timestamp).toBe('2026-01-02T00:00:00Z');
+
+      expect(count(a, 'extraction_errors')).toBe(1);
+      const errorRow = a.prepare(
+        'SELECT error, fix FROM extraction_errors'
+      ).get() as { error: string; fix: string };
+      expect(errorRow.error).toBe('boom');
+      expect(errorRow.fix).toBe('stop booming');
+
+      // Leg B — flag SET: identical fixtures, ingestion suppressed, chain intact.
+      process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS = '1';
+      const b = freshV4Db();
+      const result = applyMigrations(b);
       expect(result.applied).toBe(MIGRATIONS.length - 4);
-      expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+      expect(getMigrationVersion(b)).toBe(MIGRATIONS.length);
       for (const t of ['extraction_sessions', 'extraction_tracker', 'extraction_errors']) {
-        const { n } = db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number };
-        expect(n).toBe(0);
+        expect(count(b, t)).toBe(0);
       }
     } finally {
-      if (prev === undefined) delete process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
-      else process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS = prev;
+      mockedHome = null;
+      for (const { d, dir } of dbsToClean) {
+        d.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+      rmSync(homeDir, { recursive: true, force: true });
+      if (prevFlag === undefined) delete process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
+      else process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS = prevFlag;
     }
   });
 });

@@ -18,6 +18,9 @@ export type Migration = (db: Database) => void;
 // one-shot import of legacy ~/.claude/MEMORY/*.json into the extraction_*
 // tables. Used by tests/CI/sandboxes so a fresh DB is never seeded from the
 // host's real home dir (issue #29).
+// WARNING: never set this in a real/persistent environment — the skipped
+// import is one-shot and does not re-run once user_version advances past 5,
+// so a DB created with the flag set will permanently lack the legacy data.
 function skipLegacyDataMigrations(): boolean {
   const v = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
   return !!v && v !== '0' && v !== 'false';
