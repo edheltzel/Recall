@@ -1,6 +1,7 @@
 // recall search command
 
 import { search, SEARCH_TABLES, type SearchTable } from '../lib/memory.js';
+import { formatProvenanceTag } from './provenance-display.js';
 
 interface SearchOptions {
   project?: string;
@@ -43,14 +44,7 @@ export function runSearch(query: string, options: SearchOptions): void {
     const projectTag = result.project ? ` [${result.project}]` : '';
     const date = result.created_at.split('T')[0];
 
-    // Display contract (issue #42): known provenance stays quiet by default;
-    // unknown (NULL) is always flagged. --show-provenance shows every value.
-    let provenanceTag = '';
-    if (options.showProvenance) {
-      provenanceTag = ` [provenance: ${result.provenance ?? 'unknown'}]`;
-    } else if (!result.provenance) {
-      provenanceTag = ' ⚠ [provenance: unknown]';
-    }
+    const provenanceTag = formatProvenanceTag(result.provenance, options.showProvenance);
 
     console.log(`[${result.table}#${result.id}]${projectTag} ${date}${provenanceTag}`);
     console.log(`  ${preview.replace(/\n/g, ' ')}`);
