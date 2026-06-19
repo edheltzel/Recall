@@ -18,8 +18,14 @@
 // class would consume the next secret's anchor (the `Bearer ` keyword, or a
 // `key=`/`key:` assignment keyword) and strand that second token's value in cleartext.
 // The tempered-greedy classes below stop at this anchor so the next pattern still fires.
-// NOTE (#50 deferral): truly-unprefixed standalone secrets concatenated with NO
-// recognizable anchor at all are out of this subset — full entropy detection is #50.
+// Matched case-INSENSITIVELY (the embedding regexes carry the `i` flag) so `API_KEY`,
+// `BEARER`, etc. are recognized as anchors consistently with the assignment pattern.
+// Redaction also iterates to a fixpoint (see redactSecrets) so an anchor freshly EXPOSED
+// by redacting the first secret is caught on a later pass.
+// RESIDUAL #50 BOUNDARY: only genuinely anchorless, high-entropy STANDALONE tokens — those
+// with no recognizable credential shape (no distinctive prefix, no `Bearer`/assignment
+// anchor) — are out of this subset. Generic entropy detection is #50's job; here we only
+// guarantee a recognizable SECOND credential's value never survives.
 const NEXT_CRED = String.raw`(?:Bearer\s|(?:api[_-]?key|apikey|secret(?:[_-]?key)?|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd)\s*[:=])`;
 
 // Tempered greedy: consume one char of `cls` at a time, but stop before a known
@@ -50,23 +56,23 @@ const SECRET_PATTERNS: SecretPattern[] = [
   { kind: 'pem-private-key', regex: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g },
 
   // Provider API keys with distinctive prefixes (open-ended -> tempered).
-  { kind: 'anthropic-key', regex: new RegExp(String.raw`sk-ant-` + tempered('[A-Za-z0-9_-]', 20), 'g') },
-  { kind: 'openai-key', regex: new RegExp(String.raw`sk-proj-` + tempered('[A-Za-z0-9_-]', 20), 'g') },
-  { kind: 'openai-key', regex: new RegExp(String.raw`sk-` + tempered('[A-Za-z0-9]', 32), 'g') },
+  { kind: 'anthropic-key', regex: new RegExp(String.raw`sk-ant-` + tempered('[A-Za-z0-9_-]', 20), 'gi') },
+  { kind: 'openai-key', regex: new RegExp(String.raw`sk-proj-` + tempered('[A-Za-z0-9_-]', 20), 'gi') },
+  { kind: 'openai-key', regex: new RegExp(String.raw`sk-` + tempered('[A-Za-z0-9]', 32), 'gi') },
   { kind: 'aws-akid', regex: /(?:AKIA|ASIA)[0-9A-Z]{16}/g },
-  { kind: 'github-pat', regex: new RegExp(String.raw`gh[pousr]_` + tempered('[A-Za-z0-9]', 36), 'g') },
-  { kind: 'github-pat', regex: new RegExp(String.raw`github_pat_` + tempered('[A-Za-z0-9_]', 22), 'g') },
-  { kind: 'gitlab-pat', regex: new RegExp(String.raw`glpat-` + tempered('[A-Za-z0-9_-]', 20), 'g') },
-  { kind: 'slack-token', regex: new RegExp(String.raw`xox[baprs]-` + tempered('[A-Za-z0-9-]', 10), 'g') },
-  { kind: 'slack-webhook', regex: new RegExp(String.raw`https://hooks\.slack\.com/services/` + tempered('[A-Za-z0-9_/+]', 20), 'g') },
+  { kind: 'github-pat', regex: new RegExp(String.raw`gh[pousr]_` + tempered('[A-Za-z0-9]', 36), 'gi') },
+  { kind: 'github-pat', regex: new RegExp(String.raw`github_pat_` + tempered('[A-Za-z0-9_]', 22), 'gi') },
+  { kind: 'gitlab-pat', regex: new RegExp(String.raw`glpat-` + tempered('[A-Za-z0-9_-]', 20), 'gi') },
+  { kind: 'slack-token', regex: new RegExp(String.raw`xox[baprs]-` + tempered('[A-Za-z0-9-]', 10), 'gi') },
+  { kind: 'slack-webhook', regex: new RegExp(String.raw`https://hooks\.slack\.com/services/` + tempered('[A-Za-z0-9_/+]', 20), 'gi') },
   { kind: 'google-api-key', regex: /AIza[A-Za-z0-9_-]{35}/g },
-  { kind: 'stripe-key', regex: new RegExp(String.raw`(?:sk|rk|pk)_(?:live|test)_` + tempered('[A-Za-z0-9]', 16), 'g') },
-  { kind: 'sendgrid-key', regex: new RegExp(String.raw`SG\.` + tempered('[A-Za-z0-9_-]', 16) + String.raw`\.` + tempered('[A-Za-z0-9_-]', 16), 'g') },
+  { kind: 'stripe-key', regex: new RegExp(String.raw`(?:sk|rk|pk)_(?:live|test)_` + tempered('[A-Za-z0-9]', 16), 'gi') },
+  { kind: 'sendgrid-key', regex: new RegExp(String.raw`SG\.` + tempered('[A-Za-z0-9_-]', 16) + String.raw`\.` + tempered('[A-Za-z0-9_-]', 16), 'gi') },
   { kind: 'npm-token', regex: /npm_[A-Za-z0-9]{36}/g },
-  { kind: 'jwt', regex: new RegExp(String.raw`eyJ` + tempered('[A-Za-z0-9_-]', 10) + String.raw`\.` + tempered('[A-Za-z0-9_-]', 10) + String.raw`\.` + tempered('[A-Za-z0-9_-]', 10), 'g') },
+  { kind: 'jwt', regex: new RegExp(String.raw`eyJ` + tempered('[A-Za-z0-9_-]', 10) + String.raw`\.` + tempered('[A-Za-z0-9_-]', 10) + String.raw`\.` + tempered('[A-Za-z0-9_-]', 10), 'gi') },
 
   // `Bearer <token>` — keep the `Bearer ` prefix, redact the (tempered) token.
-  { kind: 'bearer-token', regex: new RegExp(String.raw`(\bBearer\s+)` + tempered('[A-Za-z0-9._-]', 16), 'g'), keepsPrefix: true },
+  { kind: 'bearer-token', regex: new RegExp(String.raw`(\bBearer\s+)` + tempered('[A-Za-z0-9._-]', 16), 'gi'), keepsPrefix: true },
 
   // Conservative `key = value` / `key: value` assignment for named secrets — keep the
   // key + separator (useful context) and redact only the (tempered) value. Requires a
@@ -84,6 +90,13 @@ const SECRET_PATTERNS: SecretPattern[] = [
   },
 ];
 
+// Bounded fixpoint passes. Redacting one secret can EXPOSE a previously-glued anchor
+// (e.g. `…secret-value Bearer xxx` -> `[REDACTED:…]Bearer xxx`, where `\bBearer` now
+// holds against the `]`), which a later pass then catches. A handful of passes reaches
+// the fixpoint for any realistic chain; the loop also stops early when a pass is a no-op.
+// Pure + terminating (no I/O; capped iterations).
+const MAX_REDACTION_PASSES = 3;
+
 /**
  * Replace high-confidence secrets with visible `[REDACTED:<kind>]` markers.
  * Returns the scrubbed text and the distinct kinds redacted (never the secret values).
@@ -91,12 +104,16 @@ const SECRET_PATTERNS: SecretPattern[] = [
 export function redactSecrets(text: string): { text: string; redactions: string[] } {
   const kinds = new Set<string>();
   let out = text;
-  for (const p of SECRET_PATTERNS) {
-    out = out.replace(p.regex, (...args) => {
-      kinds.add(p.kind);
-      const prefix = p.keepsPrefix ? String(args[1] ?? '') : '';
-      return `${prefix}[REDACTED:${p.kind}]`;
-    });
+  for (let pass = 0; pass < MAX_REDACTION_PASSES; pass++) {
+    const before = out;
+    for (const p of SECRET_PATTERNS) {
+      out = out.replace(p.regex, (...args) => {
+        kinds.add(p.kind);
+        const prefix = p.keepsPrefix ? String(args[1] ?? '') : '';
+        return `${prefix}[REDACTED:${p.kind}]`;
+      });
+    }
+    if (out === before) break; // fixpoint reached — nothing new to redact
   }
   return { text: out, redactions: [...kinds] };
 }

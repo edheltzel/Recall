@@ -61,6 +61,12 @@ describe('redactSecrets', () => {
     expect(text).not.toContain('z'.repeat(32));
   });
 
+  test('Bearer keyword is matched case-insensitively (BEARER)', () => {
+    const { text, redactions } = redactSecrets('BEARER ' + 'z'.repeat(32));
+    expect(text).not.toContain('z'.repeat(32));
+    expect(redactions).toContain('bearer-token');
+  });
+
   test('redacts a PEM private key block', () => {
     const pem = [
       '-----BEGIN RSA PRIVATE KEY-----',
@@ -99,6 +105,8 @@ describe('redactSecrets', () => {
     'see src/lib/sqlite-writers.ts:124 for the writer', // file path:line
     'sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', // hex hash
     'set RECALL_DB_PATH and EXTRACTION_MAX_CONCURRENT then run', // env var names
+    'the Bearer of bad news arrived early', // "Bearer" as a plain word
+    'use the sk- prefix convention here', // "sk-" as a plain word
   ];
   for (const prose of PROSE) {
     test(`does not over-redact prose: "${prose}"`, () => {
@@ -158,6 +166,10 @@ describe('concatenated secrets — no anchor-stranding leak (RedTeam HIGH)', () 
     { name: 'glpat + bearer', input: 'glpat-' + 'f'.repeat(24) + 'Bearer ' + 'p'.repeat(32), leak: 'p'.repeat(32) },
     { name: 'bearer + assignment', input: 'Bearer ' + 'p'.repeat(32) + 'password=anothersecret99', leak: 'anothersecret99' },
     { name: 'anthropic + assignment', input: 'sk-ant-api03-' + 'A'.repeat(40) + 'password=zzzzzzzzzzzz', leak: 'zzzzzzzzzzzz' },
+    // Round 2 — case-insensitive anchor + fixpoint exposure:
+    { name: 'openai + UPPERCASE assignment', input: 'sk-' + 'C'.repeat(40) + 'API_KEY=supersecret123', leak: 'supersecret123' },
+    { name: 'assignment + glued Bearer (fixpoint)', input: 'password=xxxxxxxxBearer ' + 'p'.repeat(32), leak: 'p'.repeat(32) },
+    { name: 'triple chain openai+assign+bearer', input: 'sk-' + 'C'.repeat(40) + 'API_KEY=xxxxxxxxBearer ' + 'p'.repeat(32), leak: 'p'.repeat(32) },
   ];
   for (const { name, input, leak } of CONCAT_CASES) {
     test(`${name}: second credential value fully redacted`, () => {
