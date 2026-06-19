@@ -1164,6 +1164,9 @@ function clearTrackerRow(convPath: string): void {
     const { Database } = require('bun:sqlite');
     const db = new Database(dbPath);
     db.exec('PRAGMA journal_mode = WAL');
+    // Match getDb()'s busy_timeout so a held lock waits instead of failing
+    // immediately. Value mirrored inline — hooks must not import from src/. (#72/#96)
+    db.exec('PRAGMA busy_timeout = 5000');
     db.prepare('DELETE FROM extraction_tracker WHERE conversation_path = ?').run(convPath);
     db.close();
   } catch {}
