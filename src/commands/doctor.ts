@@ -1,6 +1,6 @@
 // recall doctor — health check for all memory subsystems
 
-import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
+import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync, renameSync, realpathSync } from 'fs';
 import { dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -534,6 +534,25 @@ interface ProbeCheck {
   repair?: () => CheckResult;
 }
 
+// Apply a probe's repair under --fix, degrading a thrown repair to a FAIL
+// result so a single broken repair can't abort the doctor run before its
+// summary prints. Exported for unit tests; the mcp-env call site in runDoctor
+// routes through this. (The symlink-probe loop keeps its own inline handling.)
+export function resolveProbeResult(check: ProbeCheck, fix: boolean): CheckResult {
+  if (fix && check.repair && check.result.status !== 'PASS' && check.result.status !== 'INFO') {
+    try {
+      return check.repair();
+    } catch (err) {
+      return {
+        label: check.result.label,
+        status: 'FAIL',
+        message: `Repair failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+  return check.result;
+}
+
 // Exported for unit tests. The probe is pure (state lives entirely in the
 // filesystem args, not in module globals); doctor's main loop iterates the
 // build-time list and accumulates results.
@@ -658,17 +677,28 @@ interface McpRegistration {
   envDbPath: string | undefined; // value of env.RECALL_DB_PATH, if present
 }
 
+interface McpScan {
+  owners: McpRegistration[];
+  // Config files that exist but failed to parse — doctor must never touch a
+  // file it can't read as JSON, so these are surfaced (WARN), not silently
+  // conflated with a genuinely-absent registration.
+  unparseable: string[];
+}
+
 // Locate every config file that owns an mcpServers["recall-memory"] entry.
 // Mirrors the file selection in _recall_ensure_mcp_entry (exists + contains the
-// registration); malformed/unreadable JSON is skipped, never fatal.
-function findMcpRegistrations(configPaths: string[]): McpRegistration[] {
+// registration). Malformed/unreadable JSON is never fatal, but it is recorded
+// (not dropped) so the caller can distinguish it from a missing registration.
+function findMcpRegistrations(configPaths: string[]): McpScan {
   const owners: McpRegistration[] = [];
+  const unparseable: string[] = [];
   for (const configPath of configPaths) {
     if (!existsSync(configPath)) continue;
     let cfg: ClaudeConfig;
     try {
       cfg = JSON.parse(readFileSync(configPath, 'utf-8')) as ClaudeConfig;
     } catch {
+      unparseable.push(configPath);
       continue;
     }
     const entry = cfg.mcpServers?.['recall-memory'];
@@ -677,7 +707,7 @@ function findMcpRegistrations(configPaths: string[]): McpRegistration[] {
     const raw = env && typeof env === 'object' && !Array.isArray(env) ? env.RECALL_DB_PATH : undefined;
     owners.push({ configPath, envDbPath: typeof raw === 'string' ? raw : undefined });
   }
-  return owners;
+  return { owners, unparseable };
 }
 
 // Exported for unit tests. Pure with respect to its args (config-file paths +
@@ -686,10 +716,29 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   const label = 'MCP env carries RECALL_DB_PATH';
   const { configPaths, resolvedDbPath } = probe;
 
-  const owners = findMcpRegistrations(configPaths);
+  const { owners, unparseable } = findMcpRegistrations(configPaths);
 
-  // No config file owns the registration — nothing for doctor to patch.
+  // A config that exists but can't be parsed is never silently dropped: doctor
+  // names it and leaves it untouched. When there are no valid owners this is the
+  // whole result (WARN); when there are valid owners it rides along as a note so
+  // the malformed sibling can't hide behind a PASS/WARN/FAIL on the others.
+  const unparseableNote = unparseable.length > 0
+    ? ` — could not parse ${unparseable.join(', ')} (left untouched)`
+    : '';
+
+  // No config file owns the registration. Distinguish a genuinely-absent
+  // registration (INFO — nothing to do) from a config that exists but is
+  // unparseable (WARN — doctor refuses to touch a file it can't parse).
   if (owners.length === 0) {
+    if (unparseable.length > 0) {
+      return {
+        result: {
+          label,
+          status: 'WARN',
+          message: `config present but unparseable — refusing to touch ${unparseable.join(', ')}`,
+        },
+      };
+    }
     return {
       result: { label, status: 'INFO', message: 'No recall-memory MCP registration found in user config' },
     };
@@ -702,7 +751,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       result: {
         label,
         status: 'PASS',
-        message: `env.RECALL_DB_PATH matches resolved DB path in ${owners.length} config file(s)`,
+        message: `env.RECALL_DB_PATH matches resolved DB path in ${owners.length} config file(s)${unparseableNote}`,
       },
     };
   }
@@ -716,25 +765,55 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
     result: {
       label,
       status: 'WARN',
-      message: `env.RECALL_DB_PATH should be ${resolvedDbPath} but ${detail} — MCP server may diverge from CLI on next Claude restart`,
+      message: `env.RECALL_DB_PATH should be ${resolvedDbPath} but ${detail} — MCP server may diverge from CLI on next Claude restart${unparseableNote}`,
     },
     repair: () => {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
       const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
       const patched: string[] = [];
+      const failed: string[] = [];
       for (const owner of stale) {
-        mkdirSync(backupDir, { recursive: true });
-        copyFileSync(owner.configPath, join(backupDir, owner.configPath.replace(/[/\\]/g, '_')));
-        const cfg = JSON.parse(readFileSync(owner.configPath, 'utf-8')) as ClaudeConfig;
-        const entry = cfg.mcpServers?.['recall-memory'];
-        if (!entry) continue; // registration vanished between probe and repair
-        if (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env)) entry.env = {};
-        entry.env.RECALL_DB_PATH = resolvedDbPath;
-        delete entry.env.MEM_DB_PATH;
-        writeFileSync(owner.configPath, JSON.stringify(cfg, null, 2));
-        patched.push(owner.configPath);
+        // Per-file isolation: a write failure on one owner (EACCES, full disk,
+        // read-only settings.json) must not abort the others or escape the loop.
+        let tmpPath: string | undefined;
+        try {
+          const cfg = JSON.parse(readFileSync(owner.configPath, 'utf-8')) as ClaudeConfig;
+          const entry = cfg.mcpServers?.['recall-memory'];
+          if (!entry) continue; // registration vanished between probe and repair — nothing to back up or patch
+          if (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env)) entry.env = {};
+          entry.env.RECALL_DB_PATH = resolvedDbPath;
+          delete entry.env.MEM_DB_PATH;
+          // Resolve through any symlink so the write goes THROUGH the link rather
+          // than replacing it with a regular file (which would orphan the
+          // canonical target and break stow/chezmoi-style dotfiles). Safe here:
+          // the file was just read successfully.
+          const target = realpathSync(owner.configPath);
+          tmpPath = target + '.tmp';
+          // Back up only once the write is confirmed to happen (after the re-read
+          // + entry guard), so a vanished registration leaves no orphan backup.
+          mkdirSync(backupDir, { recursive: true });
+          copyFileSync(target, join(backupDir, owner.configPath.replace(/[/\\]/g, '_')));
+          // Atomic write: stage to a temp sibling then rename over the resolved
+          // target, so an interrupt mid-write can't truncate the user's config.
+          writeFileSync(tmpPath, JSON.stringify(cfg, null, 2));
+          renameSync(tmpPath, target);
+          patched.push(owner.configPath);
+        } catch (err) {
+          if (tmpPath) { try { if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort temp cleanup */ } }
+          // Capture the cause so a real EACCES/disk-full is diagnosable.
+          failed.push(`${owner.configPath} (${err instanceof Error ? err.message : String(err)})`);
+        }
       }
-      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH=${resolvedDbPath} in ${patched.join(', ')}` };
+      // Every stale owner's registration vanished before we could patch it —
+      // don't claim work that didn't happen.
+      if (patched.length === 0 && failed.length === 0) {
+        return { label, status: 'PASS', message: `Nothing to patch — registration(s) vanished before repair${unparseableNote}` };
+      }
+      if (failed.length > 0) {
+        const patchedNote = patched.length ? `patched ${patched.join(', ')}; ` : '';
+        return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}${unparseableNote}` };
+      }
+      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH=${resolvedDbPath} in ${patched.join(', ')}${unparseableNote}` };
     },
   };
 }
@@ -813,11 +892,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     configPaths: [join(homedir(), '.claude.json'), join(homedir(), '.claude', 'settings.json')],
     resolvedDbPath: getDbPath(),
   });
-  if (opts.fix && mcpEnvCheck.repair && mcpEnvCheck.result.status !== 'PASS' && mcpEnvCheck.result.status !== 'INFO') {
-    results.push(mcpEnvCheck.repair());
-  } else {
-    results.push(mcpEnvCheck.result);
-  }
+  results.push(resolveProbeResult(mcpEnvCheck, !!opts.fix));
 
   // Completion sentinel (#27): a leftover .install-incomplete marker means a
   // prior install/update was interrupted before its self-check ran. Warn-only —
