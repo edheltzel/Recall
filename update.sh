@@ -462,6 +462,10 @@ main() {
   [[ "$NO_MIGRATE" == "true" ]] && echo "No-migrate: YES"
   echo ""
 
+  # Surface a leftover completion sentinel from an interrupted prior
+  # install/update (warn-only; re-running converges) before we begin (#27).
+  recall_warn_if_install_incomplete
+
   step_version_check
   [[ "$CHECK_ONLY" == "true" ]] && exit 0
 
