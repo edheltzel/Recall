@@ -70,6 +70,11 @@ do_install() {
   _banner info "Recall Installer" "Persistent Memory for Coding Agents"
   echo ""
 
+  # If a prior install/update was interrupted before it could self-verify, the
+  # completion sentinel is still present. Surface it (warn-only) so the user
+  # knows this run is a convergence pass (#27).
+  recall_warn_if_install_incomplete
+
   log_info "Checking prerequisites..."
   recall_check_prerequisites
   echo ""
@@ -127,6 +132,9 @@ do_install() {
 
   _step "Migrate" "Preparing install root + migrating legacy database"
   recall_create_install_root
+  # Mark the install in-flight now that $RECALL_DIR exists, before any
+  # artifact-mutating step. Cleared only after the self-check passes (#27).
+  recall_mark_install_incomplete
   recall_auto_migrate
 
   _step "Installing" "Bun dependencies"
@@ -246,13 +254,22 @@ do_install() {
   fi
   echo ""
 
+  # Finalize: clear the sentinel on success, or leave it and fail loudly on a
+  # self-check failure (#27, OQ#3 — matches update.sh:step_verify, which already
+  # exit 1s). No more "installed (with self-check warnings)" — a failed gate is
+  # a failed install.
+  if ! recall_finalize_install "$_check_ok"; then
+    # Suppress the generic EXIT panel — recall_finalize_install already printed
+    # a tailored, accurate recovery (re-run converges). Mirrors the user-cancel
+    # path above, which also drops the trap before a clean intentional exit.
+    trap - EXIT
+    _banner error "Installation Incomplete"
+    exit 1
+  fi
+
   _banner success "Installation Complete"
   echo ""
-  if [[ "$_check_ok" == "true" ]]; then
-    log_success "Recall installed successfully — all systems operational."
-  else
-    log_success "Recall installed (with self-check warnings; see above)."
-  fi
+  log_success "Recall installed successfully — all systems operational."
   echo ""
   echo "Backup location: $BACKUP_DIR"
   echo "To restore:      ./install.sh restore"

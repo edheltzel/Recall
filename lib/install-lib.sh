@@ -48,6 +48,13 @@ fi
 : "${RECALL_PI_EXTENSIONS_DIR:=$RECALL_PI_ROOT/extensions}"
 : "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
 
+# Completion sentinel — written at install start, removed only after the
+# post-install self-check passes. Only install.sh marks/clears it; update.sh
+# merely warns when it finds one. A stale marker on a later run means a prior
+# install was interrupted before it could verify (SIGKILL, closed terminal,
+# power loss). See recall_mark_install_incomplete / #27.
+: "${RECALL_INSTALL_MARKER:=$RECALL_DIR/.install-incomplete}"
+
 # Backups live under the install root now (was $CLAUDE_DIR/backups/recall).
 : "${TIMESTAMP:=$(date +%Y%m%d_%H%M%S)}"
 : "${BACKUP_BASE:=$RECALL_DIR/backups}"
@@ -1227,9 +1234,75 @@ recall_verify_install() {
     done
   fi
   log_error ""
-  log_error "Recovery options:"
-  log_error "  1. Re-run ./install.sh (the collision rule is idempotent)."
-  log_error "  2. Run 'recall doctor --fix' (probes + repairs every symlink class)."
+  recall_print_recovery log_error
+  return 1
+}
+
+# ── Completion sentinel + canonical recovery story ───────────────────────────
+#
+# Recall heals a partial install on a plain re-run — every step runs
+# unconditionally and the copy/link primitives are idempotent. The one gap is
+# an interrupt *before* the post-install self-check runs (SIGKILL, closed
+# terminal, power loss): nothing durable records that an install was in flight.
+# The sentinel below closes that gap with a marker file, and the shared
+# recovery printer keeps a single canonical recovery story (#27).
+
+# Emit the canonical recovery guidance — recommended first action, then the
+# alternative. The single source of truth reused by the verify-gate failure
+# block, the stale-marker warning, and the install finalizer, so the wording
+# never drifts (AGENTS.md DRY rule). Pass the logger to route through:
+# log_error for failures, log_warn for the stale-marker advisory.
+recall_print_recovery() {
+  local logger="${1:-log_info}"
+  "$logger" "Recovery options:"
+  "$logger" "  Recommended: re-run ./install.sh — it heals canonicals AND symlinks (idempotent)."
+  "$logger" "  Alternative: run 'recall doctor --fix' — repairs symlinks only (no reinstall)."
+}
+
+# Write the in-flight marker. Called once $RECALL_DIR exists, before the first
+# artifact-mutating step. Records a timestamp + version for human context.
+recall_mark_install_incomplete() {
+  local ver="unknown"
+  if [[ -f "$RECALL_REPO_DIR/package.json" ]]; then
+    # bun-always repo: read the version with no node/bun subprocess so this
+    # never silently degrades to "unknown" on a node-less host.
+    local parsed
+    parsed="$(grep -m1 '"version"' "$RECALL_REPO_DIR/package.json" \
+      | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')" || true
+    [[ -n "$parsed" ]] && ver="$parsed"
+  fi
+  mkdir -p "$RECALL_DIR"
+  printf 'interrupted_at=%s version=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ver" > "$RECALL_INSTALL_MARKER"
+}
+
+# Remove the in-flight marker. Called only after the self-check passes.
+recall_clear_install_marker() {
+  rm -f "$RECALL_INSTALL_MARKER"
+}
+
+# Warn (only) when a prior install left the marker behind (only install.sh
+# writes it). Warn-only by design — re-running converges; we never auto-repair
+# or auto-rerun on startup (Ed, OQ#2). Safe to call before $RECALL_DIR exists
+# (reads a maybe-absent path). Called by both install.sh and update.sh.
+recall_warn_if_install_incomplete() {
+  [[ -f "$RECALL_INSTALL_MARKER" ]] || return 0
+  log_warn "A previous install did not finish (marker: $RECALL_INSTALL_MARKER)."
+  log_warn "Re-running converges — it is idempotent."
+  recall_print_recovery log_warn
+}
+
+# Finalize the post-install self-check. On success: clear the marker and return
+# 0. On failure: leave the marker in place, print the canonical recovery, and
+# return 1 so the caller fails loudly (matching update.sh:step_verify — #27).
+recall_finalize_install() {
+  local check_ok="$1"
+  if [[ "$check_ok" == "true" ]]; then
+    recall_clear_install_marker
+    return 0
+  fi
+  log_error "Self-check failed — the install did not fully verify; left marked incomplete."
+  recall_print_recovery log_error
   return 1
 }
 
