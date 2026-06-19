@@ -11,10 +11,10 @@
 // config, not the backup.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
-import { probeMcpEnv } from '../../src/commands/doctor';
+import { probeMcpEnv, resolveProbeResult } from '../../src/commands/doctor';
 
 const RESOLVED = '/custom/recall/recall.db';
 
@@ -28,6 +28,19 @@ beforeEach(() => {
 
 afterEach(() => {
   if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  // repair() backs up under the real home (Bun's homedir() ignores $HOME); the
+  // mangled backup name embeds this test's unique tempDir, so clean ours up.
+  try {
+    if (!existsSync(BACKUPS_ROOT)) return;
+    const mangledDir = tempDir.replace(/[/\\]/g, '_');
+    for (const stamp of readdirSync(BACKUPS_ROOT)) {
+      const dir = join(BACKUPS_ROOT, stamp, 'doctor-fix');
+      if (!existsSync(dir)) continue;
+      for (const f of readdirSync(dir)) {
+        if (f.includes(mangledDir)) rmSync(join(dir, f), { force: true });
+      }
+    }
+  } catch { /* best-effort cleanup */ }
 });
 
 function writeConfig(obj: unknown): void {
@@ -176,7 +189,9 @@ describe('probeMcpEnv', () => {
   // A write failure on one owner must not throw out of the loop or abort the
   // other owners. The result reflects partial success honestly (FAIL), and the
   // healthy owner is still patched (and backed up).
-  test('write failure on one owner → FAIL, other owner still patched, no throw', () => {
+  // Skipped as root: chmod(0o500) does not block uid 0, so the forced EACCES
+  // would never fire (Docker-root CI). This is the sole fail-before guard.
+  test.skipIf(process.getuid?.() === 0)('write failure on one owner → FAIL, other owner still patched, no throw', () => {
     const okDir = join(tempDir, 'ok');
     const roDir = join(tempDir, 'readonly');
     mkdirSync(okDir);
@@ -196,8 +211,9 @@ describe('probeMcpEnv', () => {
       // Healthy owner patched and backed up ...
       expect(JSON.parse(readFileSync(okPath, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
       expect(backupExistsFor(okPath)).toBe(true);
-      // ... failed owner left untouched (env still empty) and no .tmp orphan.
-      expect(JSON.parse(readFileSync(roPath, 'utf-8')).mcpServers['recall-memory'].env).toEqual({});
+      // ... failed owner left fully intact (byte-for-byte, not partial/corrupt)
+      // and no .tmp orphan remains.
+      expect(JSON.parse(readFileSync(roPath, 'utf-8'))).toEqual(stale);
       expect(existsSync(roPath + '.tmp')).toBe(false);
     } finally {
       chmodSync(roDir, 0o700);
@@ -217,7 +233,53 @@ describe('probeMcpEnv', () => {
 
     const fixed = repair!();
     expect(fixed.status).toBe('PASS'); // a vanished owner is not a failure
+    expect(fixed.message).toContain('Nothing to patch'); // honest: doesn't claim work it didn't do
     expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual({ mcpServers: {} }); // untouched
     expect(backupExistsFor(configPath)).toBe(false); // no orphan backup of the unmodified file
+  });
+
+  // ── Fix 1 (issue #112): symlinked config is written THROUGH the link ──
+  // renameSync over the link path would replace the symlink with a regular file
+  // and leave the canonical target stale; realpathSync resolves it first.
+  test('symlinked config: repair preserves the link and patches the real target', () => {
+    const realPath = join(tempDir, 'real.json');
+    const linkPath = join(tempDir, 'link.json');
+    writeFileSync(realPath, JSON.stringify(
+      { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } }, null, 2));
+    symlinkSync(realPath, linkPath);
+
+    const fixed = probeMcpEnv({ configPaths: [linkPath], resolvedDbPath: RESOLVED }).repair!();
+    expect(fixed.status).toBe('PASS');
+    expect(lstatSync(linkPath).isSymbolicLink()).toBe(true); // link not clobbered into a regular file
+    expect(JSON.parse(readFileSync(realPath, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
+  });
+
+  // ── Fix 3 (issue #112): a malformed sibling is named, not silently dropped,
+  // even when a valid owner is present (the unparseable note must ride along) ──
+  test('valid owner + malformed sibling → result NAMES the malformed file', () => {
+    const validPath = join(tempDir, 'valid.json');
+    const badPath = join(tempDir, 'bad.json');
+    writeFileSync(validPath, JSON.stringify(
+      { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } }, null, 2));
+    writeFileSync(badPath, '{ not valid json ');
+
+    const { result } = probeMcpEnv({ configPaths: [validPath, badPath], resolvedDbPath: RESOLVED });
+    expect(result.status).toBe('WARN'); // stale valid owner
+    expect(result.message).toContain(badPath); // malformed sibling surfaced, not dropped
+  });
+
+  // ── Fix 1 call site (issue #112): a throwing repair() degrades to FAIL and
+  // does not propagate, so runDoctor still prints its summary ──
+  test('resolveProbeResult: throwing repair() degrades to FAIL (no propagation)', () => {
+    const throwing = {
+      result: { label: 'MCP env carries RECALL_DB_PATH', status: 'WARN' as const, message: 'needs fix' },
+      repair: () => { throw new Error('disk full'); },
+    };
+    const res = resolveProbeResult(throwing, true);
+    expect(res.status).toBe('FAIL');
+    expect(res.message).toContain('disk full'); // cause preserved
+    expect(res.label).toBe('MCP env carries RECALL_DB_PATH');
+    // Without --fix the original result passes through untouched (repair not run).
+    expect(resolveProbeResult(throwing, false).status).toBe('WARN');
   });
 });
