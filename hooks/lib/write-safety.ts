@@ -90,21 +90,24 @@ const SECRET_PATTERNS: SecretPattern[] = [
   },
 ];
 
-// Bounded fixpoint passes. Redacting one secret can EXPOSE a previously-glued anchor
-// (e.g. `…secret-value Bearer xxx` -> `[REDACTED:…]Bearer xxx`, where `\bBearer` now
-// holds against the `]`), which a later pass then catches. A handful of passes reaches
-// the fixpoint for any realistic chain; the loop also stops early when a pass is a no-op.
-// Pure + terminating (no I/O; capped iterations).
-const MAX_REDACTION_PASSES = 3;
-
 /**
  * Replace high-confidence secrets with visible `[REDACTED:<kind>]` markers.
  * Returns the scrubbed text and the distinct kinds redacted (never the secret values).
+ *
+ * Runs the pattern set to a TRUE FIXPOINT — repeat until a pass changes nothing. A
+ * `\b`-gated anchor (e.g. `Bearer`, an assignment keyword) glued behind another secret
+ * only becomes matchable once that preceding secret is redacted and a `]` boundary is
+ * exposed, and each pass exposes the next anchor in a chain — so a fixed pass cap would
+ * strand every secret past that depth. Termination is guaranteed: each non-final pass
+ * redacts >= 1 secret, strictly reducing the finite number of un-redacted secrets, and
+ * the no-op pass breaks. `text.length` is a generous belt-and-suspenders bound (there
+ * can be at most one anchor per character) that never caps below the real fixpoint.
  */
 export function redactSecrets(text: string): { text: string; redactions: string[] } {
   const kinds = new Set<string>();
   let out = text;
-  for (let pass = 0; pass < MAX_REDACTION_PASSES; pass++) {
+  const maxPasses = text.length + 1;
+  for (let pass = 0; pass < maxPasses; pass++) {
     const before = out;
     for (const p of SECRET_PATTERNS) {
       out = out.replace(p.regex, (...args) => {

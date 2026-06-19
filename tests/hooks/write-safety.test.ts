@@ -178,3 +178,32 @@ describe('concatenated secrets — no anchor-stranding leak (RedTeam HIGH)', () 
     });
   }
 });
+
+// Long homogeneous glued chains. Each `\b`-gated anchor only becomes matchable after the
+// PRIOR secret is redacted (exposing a `]` boundary), so exactly one new anchor surfaces
+// per pass. A fixed pass cap would strand every value past that depth; the true fixpoint
+// must redact ALL of them regardless of chain length.
+// (Mutation: re-introduce a fixed pass cap below the chain depth => tail values leak => RED.)
+describe('homogeneous glued chains — fixpoint, no depth cap (RedTeam HIGH)', () => {
+  const builders: { kind: string; el: (v: string) => string }[] = [
+    { kind: 'password=', el: (v) => `password=${v}` },
+    { kind: 'Bearer ', el: (v) => `Bearer ${v}abcdefghij` }, // value padded past the 16-char floor; no trailing space so the next `Bearer` is truly glued
+    { kind: 'api_key=', el: (v) => `api_key=${v}` },
+  ];
+  for (const { kind, el } of builders) {
+    for (const n of [4, 5, 6]) {
+      test(`${kind} chain of ${n}: no value survives`, () => {
+        const values = Array.from({ length: n }, (_, i) => `valueofsecretnumber${i}`);
+        const { text } = scrub(values.map(el).join(''));
+        for (const v of values) expect(text).not.toContain(v);
+        expect(text).toContain('[REDACTED:'); // values were actually redacted, not just absent
+      });
+    }
+  }
+
+  test('large 50x password= chain: zero cleartext values survive', () => {
+    const values = Array.from({ length: 50 }, (_, i) => `bigchainsecret${i}xyz`);
+    const { text } = scrub(values.map((v) => `password=${v}`).join(''));
+    for (const v of values) expect(text).not.toContain(v);
+  });
+});
