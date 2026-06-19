@@ -6,7 +6,6 @@ import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
-import type { Provenance } from '../types/index.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
@@ -361,50 +360,12 @@ export async function runHybridSearch(query: string, options: { table?: string; 
     const inSemantic = semanticRanked.some(r => r.id === key);
     const sourceIndicator = inFts && inSemantic ? 'FTS+VEC' : inFts ? 'FTS   ' : 'VEC   ';
 
-    // Get preview + provenance. The per-table SELECT already runs for the
-    // preview, so it is extended (not duplicated) to also carry provenance —
-    // covering breadcrumbs, which the embeddable-only resolver does not
-    // (issue #75 display contract).
-    let preview = '';
-    let meta = '';
-    let provenance: Provenance | null = null;
-
-    if (table === 'loa_entries') {
-      const loa = db.prepare('SELECT title, provenance FROM loa_entries WHERE id = ?').get(id) as { title: string; provenance: Provenance | null } | undefined;
-      if (loa) {
-        preview = loa.title;
-        meta = `LoA #${id}`;
-        provenance = loa.provenance ?? null;
-      }
-    } else if (table === 'decisions') {
-      const dec = db.prepare('SELECT decision, provenance FROM decisions WHERE id = ?').get(id) as { decision: string; provenance: Provenance | null } | undefined;
-      if (dec) {
-        preview = dec.decision.slice(0, 50);
-        meta = `Decision #${id}`;
-        provenance = dec.provenance ?? null;
-      }
-    } else if (table === 'messages') {
-      const msg = db.prepare('SELECT content, provenance FROM messages WHERE id = ?').get(id) as { content: string; provenance: Provenance | null } | undefined;
-      if (msg) {
-        preview = msg.content.slice(0, 50).replace(/\n/g, ' ');
-        meta = `Message #${id}`;
-        provenance = msg.provenance ?? null;
-      }
-    } else if (table === 'learnings') {
-      const learn = db.prepare('SELECT problem, provenance FROM learnings WHERE id = ?').get(id) as { problem: string; provenance: Provenance | null } | undefined;
-      if (learn) {
-        preview = learn.problem.slice(0, 50);
-        meta = `Learning #${id}`;
-        provenance = learn.provenance ?? null;
-      }
-    } else if (table === 'breadcrumbs') {
-      const bc = db.prepare('SELECT content, provenance FROM breadcrumbs WHERE id = ?').get(id) as { content: string; provenance: Provenance | null } | undefined;
-      if (bc) {
-        preview = bc.content.slice(0, 50);
-        meta = `Breadcrumb #${id}`;
-        provenance = bc.provenance ?? null;
-      }
-    }
+    // Resolve preview + meta + provenance via the shared resolver (issue #67,
+    // #119): one source of the per-table column mapping for all five hybrid
+    // tables (the four embeddable ones plus FTS-fused breadcrumbs), so a
+    // provenance column can't be silently dropped here. Covered by the resolver
+    // tests plus the hybrid vec-branch test.
+    const { preview, meta, provenance } = vectorRowContentProvenance(table, id);
 
     const provenanceTag = formatProvenanceTag(provenance, options.showProvenance);
     const scoreStr = (score * 100).toFixed(2).padStart(6);

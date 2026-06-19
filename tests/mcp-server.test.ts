@@ -425,8 +425,21 @@ describe('hybrid vector-branch provenance (issue #67)', () => {
     expect(msg.provenance).toBe('verbatim');
     expect(msg.content).toContain('Vector-only message matches must keep their real provenance.');
 
-    // Unknown / non-embedded table falls through to empty content, null provenance.
-    const unknown = vectorRowContentProvenance('breadcrumbs', id);
+    // Issue #119: breadcrumbs is now a covered table (the FTS side can fuse a
+    // breadcrumb into the hybrid result set), carrying its real provenance.
+    const crumbId = addBreadcrumb({
+      session_id: sessionId,
+      content: 'Vector-fused breadcrumb keeps its real provenance.',
+      provenance: 'user_authored',
+      importance: 5,
+      project: 'test-project',
+    });
+    const crumb = vectorRowContentProvenance('breadcrumbs', crumbId);
+    expect(crumb.provenance).toBe('user_authored');
+    expect(crumb.content).toContain('Vector-fused breadcrumb keeps its real provenance.');
+
+    // An unrecognized table falls through to empty content, null provenance.
+    const unknown = vectorRowContentProvenance('not_a_table', id);
     expect(unknown.content).toBe('');
     expect(unknown.provenance).toBeNull();
   });

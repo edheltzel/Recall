@@ -430,39 +430,89 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
 }
 
 /**
- * Resolve display content + provenance for a record surfaced only by the
- * vector (embeddings) branch of hybrid search, keyed by its embeddings
- * source_table. Mirrors the four embedded tables (see EMBED_SOURCES in
- * repair.ts); an unknown table yields empty content and null provenance.
- * Centralizing this keeps the hybrid vec-branch from silently omitting a
- * table — issue #67, where a vector-only learnings match misreported its
- * provenance as unknown because the learnings case was missing.
+ * Resolve display fields + provenance for a record surfaced by hybrid search,
+ * keyed by its source_table. Returns:
+ *  - `content`    — semantic / MCP preview source (title+extract for LoA, the
+ *                   primary text otherwise); consumed by runSemanticSearch and
+ *                   the MCP hybridSearch resolver.
+ *  - `preview`    — the hybrid-CLI table preview (LoA title only; first 50 chars
+ *                   of the primary text for the rest).
+ *  - `meta`       — the hybrid-CLI label, e.g. `Decision #12` (empty when the
+ *                   row is missing or the table is unrecognized).
+ *  - `provenance` — the row's provenance, or null for legacy rows.
+ *
+ * Centralizing the table → column + provenance mapping keeps the hybrid
+ * vec-branch from silently omitting a table — issue #67, where a vector-only
+ * learnings match misreported its provenance as unknown because the learnings
+ * case was missing. Covers all five hybrid tables: the four embeddable ones
+ * (see EMBED_SOURCES in repair.ts) plus breadcrumbs, which the FTS side can
+ * fuse into the hybrid result set (issue #119). An unknown table or missing row
+ * yields empty strings and null provenance.
  */
+export interface VectorRowResolution {
+  content: string;
+  preview: string;
+  meta: string;
+  provenance: Provenance | null;
+}
+
 export function vectorRowContentProvenance(
   sourceTable: string,
   sourceId: number
-): { content: string; provenance: Provenance | null } {
+): VectorRowResolution {
   const db = getDb();
+  const empty: VectorRowResolution = { content: '', preview: '', meta: '', provenance: null };
   if (sourceTable === 'loa_entries') {
     const loa = db.prepare('SELECT title, fabric_extract, provenance FROM loa_entries WHERE id = ?').get(sourceId) as any;
+    if (!loa) return empty;
     return {
-      content: loa ? `${loa.title}: ${loa.fabric_extract?.slice(0, 200)}` : '',
-      provenance: loa?.provenance ?? null
+      content: `${loa.title}: ${loa.fabric_extract?.slice(0, 200)}`,
+      preview: loa.title,
+      meta: `LoA #${sourceId}`,
+      provenance: loa.provenance ?? null
     };
   }
   if (sourceTable === 'decisions') {
     const dec = db.prepare('SELECT decision, provenance FROM decisions WHERE id = ?').get(sourceId) as any;
-    return { content: dec?.decision || '', provenance: dec?.provenance ?? null };
+    if (!dec) return empty;
+    return {
+      content: dec.decision || '',
+      preview: dec.decision.slice(0, 50),
+      meta: `Decision #${sourceId}`,
+      provenance: dec.provenance ?? null
+    };
   }
   if (sourceTable === 'messages') {
     const msg = db.prepare('SELECT content, provenance FROM messages WHERE id = ?').get(sourceId) as any;
-    return { content: msg?.content?.slice(0, 200) || '', provenance: msg?.provenance ?? null };
+    if (!msg) return empty;
+    return {
+      content: msg.content?.slice(0, 200) || '',
+      preview: msg.content.slice(0, 50).replace(/\n/g, ' '),
+      meta: `Message #${sourceId}`,
+      provenance: msg.provenance ?? null
+    };
   }
   if (sourceTable === 'learnings') {
     const learn = db.prepare('SELECT problem, provenance FROM learnings WHERE id = ?').get(sourceId) as any;
-    return { content: learn?.problem?.slice(0, 200) || '', provenance: learn?.provenance ?? null };
+    if (!learn) return empty;
+    return {
+      content: learn.problem?.slice(0, 200) || '',
+      preview: learn.problem.slice(0, 50),
+      meta: `Learning #${sourceId}`,
+      provenance: learn.provenance ?? null
+    };
   }
-  return { content: '', provenance: null };
+  if (sourceTable === 'breadcrumbs') {
+    const bc = db.prepare('SELECT content, provenance FROM breadcrumbs WHERE id = ?').get(sourceId) as any;
+    if (!bc) return empty;
+    return {
+      content: bc.content?.slice(0, 200) || '',
+      preview: bc.content.slice(0, 50),
+      meta: `Breadcrumb #${sourceId}`,
+      provenance: bc.provenance ?? null
+    };
+  }
+  return empty;
 }
 
 // ============ Recent ============
