@@ -14,12 +14,23 @@
 // - --delete (destructive opt-in) removes rows + embeddings; FK-referenced
 //   duplicates are kept as marked instead of failing the transaction
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runDedup } from '../../src/commands/dedup';
-import { embeddingsWhere } from '../../src/commands/embed';
+import { runSemanticSearch, runHybridSearch } from '../../src/commands/embed';
 import { notMarkedDuplicateSql } from '../../src/lib/dedup';
 import { embeddingToBlob } from '../../src/lib/embeddings';
+
+// Mock only the Ollama-backed exports so the end-to-end vector-search tests
+// (issue #91) run offline: embed() returns a fixed unit vector that matches the
+// seeded embeddings, and checkEmbeddingService() reports available. Every other
+// export (embeddingToBlob, blobToEmbedding, cosineSimilarity,
+// reciprocalRankFusion) stays real so the search paths score and fuse for real.
+mock.module('../../src/lib/embeddings', () => ({
+  ...require('../../src/lib/embeddings'),
+  embed: async () => ({ embedding: [1, 0, 0, 0], model: 'test', dimensions: 4 }),
+  checkEmbeddingService: async () => ({ available: true, model: 'test', url: 'mock://embed' }),
+}));
 import { getDb } from '../../src/db/connection';
 import { search } from '../../src/lib/memory';
 import {
@@ -348,17 +359,22 @@ describe('destructive opt-in (--execute --delete)', () => {
 
 // Issue #74: duplicate hiding works across FTS5, `recall semantic`, `recall
 // hybrid`, and the MCP vector path through one shared SQL fragment
-// (notMarkedDuplicateSql), but only the FTS5 path (search(), tested above)
-// was covered. The vector paths build their embedding-candidate set with the
-// same fragment — `recall semantic`/`recall hybrid` via embeddingsWhere()
+// (notMarkedDuplicateSql), but only the FTS5 path (search(), tested above) was
+// covered. The vector paths build their embedding-candidate set with the same
+// fragment — `recall semantic`/`recall hybrid` via embeddingsWhere()
 // (src/commands/embed.ts), the MCP vector path via the inline fragment in
-// hybridSearch() (src/mcp-server.ts). Those functions hit the embedding
-// service and print to stdout (and mcp-server.ts cannot be imported — it
-// starts a server on load), so each test below exercises the exact
-// embedding-candidate query its path runs, asserting the marked duplicate is
-// hidden by default and revealed when the dedup filter is dropped (the
-// include-duplicates equivalent for the vector paths).
-describe('duplicate hiding across vector search paths (issue #74)', () => {
+// hybridSearch() (src/mcp-server.ts).
+//
+// Issue #91 hardening: PR #90's seam tests asserted only the WHERE fragment, so
+// a rewiring that bypassed embeddingsWhere() entirely shipped green. The
+// `recall semantic`/`recall hybrid` cases below now drive the *real* exported
+// functions end-to-end (Ollama mocked) and assert against the rendered output,
+// so dropping the fragment from the candidate query surfaces the marked
+// duplicate and fails the test — not just neutering the fragment itself. The
+// MCP path stays a seam test: hybridSearch() is unexported and mcp-server.ts
+// runs main() on import (starts a stdio server), so it cannot be driven here
+// without a production change.
+describe('duplicate hiding across vector search paths (issue #74, #91)', () => {
   // Long enough to clear MIN_DEDUP_TEXT_LENGTH after normalization.
   const DECISION = 'Adopt the shared notMarkedDuplicateSql fragment across every search path.';
 
@@ -385,11 +401,55 @@ describe('duplicate hiding across vector search paths (issue #74)', () => {
     ).map(r => r.source_id);
   }
 
-  function expectHidesMarkedByDefault(defaultWhere: string): void {
+  /** Capture stdout (console.log) emitted while the async search runs. */
+  async function captureOutput(run: () => Promise<void>): Promise<string> {
+    const lines: string[] = [];
+    const prev = console.log;
+    console.log = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
+    try {
+      await run();
+    } finally {
+      console.log = prev;
+    }
+    return lines.join('\n');
+  }
+
+  test('recall semantic excludes marked duplicates end-to-end (runSemanticSearch)', async () => {
     const { survivorId, markedId } = seedMarkedDecisionPair();
 
-    // Hidden by default: the marked duplicate's embedding is filtered out.
-    const visible = candidateSourceIds(defaultWhere);
+    const output = await captureOutput(() =>
+      runSemanticSearch('shared fragment search path', { table: 'decisions' })
+    );
+
+    // The survivor is rendered; the marked duplicate is absent. This fails if
+    // runSemanticSearch is rewired to bypass embeddingsWhere() — both rows have
+    // identical embeddings, so the duplicate would otherwise rank and print.
+    expect(output).toContain(`[Decision #${survivorId}]`);
+    expect(output).not.toContain(`[Decision #${markedId}]`);
+  });
+
+  test('recall hybrid excludes marked duplicates end-to-end (runHybridSearch)', async () => {
+    const { survivorId, markedId } = seedMarkedDecisionPair();
+
+    const output = await captureOutput(() =>
+      runHybridSearch('shared fragment search path', { table: 'decisions' })
+    );
+
+    // Both the FTS branch (search(), hides marked) and the vector branch
+    // (embeddingsWhere(), hides marked) must keep the duplicate out of the
+    // fused results; bypassing embeddingsWhere() would re-surface it via VEC.
+    expect(output).toContain(`[Decision #${survivorId}]`);
+    expect(output).not.toContain(`[Decision #${markedId}]`);
+  });
+
+  test('MCP vector path hides marked duplicates (hybridSearch → notMarkedDuplicateSql)', () => {
+    // Seam test: hybridSearch() in src/mcp-server.ts is unexported and the
+    // module starts a server on import, so we pin the verbatim WHERE clause it
+    // runs. The test DB holds only the two seeded decision embeddings, so no
+    // table filter is needed (the MCP path queries every embedding).
+    const { survivorId, markedId } = seedMarkedDecisionPair();
+
+    const visible = candidateSourceIds(`WHERE ${notMarkedDuplicateSql('source_table', 'source_id')}`);
     expect(visible).toContain(survivorId);
     expect(visible).not.toContain(markedId);
 
@@ -397,20 +457,5 @@ describe('duplicate hiding across vector search paths (issue #74)', () => {
     const all = candidateSourceIds(`WHERE source_table = 'decisions'`);
     expect(all).toContain(survivorId);
     expect(all).toContain(markedId);
-  }
-
-  test('recall semantic hides marked duplicates (runSemanticSearch → embeddingsWhere)', () => {
-    expectHidesMarkedByDefault(embeddingsWhere('decisions'));
-  });
-
-  test('recall hybrid hides marked duplicates (runHybridSearch → embeddingsWhere)', () => {
-    expectHidesMarkedByDefault(embeddingsWhere('decisions'));
-  });
-
-  test('MCP vector path hides marked duplicates (hybridSearch → notMarkedDuplicateSql)', () => {
-    // Verbatim WHERE clause from hybridSearch() in src/mcp-server.ts. The test
-    // DB holds only the two seeded decision embeddings, so no table filter is
-    // needed (the MCP path itself queries every embedding).
-    expectHidesMarkedByDefault(`WHERE ${notMarkedDuplicateSql('source_table', 'source_id')}`);
   });
 });
