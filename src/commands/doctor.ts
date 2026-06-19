@@ -740,6 +740,31 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
 }
 
 // ─────────────────────────────────────────
+// Check: completion sentinel (#27)
+// ─────────────────────────────────────────
+//
+// install.sh / update.sh write $RECALL_DIR/.install-incomplete at start and
+// remove it only after the post-install self-check passes. A leftover marker
+// means a prior run was interrupted before it could verify (SIGKILL, closed
+// terminal, power loss) — the install may be partial. Warn-only: re-running
+// ./install.sh converges (it is idempotent). Exported + path-injected so it is
+// unit-testable without the real install root, mirroring probeSymlink/probeMcpEnv.
+export function probeInstallSentinel(markerPath: string): CheckResult {
+  const label = 'Install completed (no interrupted run)';
+  if (!existsSync(markerPath)) {
+    return { label, status: 'PASS', message: 'No interrupted install/update detected' };
+  }
+  let detail = '';
+  try { detail = readFileSync(markerPath, 'utf-8').trim(); } catch { /* unreadable — still flag it */ }
+  const suffix = detail ? ` (${detail})` : '';
+  return {
+    label,
+    status: 'WARN',
+    message: `A previous install/update did not finish${suffix} — re-run ./install.sh to converge (idempotent), or 'recall doctor --fix' for symlinks only`,
+  };
+}
+
+// ─────────────────────────────────────────
 // Main entry point
 // ─────────────────────────────────────────
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
@@ -793,6 +818,11 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   } else {
     results.push(mcpEnvCheck.result);
   }
+
+  // Completion sentinel (#27): a leftover .install-incomplete marker means a
+  // prior install/update was interrupted before its self-check ran. Warn-only —
+  // re-running ./install.sh converges; doctor does not auto-repair it.
+  results.push(probeInstallSentinel(join(homedir(), '.agents', 'Recall', '.install-incomplete')));
 
   // Print all results
   for (const r of results) {
