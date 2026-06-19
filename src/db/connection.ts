@@ -82,6 +82,11 @@ export function initDb(): { created: boolean; path: string } {
   db = new Database(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
+  // One-time init can legitimately race a concurrent hook DB open (extraction
+  // hooks fire on their own schedule). Wait up to 5s for a held lock to clear
+  // rather than failing the whole init on transient contention — chosen over
+  // fail-fast so a background hook write can't abort `recall init`. (#72/#96)
+  db.exec('PRAGMA busy_timeout = 5000');
 
   // Schema setup — ordering matters. See CHANGELOG 0.7.11.
   // 1) CREATE_TABLES: idempotent — creates tables that don't exist yet.

@@ -95,6 +95,9 @@ export function hasExtractionTracker(dbPath: string): boolean {
   let db: Database | null = null;
   try {
     db = new Database(dbPath);
+    // Wait up to 5s on a held lock instead of failing immediately, matching
+    // getDb(). Value mirrored inline — hooks must not import from src/. (#72/#96)
+    db.exec('PRAGMA busy_timeout = 5000');
     const row = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='extraction_tracker'")
       .get();

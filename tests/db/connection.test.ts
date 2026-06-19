@@ -198,6 +198,35 @@ describe('connection', () => {
     });
   });
 
+  describe('busy_timeout pragma (#96)', () => {
+    test('getDb() connection sets busy_timeout = 5000', () => {
+      const row = getDb().query('PRAGMA busy_timeout').get() as { timeout: number };
+      expect(row.timeout).toBe(5000);
+    });
+
+    test('a fresh initDb() connection sets busy_timeout = 5000', () => {
+      // initDb opens its own connection during one-time schema setup; it must
+      // also wait up to 5s on a held lock rather than failing fast (#96).
+      closeDb();
+      const freshDir = mkdtempSync(join(tmpdir(), 'recall-test-busy-'));
+      const freshPath = join(freshDir, 'busy.db');
+      const originalPath = process.env.RECALL_DB_PATH;
+
+      try {
+        process.env.RECALL_DB_PATH = freshPath;
+        initDb();
+        const row = getDb().query('PRAGMA busy_timeout').get() as { timeout: number };
+        expect(row.timeout).toBe(5000);
+      } finally {
+        closeDb();
+        process.env.RECALL_DB_PATH = originalPath;
+        rmSync(freshDir, { recursive: true, force: true });
+        // Restore the shared test DB connection for subsequent tests
+        initDb();
+      }
+    });
+  });
+
   describe('getDbStats', () => {
     test('returns size > 0 and correct path after init', () => {
       const stats = getDbStats();
