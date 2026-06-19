@@ -68,6 +68,10 @@ import {
 	checkEmbeddingService,
 } from "./lib/embeddings.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
+import {
+	shouldFallbackToHybrid,
+	buildHybridFallbackOutcome,
+} from "./lib/search-fallback.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
 
@@ -276,7 +280,20 @@ server.tool(
 		try {
 			const results = search(query, { project, table, biasType: bias_type, limit });
 
-			// Log memory usage for metrics
+			// Zero keyword hits on a GLOBAL query: retry via hybrid/semantic search
+			// so a phrasing mismatch never silently returns nothing (#39). A hard
+			// `table` filter is respected — narrowing means the honest empty result.
+			if (shouldFallbackToHybrid(results.length, table)) {
+				const { results: hybridResults } = await hybridSearch(query, {
+					project,
+					limit,
+				});
+				const outcome = buildHybridFallbackOutcome(query, hybridResults);
+				logMemoryUsage(outcome.logTool, query, outcome.logCount, project);
+				return { content: [{ type: "text", text: outcome.text }] };
+			}
+
+			// Keyword hits, or a table-filtered empty result: one honest log line.
 			logMemoryUsage("memory_search", query, results.length, project);
 
 			if (results.length === 0) {
