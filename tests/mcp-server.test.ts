@@ -29,6 +29,7 @@ import {
   getBreadcrumb,
   createLoaEntry,
   createSession,
+  addMessage,
   vectorRowContentProvenance,
 } from '../src/lib/memory';
 import {
@@ -395,6 +396,34 @@ describe('hybrid vector-branch provenance (issue #67)', () => {
     const dec = vectorRowContentProvenance('decisions', id);
     expect(dec.provenance).toBe('extracted');
     expect(dec.content).toBe('Centralize the hybrid vec-branch row fetch in one helper');
+
+    // Issue #91: the loa_entries and messages branches were a proven code-move
+    // in #90 but unguarded — a regression would silently report their
+    // provenance as unknown. Pin both: title+extract content for loa, truncated
+    // content for messages, each carrying its real provenance.
+    const loaId = createLoaEntry({
+      title: 'Hybrid vec-branch provenance',
+      fabric_extract: 'Resolved content and provenance for vector-only LoA matches.',
+      provenance: 'user_authored',
+      session_id: sessionId,
+      project: 'test-project',
+    });
+    const loa = vectorRowContentProvenance('loa_entries', loaId);
+    expect(loa.provenance).toBe('user_authored');
+    expect(loa.content).toContain('Hybrid vec-branch provenance');
+    expect(loa.content).toContain('Resolved content and provenance for vector-only LoA matches.');
+
+    const msgId = addMessage({
+      session_id: sessionId,
+      timestamp: nowIso(),
+      role: 'assistant',
+      content: 'Vector-only message matches must keep their real provenance.',
+      provenance: 'verbatim',
+      project: 'test-project',
+    });
+    const msg = vectorRowContentProvenance('messages', msgId);
+    expect(msg.provenance).toBe('verbatim');
+    expect(msg.content).toContain('Vector-only message matches must keep their real provenance.');
 
     // Unknown / non-embedded table falls through to empty content, null provenance.
     const unknown = vectorRowContentProvenance('breadcrumbs', id);

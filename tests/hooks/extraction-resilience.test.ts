@@ -122,3 +122,14 @@ describe('Parent semaphore + idempotent release (Forge Finding 4)', () => {
     expect(proximal).toBe(true);
   });
 });
+
+describe('busy_timeout on hook DB opens (#96)', () => {
+  test('RecallExtract clearTrackerRow open sets busy_timeout = 5000 — verified by grep', async () => {
+    const f = await Bun.file(join(import.meta.dir, '..', '..', 'hooks', 'RecallExtract.ts')).text();
+    // clearTrackerRow opens + closes its own connection inside the function, so
+    // the pragma isn't observable at runtime — assert it at the source seam:
+    // the Database open must be followed by busy_timeout, mirroring getDb()
+    // (hooks must not import from src/, so the value is duplicated inline). (#72/#96)
+    expect(/const db = new Database\(dbPath\);[\s\S]{0,400}PRAGMA busy_timeout = 5000/.test(f)).toBe(true);
+  });
+});
