@@ -29,8 +29,15 @@ import {
   getBreadcrumb,
   createLoaEntry,
   createSession,
+  addMessage,
   vectorRowContentProvenance,
 } from '../src/lib/memory';
+import {
+  shouldFallbackToHybrid,
+  buildHybridFallbackOutcome,
+  formatHybridResults,
+  type HybridSearchResult,
+} from '../src/lib/search-fallback';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -390,9 +397,108 @@ describe('hybrid vector-branch provenance (issue #67)', () => {
     expect(dec.provenance).toBe('extracted');
     expect(dec.content).toBe('Centralize the hybrid vec-branch row fetch in one helper');
 
+    // Issue #91: the loa_entries and messages branches were a proven code-move
+    // in #90 but unguarded — a regression would silently report their
+    // provenance as unknown. Pin both: title+extract content for loa, truncated
+    // content for messages, each carrying its real provenance.
+    const loaId = createLoaEntry({
+      title: 'Hybrid vec-branch provenance',
+      fabric_extract: 'Resolved content and provenance for vector-only LoA matches.',
+      provenance: 'user_authored',
+      session_id: sessionId,
+      project: 'test-project',
+    });
+    const loa = vectorRowContentProvenance('loa_entries', loaId);
+    expect(loa.provenance).toBe('user_authored');
+    expect(loa.content).toContain('Hybrid vec-branch provenance');
+    expect(loa.content).toContain('Resolved content and provenance for vector-only LoA matches.');
+
+    const msgId = addMessage({
+      session_id: sessionId,
+      timestamp: nowIso(),
+      role: 'assistant',
+      content: 'Vector-only message matches must keep their real provenance.',
+      provenance: 'verbatim',
+      project: 'test-project',
+    });
+    const msg = vectorRowContentProvenance('messages', msgId);
+    expect(msg.provenance).toBe('verbatim');
+    expect(msg.content).toContain('Vector-only message matches must keep their real provenance.');
+
     // Unknown / non-embedded table falls through to empty content, null provenance.
     const unknown = vectorRowContentProvenance('breadcrumbs', id);
     expect(unknown.content).toBe('');
     expect(unknown.provenance).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// memory_search → hybrid/semantic fallback (issue #39)
+//
+// On a GLOBAL zero-keyword-hit query, the memory_search handler retries via
+// hybridSearch and surfaces semantic matches; a table-filtered query respects
+// the narrowing and returns the honest empty result. mcp-server.ts cannot be
+// imported (it starts a server on load), so we test the delegates the handler
+// calls — shouldFallbackToHybrid (the decision) and buildHybridFallbackOutcome
+// (the labeled response + the single honest metrics line).
+// ---------------------------------------------------------------------------
+
+describe('memory_search hybrid fallback (issue #39)', () => {
+  const sample: HybridSearchResult = {
+    table: 'decisions',
+    id: 42,
+    content: 'We standardized on bun over npm for all Recall tooling',
+    score: 0.83,
+    source: 'vec',
+    provenance: 'user_authored',
+  };
+
+  test('a global zero-result query falls back; keyword hits and table filters do not', () => {
+    // Global (no table) + zero keyword hits → fall back to hybrid/semantic.
+    expect(shouldFallbackToHybrid(0, undefined)).toBe(true);
+
+    // A hard `table` filter narrows scope on purpose → no fallback.
+    expect(shouldFallbackToHybrid(0, 'decisions')).toBe(false);
+
+    // Keyword hits exist → no fallback regardless of table.
+    expect(shouldFallbackToHybrid(3, undefined)).toBe(false);
+  });
+
+  test('a global query with no verbatim match surfaces hybrid hits with a clear label', () => {
+    const outcome = buildHybridFallbackOutcome('which package manager', [sample]);
+
+    expect(outcome.text).toContain('No exact keyword hits for "which package manager"; showing semantic matches:');
+    // Reuses the memory_hybrid_search display shape: score% [TAG] [table#id] | provenance.
+    expect(outcome.text).toContain('83.0% [VEC] [decisions#42] | provenance: user_authored');
+    expect(outcome.text).toContain('We standardized on bun over npm');
+
+    // Metrics: one honest log line, attributed to the fallback path.
+    expect(outcome.logTool).toBe('memory_search:hybrid-fallback');
+    expect(outcome.logCount).toBe(1);
+  });
+
+  test('when hybrid also returns nothing (e.g. embeddings unavailable) the result is honestly empty', () => {
+    const outcome = buildHybridFallbackOutcome('which package manager', []);
+
+    // Do NOT claim semantic matches that don't exist.
+    expect(outcome.text).toBe('No results found for: "which package manager"');
+    expect(outcome.text).not.toContain('semantic matches');
+    expect(outcome.logTool).toBe('memory_search:hybrid-fallback');
+    expect(outcome.logCount).toBe(0);
+  });
+
+  test('formatHybridResults matches the memory_hybrid_search display shape', () => {
+    const formatted = formatHybridResults([
+      sample,
+      { ...sample, id: 7, source: 'both', provenance: null, content: 'x'.repeat(250) },
+    ]);
+
+    expect(formatted).toContain('83.0% [VEC] [decisions#42] | provenance: user_authored');
+    // NULL provenance reports as "unknown", never guessed (ADR-0001).
+    expect(formatted).toContain('[FTS+VEC] [decisions#7] | provenance: unknown');
+    // Long content is truncated to a 200-char preview with an ellipsis.
+    expect(formatted).toContain('x'.repeat(200) + '...');
+    // Result blocks are separated by the shared divider.
+    expect(formatted).toContain('\n\n---\n\n');
   });
 });
