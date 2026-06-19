@@ -197,4 +197,21 @@ describe('install.sh completion sentinel (#27)', () => {
     const doInstall = src.slice(src.indexOf('do_install() {'));
     expect(doInstall).not.toContain('already installed; skipping');
   });
+
+  // Ordering guard: the marker must be written BEFORE the first artifact-mutating
+  // step (recall_auto_migrate) and AFTER the install root exists. A future
+  // reorder that moves the mark after a mutating step would silently reopen #27
+  // (an interrupt during that step would leave no incompleteness signal).
+  test('install.sh writes the sentinel after the install root and before the first mutating step', () => {
+    const src = readFileSync(INSTALL_SH, 'utf-8');
+    const doInstall = src.slice(src.indexOf('do_install() {'));
+    const rootIdx = doInstall.indexOf('recall_create_install_root');
+    const markIdx = doInstall.indexOf('recall_mark_install_incomplete');
+    const migrateIdx = doInstall.indexOf('recall_auto_migrate');
+    expect(rootIdx).toBeGreaterThanOrEqual(0);
+    expect(markIdx).toBeGreaterThanOrEqual(0);
+    expect(migrateIdx).toBeGreaterThanOrEqual(0);
+    expect(markIdx).toBeGreaterThan(rootIdx);   // root exists before we mark
+    expect(markIdx).toBeLessThan(migrateIdx);   // mark before the first mutation
+  });
 });

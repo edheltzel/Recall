@@ -420,8 +420,9 @@ step_verify() {
   # for the rationale (catches mid-step interruptions that leave canonicals
   # in place but no platform-home symlinks).
   if ! recall_verify_install; then
+    # recall_verify_install already prints the canonical recovery story
+    # (recall_print_recovery) — don't hand-write a second, divergent one.
     log_error "Symlink verification failed after update."
-    log_error "Recovery: re-run ./update.sh, or run 'recall doctor --fix'."
     exit 1
   fi
 

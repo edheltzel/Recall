@@ -48,10 +48,11 @@ fi
 : "${RECALL_PI_EXTENSIONS_DIR:=$RECALL_PI_ROOT/extensions}"
 : "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
 
-# Completion sentinel — written at install/update start, removed only after the
-# post-install self-check passes. A stale marker on a later run means a prior
-# install/update was interrupted before it could verify (SIGKILL, closed
-# terminal, power loss). See recall_mark_install_incomplete / #27.
+# Completion sentinel — written at install start, removed only after the
+# post-install self-check passes. Only install.sh marks/clears it; update.sh
+# merely warns when it finds one. A stale marker on a later run means a prior
+# install was interrupted before it could verify (SIGKILL, closed terminal,
+# power loss). See recall_mark_install_incomplete / #27.
 : "${RECALL_INSTALL_MARKER:=$RECALL_DIR/.install-incomplete}"
 
 # Backups live under the install root now (was $CLAUDE_DIR/backups/recall).
@@ -1263,8 +1264,12 @@ recall_print_recovery() {
 recall_mark_install_incomplete() {
   local ver="unknown"
   if [[ -f "$RECALL_REPO_DIR/package.json" ]]; then
-    ver="$(node -e 'process.stdout.write(require(process.argv[1]).version)' \
-      "$RECALL_REPO_DIR/package.json" 2>/dev/null || echo unknown)"
+    # bun-always repo: read the version with no node/bun subprocess so this
+    # never silently degrades to "unknown" on a node-less host.
+    local parsed
+    parsed="$(grep -m1 '"version"' "$RECALL_REPO_DIR/package.json" \
+      | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')" || true
+    [[ -n "$parsed" ]] && ver="$parsed"
   fi
   mkdir -p "$RECALL_DIR"
   printf 'interrupted_at=%s version=%s\n' \
@@ -1276,12 +1281,13 @@ recall_clear_install_marker() {
   rm -f "$RECALL_INSTALL_MARKER"
 }
 
-# Warn (only) when a prior install/update left the marker behind. Warn-only by
-# design — re-running converges; we never auto-repair or auto-rerun on startup
-# (Ed, OQ#2). Safe to call before $RECALL_DIR exists (reads a maybe-absent path).
+# Warn (only) when a prior install left the marker behind (only install.sh
+# writes it). Warn-only by design — re-running converges; we never auto-repair
+# or auto-rerun on startup (Ed, OQ#2). Safe to call before $RECALL_DIR exists
+# (reads a maybe-absent path). Called by both install.sh and update.sh.
 recall_warn_if_install_incomplete() {
   [[ -f "$RECALL_INSTALL_MARKER" ]] || return 0
-  log_warn "A previous install/update did not finish (marker: $RECALL_INSTALL_MARKER)."
+  log_warn "A previous install did not finish (marker: $RECALL_INSTALL_MARKER)."
   log_warn "Re-running converges — it is idempotent."
   recall_print_recovery log_warn
 }
