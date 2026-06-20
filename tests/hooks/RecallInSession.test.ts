@@ -9,6 +9,7 @@
 // follow-up issue #135.
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
@@ -102,5 +103,74 @@ describe('RecallInSession entry — child (--run) dispatch', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+// ─── #52 corrections wiring — flag independence + fast-path ──────────────────
+
+function countCorrections(): number {
+  const db = new Database(dbPath);
+  try {
+    const row = db
+      .prepare("SELECT COUNT(*) AS n FROM learnings WHERE category = 'correction'")
+      .get() as { n: number };
+    return row.n;
+  } finally {
+    db.close();
+  }
+}
+
+describe('RecallInSession entry — corrections (issue #52)', () => {
+  test('corrections capture with in-session DISABLED (the flags are independent)', async () => {
+    const payload = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'sub-corr',
+      transcript_path: '/tmp/sub-corr.jsonl',
+      cwd: '/tmp/recall',
+      prompt: "that's wrong, use the cache instead",
+    });
+    // in-session OFF, corrections ON — the fast-path must still proceed.
+    const code = await runHook([], payload, {
+      RECALL_INSESSION_ENABLED: '0',
+      RECALL_CORRECTIONS_ENABLED: '1',
+    });
+    expect(code).toBe(0);
+    // Mutation: gate corrections behind RECALL_INSESSION_ENABLED → no write → RED.
+    expect(countCorrections()).toBe(1);
+  });
+
+  test('OFF by default — both flags off writes nothing', async () => {
+    const payload = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'sub-corr-off',
+      transcript_path: '/tmp/sub-corr-off.jsonl',
+      cwd: '/tmp/recall',
+      prompt: "that's wrong, use the cache instead",
+    });
+    const code = await runHook([], payload, {
+      RECALL_INSESSION_ENABLED: '0',
+      RECALL_CORRECTIONS_ENABLED: '0',
+    });
+    expect(code).toBe(0);
+    expect(countCorrections()).toBe(0);
+    expect(getSessionProgress(dbPath, 'sub-corr-off')).toBeNull();
+  });
+
+  test('a non-correction prompt with corrections ON writes nothing', async () => {
+    const payload = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'sub-corr-plain',
+      transcript_path: '/tmp/sub-corr-plain.jsonl',
+      cwd: '/tmp/recall',
+      prompt: 'please add a test for the parser',
+    });
+    const code = await runHook([], payload, {
+      RECALL_INSESSION_ENABLED: '0',
+      RECALL_CORRECTIONS_ENABLED: '1',
+    });
+    expect(code).toBe(0);
+    expect(countCorrections()).toBe(0);
+    // The prompt counter still advanced (so the rate-limit gap is real).
+    expect(getSessionProgress(dbPath, 'sub-corr-plain')?.prompts_seen).toBe(1);
   });
 });

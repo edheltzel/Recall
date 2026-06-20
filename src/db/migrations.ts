@@ -245,6 +245,32 @@ export const MIGRATIONS: Migration[] = [
       )
     `).run();
   },
+
+  // Migration 11 → 12: Correction rate-limit state on session_progress (issue #52).
+  // Correction detection writes verbatim user text on a UserPromptSubmit cadence
+  // and must rate-limit to 1 save per 3 prompts. The per-window turns_seen RESETS
+  // to 0 on every in-session cadence run (resetWindow), so it CANNOT back a
+  // monotonic "prompts since last correction" gap. We add a MONOTONIC prompts_seen
+  // (incremented every UserPromptSubmit, never reset) plus last_correction_turn
+  // (the prompts_seen value at the last save); the gate is
+  // prompts_seen - last_correction_turn >= 3, provably robust to the turns_seen
+  // reset. Mirrors the 7 → 8 importance pattern: ALTER for upgrades, declared in
+  // schema.ts for fresh installs; the try/catch absorbs the column-exists case.
+  (db) => {
+    const adds: Array<[string, number]> = [
+      ['prompts_seen', 0],
+      ['last_correction_turn', 0],
+    ];
+    for (const [column, def] of adds) {
+      try {
+        db.prepare(
+          `ALTER TABLE session_progress ADD COLUMN ${column} INTEGER DEFAULT ${def}`
+        ).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install via schema.ts).
+      }
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------
