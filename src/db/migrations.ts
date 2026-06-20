@@ -225,6 +225,26 @@ export const MIGRATIONS: Migration[] = [
   // CREATE TABLE IF NOT EXISTS DDL that runs before migrations (same
   // precedent as migration 3 → 4 for the extraction tables).
   (_db) => {},
+
+  // Migration 10 → 11: Create session_progress table (issue #51).
+  // Per-session turn/tool counters + the incremental-extraction cursor for the
+  // mid-session learning loop. Hooks run as stateless processes, so this state
+  // must persist in the DB. Mirrors the procedures precedent (6 → 7): the table
+  // is created here for upgrades AND declared in schema.ts for fresh installs,
+  // so both paths stay in parity. CRUD lives in hooks/lib/session-progress.ts.
+  (db) => {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS session_progress (
+        session_id        TEXT PRIMARY KEY,
+        conversation_path TEXT,
+        turns_seen        INTEGER DEFAULT 0,
+        tools_seen        INTEGER DEFAULT 0,
+        last_offset       INTEGER DEFAULT 0,
+        runs_this_session INTEGER DEFAULT 0,
+        updated_at        TEXT
+      )
+    `).run();
+  },
 ];
 
 // ---------------------------------------------------------------------------
