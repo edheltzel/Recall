@@ -199,6 +199,21 @@ CREATE TABLE IF NOT EXISTS dedup_lineage (
   status TEXT NOT NULL DEFAULT 'marked' CHECK (status IN ('marked', 'deleted', 'reverted')),
   detail TEXT
 );
+
+-- Session progress (issue #51): per-session turn/tool counters + the
+-- incremental-extraction cursor for the mid-session learning loop. Hooks fire
+-- as stateless processes, so this state must persist in the DB rather than in
+-- memory. CRUD lives in hooks/lib/session-progress.ts (self-contained,
+-- dbPath-injected). Also created by migration 10 → 11 for upgrade parity.
+CREATE TABLE IF NOT EXISTS session_progress (
+  session_id        TEXT PRIMARY KEY,
+  conversation_path TEXT,
+  turns_seen        INTEGER DEFAULT 0,
+  tools_seen        INTEGER DEFAULT 0,
+  last_offset       INTEGER DEFAULT 0,
+  runs_this_session INTEGER DEFAULT 0,
+  updated_at        TEXT
+);
 `;
 
 export const CREATE_INDEXES = `
