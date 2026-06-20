@@ -311,6 +311,8 @@ describe('session_progress migration (10 to 11)', () => {
     'tools_seen',
     'last_offset',
     'runs_this_session',
+    'prompts_seen',
+    'last_correction_turn',
     'updated_at',
   ];
 
@@ -369,13 +371,82 @@ describe('session_progress migration (10 to 11)', () => {
   });
 });
 
+describe('correction rate-limit columns migration (11 to 12)', () => {
+  // A pre-#52 install: session_progress exists with the original 7 columns at
+  // version 11. The 11 → 12 migration must add the two correction columns.
+  function makeLegacyV11Db(dir: string): Database {
+    const d = new Database(join(dir, 'legacy11.db'));
+    d.prepare(
+      `CREATE TABLE session_progress (
+         session_id        TEXT PRIMARY KEY,
+         conversation_path TEXT,
+         turns_seen        INTEGER DEFAULT 0,
+         tools_seen        INTEGER DEFAULT 0,
+         last_offset       INTEGER DEFAULT 0,
+         runs_this_session INTEGER DEFAULT 0,
+         updated_at        TEXT
+       )`
+    ).run();
+    d.prepare('PRAGMA user_version = 11').run();
+    return d;
+  }
+
+  test('upgrade path: a version-11 DB gains prompts_seen + last_correction_turn (default 0)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-corr-mig-'));
+    const legacyDb = makeLegacyV11Db(dir);
+    try {
+      const before = legacyDb.prepare('PRAGMA table_info(session_progress)').all() as any[];
+      expect(before.map((c) => c.name)).not.toContain('prompts_seen');
+      expect(before.map((c) => c.name)).not.toContain('last_correction_turn');
+
+      const result = applyMigrations(legacyDb);
+      // Mutation guard: drop the 11 → 12 migration and target falls to 11, so a
+      // version-11 DB applies nothing and the columns never appear → RED.
+      expect(result.from).toBe(11);
+      expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
+      expect(MIGRATIONS.length).toBe(12);
+
+      const after = (legacyDb.prepare('PRAGMA table_info(session_progress)').all() as any[]).map((c) => c.name);
+      expect(after).toContain('prompts_seen');
+      expect(after).toContain('last_correction_turn');
+
+      // New columns default to 0 on insert-by-pk.
+      legacyDb.prepare('INSERT INTO session_progress (session_id) VALUES (?)').run('s1');
+      const row = legacyDb.prepare(
+        'SELECT prompts_seen, last_correction_turn FROM session_progress WHERE session_id = ?'
+      ).get('s1') as any;
+      expect(row.prompts_seen).toBe(0);
+      expect(row.last_correction_turn).toBe(0);
+    } finally {
+      legacyDb.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('fresh DB already has the correction columns and lands at version 12', () => {
+    applyMigrations(db);
+    expect(getMigrationVersion(db)).toBe(12);
+    const cols = (db.prepare('PRAGMA table_info(session_progress)').all() as any[]).map((c) => c.name);
+    expect(cols).toContain('prompts_seen');
+    expect(cols).toContain('last_correction_turn');
+  });
+
+  test('idempotent: re-running after 12 applies nothing', () => {
+    applyMigrations(db);
+    const result = applyMigrations(db);
+    expect(result.applied).toBe(0);
+    expect(getMigrationVersion(db)).toBe(12);
+  });
+});
+
 describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
     // 7 → 8: importance column on messages/decisions/learnings/loa_entries (Sprint #4)
     // 8 → 9: provenance column on all five memory tables (issue #42)
     // 9 → 10: dedup_lineage table (issue #45)
     // 10 → 11: session_progress table (issue #51)
-    expect(MIGRATIONS.length).toBe(11);
+    // 11 → 12: correction rate-limit columns on session_progress (issue #52)
+    expect(MIGRATIONS.length).toBe(12);
   });
 
   test('all entries are functions', () => {
