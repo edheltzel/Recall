@@ -303,12 +303,79 @@ describe('provenance migration (8 to 9)', () => {
   });
 });
 
+describe('session_progress migration (10 to 11)', () => {
+  const SESSION_PROGRESS_COLUMNS = [
+    'session_id',
+    'conversation_path',
+    'turns_seen',
+    'tools_seen',
+    'last_offset',
+    'runs_this_session',
+    'updated_at',
+  ];
+
+  test('fresh DB has session_progress with the right columns and lands at latest version', () => {
+    applyMigrations(db);
+    // Mutation guard: dropping the migration entry shrinks MIGRATIONS.length to
+    // 10, so user_version would land at 10, not 11 → this assertion goes RED.
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+    const cols = db.prepare('PRAGMA table_info(session_progress)').all() as any[];
+    expect(cols.map((c: any) => c.name).sort()).toEqual([...SESSION_PROGRESS_COLUMNS].sort());
+  });
+
+  test('upgrade path: a version-10 DB without the table gets it created', () => {
+    // Simulate a pre-#51 install: no session_progress table, version 10.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-sessprog-test-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy.db'));
+    try {
+      legacyDb.prepare('PRAGMA user_version = 10').run();
+      const before = legacyDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='session_progress'"
+      ).get();
+      expect(before).toBeNull();
+
+      const result = applyMigrations(legacyDb);
+      // Mutation guard: remove the migration entry and target drops to 10, so a
+      // version-10 DB applies nothing and the table never appears → RED.
+      expect(result.from).toBe(10);
+      expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
+
+      const cols = legacyDb.prepare('PRAGMA table_info(session_progress)').all() as any[];
+      expect(cols.map((c: any) => c.name).sort()).toEqual([...SESSION_PROGRESS_COLUMNS].sort());
+
+      // Counters default to 0 on insert-by-pk.
+      legacyDb.prepare('INSERT INTO session_progress (session_id) VALUES (?)').run('s1');
+      const row = legacyDb.prepare(
+        'SELECT turns_seen, tools_seen, last_offset, runs_this_session FROM session_progress WHERE session_id = ?'
+      ).get('s1') as any;
+      expect(row.turns_seen).toBe(0);
+      expect(row.tools_seen).toBe(0);
+      expect(row.last_offset).toBe(0);
+      expect(row.runs_this_session).toBe(0);
+    } finally {
+      legacyDb.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('idempotent: re-running migrations is a no-op and keeps the table', () => {
+    applyMigrations(db);
+    const result = applyMigrations(db);
+    expect(result.applied).toBe(0);
+    const tbl = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='session_progress'"
+    ).get() as any;
+    expect(tbl.name).toBe('session_progress');
+  });
+});
+
 describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
     // 7 → 8: importance column on messages/decisions/learnings/loa_entries (Sprint #4)
     // 8 → 9: provenance column on all five memory tables (issue #42)
     // 9 → 10: dedup_lineage table (issue #45)
-    expect(MIGRATIONS.length).toBe(10);
+    // 10 → 11: session_progress table (issue #51)
+    expect(MIGRATIONS.length).toBe(11);
   });
 
   test('all entries are functions', () => {
