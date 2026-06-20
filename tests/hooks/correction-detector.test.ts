@@ -66,11 +66,35 @@ describe('negative patterns suppress (load-bearing)', () => {
   });
 
   test('negatives rescue benign affirmations that would otherwise fire via weak+directive', () => {
-    // Mutation: drop the NEGATIVE list → both of these fire (weak lead + a
-    // directive word like "that"/"use" follows) → RED. The negative pass is the
-    // ONLY thing keeping them out.
-    expect(detectCorrection('actually, that looks great').isCorrection).toBe(false);
+    // Mutation: drop the NEGATIVE list → both of these fire (weak lead + a verb
+    // directive — "stop there, run …" / "no problem, use …") → RED. The negative
+    // pass is the ONLY thing keeping them out.
+    expect(detectCorrection('stop there, run the old build').isCorrection).toBe(false);
     expect(detectCorrection('no problem, use the default').isCorrection).toBe(false);
+  });
+});
+
+describe('benign prose with a weak lead but no verb directive (#52 over-fire fix)', () => {
+  // H2: the bare pointer words (the/that/this/it) were dropped from DIRECTIVE_WORDS,
+  // so a weak lead ("no,"/"actually,"/"stop,") followed only by pointer prose is no
+  // longer a correction. A verbatim-write feature must favor precision over recall.
+  // Mutation: restore the/that/this/it to DIRECTIVE_WORDS → every row below fires → RED.
+  test.each([
+    'no, the build is green',
+    'actually, the tests pass',
+    'no, it works now',
+    "no, that's fine",
+    'actually, this is great',
+    'stop, the server is up',
+  ])('%j is NOT a correction', (text) => {
+    expect(detectCorrection(text).isCorrection).toBe(false);
+  });
+
+  test('real verb-directive corrections STILL fire (no recall regression)', () => {
+    // The fix must not silence genuine corrections — these all carry a verb.
+    expect(detectCorrection('no, use the other file').isCorrection).toBe(true);
+    expect(detectCorrection('stop, run the tests first').isCorrection).toBe(true);
+    expect(detectCorrection('actually use the parser helper').isCorrection).toBe(true);
   });
 });
 

@@ -172,14 +172,18 @@ export function handleCorrection(
     return { detected: true, saved: false, outcome: 'rate_limited', matched: detection.matched };
   }
 
-  // Scrub BEFORE the write — secrets pasted into a correction must never persist
-  // as cleartext (load-bearing per design §0.1). The stored text is the verbatim
-  // correction + its surrounding message, capped so an over-long paste can't bloat
-  // the row.
-  const raw = promptText.length > MAX_CORRECTION_CHARS
-    ? promptText.slice(0, MAX_CORRECTION_CHARS)
-    : promptText;
-  const { text: safeText, redactions } = scrub(raw);
+  // Scrub BEFORE the cap — secrets pasted into a correction must never persist as
+  // cleartext (load-bearing per design §0.1). Scrubbing the FULL prompt first is
+  // what makes the cap safe: capping the raw text could truncate a secret that
+  // straddles MAX_CORRECTION_CHARS below its pattern's minimum match length, so
+  // scrub would miss the fragment and a partial cleartext secret would persist
+  // silently. A `[REDACTED:<kind>]` marker is short and self-contained, so capping
+  // the already-scrubbed text can never strand a secret. `redactions` reflects the
+  // full-prompt scrub.
+  const { text: scrubbed, redactions } = scrub(promptText);
+  const safeText = scrubbed.length > MAX_CORRECTION_CHARS
+    ? scrubbed.slice(0, MAX_CORRECTION_CHARS)
+    : scrubbed;
 
   writeLearningsBatch(dbPath, [
     {

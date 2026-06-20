@@ -36,9 +36,9 @@ export interface CorrectionDetectorConfig {
 
 // ── Pass 1: NEGATIVE (suppressors) ───────────────────────────────────────────
 // If any of these match, the message is benign affirmation/acknowledgement and
-// must NOT be captured — even when a positive pattern also matched. These are
-// load-bearing precisely because the directive list below is broad (it includes
-// "the/that/this/it"), so "no problem, that works" would otherwise fire.
+// must NOT be captured — even when a positive pattern also matched. They suppress
+// the affirmation phrasings a weak lead + verb directive can't ("no problem",
+// "actually looks great", "stop there") before the positive passes run.
 const NEGATIVE_PATTERNS: RegExp[] = [
   /^no worries/i,
   /^no problem/i,
@@ -79,13 +79,16 @@ const WEAK_PATTERNS: { label: string; re: RegExp }[] = [
   { label: 'stop-lead', re: /^stop[,.\s!]/i },
 ];
 
-// Directive words: an imperative/pointer that turns a weak lead into a correction.
-// Broad on purpose (matches pi-hermes): includes pointers (the/that/this/it) so
-// "no, that's the wrong file" fires — the NEGATIVE pass guards the benign cases.
+// Directive words: an imperative/verb that turns a weak lead into a correction.
+// IMPERATIVES ONLY — the bare pointer words (the/that/this/it) are deliberately
+// excluded. With them in, any benign message led by a weak word ("no, the build
+// is green", "actually, the tests pass", "no, it works now") fired as a
+// high-confidence correction. Precision over recall is the right tradeoff for a
+// verbatim-write feature: better to miss a correction than to capture benign prose.
 const DIRECTIVE_WORDS = [
   'use', "don't", 'dont', 'do', 'try', 'make', 'run', 'install', 'add', 'remove',
   'delete', 'change', 'fix', 'put', 'set', 'write', 'go', 'stop', 'start',
-  'instead', 'the', 'that', 'this', 'it',
+  'instead',
 ];
 const DIRECTIVE_RE = new RegExp(`\\b(?:${DIRECTIVE_WORDS.map(escapeRegExp).join('|')})\\b`, 'i');
 

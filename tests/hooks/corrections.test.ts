@@ -67,6 +67,14 @@ describe('correctionAllowed (pure rate-limit predicate)', () => {
     expect(correctionAllowed({ prompts_seen: 3, last_correction_turn: 1 })).toBe(false); // gap 2
     expect(correctionAllowed({ prompts_seen: 4, last_correction_turn: 1 })).toBe(true); // gap 3
   });
+
+  test('honors an explicit non-default minGap (the parameter path, not just the default 3)', () => {
+    // A gap of 2 is blocked under the default (3) but allowed with an explicit minGap=2.
+    // Mutation: ignore the minGap arg / hardcode the default → the explicit-2 case flips RED.
+    expect(correctionAllowed({ prompts_seen: 3, last_correction_turn: 1 })).toBe(false); // default 3, gap 2
+    expect(correctionAllowed({ prompts_seen: 3, last_correction_turn: 1 }, 2)).toBe(true); // minGap 2, gap 2
+    expect(correctionAllowed({ prompts_seen: 2, last_correction_turn: 1 }, 2)).toBe(false); // minGap 2, gap 1
+  });
 });
 
 describe('handleCorrection — rate limit survives the window reset', () => {
@@ -124,6 +132,48 @@ describe('handleCorrection — scrub before write (load-bearing)', () => {
     expect(stored).not.toContain('A'.repeat(40));
     expect(stored).toContain('[REDACTED:anthropic-key]');
     expect(res.redactions).toContain('anthropic-key');
+  });
+
+  test('a secret straddling the 2000-char cap leaves NO partial cleartext (scrub-then-cap)', () => {
+    // H1 regression: scrub must run on the FULL prompt BEFORE the cap. Place a real
+    // anthropic key so its `sk-ant-` head sits just inside the cap and its body
+    // crosses 2000 — capping FIRST would truncate the key below its 20-char minimum
+    // match, so scrub would miss the fragment and `sk-ant-api03-…` would persist as
+    // cleartext with redactions=[].
+    const MAX = 2000;
+    const secret = 'sk-ant-api03-' + 'B'.repeat(40);
+    const lead = 'no, use the cache instead — '; // weak lead + verb directive → a correction
+    const filler = 'x'.repeat(MAX - 16 - lead.length); // secret starts 16 chars before the cap
+    const text = lead + filler + secret;
+
+    const res = handleCorrection(dbPath, SID, CONV, text, PROJ, ENABLED);
+    expect(res.saved).toBe(true);
+
+    const stored = correctionRows()[0].problem as string;
+    // Mutation: revert to cap-then-scrub → stored keeps the `sk-ant-api03-BBB` fragment
+    // and res.redactions is [] → BOTH assertions flip RED.
+    expect(stored).not.toContain('sk-ant-');
+    expect(res.redactions).toContain('anthropic-key');
+    expect(stored.length).toBeLessThanOrEqual(MAX);
+  });
+});
+
+describe('handleCorrection — cap bounds the stored row (M1)', () => {
+  test('an over-long correction is capped to 2000 chars', () => {
+    const text = 'no, use the cache instead ' + 'y'.repeat(3000); // >2000, benign (no secret)
+    handleCorrection(dbPath, SID, CONV, text, PROJ, ENABLED);
+    const stored = correctionRows()[0].problem as string;
+    expect(stored.length).toBe(2000);
+  });
+
+  test('an exactly-2000-char correction is stored verbatim (boundary)', () => {
+    const lead = 'no, use ';
+    const exact = lead + 'z'.repeat(2000 - lead.length); // exactly 2000, benign
+    expect(exact.length).toBe(2000);
+    handleCorrection(dbPath, SID, CONV, exact, PROJ, ENABLED);
+    const stored = correctionRows()[0].problem as string;
+    expect(stored).toBe(exact);
+    expect(stored.length).toBe(2000);
   });
 });
 
