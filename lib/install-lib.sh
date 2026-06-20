@@ -1184,7 +1184,7 @@ recall_verify_install() {
 
   # Hooks
   local hook
-  for hook in RecallExtract RecallStart RecallPreCompact RecallBatchExtract RecallTelosSync RecallClearExtract; do
+  for hook in RecallExtract RecallStart RecallPreCompact RecallInSession RecallBatchExtract RecallTelosSync RecallClearExtract; do
     local canonical="$RECALL_SHARED_HOOKS_DIR/$hook.ts"
     [[ ! -f "$canonical" ]] && continue
     _check_symlink "$CLAUDE_DIR/hooks/$hook.ts" "$canonical"
@@ -1535,7 +1535,7 @@ _recall_copy_hook_files() {
   mkdir -p "$hooks_dir"
 
   local hook
-  for hook in RecallExtract RecallBatchExtract RecallTelosSync RecallStart RecallPreCompact RecallClearExtract; do
+  for hook in RecallExtract RecallBatchExtract RecallTelosSync RecallStart RecallPreCompact RecallInSession RecallClearExtract; do
     if [[ -f "$src_dir/$hook.ts" ]]; then
       recall_copy_canonical "$src_dir/$hook.ts" "$RECALL_SHARED_HOOKS_DIR/$hook.ts"
       recall_link "$hooks_dir/$hook.ts" "$RECALL_SHARED_HOOKS_DIR/$hook.ts"
@@ -1646,6 +1646,17 @@ recall_register_all_hooks() {
     recall_register_hook "PreCompact" "RecallPreCompact" \
       "$bun_path run $hooks_dir/RecallPreCompact.ts" 10000
     log_success "Registered RecallPreCompact hook (PreCompact) in settings.json"
+  fi
+
+  # Mid-session learning loop (#51). Registered unconditionally on BOTH events;
+  # the runtime master flag RECALL_INSESSION_ENABLED gates BEHAVIOR (OFF by
+  # default), not registration — the disabled hook exits ~free on every fire.
+  if [[ -f "$hooks_dir/RecallInSession.ts" ]]; then
+    recall_register_hook "PostToolUse" "RecallInSession" \
+      "$bun_path run $hooks_dir/RecallInSession.ts" 10000
+    recall_register_hook "UserPromptSubmit" "RecallInSession" \
+      "$bun_path run $hooks_dir/RecallInSession.ts" 10000
+    log_success "Registered RecallInSession hook (PostToolUse + UserPromptSubmit) in settings.json"
   fi
 
   if [[ -f "$hooks_dir/RecallClearExtract.ts" ]]; then
