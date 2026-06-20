@@ -25,7 +25,7 @@ import {
   getSessionProgress,
   type SessionProgressRecord,
 } from './session-progress';
-import { childAcquireLock, childReleaseLock } from './extraction-lock';
+import { childAcquireLock, childReleaseLock, parentIsLockHeld } from './extraction-lock';
 import { runExtractCore, type ExtractCoreContext } from './extract-core';
 import type { DualWriteResult } from './extraction-parsers';
 
@@ -190,6 +190,15 @@ export interface DecideResult {
  * on every fire. When disabled this is a no-op that touches NO DB state — the
  * OFF-by-default guarantee at the logic layer (the hook's fast-path exits even
  * earlier, before this is called).
+ *
+ * When the cadence is met it RE-ARMS the window in the parent (resetWindow)
+ * before returning run=true, and refuses to fire into a held lock
+ * (parentIsLockHeld). This bounds spawns to ≤1 per cadence window. The counters
+ * are reset ONLY by the child otherwise, so without the parent re-arm a held
+ * lock (Stop hook TTL up to 600s) or a mid-extraction child would leave the
+ * window armed and EVERY subsequent fire would spawn another doomed detached
+ * child (the H1 spawn storm). The cursor (last_offset) is untouched by a window
+ * reset, so the slice waits intact for the next window — no data loss.
  */
 export function decideInSession(
   dbPath: string,
@@ -205,7 +214,31 @@ export function decideInSession(
   else incrementTools(dbPath, sessionId);
 
   const progress = getSessionProgress(dbPath, sessionId);
-  return { run: progress ? shouldRun(progress, config) : false, progress };
+  if (!progress || !shouldRun(progress, config)) return { run: false, progress };
+
+  // Cadence met — re-arm NOW so the next fire must rebuild a full cadence before
+  // spawning again, regardless of whether the spawned child wins, loses
+  // (lock_busy), or is still mid-extraction.
+  resetWindow(dbPath, sessionId);
+
+  // Don't spawn into a held lock: a child spawned while the Stop hook (or a live
+  // child) holds the per-conversation lock would only lose the race. Skip the
+  // spawn this round — the window is already re-armed, and the slice is picked
+  // up by a later window once the lock clears (cursor unchanged).
+  if (parentIsLockHeld(dbPath, convPath)) return { run: false, progress };
+
+  return { run: true, progress };
+}
+
+/**
+ * Derive the session id the parent keys progress on: prefer the hook-provided
+ * session_id, else fall back to the transcript filename (basename minus
+ * `.jsonl`). Lives here in the testable layer because the hook entry
+ * (hooks/RecallInSession.ts) self-executes on import and can't be unit-imported.
+ */
+export function sessionIdFromArgs(sessionId: string | undefined, convPath: string): string {
+  if (sessionId) return sessionId;
+  return (convPath.split('/').pop() || 'unknown').replace('.jsonl', '');
 }
 
 // ─── Child: lock → slice → extract → advance ─────────────────────────────────

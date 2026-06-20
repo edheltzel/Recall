@@ -14,6 +14,7 @@ import {
   eventFromHookInput,
   decideInSession,
   runInSessionExtraction,
+  sessionIdFromArgs,
   type InSessionConfig,
 } from '../../hooks/lib/insession';
 import {
@@ -184,6 +185,59 @@ describe('decideInSession — counter increment + threshold', () => {
   });
 });
 
+// ─── H1: bound spawns / no spawn-storm while the lock is held ─────────────────
+
+describe('decideInSession — H1: re-arm bounds spawns to ≤1 per cadence window', () => {
+  test('past cadence, exactly one run=true fires per rebuilt window (parent re-arm)', () => {
+    ensureSession(dbPath, 'sess-h1', '/tmp/h1.jsonl');
+    const runs: boolean[] = [];
+    // Three full cadence windows of turn fires, no lock held.
+    for (let i = 0; i < CFG.turnCadence * 3; i++) {
+      runs.push(decideInSession(dbPath, 'sess-h1', '/tmp/h1.jsonl', 'turn', CFG).run);
+    }
+    // One spawn-decision per rebuilt window — the parent reset re-arms so the
+    // fire after a trigger sees a zeroed window.
+    // Mutation — drop the parent resetWindow in decideInSession → the counters
+    // stay >= cadence and every fire from the 10th on returns run=true (≫ 3) → RED.
+    expect(runs.filter(Boolean).length).toBe(3);
+    expect(runs[9]).toBe(true); // 10th fire triggers
+    expect(runs[10]).toBe(false); // 11th sees a re-armed window
+  });
+
+  test('does not spawn into a held lock, yet still re-arms the window (no armed-window storm)', () => {
+    const convPath = '/tmp/h1lock.jsonl';
+    ensureSession(dbPath, 'sess-h1l', convPath);
+    // The Stop hook (or a live child) holds the per-conversation lock. Use a LIVE
+    // pid (this process) so parentIsLockHeld's liveness check sees it as held.
+    expect(childAcquireLock(dbPath, convPath, process.pid)).toBe(true);
+
+    const runs: boolean[] = [];
+    for (let i = 0; i < CFG.turnCadence * 2; i++) {
+      runs.push(decideInSession(dbPath, 'sess-h1l', convPath, 'turn', CFG).run);
+    }
+    // The lock is held the whole time → NOT ONE spawn-decision fires; a spawned
+    // child would only lose the race.
+    // Mutation — drop the parentIsLockHeld guard → the 10th & 20th fire return
+    // run=true (spawning doomed children) → RED.
+    expect(runs.filter(Boolean).length).toBe(0);
+    // …but the window was still re-armed whenever cadence was hit, so the
+    // counters never pile up far past cadence — the storm precondition is gone.
+    // Mutation — drop the parent resetWindow → turns_seen climbs to 20 → RED.
+    expect(getSessionProgress(dbPath, 'sess-h1l')!.turns_seen).toBeLessThan(CFG.turnCadence);
+  });
+});
+
+// ─── sessionIdFromArgs (parent session-id derivation) ────────────────────────
+
+describe('sessionIdFromArgs', () => {
+  test('prefers the explicit id; falls back to the transcript basename', () => {
+    // Mutation — ignore the provided id, or mis-parse the basename → RED.
+    expect(sessionIdFromArgs('abc-123', '/x/y/whatever.jsonl')).toBe('abc-123');
+    expect(sessionIdFromArgs(undefined, '/x/y/sess-7.jsonl')).toBe('sess-7');
+    expect(sessionIdFromArgs('', '/x/y/sess-8.jsonl')).toBe('sess-8');
+  });
+});
+
 // ─── sliceTranscript — incremental window (design §3.2) ──────────────────────
 
 describe('sliceTranscript — reads only the window since last_offset', () => {
@@ -209,6 +263,26 @@ describe('sliceTranscript — reads only the window since last_offset', () => {
     const a = line('user', 'only message here long enough to count as content');
     const full = a + '\n';
     expect(sliceTranscript(full, full.length).text).toBe('');
+  });
+
+  test('astral-plane chars: offsets are UTF-16 units so slice + cursor never drift', () => {
+    // An emoji (astral, 2 UTF-16 code units) straddling the line boundary pins
+    // the multibyte invariant the doc-comment claims.
+    const a = line('user', '🎉 ALPHA emoji message long enough to pass the filter 🚀');
+    const b = line('assistant', 'BETA reply also sufficiently long for the quality gate');
+    const full = a + '\n' + b + '\n';
+
+    const whole = sliceTranscript(full, 0);
+    expect(whole.newOffset).toBe(full.length); // cursor counts astral chars as 2 units
+    expect(whole.text).toContain('🎉');
+
+    // Slice from exactly the boundary after line a — only BETA survives, and the
+    // emoji never bleeds across. Mutation — measure offsets in bytes instead of
+    // UTF-16 units → the boundary misaligns and 🎉/ALPHA leak into the delta → RED.
+    const delta = sliceTranscript(full, (a + '\n').length);
+    expect(delta.text).toContain('BETA');
+    expect(delta.text).not.toContain('🎉');
+    expect(delta.text).not.toContain('ALPHA');
   });
 });
 
@@ -348,6 +422,31 @@ describe('runInSessionExtraction — incremental window advances the cursor', ()
     );
     expect(r2.outcome).toBe('empty_slice');
     expect(spy.calls.length).toBe(1); // still just the first run
+  });
+
+  test('new bytes that are ALL filtered (tool-noise/too-short) → empty_slice, model not called, cursor advances', async () => {
+    const convPath = '/tmp/win4.jsonl';
+    ensureSession(dbPath, 'sess-win4', convPath);
+    // Genuinely new bytes — but every line is filtered (content too short, or a
+    // non-user/assistant role) so the parsed slice is empty. Distinct from the
+    // "no new bytes" (offset == EOF) case above.
+    const full =
+      JSON.stringify({ message: { role: 'user', content: 'hi' } }) + '\n' +
+      JSON.stringify({ message: { role: 'tool', content: 'tool output noise here' } }) + '\n';
+
+    const spy: SpyDeps = { calls: [] };
+    const r = await runInSessionExtraction(
+      dbPath,
+      { sessionId: 'sess-win4', convPath, sessionLabel: 'demo', project: 'demo' },
+      makeDeps(spy, CLEAN_FIXTURE, full)
+    );
+
+    // Mutation — treat a filtered-empty slice as content (call the model on '')
+    // → calls.length === 1 → RED.
+    expect(r.outcome).toBe('empty_slice');
+    expect(spy.calls.length).toBe(0);
+    // Cursor advances past the noise so it isn't re-scanned every window.
+    expect(getSessionProgress(dbPath, 'sess-win4')!.last_offset).toBe(full.length);
   });
 });
 

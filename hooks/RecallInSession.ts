@@ -30,6 +30,7 @@ import {
   eventFromHookInput,
   decideInSession,
   runInSessionExtraction,
+  sessionIdFromArgs,
 } from './lib/insession';
 import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extract-model';
 import { resolveDbPath } from './lib/db-path';
@@ -94,11 +95,6 @@ function spawnChild(convPath: string, sessionId: string, cwd: string): void {
   } catch {
     // Spawn failure is non-fatal — the Stop hook still extracts at session end.
   }
-}
-
-function sessionIdFromArgs(sessionId: string | undefined, convPath: string): string {
-  if (sessionId) return sessionId;
-  return (convPath.split('/').pop() || 'unknown').replace('.jsonl', '');
 }
 
 /** Parent: OFF fast-path, then the cheap counter + cadence check; spawn on threshold. */
@@ -178,11 +174,13 @@ async function runChild(): Promise<void> {
   process.exit(0);
 }
 
-const isRunMode = process.argv.includes('--run');
-const runsAsScript = process.argv[1]?.endsWith('RecallInSession.ts');
-
-if (isRunMode) {
+// Dispatch: `--run` is the detached extraction child; any other invocation is
+// the hook parent. main() runs UNCONDITIONALLY in the else branch — no
+// `argv[1].endsWith('RecallInSession.ts')` guard — so a symlinked or
+// canonical-path invocation (the hook is installed as a symlink) can't silently
+// turn the hook into a no-op. Mirrors RecallExtract.ts's self-identification.
+if (process.argv.includes('--run')) {
   runChild().catch(() => process.exit(0));
-} else if (runsAsScript) {
+} else {
   main().catch(() => process.exit(0));
 }
