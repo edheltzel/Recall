@@ -30,7 +30,7 @@
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { execSync, spawn } from 'child_process';
-import { evaluateQuality, shouldSkipExtraction } from './lib/extraction-quality';
+import { shouldSkipExtraction } from './lib/extraction-quality';
 import { encodeProjectDir } from './lib/path-encoding';
 import {
   wasAlreadyExtracted as trackerWasAlreadyExtracted,
@@ -41,7 +41,8 @@ import { childAcquireLock, childReleaseLock } from './lib/extraction-lock';
 import { acquireSemaphore, releaseSemaphore } from './lib/extraction-semaphore';
 import { migrateTrackerJson } from './lib/extraction-migration';
 import { getDbPath } from './lib/sqlite-writers';
-import { dualWriteToSqlite } from './lib/extraction-parsers';
+import type { DualWriteResult } from './lib/extraction-parsers';
+import { runExtractCore } from './lib/extract-core';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
@@ -838,31 +839,55 @@ async function extractWithClaudeChunked(messages: string): Promise<string | null
   return partials.map(p => p.replace(/^--- Chunk \d+\/\d+ ---\n/, '')).join('\n\n');
 }
 
-function runDualWrite(ctx: {
-  sessionId: string;
-  sessionLabel: string;
-  project: string;
-  timestamp: string;
-  conversationPath: string;
-  topics: string[];
-  summary: string;
-  extracted: string;
-}): void {
-  try {
-    const result = dualWriteToSqlite(getDbPath(), ctx);
-    if (Object.keys(result.failures).length > 0) {
-      for (const [where, msg] of Object.entries(result.failures)) {
-        logExtract(`SQLITE_WRITE_FAIL[${where}]: ${msg}`);
-      }
-    }
-    logExtract(
-      `SQLITE_WRITE: sessions=${result.sessions} decisions=${result.decisions} ` +
-        `learnings=${result.learnings} breadcrumbs=${result.breadcrumbs} ` +
-        `errors=${result.errors} loa=${result.loa}`
-    );
-  } catch (e: any) {
-    logExtract(`SQLITE_WRITE_OUTER_FAIL: ${e?.message || e}`);
+/**
+ * Run the extraction-model cascade over raw transcript/markdown text: Claude CLI
+ * (chunked for very large inputs) with a local Ollama fallback. Returns the
+ * extracted markdown, or null if every method failed. Shared by the Stop path and
+ * the markdown re-extraction path, and injected into runExtractCore as deps.extract.
+ */
+async function runExtractionCascade(messages: string): Promise<string | null> {
+  let extracted = '';
+
+  // Attempt 1: Claude CLI (uses Claude Code's existing auth — no API key needed).
+  // Chunked extraction for large files (>120K chars).
+  if (messages.length > 120000) {
+    console.error(`[FabricExtract] Large input (${messages.length} chars), using chunked extraction...`);
+    const chunkedResult = await extractWithClaudeChunked(messages);
+    if (chunkedResult) extracted = chunkedResult;
+  } else {
+    console.error("[FabricExtract] Trying Claude CLI extraction...");
+    const claudeResult = await extractWithClaude(messages);
+    if (claudeResult) extracted = claudeResult;
   }
+
+  // Attempt 2: local Ollama LLM fallback (free, lower quality).
+  if (!extracted) {
+    console.error("[FabricExtract] Claude CLI failed, trying local Ollama LLM fallback...");
+    const ollamaResult = extractWithOllama(messages);
+    if (ollamaResult) extracted = ollamaResult;
+  }
+
+  return extracted || null;
+}
+
+/** Pull the "## ONE SENTENCE SUMMARY" line from extracted markdown, else a label fallback. */
+function deriveSummary(extracted: string, fallbackLabel: string): string {
+  const summaryMatch = extracted.match(/##\s*ONE\s*SENTENCE\s*SUMMARY\s*\n+(.+)/);
+  return summaryMatch ? summaryMatch[1].trim() : `${fallbackLabel} session`;
+}
+
+/** Log the SQLite dual-write outcome (per-writer failures + per-table summary). */
+function logDualWrite(result: DualWriteResult): void {
+  if (Object.keys(result.failures).length > 0) {
+    for (const [where, msg] of Object.entries(result.failures)) {
+      logExtract(`SQLITE_WRITE_FAIL[${where}]: ${msg}`);
+    }
+  }
+  logExtract(
+    `SQLITE_WRITE: sessions=${result.sessions} decisions=${result.decisions} ` +
+      `learnings=${result.learnings} breadcrumbs=${result.breadcrumbs} ` +
+      `errors=${result.errors} loa=${result.loa}`
+  );
 }
 
 /**
@@ -888,57 +913,54 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
       return;
     }
 
-    let extracted: string = "";
-
-    // Attempt 1: Claude CLI (uses Claude Code's existing auth — no API key needed)
-    // Use chunked extraction for large files (>120K chars)
-    if (messages.length > 120000) {
-      console.error(`[FabricExtract] Large file (${messages.length} chars), using chunked extraction...`);
-      const chunkedResult = await extractWithClaudeChunked(messages);
-      if (chunkedResult) {
-        extracted = chunkedResult;
-      }
-    } else {
-      console.error("[FabricExtract] Trying Claude CLI extraction...");
-      const claudeResult = await extractWithClaude(messages);
-      if (claudeResult) {
-        extracted = claudeResult;
-      }
-    }
-
-    // Attempt 2: Local Ollama LLM fallback (free, lower quality)
-    if (!extracted) {
-      console.error("[FabricExtract] Claude CLI failed, trying local Ollama LLM fallback...");
-      const ollamaResult = extractWithOllama(messages);
-      if (ollamaResult) {
-        extracted = ollamaResult;
-      }
-    }
-
-    if (!extracted) {
-      console.error("[FabricExtract] All extraction methods failed, no extraction");
-      logExtract("FAILURE: All extraction methods failed");
-      markAsFailed(convHash, 'all extraction methods failed');
-      return;
-    }
-
-    // Quality gate: reject extractions that don't follow the structured format
-    const quality = evaluateQuality(extracted);
-    if (!quality.pass) {
-      console.error(`[FabricExtract] QUALITY GATE FAILED: ${quality.reason}. Discarding.`);
-      logExtract(`QUALITY GATE FAILED: ${quality.reason}`);
-      markAsFailed(convHash, `quality gate failed: ${quality.reason}`);
-      return;
-    }
-    logExtract("QUALITY GATE PASSED: extraction contains required sections");
-
-    // Metadata
+    // Metadata (independent of the extracted text) — supplied up-front so the
+    // core can build the SQLite dual-write context.
     const timestamp = new Date().toISOString().split('T')[0];
     const dirName = cwd.split('/').pop() || 'unknown';
     const loaName = getLoaSessionName();
     // Use LoA session name if available, otherwise fall back to directory name
     const sessionLabel = loaName || dirName;
     const sessionId = conversationPath.split('/').pop()?.replace('.jsonl', '') || 'unknown';
+
+    // Shared extract-core: extract → quality-gate → scrub → dual-write (SQLite only).
+    // The scrub guard redacts secrets / strips invisible unicode from every
+    // persisted text field before it reaches a writer. Markdown side-effects below
+    // are unchanged and operate on the RAW extracted text the core returns.
+    const core = await runExtractCore(
+      getDbPath(),
+      messages,
+      { sessionId, sessionLabel, project: sessionLabel, timestamp, conversationPath },
+      {
+        extract: runExtractionCascade,
+        deriveMeta: (text) => ({
+          topics: extractTopics(text),
+          summary: deriveSummary(text, sessionLabel),
+        }),
+      },
+    );
+
+    if (core.outcome === 'extraction_failed') {
+      console.error("[FabricExtract] All extraction methods failed, no extraction");
+      logExtract("FAILURE: All extraction methods failed");
+      markAsFailed(convHash, 'all extraction methods failed');
+      return;
+    }
+    if (core.outcome === 'quality_failed') {
+      console.error(`[FabricExtract] QUALITY GATE FAILED: ${core.quality?.reason}. Discarding.`);
+      logExtract(`QUALITY GATE FAILED: ${core.quality?.reason}`);
+      markAsFailed(convHash, `quality gate failed: ${core.quality?.reason}`);
+      return;
+    }
+    logExtract("QUALITY GATE PASSED: extraction contains required sections");
+
+    // RAW (un-scrubbed) values for the unchanged legacy markdown side-effects.
+    const extracted = core.extracted!;
+    const topics = core.topics!;
+    const summary = core.summary!;
+
+    // SQLite dual-write already ran inside the core (with scrubbed text).
+    logDualWrite(core.dualWrite!);
+    logExtract(`SCRUB: redacted ${core.redactions!.length} secret kind(s) before SQLite write`);
 
     // 1. Append to DISTILLED.md (full archive)
     const header = `\n---\n## Extracted: ${timestamp} | ${sessionLabel}\n\n`;
@@ -950,11 +972,6 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     console.error(`[FabricExtract] Updated HOT_RECALL.md`);
 
     // 3. Update SESSION_INDEX.json (searchable lookup)
-    const topics = extractTopics(extracted);
-    // Extract summary from "## ONE SENTENCE SUMMARY" section
-    const summaryMatch = extracted.match(/##\s*ONE\s*SENTENCE\s*SUMMARY\s*\n+(.+)/);
-    const summary = summaryMatch ? summaryMatch[1].trim() : `${sessionLabel} session`;
-
     updateSessionIndex({
       sessionId,
       project: sessionLabel,
@@ -989,19 +1006,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     appendRejections(extracted, sessionLabel, timestamp);
     appendErrors(extracted, sessionLabel, timestamp);
 
-    // 6. SQLite dual-write (additive, best-effort — failures logged, never thrown)
-    runDualWrite({
-      sessionId,
-      sessionLabel,
-      project: sessionLabel,
-      timestamp,
-      conversationPath,
-      topics,
-      summary,
-      extracted,
-    });
-
-    // 7. Mark as extracted (dedup)
+    // 6. Mark as extracted (dedup)
     markAsExtracted(convHash);
 
     logExtract(`SUCCESS: All memory files updated for session=${sessionLabel}`);
@@ -1054,44 +1059,8 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
       return;
     }
 
-    let extracted: string = "";
-
-    // Use chunked extraction for large files, same as JSONL path
-    if (messages.length > 120000) {
-      console.error(`[FabricExtract] Large markdown (${messages.length} chars), using chunked extraction...`);
-      const chunkedResult = await extractWithClaudeChunked(messages);
-      if (chunkedResult) extracted = chunkedResult;
-    } else {
-      console.error("[FabricExtract] Trying Claude CLI extraction for markdown...");
-      const claudeResult = await extractWithClaude(messages);
-      if (claudeResult) extracted = claudeResult;
-    }
-
-    // Fallback to Ollama
-    if (!extracted) {
-      console.error("[FabricExtract] Claude CLI failed, trying local Ollama LLM fallback...");
-      const ollamaResult = extractWithOllama(messages);
-      if (ollamaResult) extracted = ollamaResult;
-    }
-
-    if (!extracted) {
-      console.error("[FabricExtract] All extraction methods failed for markdown");
-      logExtract("FAILURE: All extraction methods failed (markdown)");
-      markAsFailed(convHash, 'all extraction methods failed (markdown)');
-      return;
-    }
-
-    // Quality gate
-    const mdQuality = evaluateQuality(extracted);
-    if (!mdQuality.pass) {
-      console.error(`[FabricExtract] QUALITY GATE FAILED: ${mdQuality.reason}.`);
-      logExtract(`QUALITY GATE FAILED (markdown): ${mdQuality.reason}`);
-      markAsFailed(convHash, `quality gate failed (markdown): ${mdQuality.reason}`);
-      return;
-    }
-    logExtract("QUALITY GATE PASSED (markdown)");
-
-    // Metadata — use filename as session ID, 'opencode' as project label
+    // Metadata — use filename as session ID, platform as project label. Supplied
+    // up-front so the core can build the SQLite dual-write context.
     const timestamp = new Date().toISOString().split('T')[0];
     const fileName = mdPath.split('/').pop() || 'unknown';
     const sessionId = fileName.replace('.md', '');
@@ -1100,6 +1069,45 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     const isRealPath = cwd.includes('/');
     const platform = isRealPath ? cwd.split('/').pop() || 'unknown' : cwd;
     const sessionLabel = `${platform}/${sessionId}`;
+
+    // Shared extract-core: extract → quality-gate → scrub → dual-write (SQLite only).
+    // Same scrub guard as the Stop path; markdown side-effects below are unchanged
+    // and operate on the RAW extracted text the core returns.
+    const core = await runExtractCore(
+      getDbPath(),
+      messages,
+      { sessionId, sessionLabel, project: sessionLabel, timestamp, conversationPath: mdPath },
+      {
+        extract: runExtractionCascade,
+        deriveMeta: (text) => ({
+          topics: extractTopics(text),
+          summary: deriveSummary(text, sessionLabel),
+        }),
+      },
+    );
+
+    if (core.outcome === 'extraction_failed') {
+      console.error("[FabricExtract] All extraction methods failed for markdown");
+      logExtract("FAILURE: All extraction methods failed (markdown)");
+      markAsFailed(convHash, 'all extraction methods failed (markdown)');
+      return;
+    }
+    if (core.outcome === 'quality_failed') {
+      console.error(`[FabricExtract] QUALITY GATE FAILED: ${core.quality?.reason}.`);
+      logExtract(`QUALITY GATE FAILED (markdown): ${core.quality?.reason}`);
+      markAsFailed(convHash, `quality gate failed (markdown): ${core.quality?.reason}`);
+      return;
+    }
+    logExtract("QUALITY GATE PASSED (markdown)");
+
+    // RAW (un-scrubbed) values for the unchanged legacy markdown side-effects.
+    const extracted = core.extracted!;
+    const topics = core.topics!;
+    const summary = core.summary!;
+
+    // SQLite dual-write already ran inside the core (with scrubbed text).
+    logDualWrite(core.dualWrite!);
+    logExtract(`SCRUB: redacted ${core.redactions!.length} secret kind(s) before SQLite write (markdown)`);
 
     // 1. Append to DISTILLED.md
     const header = `\n---\n## Extracted: ${timestamp} | ${sessionLabel} (${sessionId})\n\n`;
@@ -1110,10 +1118,6 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     updateHotRecall(extracted, sessionLabel, timestamp);
 
     // 3. Update SESSION_INDEX.json
-    const topics = extractTopics(extracted);
-    const summaryMatch = extracted.match(/##\s*ONE\s*SENTENCE\s*SUMMARY\s*\n+(.+)/);
-    const summary = summaryMatch ? summaryMatch[1].trim() : `${sessionLabel} session`;
-
     updateSessionIndex({
       sessionId,
       project: sessionLabel,
@@ -1129,19 +1133,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     appendRejections(extracted, sessionLabel, timestamp);
     appendErrors(extracted, sessionLabel, timestamp);
 
-    // 5. SQLite dual-write (additive, best-effort — failures logged, never thrown)
-    runDualWrite({
-      sessionId,
-      sessionLabel,
-      project: sessionLabel,
-      timestamp,
-      conversationPath: mdPath,
-      topics,
-      summary,
-      extracted,
-    });
-
-    // 6. Mark as extracted
+    // 5. Mark as extracted
     markAsExtracted(convHash);
 
     logExtract(`SUCCESS (markdown): All memory files updated for ${sessionLabel} (${sessionId})`);
