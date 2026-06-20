@@ -27,6 +27,8 @@ import { existsSync, readFileSync } from 'fs';
 import { spawn } from 'child_process';
 import {
   readInSessionConfig,
+  readCorrectionsConfig,
+  handleCorrection,
   eventFromHookInput,
   decideInSession,
   runInSessionExtraction,
@@ -99,10 +101,13 @@ function spawnChild(convPath: string, sessionId: string, cwd: string): void {
 
 /** Parent: OFF fast-path, then the cheap counter + cadence check; spawn on threshold. */
 async function main(): Promise<void> {
-  // OFF-by-default fast-path — the cheapest possible exit. Read ONE env var and
-  // bail before stdin, the DB, or the model. This fires on EVERY tool call.
+  // OFF-by-default fast-path — the cheapest possible exit. Read the two env flags
+  // and bail before stdin, the DB, or the model unless EITHER feature is on. The
+  // flags are INDEPENDENT (#52): corrections can run without the in-session loop,
+  // and the in-session loop without corrections. This fires on EVERY tool call.
   const config = readInSessionConfig(process.env);
-  if (!config.enabled) process.exit(0);
+  const corrections = readCorrectionsConfig(process.env);
+  if (!config.enabled && !corrections.enabled) process.exit(0);
 
   const raw = await readStdin();
   if (!raw.trim()) process.exit(0);
@@ -124,14 +129,30 @@ async function main(): Promise<void> {
   if (!existsSync(dbPath)) process.exit(0); // DB not initialized — nothing to do
 
   const sessionId = sessionIdFromArgs(input.session_id, convPath);
-
-  // Cheap path: increment the counter + evaluate cadence inline (fast SQLite).
-  const { run } = decideInSession(dbPath, sessionId, convPath, event, config);
-  if (!run) process.exit(0);
-
-  // At/above threshold — spawn the heavy extraction async (never blocks the turn).
   const cwd = input.cwd || process.cwd();
-  spawnChild(convPath, sessionId, cwd);
+
+  // #52 — correction capture runs INLINE on a user prompt (pure regex + at most
+  // one batch insert, no model call). Independent of the in-session cadence below
+  // and cheap enough to never block the turn. The detector scrubs verbatim text
+  // before any write (handleCorrection).
+  if (corrections.enabled && event === 'turn') {
+    const project = cwd.split('/').pop() || 'unknown';
+    const promptText = typeof input.prompt === 'string' ? input.prompt : '';
+    try {
+      handleCorrection(dbPath, sessionId, convPath, promptText, project, corrections);
+    } catch {
+      // Capture failure must never block the turn — the Stop hook still extracts.
+    }
+  }
+
+  // #51 — mid-session extraction cadence. Only when the in-session loop is on.
+  // Increment the counter + evaluate cadence inline (fast SQLite); spawn the heavy
+  // extraction async (never blocks the turn) when at/above threshold.
+  if (config.enabled) {
+    const { run } = decideInSession(dbPath, sessionId, convPath, event, config);
+    if (run) spawnChild(convPath, sessionId, cwd);
+  }
+
   process.exit(0);
 }
 

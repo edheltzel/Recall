@@ -23,6 +23,14 @@ export interface SessionProgressRecord {
   tools_seen: number;
   last_offset: number;
   runs_this_session: number;
+  /**
+   * MONOTONIC count of user prompts this session (issue #52). Incremented on every
+   * UserPromptSubmit and — unlike turns_seen — NEVER zeroed by resetWindow, so it
+   * backs a rate-limit gap that survives the in-session cadence's window reset.
+   */
+  prompts_seen: number;
+  /** The prompts_seen value at the last correction save (0 = none yet). */
+  last_correction_turn: number;
   updated_at: string | null;
 }
 
@@ -82,6 +90,41 @@ export function incrementTools(dbPath: string, sessionId: string): void {
   try {
     db.prepare(
       "UPDATE session_progress SET tools_seen = tools_seen + 1, updated_at = datetime('now') WHERE session_id = ?"
+    ).run(sessionId);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Atomically increment the MONOTONIC prompt counter (UserPromptSubmit, issue #52).
+ * Deliberately separate from incrementTurns: turns_seen is a per-window counter
+ * that resetWindow zeroes, whereas prompts_seen must keep growing for the
+ * correction rate-limit gap to be meaningful across cadence resets.
+ */
+export function incrementPrompts(dbPath: string, sessionId: string): void {
+  const db = openDb(dbPath);
+  try {
+    db.prepare(
+      "UPDATE session_progress SET prompts_seen = prompts_seen + 1, updated_at = datetime('now') WHERE session_id = ?"
+    ).run(sessionId);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Mark a correction as saved at the current prompts_seen (issue #52). Sets
+ * last_correction_turn = prompts_seen so the next save is gated until the
+ * monotonic gap (prompts_seen - last_correction_turn) reaches the minimum again.
+ * Read from prompts_seen in the same statement so the marker is always a real
+ * monotonic value, never a stale snapshot.
+ */
+export function recordCorrection(dbPath: string, sessionId: string): void {
+  const db = openDb(dbPath);
+  try {
+    db.prepare(
+      "UPDATE session_progress SET last_correction_turn = prompts_seen, updated_at = datetime('now') WHERE session_id = ?"
     ).run(sessionId);
   } finally {
     db.close();

@@ -205,14 +205,19 @@ CREATE TABLE IF NOT EXISTS dedup_lineage (
 -- as stateless processes, so this state must persist in the DB rather than in
 -- memory. CRUD lives in hooks/lib/session-progress.ts (self-contained,
 -- dbPath-injected). Also created by migration 10 → 11 for upgrade parity.
+-- prompts_seen / last_correction_turn back the issue #52 correction rate-limit:
+-- prompts_seen is MONOTONIC (every UserPromptSubmit, never reset by resetWindow)
+-- so a "prompts since last correction" gap survives the per-window counter reset.
 CREATE TABLE IF NOT EXISTS session_progress (
-  session_id        TEXT PRIMARY KEY,
-  conversation_path TEXT,
-  turns_seen        INTEGER DEFAULT 0,
-  tools_seen        INTEGER DEFAULT 0,
-  last_offset       INTEGER DEFAULT 0,
-  runs_this_session INTEGER DEFAULT 0,
-  updated_at        TEXT
+  session_id           TEXT PRIMARY KEY,
+  conversation_path    TEXT,
+  turns_seen           INTEGER DEFAULT 0,
+  tools_seen           INTEGER DEFAULT 0,
+  last_offset          INTEGER DEFAULT 0,
+  runs_this_session    INTEGER DEFAULT 0,
+  prompts_seen         INTEGER DEFAULT 0,
+  last_correction_turn INTEGER DEFAULT 0,
+  updated_at           TEXT
 );
 `;
 

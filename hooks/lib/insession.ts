@@ -20,6 +20,8 @@ import {
   incrementTurns,
   incrementTools,
   incrementRuns,
+  incrementPrompts,
+  recordCorrection,
   advanceOffset,
   resetWindow,
   getSessionProgress,
@@ -28,6 +30,9 @@ import {
 import { childAcquireLock, childReleaseLock, parentIsLockHeld } from './extraction-lock';
 import { runExtractCore, type ExtractCoreContext } from './extract-core';
 import type { DualWriteResult } from './extraction-parsers';
+import { detectCorrection } from './correction-detector';
+import { scrub } from './write-safety';
+import { writeLearningsBatch } from './sqlite-writers';
 
 // ─── Config (design §3.5 — env vars, no config file) ────────────────────────
 
@@ -58,6 +63,141 @@ export function readInSessionConfig(env: Record<string, string | undefined>): In
     maxRuns: intFromEnv(env.RECALL_INSESSION_MAX_RUNS, 20),
     minTurns: intFromEnv(env.RECALL_INSESSION_MIN_TURNS, 3),
   };
+}
+
+// ─── #52 corrections config + handler (independent of the in-session loop) ───
+
+/** Minimum prompts between two correction saves (pi-hermes' load-bearing 1-per-3). */
+const CORRECTION_MIN_GAP = 3;
+/** Importance stamped on a captured correction — elevated, so it surfaces in L1. */
+const CORRECTION_IMPORTANCE = 8;
+/** Cap on the stored correction text (the correction + its surrounding message). */
+const MAX_CORRECTION_CHARS = 2000;
+
+export interface CorrectionsConfig {
+  /** Master flag. OFF unless RECALL_CORRECTIONS_ENABLED === '1'. INDEPENDENT of RECALL_INSESSION_ENABLED. */
+  enabled: boolean;
+  /** Extra strong patterns merged into the detector (RECALL_CORRECTIONS_PATTERNS, comma/newline separated). */
+  extraPatterns: string[];
+  /** Minimum monotonic-prompt gap between saves (default 3). */
+  minGap: number;
+}
+
+/** Split a comma/newline-separated env list into trimmed, non-empty pattern sources. */
+function parsePatternList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Read the corrections config from an env bag. The master flag is deliberately
+ * SEPARATE from RECALL_INSESSION_ENABLED so corrections can be captured without
+ * turning on the full extraction loop (and vice-versa).
+ */
+export function readCorrectionsConfig(env: Record<string, string | undefined>): CorrectionsConfig {
+  return {
+    enabled: env.RECALL_CORRECTIONS_ENABLED === '1',
+    extraPatterns: parsePatternList(env.RECALL_CORRECTIONS_PATTERNS),
+    minGap: CORRECTION_MIN_GAP,
+  };
+}
+
+/**
+ * Rate-limit predicate (pure). A correction may be saved iff none has been saved
+ * yet (last_correction_turn === 0) OR at least `minGap` MONOTONIC prompts have
+ * elapsed since the last save. Reads prompts_seen / last_correction_turn — both
+ * untouched by resetWindow — so a window reset between corrections can never
+ * wrongly re-open the gate (the wrinkle the design §4.2 flags). turns_seen is
+ * intentionally NOT consulted here.
+ */
+export function correctionAllowed(
+  p: Pick<SessionProgressRecord, 'prompts_seen' | 'last_correction_turn'>,
+  minGap: number = CORRECTION_MIN_GAP
+): boolean {
+  if (p.last_correction_turn === 0) return true; // no correction saved yet
+  return p.prompts_seen - p.last_correction_turn >= minGap;
+}
+
+export type CorrectionOutcome =
+  | 'disabled'
+  | 'not_correction'
+  | 'rate_limited'
+  | 'saved';
+
+export interface CorrectionHandleResult {
+  detected: boolean;
+  saved: boolean;
+  outcome: CorrectionOutcome;
+  matched?: string;
+  redactions?: string[];
+}
+
+/**
+ * Parent-inline correction capture for a UserPromptSubmit (issue #52). Cheap and
+ * non-blocking: a pure regex classify + at most one batch insert, NO model call.
+ *
+ * Flow: ensure the session row → increment the MONOTONIC prompt counter → classify
+ * the prompt. On a correction that the rate-limit allows: SCRUB the text FIRST
+ * (the verbatim-text path is the genuinely-new exposure #50 guards — the scrub is
+ * what makes it safe enough to ship), write a high-confidence learning, and stamp
+ * last_correction_turn = prompts_seen.
+ *
+ * prompts_seen is incremented for EVERY enabled UserPromptSubmit (correction or
+ * not) so the gap reflects real elapsed prompts. When disabled this is a no-op
+ * that never touches the DB.
+ */
+export function handleCorrection(
+  dbPath: string,
+  sessionId: string,
+  convPath: string | null,
+  promptText: string,
+  project: string | null,
+  config: CorrectionsConfig
+): CorrectionHandleResult {
+  if (!config.enabled) return { detected: false, saved: false, outcome: 'disabled' };
+
+  ensureSession(dbPath, sessionId, convPath);
+  incrementPrompts(dbPath, sessionId);
+
+  const detection = detectCorrection(promptText, { extraPatterns: config.extraPatterns });
+  if (!detection.isCorrection) {
+    return { detected: false, saved: false, outcome: 'not_correction' };
+  }
+
+  const progress = getSessionProgress(dbPath, sessionId);
+  if (!progress || !correctionAllowed(progress, config.minGap)) {
+    return { detected: true, saved: false, outcome: 'rate_limited', matched: detection.matched };
+  }
+
+  // Scrub BEFORE the cap — secrets pasted into a correction must never persist as
+  // cleartext (load-bearing per design §0.1). Scrubbing the FULL prompt first is
+  // what makes the cap safe: capping the raw text could truncate a secret that
+  // straddles MAX_CORRECTION_CHARS below its pattern's minimum match length, so
+  // scrub would miss the fragment and a partial cleartext secret would persist
+  // silently. A `[REDACTED:<kind>]` marker is short and self-contained, so capping
+  // the already-scrubbed text can never strand a secret. `redactions` reflects the
+  // full-prompt scrub.
+  const { text: scrubbed, redactions } = scrub(promptText);
+  const safeText = scrubbed.length > MAX_CORRECTION_CHARS
+    ? scrubbed.slice(0, MAX_CORRECTION_CHARS)
+    : scrubbed;
+
+  writeLearningsBatch(dbPath, [
+    {
+      problem: safeText,
+      confidence: 'high',
+      importance: CORRECTION_IMPORTANCE,
+      category: 'correction',
+      sessionId,
+      project,
+    },
+  ]);
+
+  recordCorrection(dbPath, sessionId);
+  return { detected: true, saved: true, outcome: 'saved', matched: detection.matched, redactions };
 }
 
 // ─── Cadence (design §3.1) ───────────────────────────────────────────────────
