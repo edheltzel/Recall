@@ -17,6 +17,12 @@
 // No persisted text field may bypass the guard. The RAW (un-scrubbed) values are
 // returned to the caller so the legacy markdown side-effects stay unchanged; the
 // scrub applies only to the SQLite write path.
+//
+// TRADEOFF (#133): the `[REDACTED:<kind>]` marker contains a colon, and the ERRORS
+// FIXED parsers split each bullet on the first colon — so a secret in the error-key
+// position splits inside the marker (error="[REDACTED", fix="anthropic-key]: …").
+// Accepted: redact-over-leak. Scrub runs BEFORE the parser, so split fidelity on a
+// secret-bearing row is best-effort, never a leak (covered in extract-core.test.ts).
 
 import { evaluateQuality, type QualityResult } from './extraction-quality';
 import { scrub } from './write-safety';

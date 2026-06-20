@@ -194,6 +194,67 @@ During the configuration session we accidentally leaked the key ${SECRET} into t
   });
 });
 
+describe('runExtractCore — secret in the ERRORS FIXED error-key position (#133)', () => {
+  // The `[REDACTED:<kind>]` marker contains a colon, and the ERRORS FIXED bullet
+  // parsers split on the FIRST colon (`line.indexOf(':')`). When a secret sits in
+  // the error-key position, scrub rewrites it to `[REDACTED:anthropic-key]` and the
+  // split lands INSIDE the marker → error="[REDACTED", fix="anthropic-key]: …".
+  // This is the accepted redact-over-leak tradeoff (see extract-core SECURITY GUARD):
+  // the split is wonky, but the cleartext secret was already redacted before the
+  // parser ran, so it can NEVER persist. This test locks that no-leak guarantee and
+  // documents the real (split) shape.
+  test('the secret never persists as cleartext and the parse degrades gracefully', async () => {
+    const fixture = `## ONE SENTENCE SUMMARY
+We hardened the shared write path so leaked credentials are redacted before any row is persisted to the database.
+
+## MAIN IDEAS
+- A secret pasted into an ERRORS FIXED bullet must never survive into a stored row as cleartext
+- The redaction marker contains a colon, so the first-colon split can land inside it on a secret-bearing row
+- That split is wonky but safe because the cleartext secret was already replaced before the parser ever ran
+
+## ERRORS FIXED
+- ${SECRET}: replaced the leaked credential with a vault reference and restarted the affected service`;
+
+    const result = await runExtractCore(dbPath, 'raw', BASE_CTX, {
+      extract: async () => fixture,
+      deriveMeta,
+    });
+
+    // Graceful degrade — no throw; the row is still produced (one learning, one error).
+    expect(result.outcome).toBe('extracted');
+    expect(result.dualWrite!.failures).toEqual({});
+    expect(result.dualWrite!.learnings).toBe(1);
+    expect(result.dualWrite!.errors).toBe(1);
+    expect(result.redactions).toContain('anthropic-key');
+
+    // The load-bearing guarantee: the cleartext secret reaches NO row, anywhere.
+    // Mutation — bypass scrub() in runExtractCore → the secret persists → RED.
+    const persisted = allPersistedText();
+    expect(persisted).not.toContain(SECRET);
+
+    // Document the REAL split shape: the first-colon split lands inside the marker,
+    // so the error-key half is "[REDACTED" and the fix half carries the rest. Neither
+    // half is cleartext. (LoA fabric_extract still holds the intact marker.)
+    const db = openRead();
+    const learning = db.prepare('SELECT problem, solution FROM learnings').get() as any;
+    const err = db.prepare('SELECT error_key, error, fix FROM extraction_errors').get() as any;
+    db.close();
+
+    expect(learning.problem).toBe('[REDACTED');
+    expect(learning.solution).toBe(
+      'anthropic-key]: replaced the leaked credential with a vault reference and restarted the affected service',
+    );
+    expect(err.error).toBe('[REDACTED');
+    expect(err.error_key).toBe('[redacted');
+    expect(err.fix).toBe(
+      'anthropic-key]: replaced the leaked credential with a vault reference and restarted the affected service',
+    );
+    for (const field of [learning.problem, learning.solution, err.error_key, err.error, err.fix]) {
+      expect(field).not.toContain(SECRET);
+    }
+  });
+});
+
 describe('runExtractCore — invisible-unicode strip', () => {
   test('a planted bidi codepoint is absent from the written row', async () => {
     const fixture = `## ONE SENTENCE SUMMARY
