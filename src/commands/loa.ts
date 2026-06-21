@@ -159,9 +159,21 @@ export function runLoaQuote(loaId: number): void {
 
   const messages = getLoaMessages(loaId);
 
+  // The id range is fixed at capture, but interior messages can be pruned by
+  // `recall age` (#139) — their content survives in the fabric_extract summary.
+  // Report what actually still exists rather than asserting the captured count.
+  // `present > expected` (cross-session ids in the span, see getLoaMessages)
+  // collapses to a plain present-count so the line never claims a fake prune.
+  const present = messages.length;
+  const expected = loa.message_count ?? present;
+  const pruned = Math.max(0, expected - present);
+  const countLabel = pruned > 0
+    ? `Messages: ${present} of ${expected} present (${pruned} pruned)`
+    : `Messages: ${present}`;
+
   console.log(`LoA #${loaId}: "${loa.title}"`);
   console.log(`Created: ${loa.created_at}`);
-  console.log(`Messages: ${messages.length} (IDs ${loa.message_range_start}-${loa.message_range_end})`);
+  console.log(`${countLabel} (IDs ${loa.message_range_start}-${loa.message_range_end})`);
   console.log(`\n${'='.repeat(60)}\n`);
 
   for (const m of messages) {
