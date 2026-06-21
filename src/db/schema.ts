@@ -97,6 +97,11 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   message_count INTEGER,
   importance INTEGER DEFAULT 8 CHECK (importance BETWEEN 1 AND 10),
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
+  -- Source lineage for derived consolidation summaries (issue #140): JSON array
+  -- of {table, id} records this entry was built from. parent_loa_id chains
+  -- LoA→LoA; this captures the generic "built from records X,Y,Z". Nullable —
+  -- legacy/non-derived rows stay NULL (never guessed, ADR-0001).
+  source_ids TEXT,
   FOREIGN KEY (parent_loa_id) REFERENCES loa_entries(id),
   FOREIGN KEY (message_range_start) REFERENCES messages(id),
   FOREIGN KEY (message_range_end) REFERENCES messages(id)

@@ -404,7 +404,6 @@ describe('correction rate-limit columns migration (11 to 12)', () => {
       // version-11 DB applies nothing and the columns never appear → RED.
       expect(result.from).toBe(11);
       expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
-      expect(MIGRATIONS.length).toBe(12);
 
       const after = (legacyDb.prepare('PRAGMA table_info(session_progress)').all() as any[]).map((c) => c.name);
       expect(after).toContain('prompts_seen');
@@ -423,9 +422,9 @@ describe('correction rate-limit columns migration (11 to 12)', () => {
     }
   });
 
-  test('fresh DB already has the correction columns and lands at version 12', () => {
+  test('fresh DB already has the correction columns and lands at the latest version', () => {
     applyMigrations(db);
-    expect(getMigrationVersion(db)).toBe(12);
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
     const cols = (db.prepare('PRAGMA table_info(session_progress)').all() as any[]).map((c) => c.name);
     expect(cols).toContain('prompts_seen');
     expect(cols).toContain('last_correction_turn');
@@ -435,7 +434,89 @@ describe('correction rate-limit columns migration (11 to 12)', () => {
     applyMigrations(db);
     const result = applyMigrations(db);
     expect(result.applied).toBe(0);
-    expect(getMigrationVersion(db)).toBe(12);
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+  });
+});
+
+describe('source-lineage column migration (12 to 13)', () => {
+  test('fresh DB has source_ids on loa_entries and lands at the latest version', () => {
+    applyMigrations(db);
+    // Mutation guard: dropping the 12 → 13 entry shrinks MIGRATIONS.length to
+    // 12, so user_version would land at 12 and the column would be absent → RED.
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+    expect(MIGRATIONS.length).toBe(13);
+    const cols = (db.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
+    expect(cols).toContain('source_ids');
+  });
+
+  test('upgrade path: an 11 → 12 → 13 chain adds source_ids to loa_entries (nullable)', () => {
+    // A pre-#140 install at version 11: loa_entries lacks source_ids and
+    // session_progress still has its original 7 columns. Applying must run both
+    // 11 → 12 (correction columns) and 12 → 13 (source_ids) and land at latest.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-srcids-mig-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy11.db'));
+    try {
+      legacyDb.exec(`
+        CREATE TABLE loa_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          fabric_extract TEXT NOT NULL
+        );
+        CREATE TABLE session_progress (
+          session_id        TEXT PRIMARY KEY,
+          conversation_path TEXT,
+          turns_seen        INTEGER DEFAULT 0,
+          tools_seen        INTEGER DEFAULT 0,
+          last_offset       INTEGER DEFAULT 0,
+          runs_this_session INTEGER DEFAULT 0,
+          updated_at        TEXT
+        );
+      `);
+      legacyDb.prepare('INSERT INTO loa_entries (title, fabric_extract) VALUES (?, ?)')
+        .run('legacy', 'extract');
+      legacyDb.prepare('PRAGMA user_version = 11').run();
+
+      const before = (legacyDb.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
+      expect(before).not.toContain('source_ids');
+
+      const result = applyMigrations(legacyDb);
+      // Mutation guard: drop the 12 → 13 migration and target falls to 12, so
+      // the column never appears even though the chain still advances → RED.
+      expect(result.from).toBe(11);
+      expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
+
+      const sourceCol = (legacyDb.prepare('PRAGMA table_info(loa_entries)').all() as any[])
+        .find((c) => c.name === 'source_ids');
+      expect(sourceCol).toBeDefined();
+      // Declared TEXT, no NOT NULL, no default → legacy rows stay NULL.
+      expect(sourceCol.type).toBe('TEXT');
+      expect(sourceCol.notnull).toBe(0);
+      const legacyRow = legacyDb.prepare('SELECT source_ids FROM loa_entries WHERE title = ?').get('legacy') as any;
+      expect(legacyRow.source_ids).toBeNull();
+
+      // A derived summary can record its origin records as JSON; round-trips.
+      const lineage = JSON.stringify([
+        { table: 'loa_entries', id: 1 },
+        { table: 'decisions', id: 9 },
+      ]);
+      legacyDb.prepare('INSERT INTO loa_entries (title, fabric_extract, source_ids) VALUES (?, ?, ?)')
+        .run('derived', 'consolidated', lineage);
+      const derived = legacyDb.prepare('SELECT source_ids FROM loa_entries WHERE title = ?').get('derived') as any;
+      expect(JSON.parse(derived.source_ids)).toEqual([
+        { table: 'loa_entries', id: 1 },
+        { table: 'decisions', id: 9 },
+      ]);
+    } finally {
+      legacyDb.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('idempotent: re-running after 13 applies nothing', () => {
+    applyMigrations(db);
+    const result = applyMigrations(db);
+    expect(result.applied).toBe(0);
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
   });
 });
 
@@ -446,7 +527,8 @@ describe('MIGRATIONS array', () => {
     // 9 → 10: dedup_lineage table (issue #45)
     // 10 → 11: session_progress table (issue #51)
     // 11 → 12: correction rate-limit columns on session_progress (issue #52)
-    expect(MIGRATIONS.length).toBe(12);
+    // 12 → 13: source_ids lineage column on loa_entries (issue #140)
+    expect(MIGRATIONS.length).toBe(13);
   });
 
   test('all entries are functions', () => {

@@ -271,6 +271,25 @@ export const MIGRATIONS: Migration[] = [
       }
     }
   },
+
+  // Migration 12 → 13: Source-lineage column on loa_entries (issue #140,
+  // Phase B prereq of #53; provenance lineage per ADR-0001 / issue #42).
+  // parent_loa_id chains LoA→LoA only; this adds a generic record-of-origin so
+  // a future 'derived' consolidation summary can record the records it was
+  // built from. Free-form JSON text — a serialized array of {table, id}
+  // references (e.g. [{"table":"loa_entries","id":3},{"table":"decisions","id":9}]).
+  // Additive NULLABLE column with NO CHECK, so the SQLite ALTER-cannot-add-a-
+  // referencing-CHECK limitation that constrains migration 7 → 8 does not apply
+  // here. Legacy and non-derived rows stay NULL — never guessed (ADR-0001).
+  // Mirrors the 8 → 9 provenance pattern: ALTER for upgrades, declared in
+  // schema.ts for fresh installs; the try/catch absorbs the column-exists case.
+  (db) => {
+    try {
+      db.prepare('ALTER TABLE loa_entries ADD COLUMN source_ids TEXT').run();
+    } catch {
+      // Column already exists — safe to ignore (fresh install via schema.ts).
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------
