@@ -20,6 +20,7 @@ import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './co
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
 import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
 import { runPrune } from './commands/prune.js';
+import { runAge } from './commands/age.js';
 import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
@@ -33,6 +34,11 @@ import { runExport } from './commands/export.js';
 import { runDedup } from './commands/dedup.js';
 import { runRepair } from './commands/repair.js';
 import { DEFAULT_SEMANTIC_THRESHOLD } from './lib/dedup.js';
+import {
+  DEFAULT_AGE_CUTOFF_DAYS,
+  DEFAULT_BREADCRUMB_HORIZON_DAYS,
+  DEFAULT_IMPORTANCE_THRESHOLD,
+} from './lib/aging.js';
 import { closeDb } from './db/connection.js';
 
 const program = new Command();
@@ -156,6 +162,28 @@ program
       execute: options.execute,
       olderThan: options.olderThan,
       keepDecisions: options.keepDecisions
+    });
+    closeDb();
+  });
+
+// recall age — type-aware aging policy (issue #139, Phase A of #53; subsumes #38)
+// Dry-run by default. Deletes old messages, expires old breadcrumbs via their
+// TTL, and demotes old low-importance decisions/learnings/loa_entries.
+program
+  .command('age')
+  .description('Age records by type: delete old messages, expire old breadcrumbs, demote old low-importance records (dry-run by default, --execute to apply)')
+  .option('--execute', 'Apply the plan (default is dry-run)')
+  .option('-t, --table <table>', 'Target table: messages, breadcrumbs, decisions, learnings, loa_entries, all', 'all')
+  .option('--age-cutoff <duration>', 'Age cutoff for messages/decisions/learnings/loa (e.g., 90d, 180d)', `${DEFAULT_AGE_CUTOFF_DAYS}d`)
+  .option('--breadcrumb-horizon <duration>', 'Age horizon for breadcrumbs (e.g., 14d)', `${DEFAULT_BREADCRUMB_HORIZON_DAYS}d`)
+  .option('--importance-threshold <n>', 'Demote durable records only when importance is below this (1-10)', String(DEFAULT_IMPORTANCE_THRESHOLD))
+  .action((options) => {
+    runAge({
+      execute: options.execute,
+      table: options.table,
+      ageCutoff: options.ageCutoff,
+      breadcrumbHorizon: options.breadcrumbHorizon,
+      importanceThreshold: parseInt(options.importanceThreshold, 10)
     });
     closeDb();
   });
