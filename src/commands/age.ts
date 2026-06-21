@@ -97,8 +97,11 @@ export function runAge(options: AgeOptions = {}): AgeRunResult | undefined {
     totalPlanned += report.eligible.length;
     const [dryVerb, execVerb] = ACTION_VERB[report.action];
     const verb = execute ? execVerb : dryVerb;
+    // Pins (importance 10) and already-expiring crumbs never enter `matched`,
+    // so `protected` only ever counts guard withholds: survivors, marked
+    // duplicates, and (messages) FK-referenced rows.
     const protectedNote = report.protected > 0
-      ? ` (${report.protected.toLocaleString()} withheld: pins/survivors/duplicates/FK-referenced)`
+      ? ` (${report.protected.toLocaleString()} withheld: survivors/duplicates/FK-referenced)`
       : '';
     console.log(
       `${report.table}: ${verb} ${report.eligible.length.toLocaleString()} [${report.action}]${protectedNote}`

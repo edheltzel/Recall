@@ -219,7 +219,9 @@ export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
         }
         result.expired += ids.length;
       } else {
-        // demote — every eligible row in a table shares the same clamped floor.
+        // demote — newImportance is the per-type clampImportance floor computed
+        // in planAge; it is a constant across every eligible row in a table, so
+        // one bound value drives every chunked UPDATE.
         const floor = report.eligible[0].newImportance!;
         for (const chunk of chunked(ids)) {
           const placeholders = chunk.map(() => '?').join(', ');

@@ -748,7 +748,7 @@ program
   .option('-v, --vector', 'Use vector search only (semantic)')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

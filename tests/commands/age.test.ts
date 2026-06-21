@@ -14,6 +14,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runAge } from '../../src/commands/age';
+import { runLoaQuote } from '../../src/commands/loa';
 import { getDb } from '../../src/db/connection';
 import {
   createSession,
@@ -76,6 +77,17 @@ function expiresAtOf(id: number): string | null {
 function makeOld(table: string, id: number): void {
   const col = table === 'messages' ? 'timestamp' : 'created_at';
   getDb().prepare(`UPDATE ${table} SET ${col} = ? WHERE id = ?`).run(OLD, id);
+}
+function seedEmbedding(table: string, id: number): void {
+  getDb().prepare(
+    `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+     VALUES (?, ?, 'test', 4, ?)`
+  ).run(table, id, Buffer.from([1, 2, 3, 4]));
+}
+function embeddingCount(table: string, id: number): number {
+  return (getDb().prepare(
+    `SELECT COUNT(*) AS c FROM embeddings WHERE source_table = ? AND source_id = ?`
+  ).get(table, id) as { c: number }).c;
 }
 
 describe('dry-run default', () => {
@@ -266,5 +278,119 @@ describe('scoping and validation', () => {
     process.exitCode = 0;
     expect(runAge({ importanceThreshold: 99 })).toBeUndefined();
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe('quote-back stays truthful after interior pruning (#H1)', () => {
+  test('a holey LoA range reports surviving messages, not the captured count', () => {
+    // 3-message range; endpoints are FK-protected, the interior is prunable.
+    const m1 = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'first message' });
+    const m2 = addMessage({ session_id: 's1', timestamp: OLD, role: 'assistant', content: 'interior message' });
+    const m3 = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'last message' });
+    const loa = createLoaEntry({
+      title: 'ranged', fabric_extract: 'summary preserving all three', session_id: 's1',
+      message_range_start: m1, message_range_end: m3, message_count: 3,
+    });
+
+    runAge({ execute: true });
+
+    // Interior deleted (accepted #38 tradeoff); endpoints survive (FK-protected).
+    expect(rowExists('messages', m2)).toBe(false);
+    expect(rowExists('messages', m1)).toBe(true);
+    expect(rowExists('messages', m3)).toBe(true);
+
+    logged = [];
+    runLoaQuote(loa);
+    const out = logged.join('\n');
+    expect(out).toContain('Messages: 2 of 3 present (1 pruned)');
+    // The line must not assert the stale full count as if all survived.
+    expect(out).not.toMatch(/Messages: 3 \(IDs/);
+  });
+});
+
+describe('guard coverage on every aging path (#H2)', () => {
+  test('breadcrumbs (expire): survivor and marked-duplicate are withheld', () => {
+    const survivor = addBreadcrumb({ content: 'survivor crumb', importance: 4 });
+    const marked = addBreadcrumb({ content: 'marked dup crumb', importance: 4 });
+    const plain = addBreadcrumb({ content: 'plain old crumb', importance: 4 });
+    [survivor, marked, plain].forEach(id => makeOld('breadcrumbs', id));
+    recordLineage('breadcrumbs', survivor, 'breadcrumbs', marked, 'marked');
+
+    runAge({ execute: true, table: 'breadcrumbs' });
+
+    expect(expiresAtOf(survivor)).toBeNull();   // recorded survivor — withheld
+    expect(expiresAtOf(marked)).toBeNull();     // marked duplicate — withheld
+    expect(expiresAtOf(plain)).not.toBeNull();  // control — expired
+  });
+
+  test('learnings (demote): survivor and marked-duplicate are withheld', () => {
+    const survivor = addLearning({ problem: 'survivor learning', importance: 4 });
+    const marked = addLearning({ problem: 'marked dup learning', importance: 4 });
+    const plain = addLearning({ problem: 'plain old learning', importance: 4 });
+    [survivor, marked, plain].forEach(id => makeOld('learnings', id));
+    recordLineage('learnings', survivor, 'learnings', marked, 'marked');
+
+    runAge({ execute: true, table: 'learnings' });
+
+    expect(importanceOf('learnings', survivor)).toBe(4);  // withheld
+    expect(importanceOf('learnings', marked)).toBe(4);    // withheld
+    expect(importanceOf('learnings', plain)).toBe(1);     // control — demoted
+  });
+
+  test('loa_entries (demote): survivor and marked-duplicate are withheld', () => {
+    // importance 6 sits in the demote band only when the threshold is raised > 6.
+    const survivor = createLoaEntry({ title: 'survivor loa', fabric_extract: 'x', importance: 6 });
+    const marked = createLoaEntry({ title: 'marked dup loa', fabric_extract: 'y', importance: 6 });
+    const plain = createLoaEntry({ title: 'plain loa', fabric_extract: 'z', importance: 6 });
+    [survivor, marked, plain].forEach(id => makeOld('loa_entries', id));
+    recordLineage('loa_entries', survivor, 'loa_entries', marked, 'marked');
+
+    runAge({ execute: true, table: 'loa_entries', importanceThreshold: 7 });
+
+    expect(importanceOf('loa_entries', survivor)).toBe(6);  // withheld
+    expect(importanceOf('loa_entries', marked)).toBe(6);    // withheld
+    expect(importanceOf('loa_entries', plain)).toBe(5);     // control — demoted to floor 5
+  });
+});
+
+describe('embeddings cascade on message deletion (#M1)', () => {
+  test('a deleted message loses its embedding; a withheld message keeps it', () => {
+    const deletable = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'deletable message' });
+
+    // A recorded survivor stays — its embedding must survive with it.
+    const survivor = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'survivor message' });
+    createSession({ session_id: 's2', started_at: OLD });
+    const dup = addMessage({ session_id: 's2', timestamp: OLD, role: 'user', content: 'a duplicate elsewhere' });
+    recordLineage('messages', survivor, 'messages', dup, 'marked');
+
+    seedEmbedding('messages', deletable);
+    seedEmbedding('messages', survivor);
+
+    runAge({ execute: true, table: 'messages' });
+
+    expect(rowExists('messages', deletable)).toBe(false);
+    expect(embeddingCount('messages', deletable)).toBe(0);  // cascaded
+    expect(rowExists('messages', survivor)).toBe(true);
+    expect(embeddingCount('messages', survivor)).toBe(1);   // preserved
+  });
+});
+
+describe('age cutoff happy-path (#M3)', () => {
+  test('a row between two cutoffs flips eligibility as the cutoff changes', () => {
+    // Aged 100 days: older than a 90d cutoff, younger than a 180d cutoff.
+    const d = addDecision({ decision: 'hundred-day decision', status: 'active', importance: 3 });
+    getDb().prepare(`UPDATE decisions SET created_at = datetime('now', '-100 days') WHERE id = ?`).run(d);
+
+    const farPlan = runAge({ ageCutoff: '180d' })!.plan;       // dry run
+    const nearPlan = runAge({ ageCutoff: '90d' })!.plan;       // dry run
+    const eligibleIn = (plan: typeof farPlan) =>
+      plan.tables.find(t => t.table === 'decisions')!.eligible.length;
+
+    expect(eligibleIn(farPlan)).toBe(0);   // 100d < 180d cutoff → not yet old
+    expect(eligibleIn(nearPlan)).toBe(1);  // 100d > 90d cutoff → eligible
+    expect(importanceOf('decisions', d)).toBe(3); // dry runs wrote nothing
+
+    runAge({ execute: true, ageCutoff: '90d' });
+    expect(importanceOf('decisions', d)).toBe(1); // demoted under the near cutoff
   });
 });
