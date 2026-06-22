@@ -16,6 +16,33 @@ const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
 
+/**
+ * Apply the connection-level PRAGMAs every open shares (issue #151).
+ *
+ * Durability is preserved: WAL stays on and `synchronous` is left at its
+ * default — NO `synchronous=OFF` (these are read-path tuning only).
+ *
+ * Read tuning (kept only because Suite F showed a win):
+ * - cache_size  = -65536 → 64 MB page cache per connection (negative = KiB),
+ *   up from the 2 MB default, so warm reads stay in memory.
+ * - mmap_size   = 256 MB → memory-map the DB file so large scans (the vector
+ *   BLOB reads) avoid per-page read() syscalls.
+ * - temp_store  = MEMORY → keep transient sort/temp B-trees in RAM.
+ */
+function applyConnectionPragmas(database: Database): void {
+  database.exec('PRAGMA journal_mode = WAL');
+  database.exec('PRAGMA foreign_keys = ON');
+  // Concurrent CLI/MCP/hook invocations share this file. Without a busy
+  // timeout, a writer that finds the lock held fails immediately with
+  // 'database is locked'; wait up to 5s for the lock to clear instead.
+  // (#72/#96 — do not regress.)
+  database.exec('PRAGMA busy_timeout = 5000');
+  // Read-path tuning (#151) — see doc comment above. No durability change.
+  database.exec('PRAGMA cache_size = -65536');
+  database.exec('PRAGMA mmap_size = 268435456');
+  database.exec('PRAGMA temp_store = MEMORY');
+}
+
 // Precedence:
 //   1. RECALL_DB_PATH (primary)
 //   2. MEM_DB_PATH    (legacy fallback)
@@ -59,12 +86,7 @@ export function getDb(): Database {
     }
 
     db = new Database(dbPath);
-    db.exec('PRAGMA journal_mode = WAL');
-    db.exec('PRAGMA foreign_keys = ON');
-    // Concurrent CLI/MCP/hook invocations share this file. Without a busy
-    // timeout, a writer that finds the lock held fails immediately with
-    // 'database is locked'; wait up to 5s for the lock to clear instead. (#72)
-    db.exec('PRAGMA busy_timeout = 5000');
+    applyConnectionPragmas(db);
     // Best-effort load of sqlite-vec (#148). Never throws; on failure the
     // vector path falls back to the brute-force cosine scan.
     loadVecExtension(db);
@@ -87,13 +109,7 @@ export function initDb(): { created: boolean; path: string } {
   const alreadyExists = existsSync(dbPath);
 
   db = new Database(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA foreign_keys = ON');
-  // One-time init can legitimately race a concurrent hook DB open (extraction
-  // hooks fire on their own schedule). Wait up to 5s for a held lock to clear
-  // rather than failing the whole init on transient contention — chosen over
-  // fail-fast so a background hook write can't abort `recall init`. (#72/#96)
-  db.exec('PRAGMA busy_timeout = 5000');
+  applyConnectionPragmas(db);
   // Best-effort load of sqlite-vec (#148) before schema setup, so the vec0
   // index table can be created below when the extension is available.
   loadVecExtension(db);
