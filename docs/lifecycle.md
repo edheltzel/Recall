@@ -82,7 +82,7 @@ Flags (forwarded verbatim): `--dry-run` (narrate, touch nothing), `--purge` (als
 
 ## Recovery
 
-- **Restore a backup** (install/update write timestamped backups under `~/.claude/backups/recall/`): `./install.sh list`, then `./install.sh restore [TIMESTAMP]`.
+- **Restore a backup** (install/update write timestamped backups under `~/.agents/Recall/backups/`): `./install.sh list`, then `./install.sh restore [TIMESTAMP]`.
 - **A failed update** writes `ROLLBACK.txt` into its backup directory with the exact revert commands. See [Upgrading → Rollback](upgrading.md#rollback). Note: **DB schema downgrades are not supported** — if a migration ran, restore the DB file from the backup rather than just reverting the repo.
 - **A `--purge` uninstall** writes a `pre_purge_<TS>/` database snapshot before deleting, so a mistaken purge is recoverable.
 - **Drifted symlinks** (e.g. after moving the checkout): `recall doctor` reports them and `recall doctor --fix` re-creates them, backing up any user-modified file at a symlink target first.
