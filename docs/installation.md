@@ -83,16 +83,16 @@ Verify: `echo "test" | fabric --pattern extract_wisdom` — [github.com/danielmi
 
 Vector embeddings enable semantic search: finding related content even when exact keywords do not match. Without Ollama, Recall uses keyword search only (FTS5), which works well for most queries.
 
-Model: `nomic-embed-text` — 768-dimension embeddings, approximately 270 MB.
+Model: `qwen3-embedding:0.6b` — 1024-dimension embeddings, approximately 640 MB.
 
 ```bash
 # macOS (Homebrew)
 brew install ollama
-ollama pull nomic-embed-text
+ollama pull qwen3-embedding:0.6b
 
 # Linux (curl)
 curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull nomic-embed-text
+ollama pull qwen3-embedding:0.6b
 ```
 
 Verify: `curl http://localhost:11434/api/tags` — [ollama.ai](https://ollama.ai)
@@ -216,7 +216,7 @@ crontab -e
 | `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
 | `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `recall onboard` (write). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used for embeddings (768-dim) |
+| `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
 | `RECALL_BASE_DIR` | `~/.claude` | Base directory for document imports |
 | `RECALL_NO_GUM` | `0` | Set to `1` to skip the optional [`gum`](https://github.com/charmbracelet/gum) auto-install and use the bash UI for installer/update/uninstall. Same effect as the `--no-gum` flag, but persistent across all runs. |

@@ -67,6 +67,10 @@ import {
 	reciprocalRankFusion,
 	checkEmbeddingService,
 } from "./lib/embeddings.js";
+import {
+	isRebackfillNeeded,
+	expectedEmbeddingMarker,
+} from "./lib/embedding-marker.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
 import {
 	shouldFallbackToHybrid,
@@ -241,6 +245,23 @@ export async function hybridSearch(
 const dbPath = getDbPath();
 if (!existsSync(dbPath)) {
 	initDb();
+}
+
+// Embedding model+dims marker check (issue #107) — run ONCE here at process
+// start (this long-lived server is the hot query path) and cache for the
+// process lifetime. Never re-checked per query/turn. A stale marker only logs
+// a hint to stderr (stdout is the MCP protocol channel); semantic search
+// already degrades to FTS5 on a dimension mismatch, so this never blocks.
+try {
+	if (isRebackfillNeeded(getDb())) {
+		const { model, dimensions } = expectedEmbeddingMarker();
+		process.stderr.write(
+			`[recall] Embedding marker is stale — run 'recall embed rebackfill' to re-embed at ${model} (${dimensions}d). ` +
+				`Semantic search falls back to FTS5 until then.\n`,
+		);
+	}
+} catch {
+	// Never block server startup on the marker check.
 }
 
 const server = new McpServer({
