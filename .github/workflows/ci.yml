@@ -61,6 +61,13 @@ jobs:
       - name: Type-check
         run: bun run lint
 
+      # Explicitly prove sqlite-vec loads NATIVELY on Linux (issue #148): Bun's
+      # bundled SQLite is extension-capable, so isVecAvailable() must be true and
+      # native KNN must match the brute-force ranking here. macOS loads it
+      # best-effort via Homebrew libsqlite3; this leg is the Linux native-load gate.
+      - name: Verify sqlite-vec native load (Linux)
+        run: bun test tests/db/sqlite-vec-load.test.ts tests/db/vec.test.ts
+
       # Ubuntu is a portability smoke target, not Recall's primary platform.
       # macOS runs the full test suite; Linux still builds to catch Bun/ESM and shell portability regressions.
       - name: Build
