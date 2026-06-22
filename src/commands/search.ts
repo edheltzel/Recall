@@ -1,6 +1,6 @@
 // recall search command
 
-import { search, SEARCH_TABLES, type SearchTable } from '../lib/memory.js';
+import { search, bumpAccess, SEARCH_TABLES, type SearchTable } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
 
 interface SearchOptions {
@@ -33,6 +33,9 @@ export function runSearch(query: string, options: SearchOptions): void {
     console.log('No results found.');
     return;
   }
+
+  // Bump-on-use (issue #153): these results are surfaced to the user.
+  bumpAccess(results);
 
   console.log(`Found ${results.length} result(s):\n`);
 

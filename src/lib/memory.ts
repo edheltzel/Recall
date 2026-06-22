@@ -429,6 +429,65 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
   return results.slice(0, limit);
 }
 
+// ============ Access tracking (frecency B1, issue #153) ============
+
+// Physical tables carrying access_count / last_accessed (migration 13→14).
+// Search results label LoA rows as 'loa'; the physical table is 'loa_entries'.
+const BUMP_TABLES = new Set(['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries']);
+
+function physicalBumpTable(table: string): string | null {
+  const physical = table === 'loa' ? 'loa_entries' : table;
+  return BUMP_TABLES.has(physical) ? physical : null;
+}
+
+/**
+ * Bump-on-use (issue #153): record that these records were surfaced in returned
+ * recall results — increment `access_count` and set `last_accessed` to now. This
+ * is the access signal #154's frecency score will consume; it does NOT change
+ * ranking here.
+ *
+ * Call ONLY with the FINAL returned/sliced result set of a user-facing surface
+ * (the `memory_search` tool + `recall search` CLI, and `hybridSearch`'s returned
+ * results). NEVER call it with an internal candidate pool — e.g. the `limit * 2`
+ * `search()` call inside `hybridSearch` — or matches that were never returned
+ * would be bumped, corrupting the frecency signal.
+ *
+ * One batched UPDATE per table. The UPDATE touches only access_count /
+ * last_accessed, which (after migration 14→15 scopes the FTS `AFTER UPDATE OF`
+ * triggers to indexed columns) does NOT re-fire FTS reindexing. Best-effort: a
+ * bump failure must never break the read path.
+ */
+export function bumpAccess(records: Array<{ table: string; id: number }>): void {
+  if (records.length === 0) return;
+
+  // Group unique ids per physical table (dedup so a row surfaced twice in one
+  // result set still counts as a single access).
+  const idsByTable = new Map<string, Set<number>>();
+  for (const { table, id } of records) {
+    const physical = physicalBumpTable(table);
+    if (!physical) continue;
+    let ids = idsByTable.get(physical);
+    if (!ids) { ids = new Set(); idsByTable.set(physical, ids); }
+    ids.add(id);
+  }
+  if (idsByTable.size === 0) return;
+
+  try {
+    const db = getDb();
+    const apply = db.transaction(() => {
+      for (const [table, ids] of idsByTable) {
+        const placeholders = Array.from(ids, () => '?').join(', ');
+        db.prepare(
+          `UPDATE ${table} SET access_count = access_count + 1, last_accessed = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`
+        ).run(...ids);
+      }
+    });
+    apply();
+  } catch {
+    // Best-effort: a frecency bump must never break the read path.
+  }
+}
+
 /**
  * Resolve display fields + provenance for a record surfaced by hybrid search,
  * keyed by its source_table. Returns:
