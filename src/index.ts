@@ -35,6 +35,7 @@ import { runPath } from './commands/path.js';
 import { runExport } from './commands/export.js';
 import { runDedup } from './commands/dedup.js';
 import { runRepair } from './commands/repair.js';
+import { runInstall } from './commands/install.js';
 import { runUpdate } from './commands/update.js';
 import { runUninstall } from './commands/uninstall.js';
 import { DEFAULT_SEMANTIC_THRESHOLD } from './lib/dedup.js';
@@ -828,6 +829,17 @@ function forwardedArgs(commandName: string): string[] {
   const idx = argv.indexOf(commandName);
   return idx >= 0 ? argv.slice(idx + 1) : argv;
 }
+
+program
+  .command('install')
+  .description('Run the canonical Recall install for a packaged binary — MCP, hooks, commands, guides (delegates to install.sh in packaged mode)')
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .helpOption(false)
+  .argument('[args...]', 'Flags forwarded to install.sh (--yes, --no-gum, --db-path, --help)')
+  .action(() => {
+    process.exitCode = runInstall(forwardedArgs('install'));
+  });
 
 program
   .command('update')
