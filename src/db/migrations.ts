@@ -11,6 +11,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { FTS_SCHEMA } from './schema';
 
 export type Migration = (db: Database) => void;
 
@@ -288,6 +289,76 @@ export const MIGRATIONS: Migration[] = [
       db.prepare('ALTER TABLE loa_entries ADD COLUMN source_ids TEXT').run();
     } catch {
       // Column already exists — safe to ignore (fresh install via schema.ts).
+    }
+  },
+
+  // Migration 13 → 14: Access-tracking columns for frecency ranking (issue #152,
+  // B0 of Workstream B). The additive foundation for #153 (bump-on-use) and #154
+  // (frecency score) — this migration adds the columns ONLY: no bump logic and no
+  // ranking change. access_count defaults to 0; last_accessed is nullable (NULL
+  // until a row is first surfaced/used — never guessed). Applied to all five
+  // memory tables, the same set the provenance migration (8 → 9) established as
+  // surfaced in recall results, so every rankable row can carry a frecency signal.
+  // No indexes yet — deferred to #154, which defines how frecency is queried
+  // (YAGNI). FTS5 sync triggers are untouched: they reference only content/project
+  // columns, not these. Mirrors the 8 → 9 pattern: ALTER for upgrades, declared in
+  // schema.ts for fresh installs; the try/catch absorbs the column-exists case.
+  (db) => {
+    const tables = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'];
+    for (const table of tables) {
+      try {
+        db.prepare(`ALTER TABLE ${table} ADD COLUMN access_count INTEGER DEFAULT 0`).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install via schema.ts).
+      }
+      try {
+        db.prepare(`ALTER TABLE ${table} ADD COLUMN last_accessed DATETIME`).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install via schema.ts).
+      }
+    }
+  },
+
+  // Migration 14 → 15: Scope the FTS5 `AFTER UPDATE` triggers to indexed columns
+  // (issue #153, B1 bump-on-use). The bump-on-use write increments
+  // access_count / sets last_accessed on the five memory tables every time a row
+  // is surfaced in recall results. Those tables' FTS `*_au` triggers were
+  // un-scoped (`AFTER UPDATE ON <table>`), so a bump would re-fire a full FTS
+  // delete+reinsert per surfaced row on the hot read path — unacceptable write
+  // amplification. We rescope each `*_au` to `AFTER UPDATE OF <indexed source
+  // columns>` so an access-only UPDATE no longer reindexes, while a real edit to
+  // any indexed column still does.
+  //
+  // No drift: the scoped `*_au` text is extracted from the SAME FTS_SCHEMA
+  // createTriggers strings that fresh installs (schema.ts DDL) and `recall
+  // repair`/`doctor` use. For each of the five memory tables we DROP the old
+  // `*_au` trigger and recreate ONLY it (the `*_ai`/`*_ad` triggers are
+  // untouched — they already exist on real installs, and recreating them would
+  // break a base-table write on any DB whose FTS virtual tables aren't present).
+  // Per-table try/catch tolerates a DB missing a base table (the migration may
+  // run standalone on a partial schema); CREATE TRIGGER requires the ON-table.
+  // Only the five bumped tables are touched — telos/documents are not bumped, so
+  // rescoping them would be speculative.
+  (db) => {
+    const memoryFtsKeys = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'];
+    for (const key of memoryFtsKeys) {
+      const schema = FTS_SCHEMA[key];
+      // Trigger name prefix = the FTS table name without its `_fts` suffix
+      // (e.g. loa_fts → loa_au), which differs from the map key for loa_entries.
+      const auTrigger = `${schema.ftsTable.replace(/_fts$/, '')}_au`;
+      // Slice out just this table's `*_au` CREATE statement from its canonical
+      // createTriggers block (single source of truth → no drift). The block ends
+      // each trigger with `END;`; the `*_au` body has no nested `END;`.
+      const start = schema.createTriggers.indexOf(`CREATE TRIGGER IF NOT EXISTS ${auTrigger} `);
+      const end = schema.createTriggers.indexOf('END;', start);
+      if (start < 0 || end < 0) continue; // canonical shape changed — leave triggers alone
+      const auStatement = schema.createTriggers.slice(start, end + 'END;'.length);
+      try {
+        db.prepare(`DROP TRIGGER IF EXISTS ${auTrigger}`).run();
+        db.exec(auStatement);
+      } catch {
+        // Base table absent on a partial schema — nothing to rescope here.
+      }
     }
   },
 ];

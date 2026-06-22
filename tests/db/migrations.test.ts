@@ -444,7 +444,7 @@ describe('source-lineage column migration (12 to 13)', () => {
     // Mutation guard: dropping the 12 → 13 entry shrinks MIGRATIONS.length to
     // 12, so user_version would land at 12 and the column would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(13);
+    expect(MIGRATIONS.length).toBe(15);
     const cols = (db.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
     expect(cols).toContain('source_ids');
   });
@@ -520,6 +520,176 @@ describe('source-lineage column migration (12 to 13)', () => {
   });
 });
 
+describe('access-tracking columns migration (13 to 14)', () => {
+  const ACCESS_TABLES = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'];
+
+  test('fresh DB has access_count + last_accessed on all five memory tables', () => {
+    applyMigrations(db);
+    // Mutation guard: dropping the 13 → 14 entry shrinks MIGRATIONS.length to 13,
+    // so user_version would land at 13 and the columns would be absent → RED.
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+    expect(MIGRATIONS.length).toBe(15);
+    for (const table of ACCESS_TABLES) {
+      const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => c.name);
+      expect(cols).toContain('access_count');
+      expect(cols).toContain('last_accessed');
+    }
+  });
+
+  test('fresh-install defaults: access_count = 0, last_accessed = NULL', () => {
+    applyMigrations(db);
+    db.prepare('INSERT INTO breadcrumbs (content) VALUES (?)').run('fresh row');
+    const row = db.prepare(
+      'SELECT access_count, last_accessed FROM breadcrumbs WHERE content = ?'
+    ).get('fresh row') as any;
+    expect(row.access_count).toBe(0);
+    expect(row.last_accessed).toBeNull();
+  });
+
+  test('upgrade path: a version-13 legacy DB gains the columns with correct defaults', () => {
+    // A pre-#152 install at version 13: the five memory tables lack the
+    // access-tracking columns. Applying must run only 13 → 14 and land at latest.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-access-mig-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy13.db'));
+    try {
+      legacyDb.exec(`
+        CREATE TABLE messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          timestamp DATETIME NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL
+        );
+        CREATE TABLE decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, decision TEXT NOT NULL);
+        CREATE TABLE learnings (id INTEGER PRIMARY KEY AUTOINCREMENT, problem TEXT NOT NULL);
+        CREATE TABLE breadcrumbs (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL);
+        CREATE TABLE loa_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, fabric_extract TEXT NOT NULL);
+      `);
+      legacyDb.prepare('INSERT INTO breadcrumbs (content) VALUES (?)').run('legacy row');
+      legacyDb.prepare('PRAGMA user_version = 13').run();
+
+      for (const table of ACCESS_TABLES) {
+        const before = (legacyDb.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => c.name);
+        expect(before).not.toContain('access_count');
+        expect(before).not.toContain('last_accessed');
+      }
+
+      const result = applyMigrations(legacyDb);
+      // Mutation guard: drop the 13 → 14 migration and target falls to 13, so the
+      // columns never appear even though the chain still advances → RED.
+      expect(result.from).toBe(13);
+      expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
+
+      for (const table of ACCESS_TABLES) {
+        const cols = legacyDb.prepare(`PRAGMA table_info(${table})`).all() as any[];
+        const accessCol = cols.find((c) => c.name === 'access_count');
+        const lastCol = cols.find((c) => c.name === 'last_accessed');
+        expect(accessCol).toBeDefined();
+        // access_count is a non-null integer defaulting to 0.
+        expect(accessCol.dflt_value).toBe('0');
+        // last_accessed is nullable with no default → NULL until a row is used.
+        expect(lastCol).toBeDefined();
+        expect(lastCol.notnull).toBe(0);
+        expect(lastCol.dflt_value).toBeNull();
+      }
+
+      // Legacy rows pick up the defaults: count 0, last_accessed NULL.
+      const row = legacyDb.prepare(
+        'SELECT access_count, last_accessed FROM breadcrumbs WHERE content = ?'
+      ).get('legacy row') as any;
+      expect(row.access_count).toBe(0);
+      expect(row.last_accessed).toBeNull();
+    } finally {
+      legacyDb.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('idempotent: re-running after 14 applies nothing', () => {
+    applyMigrations(db);
+    const result = applyMigrations(db);
+    expect(result.applied).toBe(0);
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+  });
+});
+
+describe('FTS trigger scoping migration (14 to 15)', () => {
+  const MEMORY_AU_TRIGGERS = ['messages_au', 'decisions_au', 'learnings_au', 'breadcrumbs_au', 'loa_au'];
+
+  const triggerSql = (d: Database, name: string): string | null => {
+    const row = d.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name = ?").get(name) as
+      | { sql: string }
+      | undefined;
+    return row?.sql ?? null;
+  };
+
+  test('fresh DB: all five memory AFTER UPDATE triggers are scoped to indexed columns', () => {
+    applyMigrations(db);
+    // Mutation guard: dropping the 14 → 15 entry shrinks MIGRATIONS.length to 14,
+    // so user_version would land at 14 with the triggers still bare → RED.
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+    expect(MIGRATIONS.length).toBe(15);
+    for (const name of MEMORY_AU_TRIGGERS) {
+      const sql = triggerSql(db, name);
+      expect(sql).not.toBeNull();
+      // Scoped form `AFTER UPDATE OF <cols>` — never a bare `AFTER UPDATE`.
+      expect(sql).toContain('AFTER UPDATE OF');
+      // The access-tracking columns must NOT be in the scope, or bumping them
+      // would reindex FTS — the whole point of this migration.
+      expect(sql).not.toContain('access_count');
+      expect(sql).not.toContain('last_accessed');
+    }
+  });
+
+  test('upgrade path: a version-14 DB rescopes a legacy unscoped AFTER UPDATE trigger', () => {
+    // A pre-#153 install at version 14: the five memory tables exist with their
+    // bare `AFTER UPDATE ON <table>` FTS triggers. CREATE TRIGGER requires the
+    // ON-table to exist (FTS virtual tables, referenced only in the body, do
+    // not), so all five base tables are present; only messages carries a seeded
+    // legacy trigger to prove the DROP+recreate rescopes it.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-fts-scope-mig-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy14.db'));
+    try {
+      legacyDb.exec(`
+        CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, project TEXT);
+        CREATE TABLE decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, decision TEXT, reasoning TEXT, project TEXT);
+        CREATE TABLE learnings (id INTEGER PRIMARY KEY AUTOINCREMENT, problem TEXT, solution TEXT, tags TEXT, project TEXT);
+        CREATE TABLE breadcrumbs (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, category TEXT, project TEXT);
+        CREATE TABLE loa_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, description TEXT, fabric_extract TEXT, tags TEXT, project TEXT);
+        CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content, project) VALUES('delete', old.id, old.content, old.project);
+          INSERT INTO messages_fts(rowid, content, project) VALUES (new.id, new.content, new.project);
+        END;
+      `);
+      legacyDb.prepare('PRAGMA user_version = 14').run();
+
+      const before = triggerSql(legacyDb, 'messages_au') ?? '';
+      expect(before).toContain('AFTER UPDATE ON messages');
+      expect(before).not.toContain('AFTER UPDATE OF');
+
+      const result = applyMigrations(legacyDb);
+      // Mutation guard: drop the 14 → 15 migration and target falls to 14, so the
+      // trigger is never rescoped even though the chain still advances → RED.
+      expect(result.from).toBe(14);
+      expect(getMigrationVersion(legacyDb)).toBe(MIGRATIONS.length);
+
+      const after = triggerSql(legacyDb, 'messages_au') ?? '';
+      expect(after).toContain('AFTER UPDATE OF content, project');
+      expect(after).not.toMatch(/AFTER UPDATE ON messages\b/);
+    } finally {
+      legacyDb.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('idempotent: re-running after 15 applies nothing', () => {
+    applyMigrations(db);
+    const result = applyMigrations(db);
+    expect(result.applied).toBe(0);
+    expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+  });
+});
+
 describe('MIGRATIONS array', () => {
   test('has expected number of migrations', () => {
     // 7 → 8: importance column on messages/decisions/learnings/loa_entries (Sprint #4)
@@ -528,7 +698,9 @@ describe('MIGRATIONS array', () => {
     // 10 → 11: session_progress table (issue #51)
     // 11 → 12: correction rate-limit columns on session_progress (issue #52)
     // 12 → 13: source_ids lineage column on loa_entries (issue #140)
-    expect(MIGRATIONS.length).toBe(13);
+    // 13 → 14: access_count + last_accessed on all five memory tables (issue #152)
+    // 14 → 15: scope FTS AFTER UPDATE triggers to indexed columns (issue #153)
+    expect(MIGRATIONS.length).toBe(15);
   });
 
   test('all entries are functions', () => {

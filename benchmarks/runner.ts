@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { runSuiteB } from './suites/suite-b-token-efficiency.js';
 import { runSuiteC } from './suites/suite-c-precision-noise.js';
+import { runSuiteF } from './suites/suite-f-search-latency.js';
 import type { RunResult, SuiteResult, SuiteId } from './types.js';
 
 const RESULTS_DIR = join(import.meta.dir, 'results');
@@ -43,6 +44,10 @@ async function dispatchSuite(suite: SuiteId, project?: string): Promise<SuiteRes
       // Suite C builds its own synthetic corpora — the project scope does
       // not apply to it.
       return runSuiteC();
+    case 'F':
+      // Suite F builds its own synthetic corpora + embeddings — project scope
+      // does not apply.
+      return runSuiteF();
     case 'A':
     case 'D':
     case 'E':
@@ -55,7 +60,7 @@ async function dispatchSuite(suite: SuiteId, project?: string): Promise<SuiteRes
 export async function runBenchmarks(options: RunOptions = {}): Promise<RunOutput> {
   const startedAt = new Date().toISOString();
 
-  const suiteIds: SuiteId[] = options.suite ? [options.suite] : ['A', 'B', 'C', 'D', 'E'];
+  const suiteIds: SuiteId[] = options.suite ? [options.suite] : ['A', 'B', 'C', 'D', 'E', 'F'];
   const suites: SuiteResult[] = [];
 
   for (const id of suiteIds) {

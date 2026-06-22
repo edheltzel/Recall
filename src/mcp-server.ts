@@ -43,6 +43,7 @@ import { z } from "zod";
 import { getDb, initDb, getDbPath } from "./db/connection.js";
 import {
 	search,
+	bumpAccess,
 	SEARCH_TABLES,
 	recentMessages,
 	recentDecisions,
@@ -67,6 +68,15 @@ import {
 	reciprocalRankFusion,
 	checkEmbeddingService,
 } from "./lib/embeddings.js";
+import {
+	isRebackfillNeeded,
+	expectedEmbeddingMarker,
+} from "./lib/embedding-marker.js";
+import {
+	isVecAvailable,
+	ensureVecIndexSynced,
+	knnSearch,
+} from "./db/vec.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
 import {
 	shouldFallbackToHybrid,
@@ -75,6 +85,64 @@ import {
 import { provenanceLabel } from "./lib/provenance.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
+
+/**
+ * Brute-force cosine scan over all non-duplicate embeddings — the fallback when
+ * sqlite-vec is unavailable (and the original #45/#107 behavior). Returns the
+ * top limit*2 by similarity.
+ */
+function bruteForceVectorScan(
+	db: ReturnType<typeof getDb>,
+	queryEmbedding: number[],
+	limit: number,
+): Array<{ source_table: string; source_id: number; similarity: number }> {
+	// Marked duplicates (recall dedup, issue #45) keep their embeddings but are
+	// hidden from the vector path, matching the FTS5 default.
+	const embeddings = db
+		.prepare(`
+        SELECT source_table, source_id, embedding FROM embeddings
+        WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
+      `)
+		.all() as Array<{
+		source_table: string;
+		source_id: number;
+		embedding: Buffer;
+	}>;
+
+	const out: Array<{ source_table: string; source_id: number; similarity: number }> = [];
+	for (const row of embeddings) {
+		const similarity = cosineSimilarity(queryEmbedding, blobToEmbedding(row.embedding));
+		out.push({ source_table: row.source_table, source_id: row.source_id, similarity });
+	}
+	out.sort((a, b) => b.similarity - a.similarity);
+	return out.slice(0, limit * 2);
+}
+
+/**
+ * Vector search with the sqlite-vec fast tier and a brute-force fallback (#148).
+ * vec0 uses cosine distance, so nearest == most similar — the same ordering the
+ * brute-force cosineSimilarity sort produces. On any vec failure (e.g. the
+ * extension absent or a stale dimension), falls back to brute-force.
+ */
+function vectorSearch(
+	db: ReturnType<typeof getDb>,
+	queryEmbedding: number[],
+	limit: number,
+): Array<{ source_table: string; source_id: number; similarity: number }> {
+	if (isVecAvailable()) {
+		try {
+			ensureVecIndexSynced(db); // once per process, cached — never per query
+			return knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
+				source_table: h.source_table,
+				source_id: h.source_id,
+				similarity: 1 - h.distance,
+			}));
+		} catch {
+			// vec query failed — fall back to the brute-force scan.
+		}
+	}
+	return bruteForceVectorScan(db, queryEmbedding, limit);
+}
 
 /**
  * Hybrid search combining FTS5 + vector embeddings with RRF fusion
@@ -117,33 +185,10 @@ export async function hybridSearch(
 			embeddingsAvailable = true;
 
 			const queryResult = await embed(query);
-			const queryEmbedding = queryResult.embedding;
-
-			// Marked duplicates (recall dedup, issue #45) keep their embeddings
-			// but are hidden from the vector path, matching the FTS5 default.
-			const embeddings = db
-				.prepare(`
-        SELECT source_table, source_id, embedding FROM embeddings
-        WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
-      `)
-				.all() as Array<{
-				source_table: string;
-				source_id: number;
-				embedding: Buffer;
-			}>;
-
-			for (const row of embeddings) {
-				const embedding = blobToEmbedding(row.embedding);
-				const similarity = cosineSimilarity(queryEmbedding, embedding);
-				semanticResults.push({
-					source_table: row.source_table,
-					source_id: row.source_id,
-					similarity,
-				});
-			}
-
-			semanticResults.sort((a, b) => b.similarity - a.similarity);
-			semanticResults = semanticResults.slice(0, limit * 2);
+			// Fast tier: sqlite-vec native KNN when the extension loaded (#148);
+			// otherwise the brute-force cosine scan. Both exclude recall-dedup
+			// marked duplicates and return the top limit*2 in the same order.
+			semanticResults = vectorSearch(db, queryResult.embedding, limit);
 		}
 	} catch {
 		// Embedding service unavailable - continue with FTS only
@@ -218,29 +263,60 @@ export async function hybridSearch(
 			.sort((a, b) => b.score - a.score)
 			.slice(0, limit);
 
+		// Bump-on-use (issue #153): only the final returned set, never the
+		// limit*2 candidate pool that fed search() above.
+		bumpAccess(results);
 		return { results, embeddingsAvailable };
 	}
 
 	// FTS only fallback
-	return {
-		results: ftsResults
-			.map((r) => ({
-				table: r.table,
-				id: r.id,
-				content: r.content,
-				score: r.rank || 0,
-				source: "fts" as const,
-				provenance: r.provenance ?? null,
-			}))
-			.slice(0, limit),
-		embeddingsAvailable: false,
-	};
+	const ftsOnly = ftsResults
+		.map((r) => ({
+			table: r.table,
+			id: r.id,
+			content: r.content,
+			score: r.rank || 0,
+			source: "fts" as const,
+			provenance: r.provenance ?? null,
+		}))
+		.slice(0, limit);
+
+	// Bump-on-use (issue #153): only the final returned set.
+	bumpAccess(ftsOnly);
+	return { results: ftsOnly, embeddingsAvailable: false };
 }
 
 // Ensure DB exists
 const dbPath = getDbPath();
 if (!existsSync(dbPath)) {
 	initDb();
+}
+
+// Embedding model+dims marker check (issue #107) — run ONCE here at process
+// start (this long-lived server is the hot query path) and cache for the
+// process lifetime. Never re-checked per query/turn. A stale marker only logs
+// a hint to stderr (stdout is the MCP protocol channel); semantic search
+// already degrades to FTS5 on a dimension mismatch, so this never blocks.
+try {
+	if (isRebackfillNeeded(getDb())) {
+		const { model, dimensions } = expectedEmbeddingMarker();
+		process.stderr.write(
+			`[recall] Embedding marker is stale — run 'recall embed rebackfill' to re-embed at ${model} (${dimensions}d). ` +
+				`Semantic search falls back to FTS5 until then.\n`,
+		);
+	}
+} catch {
+	// Never block server startup on the marker check.
+}
+
+// Sync the sqlite-vec index from the canonical embeddings ONCE at process start
+// (#148) — rebuilds only if out of sync (e.g. first run after a re-backfill).
+// Cached for the process lifetime; never rebuilt per query. No-op when the
+// extension is unavailable. Never blocks startup.
+try {
+	ensureVecIndexSynced(getDb());
+} catch {
+	// Brute-force scan remains available if the index can't be synced.
 }
 
 const server = new McpServer({
@@ -296,6 +372,11 @@ server.tool(
 					content: [{ type: "text", text: `No results found for: "${query}"` }],
 				};
 			}
+
+			// Bump-on-use (issue #153): these keyword hits are surfaced to the
+			// agent. The fallback path above returns hybridSearch results, which
+			// are bumped inside hybridSearch — so this only covers the direct path.
+			bumpAccess(results);
 
 			const formatted = results
 				.map((r) => {
