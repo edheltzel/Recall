@@ -1,9 +1,9 @@
 // Embedding generation for RECALL
-// Uses Ollama for nomic-embed-text embeddings
+// Uses Ollama for Qwen3-Embedding-0.6B embeddings (issue #107)
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-const EMBEDDING_DIMENSIONS = 768;
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'qwen3-embedding:0.6b';
+const EMBEDDING_DIMENSIONS = 1024;
 
 export interface EmbeddingResult {
   embedding: number[];
@@ -15,8 +15,9 @@ export interface EmbeddingResult {
  * Generate embedding for text using Ollama on nano
  */
 export async function embed(text: string): Promise<EmbeddingResult> {
-  // Truncate very long text (nomic-embed-text has 8192 token context)
-  const truncated = text.slice(0, 30000); // ~8K tokens rough estimate
+  // Truncate very long text (Qwen3-Embedding-0.6B has 32K token context;
+  // 30K chars ≈ 8K tokens stays well within it).
+  const truncated = text.slice(0, 30000);
 
   const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
     method: 'POST',

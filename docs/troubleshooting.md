@@ -146,7 +146,7 @@ Embeddings are optional. Hybrid search falls back to FTS5-only automatically.
 To enable semantic search:
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull qwen3-embedding:0.6b
 curl http://localhost:11434/api/tags   # Verify Ollama is running
 ```
 

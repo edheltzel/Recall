@@ -105,11 +105,11 @@ describe('reciprocalRankFusion', () => {
 });
 
 describe('constants', () => {
-  test('EMBEDDING_DIMENSIONS is 768', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(768);
+  test('EMBEDDING_DIMENSIONS is 1024 (Qwen3-Embedding-0.6B, issue #107)', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(1024);
   });
 
-  test("EMBEDDING_MODEL is 'nomic-embed-text'", () => {
-    expect(EMBEDDING_MODEL).toBe('nomic-embed-text');
+  test("EMBEDDING_MODEL is 'qwen3-embedding:0.6b' (issue #107)", () => {
+    expect(EMBEDDING_MODEL).toBe('qwen3-embedding:0.6b');
   });
 });
