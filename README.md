@@ -328,6 +328,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
 | [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |
+| [Managing Recall](docs/lifecycle.md)       | Which command when: install, update, uninstall, custom DB, recovery       |
 | [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |
 | [MCP Tools](docs/mcp-tools.md)             | Tools available to AI agents                                              |
 | [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
