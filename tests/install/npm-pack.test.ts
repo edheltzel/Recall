@@ -11,18 +11,19 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync, spawnSync } from 'child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  symlinkSync,
-} from 'fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
 const REPO = process.cwd();
+
+// CI runs `bun test` BEFORE the `bun run build` step, so dist/ may not exist
+// yet. The published tarball always contains dist/ (prepublishOnly builds it),
+// so build once here — unconditionally, so a stale dist/ can't mask a current
+// source change — to make the packaging assertions faithful and deterministic.
+beforeAll(() => {
+  execFileSync('bun', ['run', 'build'], { cwd: REPO, stdio: 'ignore' });
+});
 
 function packFileList(): string[] {
   const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {
@@ -81,10 +82,8 @@ describe('npm package: shims resolve bundled scripts under a packaged layout', (
   let binLink: string; // <stage>/bin/recall — mimics a global-install bin symlink
 
   beforeAll(() => {
-    // Ensure a built dist/ exists, then pack + extract to mimic an install.
-    if (!existsSync(join(REPO, 'dist', 'index.js'))) {
-      execFileSync('bun', ['run', 'build'], { cwd: REPO, stdio: 'ignore' });
-    }
+    // dist/ is guaranteed by the file-level beforeAll above. Pack + extract to
+    // mimic a node_modules/<pkg>/ install.
     stage = mkdtempSync(join(tmpdir(), 'recall-pack-'));
     execFileSync('npm', ['pack', '--pack-destination', stage], {
       cwd: REPO,
