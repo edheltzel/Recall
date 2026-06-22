@@ -95,6 +95,10 @@ export interface LoaEntry {
   message_count?: number;
   importance?: number;
   provenance?: Provenance | null;
+  // Source lineage for derived consolidation summaries (issue #140/#141): JSON
+  // array of {table, id} records this entry was built from. Nullable — legacy
+  // and non-derived rows stay NULL (never guessed, ADR-0001).
+  source_ids?: string | null;
 }
 
 export interface SearchResult {
