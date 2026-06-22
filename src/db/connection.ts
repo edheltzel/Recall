@@ -6,6 +6,10 @@ import { join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
 import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_VECTOR_TABLES } from './schema.js';
 import { applyMigrations } from './migrations.js';
+// Importing vec sets up bun:sqlite's custom (extension-capable) SQLite on macOS
+// at module load — BEFORE any Database is opened below, as setCustomSQLite
+// requires (it is process-global). See src/db/vec.ts.
+import { loadVecExtension, isVecAvailable, createVecTable } from './vec.js';
 
 const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
@@ -61,6 +65,9 @@ export function getDb(): Database {
     // timeout, a writer that finds the lock held fails immediately with
     // 'database is locked'; wait up to 5s for the lock to clear instead. (#72)
     db.exec('PRAGMA busy_timeout = 5000');
+    // Best-effort load of sqlite-vec (#148). Never throws; on failure the
+    // vector path falls back to the brute-force cosine scan.
+    loadVecExtension(db);
 
     return db;
   } finally {
@@ -87,6 +94,9 @@ export function initDb(): { created: boolean; path: string } {
   // rather than failing the whole init on transient contention — chosen over
   // fail-fast so a background hook write can't abort `recall init`. (#72/#96)
   db.exec('PRAGMA busy_timeout = 5000');
+  // Best-effort load of sqlite-vec (#148) before schema setup, so the vec0
+  // index table can be created below when the extension is available.
+  loadVecExtension(db);
 
   // Schema setup — ordering matters. See CHANGELOG 0.7.11.
   // 1) CREATE_TABLES: idempotent — creates tables that don't exist yet.
@@ -102,6 +112,13 @@ export function initDb(): { created: boolean; path: string } {
   db.exec(CREATE_FTS);
   db.exec(CREATE_FTS_TRIGGERS);
   db.exec(CREATE_VECTOR_TABLES);
+  // sqlite-vec index table (#148) — created ONLY when the extension loaded.
+  // Deliberately NOT a migration: a vec0 CREATE throws where the extension is
+  // absent, which would break initDb and violate the OPTIONAL invariant. This
+  // idempotent, availability-guarded create is the correct home.
+  if (isVecAvailable()) {
+    createVecTable(db);
+  }
 
   if (migration.applied > 0) {
     // Keep schema_meta in sync for backward compatibility with older code.

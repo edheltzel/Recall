@@ -45,6 +45,7 @@ import {
   EMBEDDING_DIMENSIONS,
 } from '../../src/lib/embeddings.js';
 import { notMarkedDuplicateSql, DEDUP_TABLES } from '../../src/lib/dedup.js';
+import { isVecAvailable, reindexVec, knnSearch } from '../../src/db/vec.js';
 import type { Provenance } from '../../src/types/index.js';
 import type { SuiteResult, MetricSample } from '../types.js';
 import {
@@ -165,6 +166,18 @@ function vectorScan(db: ReturnType<typeof getDb>, queryVec: number[]): SemanticH
   return hits.slice(0, LIMIT * 2);
 }
 
+/** The sqlite-vec native KNN path (#148) — the fast tier that replaces the
+ *  brute-force scan above. Queries the vec0 index for the nearest LIMIT*2 by
+ *  cosine distance. Only meaningful when the extension loaded (isVecAvailable);
+ *  this is the "after" number compared to the brute-force `vec` baseline. */
+function vecIndexPath(db: ReturnType<typeof getDb>, queryVec: number[]): SemanticHit[] {
+  return knnSearch(db, queryVec, LIMIT * 2).map((h) => ({
+    source_table: h.source_table,
+    source_id: h.source_id,
+    similarity: 1 - h.distance,
+  }));
+}
+
 /** FTS5 keyword path — the real search(), failing loud on a swallowed error so
  *  a broken FTS path can't masquerade as a fast (empty) baseline. */
 function ftsPath(query: FixtureQuery): void {
@@ -242,6 +255,10 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
       seedFixture(spec);
       const db = getDb();
       const indexed = backfillSyntheticEmbeddings(db, seed);
+      // Build the sqlite-vec index (#148) from the same canonical BLOBs so the
+      // native KNN path can be measured against the brute-force baseline.
+      const vecReady = isVecAvailable();
+      if (vecReady) reindexVec(db);
       const scope = `corpus=${size}`;
 
       // Pre-compute one seeded query vector per query — deterministic, and not
@@ -253,6 +270,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
 
       const ftsLat: number[] = [];
       const vecLat: number[] = [];
+      const vecIndexLat: number[] = [];
       const hybridLat: number[] = [];
 
       const measure = (bucket: number[] | null, fn: () => void) => {
@@ -268,6 +286,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
           const qv = queryVectors.get(q.id)!;
           measure(null, () => ftsPath(q));
           measure(null, () => vectorScan(db, qv));
+          if (vecReady) measure(null, () => vecIndexPath(db, qv));
           measure(null, () => hybridPath(db, q, qv));
         }
       }
@@ -277,6 +296,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
           const qv = queryVectors.get(q.id)!;
           measure(ftsLat, () => ftsPath(q));
           measure(vecLat, () => vectorScan(db, qv));
+          if (vecReady) measure(vecIndexLat, () => vecIndexPath(db, qv));
           measure(hybridLat, () => hybridPath(db, q, qv));
         }
       }
@@ -288,6 +308,11 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
       samples.push({ name: 'fts_latency_p95_ms', value: round(percentile(ftsLat, 95), 3), unit: 'ms', scope });
       samples.push({ name: 'vec_latency_p50_ms', value: round(percentile(vecLat, 50), 3), unit: 'ms', scope });
       samples.push({ name: 'vec_latency_p95_ms', value: round(percentile(vecLat, 95), 3), unit: 'ms', scope });
+      if (vecReady) {
+        // sqlite-vec native KNN (#148) — the "after" vs the brute-force `vec` baseline.
+        samples.push({ name: 'vec_index_latency_p50_ms', value: round(percentile(vecIndexLat, 50), 3), unit: 'ms', scope });
+        samples.push({ name: 'vec_index_latency_p95_ms', value: round(percentile(vecIndexLat, 95), 3), unit: 'ms', scope });
+      }
       samples.push({ name: 'hybrid_latency_p50_ms', value: round(percentile(hybridLat, 50), 3), unit: 'ms', scope });
       samples.push({ name: 'hybrid_latency_p95_ms', value: round(percentile(hybridLat, 95), 3), unit: 'ms', scope });
     }
@@ -325,6 +350,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
       `Latency only — NOT relevance. The vector/hybrid paths use DETERMINISTIC synthetic ${EMBEDDING_DIMENSIONS}-dim seeded random embeddings (seed ${seed}), not real model embeddings, so their ranking is meaningless. Precision lives in Suite C.`,
       `Latency protocol: ${WARMUP_PASSES} unmeasured warmup pass per corpus size, then ${repeats} measured repeats per query on a warm connection; p50/p95 are computed across all measured calls at that size.`,
       `Vector path measures the brute-force O(n) scan inside hybridSearch (SELECT all embeddings + JS cosine loop) — the confirmed bottleneck #148 (sqlite-vec) replaces. It scans every embedding in the corpus per query, so vec/hybrid p50/p95 grow with DB size by design; that growth is the number the epic must flatten.`,
+      `vec_index_latency_* is the sqlite-vec native KNN path (#148) — the "after" compared to the brute-force vec_latency "before". It is emitted ONLY when the extension loaded on this host (isVecAvailable); absent on a host without an extension-capable libsqlite3, where production also falls back to the brute-force path.`,
       `The Ollama embed(query) network call is intentionally EXCLUDED — production hybrid latency additionally pays it per query. This suite isolates the in-process scan/fusion cost so before/after deltas reflect the index change, not embedding-service variance.`,
       `Absolute milliseconds are machine- and load-dependent and do NOT transfer across hosts; the harness (corpus, query set, sizes, synthetic vectors) is deterministic, so compare distributions only against runs of this same suite on the same machine.`,
       `Epic SLO (for reference, not gated here): ≤10 ms ideal / ≤50 ms acceptable per query. No pass/fail threshold — baseline-first; re-run post-fix to confirm.`,
