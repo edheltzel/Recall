@@ -658,7 +658,7 @@ const benchmarkCmd = program
 
 benchmarkCmd
   .command('run [suite]')
-  .description('Run benchmarks. Pass a suite id (A-E) to run just one; omit to run all available.')
+  .description('Run benchmarks. Pass a suite id (A-F) to run just one; omit to run all available.')
   .option('-p, --project <name>', 'Scope the benchmark to a specific project')
   .action(async (suite, options) => {
     await runBenchmark({ suite, project: options.project });
