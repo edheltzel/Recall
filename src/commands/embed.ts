@@ -3,6 +3,7 @@
 import { getDb } from '../db/connection.js';
 import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from '../lib/embeddings.js';
 import { writeEmbeddingMarker } from '../lib/embedding-marker.js';
+import { reindexVec, isVecAvailable } from '../db/vec.js';
 import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
@@ -149,6 +150,9 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
   // a stale DB. Embeddings were produced with the current EMBEDDING_MODEL.
   if (success > 0) {
     writeEmbeddingMarker(db);
+    // Keep the sqlite-vec index (#148) in sync with the canonical BLOBs.
+    // No-op when the extension is unavailable.
+    reindexVec(db);
   }
 
   console.log(`\nDone: ${success} embedded, ${failed} failed`);
@@ -236,8 +240,31 @@ export async function runRebackfill(): Promise<void> {
   });
   swap();
 
+  // Rebuild the sqlite-vec index (#148) from the new canonical BLOBs. The BLOBs
+  // are the atomic source of truth; the vec index is a derived cache (and
+  // self-heals via ensureVecIndexSynced on next startup). No-op when unavailable.
+  const indexed = reindexVec(db);
+
   console.log(`\nDone: ${updates.length} re-embedded, ${total - updates.length} pruned (orphan/too-short).`);
   console.log(`Marker set to ${EMBEDDING_MODEL} (${EMBEDDING_DIMENSIONS}d).`);
+  if (isVecAvailable()) {
+    console.log(`Vector index rebuilt: ${indexed} entries.`);
+  }
+}
+
+/**
+ * Rebuild the sqlite-vec index (#148) from the canonical embeddings BLOBs.
+ * Use after a manual change to the embeddings table, or to recover a dropped
+ * index. No-op (with a note) when the sqlite-vec extension is unavailable.
+ */
+export function runReindex(): void {
+  const db = getDb();
+  if (!isVecAvailable()) {
+    console.log('sqlite-vec extension unavailable — nothing to reindex. Search uses FTS5 + brute-force cosine.');
+    return;
+  }
+  const indexed = reindexVec(db);
+  console.log(`Vector index rebuilt: ${indexed} entries.`);
 }
 
 /**
