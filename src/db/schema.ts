@@ -497,8 +497,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source_table TEXT NOT NULL,
   source_id INTEGER NOT NULL,
-  model TEXT NOT NULL DEFAULT 'nomic-embed-text',
-  dimensions INTEGER NOT NULL DEFAULT 768,
+  model TEXT NOT NULL DEFAULT 'qwen3-embedding:0.6b',
+  dimensions INTEGER NOT NULL DEFAULT 1024,
   embedding BLOB NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(source_table, source_id)
@@ -510,6 +510,6 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
 `;
 
 // Note: sqlite-vec virtual tables are created dynamically after loading the extension
-// They use: CREATE VIRTUAL TABLE vec_xxx USING vec0(embedding float[768]);
+// They use: CREATE VIRTUAL TABLE vec_xxx USING vec0(embedding float[1024]);
 
 // Migration SQL lives in src/db/migrations.ts (ordered migration array)

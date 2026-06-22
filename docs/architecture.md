@@ -69,7 +69,7 @@ both.
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |
 | telos | Purpose framework entries (optional) | Yes |
 | documents | Imported standalone markdown documents (optional) | Yes |
-| embeddings | Vector embeddings for semantic search (768-dim, nomic-embed-text) | N/A |
+| embeddings | Vector embeddings for semantic search (1024-dim, qwen3-embedding:0.6b) | N/A |
 | dedup_lineage | Duplicate lineage audit trail from `recall dedup` (survivor, duplicate, reason, similarity, status) | No |
 
 All FTS5-indexed tables have automatic sync triggers.

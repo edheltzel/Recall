@@ -24,7 +24,7 @@ import { runAge } from './commands/age.js';
 import { runConsolidate } from './commands/consolidate.js';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_MIN_CLUSTER_SIZE } from './lib/consolidate.js';
 import { runCluster } from './commands/cluster.js';
-import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
+import { runEmbedBackfill, runRebackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
 import { runProvenanceBackfill } from './commands/provenance.js';
@@ -523,6 +523,14 @@ embedCmd
       limit: parseInt(options.limit, 10),
       force: options.force
     });
+    closeDb();
+  });
+
+embedCmd
+  .command('rebackfill')
+  .description('Re-embed all existing embeddings with the current model (atomic; one-time after a model swap, issue #107)')
+  .action(async () => {
+    await runRebackfill();
     closeDb();
   });
 
