@@ -21,6 +21,8 @@ import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './comman
 import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
 import { runPrune } from './commands/prune.js';
 import { runAge } from './commands/age.js';
+import { runConsolidate } from './commands/consolidate.js';
+import { DEFAULT_WINDOW_DAYS, DEFAULT_MIN_CLUSTER_SIZE } from './lib/consolidate.js';
 import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
@@ -184,6 +186,32 @@ program
       ageCutoff: options.ageCutoff,
       breadcrumbHorizon: options.breadcrumbHorizon,
       importanceThreshold: parseInt(options.importanceThreshold, 10)
+    });
+    closeDb();
+  });
+
+// recall consolidate — LLM consolidation pass (issue #141, Phase B of #53)
+// Clusters old, low-importance, un-pinned decisions/learnings per project +
+// time window and compresses each cluster into a derived LoA summary, then
+// demotes the sources so `recall age` retires them. Dry-run by default; the
+// --execute apply step runs in the hook-side engine via subprocess.
+program
+  .command('consolidate')
+  .description('Consolidate clusters of old low-importance decisions/learnings into derived LoA summaries and demote the sources (dry-run by default, --execute to apply)')
+  .option('--execute', 'Apply the plan: summarize each cluster and demote its sources (default is dry-run)')
+  .option('-t, --table <table>', 'Target table: decisions, learnings, all', 'all')
+  .option('--age-cutoff <duration>', 'Only consider records older than this (e.g., 90d, 180d)', `${DEFAULT_AGE_CUTOFF_DAYS}d`)
+  .option('--importance-threshold <n>', 'Only consider records with importance below this (1-10)', String(DEFAULT_IMPORTANCE_THRESHOLD))
+  .option('--window-days <n>', 'Time-window bucket width for clustering, in days', String(DEFAULT_WINDOW_DAYS))
+  .option('--min-cluster-size <n>', 'Minimum records for a cluster to be consolidated', String(DEFAULT_MIN_CLUSTER_SIZE))
+  .action(async (options) => {
+    await runConsolidate({
+      execute: options.execute,
+      table: options.table,
+      ageCutoff: options.ageCutoff,
+      importanceThreshold: parseInt(options.importanceThreshold, 10),
+      windowDays: parseInt(options.windowDays, 10),
+      minClusterSize: parseInt(options.minClusterSize, 10),
     });
     closeDb();
   });
@@ -748,7 +776,7 @@ program
   .option('-v, --vector', 'Use vector search only (semantic)')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {
