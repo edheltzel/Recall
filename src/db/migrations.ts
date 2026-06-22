@@ -290,6 +290,33 @@ export const MIGRATIONS: Migration[] = [
       // Column already exists — safe to ignore (fresh install via schema.ts).
     }
   },
+
+  // Migration 13 → 14: Access-tracking columns for frecency ranking (issue #152,
+  // B0 of Workstream B). The additive foundation for #153 (bump-on-use) and #154
+  // (frecency score) — this migration adds the columns ONLY: no bump logic and no
+  // ranking change. access_count defaults to 0; last_accessed is nullable (NULL
+  // until a row is first surfaced/used — never guessed). Applied to all five
+  // memory tables, the same set the provenance migration (8 → 9) established as
+  // surfaced in recall results, so every rankable row can carry a frecency signal.
+  // No indexes yet — deferred to #154, which defines how frecency is queried
+  // (YAGNI). FTS5 sync triggers are untouched: they reference only content/project
+  // columns, not these. Mirrors the 8 → 9 pattern: ALTER for upgrades, declared in
+  // schema.ts for fresh installs; the try/catch absorbs the column-exists case.
+  (db) => {
+    const tables = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'];
+    for (const table of tables) {
+      try {
+        db.prepare(`ALTER TABLE ${table} ADD COLUMN access_count INTEGER DEFAULT 0`).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install via schema.ts).
+      }
+      try {
+        db.prepare(`ALTER TABLE ${table} ADD COLUMN last_accessed DATETIME`).run();
+      } catch {
+        // Column already exists — safe to ignore (fresh install via schema.ts).
+      }
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------
