@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS messages (
   project TEXT,
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
+  access_count INTEGER DEFAULT 0,
+  last_accessed DATETIME,
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -42,6 +44,8 @@ CREATE TABLE IF NOT EXISTS decisions (
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'reverted')),
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
+  access_count INTEGER DEFAULT 0,
+  last_accessed DATETIME,
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -58,6 +62,8 @@ CREATE TABLE IF NOT EXISTS learnings (
   tags TEXT,
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
+  access_count INTEGER DEFAULT 0,
+  last_accessed DATETIME,
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -72,6 +78,8 @@ CREATE TABLE IF NOT EXISTS breadcrumbs (
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   expires_at DATETIME,
+  access_count INTEGER DEFAULT 0,
+  last_accessed DATETIME,
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -102,6 +110,8 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   -- LoA→LoA; this captures the generic "built from records X,Y,Z". Nullable —
   -- legacy/non-derived rows stay NULL (never guessed, ADR-0001).
   source_ids TEXT,
+  access_count INTEGER DEFAULT 0,
+  last_accessed DATETIME,
   FOREIGN KEY (parent_loa_id) REFERENCES loa_entries(id),
   FOREIGN KEY (message_range_start) REFERENCES messages(id),
   FOREIGN KEY (message_range_end) REFERENCES messages(id)

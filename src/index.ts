@@ -35,6 +35,8 @@ import { runPath } from './commands/path.js';
 import { runExport } from './commands/export.js';
 import { runDedup } from './commands/dedup.js';
 import { runRepair } from './commands/repair.js';
+import { runUpdate } from './commands/update.js';
+import { runUninstall } from './commands/uninstall.js';
 import { DEFAULT_SEMANTIC_THRESHOLD } from './lib/dedup.js';
 import {
   DEFAULT_AGE_CUTOFF_DAYS,
@@ -819,6 +821,42 @@ program
       }
       closeDb();
     }
+  });
+
+// recall update / recall uninstall — lifecycle commands.
+//
+// These delegate verbatim to the canonical bash scripts (update.sh /
+// uninstall.sh + lib/install-lib.sh), the single source of truth. We do not
+// declare their flags here: allowUnknownOption + helpOption(false) let every
+// flag pass straight through to the script (which owns validation and --help).
+// The forwarded args are read from process.argv so nothing is consumed by
+// Commander's own option parser.
+function forwardedArgs(commandName: string): string[] {
+  const argv = process.argv.slice(2); // drop node + script path
+  const idx = argv.indexOf(commandName);
+  return idx >= 0 ? argv.slice(idx + 1) : argv;
+}
+
+program
+  .command('update')
+  .description('Update Recall: pull latest, rebuild, migrate, refresh hooks (delegates to update.sh)')
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .helpOption(false)
+  .argument('[args...]', 'Flags forwarded to update.sh (--check, --dry-run, --force, --no-migrate, --no-confirm, --no-gum, --help)')
+  .action(() => {
+    process.exitCode = runUpdate(forwardedArgs('update'));
+  });
+
+program
+  .command('uninstall')
+  .description('Uninstall Recall from Claude Code / OpenCode / Pi (delegates to uninstall.sh)')
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .helpOption(false)
+  .argument('[args...]', 'Flags forwarded to uninstall.sh (--dry-run, --purge, --no-confirm, --skip-opencode, --skip-pi, --no-gum, --help)')
+  .action(() => {
+    process.exitCode = runUninstall(forwardedArgs('uninstall'));
   });
 
 // Parse and run
