@@ -65,9 +65,9 @@ import {
 	blobToEmbedding,
 	cosineSimilarity,
 	reciprocalRankFusion,
-	checkEmbeddingService,
 } from "./lib/embeddings.js";
 import { embedQueryCached } from "./lib/query-embedding-cache.js";
+import { checkEmbeddingServiceCached } from "./lib/availability-cache.js";
 import {
 	isRebackfillNeeded,
 	expectedEmbeddingMarker,
@@ -180,7 +180,10 @@ export async function hybridSearch(
 	let embeddingsAvailable = false;
 
 	try {
-		const serviceStatus = await checkEmbeddingService();
+		// #150: cache the Ollama liveness check (30s TTL) so it isn't an HTTP
+		// round-trip on every query. A stale "available" is self-correcting — the
+		// embed() below throws and the catch falls back to FTS-only.
+		const serviceStatus = await checkEmbeddingServiceCached();
 		if (serviceStatus.available) {
 			embeddingsAvailable = true;
 
