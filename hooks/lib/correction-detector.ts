@@ -68,16 +68,39 @@ const STRONG_PATTERNS: { label: string; re: RegExp }[] = [
   { label: 'thats-not-right', re: /that'?s not (right|correct)/i },
   // #137: targeted strong patterns for real corrections the precision-tuned
   // detector (PR #136, RedTeam finding #3) was letting through. Each is
-  // high-confidence ALONE — phrased so a benign-prose lookalike can't trip it
-  // (e.g. "you misunderstood" but not the affirmation "you understood";
-  // "no different than before" stays benign) — and is paired in the tests with a
-  // negative that must NOT fire. No bare pointer words are reintroduced.
-  { label: 'thats-not-it', re: /that'?s not it\b/i },
-  { label: 'thats-wrong-approach', re: /that'?s the wrong\b/i },
-  { label: 'you-misunderstood', re: /\byou(?:'ve| have)? misunderstood\b/i },
+  // high-confidence ALONE and deliberately NARROW so a benign-prose lookalike
+  // can't trip it — every constraint below has a paired negative guard in the
+  // tests (RedTeam NO-GO on PR #159's first cut found 9 false positives when
+  // these were unanchored/greedy). No bare pointer words are reintroduced.
+  //
+  //   - thats-not-it: `(?!')` keeps the possessive "that's not it's job" benign.
+  //   - thats-wrong-approach: a dev-noun allowlist, NOT bare "the wrong <noun>",
+  //     so "the wrong number/assumption" stay benign.
+  //   - you-misunderstood: end-bounded (optionally "me"/"my point"), so the
+  //     third-party "you misunderstood the assignment" stays benign.
+  //   - revert-undo-that: anchored + end-bounded to a terse object, so forward /
+  //     polite / future / user-state requests ("revert that … when you get a
+  //     chance", "can you undo this for me please") stay benign.
+  //   - nope-different: the redirect target is a dev-noun allowlist, so a topic
+  //     shift ("nope, different topic") and the idiom "different strokes" stay benign.
+  { label: 'thats-not-it', re: /that'?s not it\b(?!')/i },
+  {
+    label: 'thats-wrong-approach',
+    re: /that'?s the wrong (?:approach|file|direction|fix|change|way|method|one|order|function|command|version|branch|path|line|idea)\b/i,
+  },
   { label: 'you-got-it-wrong', re: /\byou(?:'ve| have)? got (?:it|this|that) wrong\b/i },
-  { label: 'revert-undo-that', re: /\b(?:revert|undo) (?:that|this|it)\b/i },
-  { label: 'nope-different', re: /^(?:no|nope)[,.\s!—–-]+different\s+(?!than\b|from\b)\w/i },
+  {
+    label: 'you-misunderstood',
+    re: /\byou(?:'ve| have)? misunderstood(?:\s+(?:me|my point|the point|what i|the question))?\s*[.!]?$/i,
+  },
+  {
+    label: 'revert-undo-that',
+    re: /^(?:revert|undo) (?:that|this|it)(?:\s+(?:last\s+)?(?:change|edit|commit|line|fix|file|diff|patch))?[.!]?$/i,
+  },
+  {
+    label: 'nope-different',
+    re: /^(?:no|nope)[,.\s!—–-]+different\s+(?:file|approach|function|method|directory|folder|path|one|place|line|branch|command|name|variable|module|class)\b/i,
+  },
 ];
 
 // ── Pass 2: WEAK leads (require a directive) ─────────────────────────────────

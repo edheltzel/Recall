@@ -100,16 +100,17 @@ describe('benign prose with a weak lead but no verb directive (#52 over-fire fix
 
 describe('#137: missed real corrections now captured (recall, no precision regression)', () => {
   // Each phrase class from issue #137 (RedTeam finding #3 on PR #136) fires as a
-  // strong pattern...
+  // strong pattern — terse corrections directed at the agent's just-done work.
   test.each([
     "that's not it",
     "no, that's not it",
-    "you misunderstood",
-    "you've misunderstood the requirement",
+    'you misunderstood',
+    "you've misunderstood",
     'you have misunderstood me',
     'revert that',
     'undo that',
-    'please revert that change',
+    'undo it',
+    'revert that change',
     "that's the wrong approach",
     "that's the wrong file",
     'you got it wrong',
@@ -121,18 +122,36 @@ describe('#137: missed real corrections now captured (recall, no precision regre
     expect(detectCorrection(text).isCorrection).toBe(true);
   });
 
-  // ...and each is paired with a benign-prose lookalike that must NOT fire, so the
-  // additions raise recall WITHOUT reintroducing the false positives PR #136 removed.
-  // Mutation: loosen any new pattern toward its bare lead → a row below flips → RED.
+  // No-false-positive-regression guard (PR #159 RedTeam NO-GO). The first nine are
+  // the exact benign phrases RedTeam confirmed fired ONLY on the over-broad first
+  // cut; the rest broaden the sample to realistic developer prose. ALL must stay
+  // benign — these are the verbatim-write false positives #137 forbids reintroducing.
+  // Mutation: loosen any new pattern back toward its unanchored/greedy form → a row
+  // below flips → RED.
   test.each([
-    "that's not ideal, but ship it", // "not it" vs "not ideal"
-    'you understood the spec perfectly', // affirmation, not "misunderstood"
-    'can you add an undo button to the toolbar', // "undo button", not "undo that/this/it"
-    "that's the right approach", // "the right", not "the wrong"
+    // —— the nine RedTeam-confirmed regressions ——
+    'revert that commit when you get a chance', // forward request, not a correction
+    'undo that last cell in my notebook', // request about the user's own state
+    'can you undo this for me please', // polite request
+    'lets revert this approach next sprint', // planning, future tense
+    "that's the wrong number you dialed", // fires on ANY "wrong <noun>"
+    "that's the wrong assumption people make", // about a concept, not the agent
+    'nope, different topic entirely', // benign topic shift, no dev target
+    'no, different strokes for different folks', // idiom
+    'you misunderstood the assignment', // third-party / mid-sentence remark
+    // —— broadened realistic developer prose ——
+    'can you revert the migration after the deploy lands', // forward request
+    'we should undo this refactor eventually', // planning
+    'undo functionality is broken in the editor', // "undo" as a subject, no pointer
+    "that's the wrong button in the mockup, FYI", // non-dev-action noun
+    'you misunderstood my earlier message, let me re-explain', // trailing object
+    "you understood the spec perfectly", // affirmation, not "misunderstood"
     'you got it exactly right', // "got it right", not "got it wrong"
     'you got it', // bare affirmation
-    'no different than before, leave it as is', // benign "no different than" idiom
-    'no, the diff looks different now', // pointer prose, not "no, different <target>"
+    'no different than before, leave it as is', // "no different than" idiom
+    "that's not ideal, but ship it", // "not it" vs "not ideal"
+    "that's not it's job to validate", // possessive "it's", not the correction
+    "let's go with a different approach to logging", // not a "no/nope" rejection lead
   ])('%j is NOT a correction', (text) => {
     expect(detectCorrection(text).isCorrection).toBe(false);
   });
