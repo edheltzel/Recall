@@ -11,7 +11,7 @@ TypeScript source for the `recall` CLI (Commander), the `recall-mcp` MCP server,
 - `index.ts` — CLI entry (Commander)
 - `mcp-server.ts` — MCP server entry (`@modelcontextprotocol/sdk`)
 - `version.ts` — version sourced from `package.json`
-- `commands/` — CLI subcommands · `db/` — connection + schema/FTS5 · `lib/` — core memory, embeddings, import, project utils · `types/` — shared types
+- `commands/` — CLI subcommands · `db/` — connection + schema/FTS5 · `lib/` — core memory, embeddings, import, project utils, lifecycle delegation (`lifecycle.ts` → update.sh/uninstall.sh) · `types/` — shared types
 
 Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `src/`) and build output (`dist/`, generated).
 
