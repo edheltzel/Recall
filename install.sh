@@ -91,8 +91,13 @@ do_install() {
   RESOLVED_DB_PATH="$(recall_resolve_db_path)"
 
   # Step counter — 11 always-run steps (added Migrate); +1 each for OpenCode/Pi.
+  # Packaged installs (npm / npx / `bun install -g` via `recall install`) arrive
+  # with deps vendored, dist/ prebuilt, and the bins already on PATH, so the
+  # Installing / Building / Linking steps are skipped (see RECALL_PACKAGED guard
+  # below) — drop 3 from the total.
   STEP_NUM=0
   STEP_TOTAL=11
+  [[ "${RECALL_PACKAGED:-false}" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL - 3))
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
@@ -137,26 +142,34 @@ do_install() {
   recall_mark_install_incomplete
   recall_auto_migrate
 
-  _step "Installing" "Bun dependencies"
-  if ! _run_quiet "bun install" bun install; then
-    log_info "Try running: bun install (manually to see errors)"
-    exit 1
-  fi
+  # Bootstrap steps — vendoring deps, building dist/, and linking the global
+  # bins. Packaged installs (RECALL_PACKAGED=1, set by `recall install`) already
+  # have all three from the package manager, so they are skipped there. The
+  # git-checkout `./install.sh` path (RECALL_PACKAGED unset) runs them as before.
+  if [[ "${RECALL_PACKAGED:-false}" != "true" ]]; then
+    _step "Installing" "Bun dependencies"
+    if ! _run_quiet "bun install" bun install; then
+      log_info "Try running: bun install (manually to see errors)"
+      exit 1
+    fi
 
-  _step "Building" "Compiling bundles"
-  if ! _run_quiet "bun run build" bun run build; then
-    log_info "Try running: bun run build (manually to see errors)"
-    exit 1
-  fi
+    _step "Building" "Compiling bundles"
+    if ! _run_quiet "bun run build" bun run build; then
+      log_info "Try running: bun run build (manually to see errors)"
+      exit 1
+    fi
 
-  _step "Linking" "Linking recall + recall-mcp globally"
-  # recall_link_global does bun link → verify → npm link fallback → verify.
-  # 0.7.22 hardening: the verify step catches the silent-no-op case where
-  # `bun link` exits 0 but doesn't actually refresh ~/.bun/bin/recall{,-mcp},
-  # which was the root cause of the "recall not on PATH after install" class
-  # of failures.
-  if ! recall_link_global; then
-    exit 1
+    _step "Linking" "Linking recall + recall-mcp globally"
+    # recall_link_global does bun link → verify → npm link fallback → verify.
+    # 0.7.22 hardening: the verify step catches the silent-no-op case where
+    # `bun link` exits 0 but doesn't actually refresh ~/.bun/bin/recall{,-mcp},
+    # which was the root cause of the "recall not on PATH after install" class
+    # of failures.
+    if ! recall_link_global; then
+      exit 1
+    fi
+  else
+    log_info "Packaged install — deps vendored, dist/ prebuilt, bins on PATH (skipping bun install/build/link)"
   fi
 
   _step "Database" "Initializing memory database"
@@ -339,6 +352,7 @@ help | --help | -h)
   echo "  RECALL_NO_GUM=1                       Permanently disable gum (same as --no-gum)"
   echo "  NO_COLOR=1                            Disable ANSI colors"
   echo "  RECALL_VERBOSE=1                      Show full output of bun install/build"
+  echo "  RECALL_PACKAGED=1                     Packaged install (set by 'recall install'): skip bun install/build/link"
   ;;
 *)
   while [[ $# -gt 0 ]]; do
