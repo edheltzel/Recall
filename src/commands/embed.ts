@@ -1,9 +1,10 @@
 // recall embed command - Generate and store embeddings for semantic search
 
 import { getDb } from '../db/connection.js';
-import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL } from '../lib/embeddings.js';
+import { embed, embeddingToBlob, blobToEmbedding, cosineSimilarity, checkEmbeddingService, reciprocalRankFusion, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from '../lib/embeddings.js';
+import { writeEmbeddingMarker } from '../lib/embedding-marker.js';
 import { notMarkedDuplicateSql } from '../lib/dedup.js';
-import { embeddingTextFor } from '../lib/repair.js';
+import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
 
@@ -47,7 +48,7 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
   if (!serviceStatus.available) {
     console.error(`\nError: Embedding service not available at ${serviceStatus.url}`);
     console.error(`Make sure Ollama is running with ${serviceStatus.model} model.`);
-    console.error(`\nTo install: ssh nano "ollama pull nomic-embed-text"`);
+    console.error(`\nTo install: ollama pull ${serviceStatus.model}`);
     process.exit(1);
   }
 
@@ -144,7 +145,99 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
     }
   }
 
+  // Stamp the model+dims marker (issue #107) so future model swaps can detect
+  // a stale DB. Embeddings were produced with the current EMBEDDING_MODEL.
+  if (success > 0) {
+    writeEmbeddingMarker(db);
+  }
+
   console.log(`\nDone: ${success} embedded, ${failed} failed`);
+}
+
+/**
+ * Atomic re-backfill (issue #107): re-embed EVERY currently-embedded row with
+ * the current model, then swap them in under one transaction. This is the
+ * one-time migration after the model/dimension swap (nomic 768 → qwen3 1024).
+ *
+ * Atomicity: all embeddings are produced FIRST (no DB writes); only if every
+ * one succeeds do we open a single transaction that clears the embeddings
+ * table, re-inserts the new vectors, and writes the marker. A failure mid-way
+ * (e.g. the embedding service dies) throws before any mutation, so the DB is
+ * never left in a mixed-model state. Orphaned rows (source deleted) and rows
+ * whose source text is now too short are pruned as a side effect of the clear.
+ *
+ * OPTIONAL invariant: if the embedding service is unavailable this is a no-op
+ * with a clear message — re-backfill is a graceful enhancement, never required.
+ */
+export async function runRebackfill(): Promise<void> {
+  const db = getDb();
+
+  const serviceStatus = await checkEmbeddingService();
+  if (!serviceStatus.available) {
+    console.error(`Error: Embedding service not available at ${serviceStatus.url}`);
+    console.error(`Make sure Ollama is running with ${serviceStatus.model} model.`);
+    console.error(`\nTo install: ollama pull ${serviceStatus.model}`);
+    console.error('\nRe-backfill skipped (no changes made). Search continues to work on FTS5.');
+    process.exit(1);
+  }
+
+  const total = (db.prepare('SELECT COUNT(*) AS c FROM embeddings').get() as { c: number }).c;
+  if (total === 0) {
+    writeEmbeddingMarker(db);
+    console.log(`No embeddings to re-backfill. Marker set to ${EMBEDDING_MODEL} (${EMBEDDING_DIMENSIONS}d).`);
+    return;
+  }
+
+  console.log(`Re-backfilling ${total} embeddings → ${EMBEDDING_MODEL} (${EMBEDDING_DIMENSIONS}d)...\n`);
+
+  // Phase 1: produce every new embedding up front (no DB writes yet). We embed
+  // only rows that still have a resolvable, long-enough source — the rest are
+  // dropped by the clear in phase 2, keeping the table uniform.
+  const updates: Array<{ table: string; id: number; model: string; dimensions: number; blob: Buffer }> = [];
+  let processed = 0;
+
+  for (const config of EMBED_SOURCES) {
+    const cols = config.columns.map(c => `t.${c}`).join(', ');
+    const rows = db.prepare(
+      `SELECT t.id AS id, ${cols}
+       FROM ${config.table} t
+       JOIN embeddings e ON e.source_table = ? AND e.source_id = t.id`
+    ).all(config.table) as Array<Record<string, unknown>>;
+
+    for (const row of rows) {
+      processed++;
+      const text = embeddingTextFor(config.table, row).trim();
+      if (text.length < MIN_EMBED_TEXT_LENGTH) continue; // pruned by the clear
+
+      process.stdout.write(`  [${processed}/${total}] Re-embedding ${config.table}#${row.id}... `);
+      const result = await embed(text); // throws on failure → aborts before any mutation
+      updates.push({
+        table: config.table,
+        id: row.id as number,
+        model: result.model,
+        dimensions: result.dimensions,
+        blob: embeddingToBlob(result.embedding),
+      });
+      console.log(`✓ (${result.dimensions}d)`);
+    }
+  }
+
+  // Phase 2: atomic swap. Clear the old (possibly mixed-model) rows, insert the
+  // freshly produced ones, and stamp the marker — all or nothing.
+  const insert = db.prepare(
+    `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding) VALUES (?, ?, ?, ?, ?)`
+  );
+  const swap = db.transaction(() => {
+    db.prepare('DELETE FROM embeddings').run();
+    for (const u of updates) {
+      insert.run(u.table, u.id, u.model, u.dimensions, u.blob);
+    }
+    writeEmbeddingMarker(db);
+  });
+  swap();
+
+  console.log(`\nDone: ${updates.length} re-embedded, ${total - updates.length} pruned (orphan/too-short).`);
+  console.log(`Marker set to ${EMBEDDING_MODEL} (${EMBEDDING_DIMENSIONS}d).`);
 }
 
 /**
