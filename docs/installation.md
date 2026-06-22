@@ -4,6 +4,8 @@
 
 This guide covers everything needed to install Recall: prerequisites, what the installer does, verification, session extraction setup, and environment variables.
 
+> **Not sure which command to run** (install vs. update vs. uninstall, npm vs. source, re-install, custom DB path, recovery)? See **[Managing Recall — which command do I run?](lifecycle.md)** for the decision table.
+
 ---
 
 ## Prerequisites
