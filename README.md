@@ -57,11 +57,29 @@ Four things that set Recall apart from cloud-hosted memory layers and from agent
 
 ## Quick Start
 
+Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
+
+```bash
+# Primary — install from npm with Bun, then configure
+bun install -g recall-memory
+recall install
+
+# Secondary — one-shot via npx (Bun must be on PATH)
+npx --package=recall-memory recall install
+```
+
+`recall install` runs the canonical setup (MCP server, hooks, slash commands, guides) for all detected agents. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+
+<details>
+<summary>Install from source instead</summary>
+
 ```bash
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
 ./install.sh
 ```
+
+</details>
 
 Verify it works:
 
@@ -98,6 +116,8 @@ release and the exact command to run. From a shell:
 ./update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
+Installed from npm? Use `recall update` (same flags) — or `bun install -g recall-memory@latest && recall install` to bump the binary.
+
 ### Uninstalling
 
 ```bash
@@ -105,6 +125,8 @@ release and the exact command to run. From a shell:
 ./uninstall.sh             # surgical remove; preserves ~/.agents/Recall/ (DB + backups)
 ./uninstall.sh --purge     # also destroy ~/.agents/Recall/ and any legacy DB (confirmed)
 ```
+
+Installed from npm? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
 

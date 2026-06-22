@@ -66,6 +66,40 @@ const STRONG_PATTERNS: { label: string; re: RegExp }[] = [
   { label: 'thats-wrong', re: /that'?s wrong/i },
   { label: 'thats-incorrect', re: /that'?s incorrect/i },
   { label: 'thats-not-right', re: /that'?s not (right|correct)/i },
+  // #137: targeted strong patterns for real corrections the precision-tuned
+  // detector (PR #136, RedTeam finding #3) was letting through. On the
+  // verbatim-write surface precision wins, so each pattern fires only on the
+  // TERSE correction. THREE structural constraints, together (RedTeam needed all
+  // three across 3 adversarial passes — any one alone leaks):
+  //   1. start-anchor with only a short `no/nope/actually` rejection lead — so
+  //      arbitrary leading prose ("the quiz says …", "honestly …", "she thinks …")
+  //      can't carry the trigger into a benign sentence;
+  //   2. end-bound (`\s*[.!]?$`) — so trailing prose ("…wrong path in life") is benign;
+  //   3. for "that's the wrong X", a TIGHT dev-action noun allowlist — a bare `\w+`
+  //      is NOT a narrowing (it fires on "wrong answer/number/tree"); the allowlist
+  //      separates "wrong approach/file" (correction) from "wrong answer" (prose).
+  // The tradeoff is deliberate and per #137/PR #136: missing "<long prose> wrong
+  // approach" is acceptable; a false positive on generic prose is not. No bare
+  // pointer words are reintroduced.
+  { label: 'thats-not-it', re: /^(?:no|nope|actually)?[,.\s—–-]*that'?s not it\s*[.!]?$/i },
+  {
+    label: 'thats-wrong-approach',
+    re: /^(?:no|nope|actually)?[,.\s—–-]*that'?s the wrong (?:approach|file|fix|change|line|method|function|command|path|import|name)\s*[.!]?$/i,
+  },
+  {
+    label: 'you-got-it-wrong',
+    re: /^(?:no|nope|actually)?[,.\s—–-]*you(?:'ve| have)? got (?:it|this|that) wrong\s*[.!]?$/i,
+  },
+  // ── These three were clean across all 3 RedTeam passes — left untouched. ──
+  {
+    label: 'you-misunderstood',
+    re: /\byou(?:'ve| have)? misunderstood(?:\s+(?:me|my point|the point|what i|the question))?\s*[.!]?$/i,
+  },
+  {
+    label: 'revert-undo-that',
+    re: /^(?:revert|undo) (?:that|this|it)(?:\s+(?:last\s+)?(?:change|edit|commit|line|fix|file|diff|patch))?[.!]?$/i,
+  },
+  { label: 'nope-different', re: /^(?:no|nope)[,.\s!—–-]+different \w+\s*[.!]?$/i },
 ];
 
 // ── Pass 2: WEAK leads (require a directive) ─────────────────────────────────

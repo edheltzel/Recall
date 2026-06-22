@@ -62,12 +62,12 @@ import {
 	vectorRowContentProvenance,
 } from "./lib/memory.js";
 import {
-	embed,
 	blobToEmbedding,
 	cosineSimilarity,
 	reciprocalRankFusion,
-	checkEmbeddingService,
 } from "./lib/embeddings.js";
+import { embedQueryCached } from "./lib/query-embedding-cache.js";
+import { checkEmbeddingServiceCached } from "./lib/availability-cache.js";
 import {
 	isRebackfillNeeded,
 	expectedEmbeddingMarker,
@@ -180,11 +180,17 @@ export async function hybridSearch(
 	let embeddingsAvailable = false;
 
 	try {
-		const serviceStatus = await checkEmbeddingService();
+		// #150: cache the Ollama liveness check (30s TTL) so it isn't an HTTP
+		// round-trip on every query. A stale "available" is self-correcting — the
+		// embed() below throws and the catch falls back to FTS-only.
+		const serviceStatus = await checkEmbeddingServiceCached();
 		if (serviceStatus.available) {
 			embeddingsAvailable = true;
 
-			const queryResult = await embed(query);
+			// #149: cache the query embedding in-process so a repeated query in
+			// this long-lived server skips the Ollama embed call. Keyed on
+			// (query, model tag, dims) — a model change can never serve a stale hit.
+			const queryResult = await embedQueryCached(query);
 			// Fast tier: sqlite-vec native KNN when the extension loaded (#148);
 			// otherwise the brute-force cosine scan. Both exclude recall-dedup
 			// marked duplicates and return the top limit*2 in the same order.

@@ -98,6 +98,104 @@ describe('benign prose with a weak lead but no verb directive (#52 over-fire fix
   });
 });
 
+describe('#137: missed real corrections now captured (recall, no precision regression)', () => {
+  // Each phrase class from issue #137 (RedTeam finding #3 on PR #136) fires as a
+  // strong pattern — terse corrections directed at the agent's just-done work.
+  test.each([
+    "that's not it",
+    "no, that's not it", // short rejection lead is allowed (and is a correction)
+    'you misunderstood',
+    "you've misunderstood",
+    'you have misunderstood me',
+    'revert that',
+    'undo that',
+    'undo it',
+    'revert that change',
+    "that's the wrong approach",
+    "that's the wrong file",
+    "that's the wrong fix",
+    'you got it wrong',
+    "you've got it wrong",
+    'no, you got it wrong', // rejection lead
+    'nope, different file',
+    'no, different approach',
+    'nope — different function',
+  ])('%j IS a correction', (text) => {
+    expect(detectCorrection(text).isCorrection).toBe(true);
+  });
+
+  // No-false-positive-regression guard (PR #159 RedTeam NO-GO ×2). The patterns
+  // are STRUCTURAL (terse + end-bounded), not allowlists — so the guard probes
+  // GENERIC NON-CODING prose, the surface where the brittle allowlist forms leaked.
+  // ALL must stay benign — these are the verbatim-write false positives #137 forbids.
+  // Mutation: drop the `\s*[.!]?$` end-bound (or restore a noun allowlist) → trailing-
+  // prose rows below flip → RED.
+  test.each([
+    // —— RedTeam round 3: 10 single-noun "wrong <noun>" + leading-prefix leaks ——
+    "that's the wrong answer",
+    "that's the wrong number",
+    "that's the wrong tree", // bark up the wrong tree
+    "that's the wrong color",
+    "that's the wrong question",
+    "that's the wrong moment",
+    "that's the wrong guy",
+    "that's the wrong call",
+    "that's the wrong idea",
+    "that's the wrong person",
+    'haha you got it wrong', // leading prefix, no rejection lead
+    'the quiz says you got it wrong',
+    'sometimes you got it wrong',
+    'lol you got it wrong',
+    "honestly that's not it", // leading prefix that is NOT a short rejection lead
+    // —— RedTeam round 2: 13 fresh generic-prose false positives ——
+    "that's the wrong way to think about it",
+    "that's the wrong idea about marriage",
+    "that's the wrong way to raise a child",
+    "that's the wrong one to blame",
+    "that's the wrong order at the restaurant",
+    "that's the wrong line of reasoning",
+    "that's the wrong path in life",
+    "that's the wrong version of events",
+    'you got it wrong in the quiz',
+    "you got it wrong on last week's trivia night",
+    'you have got this wrong about the weather forecast',
+    'nope, different name though',
+    "that's not it, but close",
+    // —— RedTeam round 1: 9 confirmed regressions (still must hold) ——
+    'revert that commit when you get a chance', // forward request
+    'undo that last cell in my notebook', // request about the user's own state
+    'can you undo this for me please', // polite request
+    'lets revert this approach next sprint', // planning, future tense
+    "that's the wrong number you dialed", // trailing prose
+    "that's the wrong assumption people make", // about a concept
+    'nope, different topic entirely', // topic shift + trailing
+    'no, different strokes for different folks', // idiom
+    'you misunderstood the assignment', // third-party / trailing object
+    // —— broadened generic + developer prose ——
+    'can you revert the migration after the deploy lands',
+    'we should undo this refactor eventually',
+    'undo functionality is broken in the editor', // "undo" as a subject, no pointer
+    "you understood the spec perfectly", // affirmation, not "misunderstood"
+    'you got it exactly right', // "got it right", not "got it wrong"
+    'you got it', // bare affirmation
+    'no different than before, leave it as is', // "no different than" idiom
+    "that's not ideal, but ship it", // "not it" vs "not ideal"
+    "that's not it's job to validate", // possessive "it's", not the correction
+    "let's go with a different approach to logging", // not a "no/nope" rejection lead
+  ])('%j is NOT a correction', (text) => {
+    expect(detectCorrection(text).isCorrection).toBe(false);
+  });
+
+  test('reports the new pattern labels', () => {
+    expect(detectCorrection("that's not it").matched).toBe('thats-not-it');
+    expect(detectCorrection('you misunderstood').matched).toBe('you-misunderstood');
+    expect(detectCorrection('revert that').matched).toBe('revert-undo-that');
+    expect(detectCorrection("that's the wrong approach").matched).toBe('thats-wrong-approach');
+    expect(detectCorrection('you got it wrong').matched).toBe('you-got-it-wrong');
+    expect(detectCorrection('nope, different file').matched).toBe('nope-different');
+  });
+});
+
 describe('config-overridable extra patterns', () => {
   test('an env-provided pattern fires like a strong pattern; absent it does not', () => {
     expect(detectCorrection('zoinks the build broke').isCorrection).toBe(false);

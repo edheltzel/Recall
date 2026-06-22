@@ -15,8 +15,50 @@ import { join } from 'path';
 import { resolveRepoRoot, runLifecycleScript } from '../../src/lib/lifecycle.js';
 import { runUpdate } from '../../src/commands/update.js';
 import { runUninstall } from '../../src/commands/uninstall.js';
+import { runInstall } from '../../src/commands/install.js';
 
 const REPO = process.cwd();
+
+describe('lifecycle: recall install (packaged-mode delegation)', () => {
+  let root: string;
+  afterEach(() => {
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  test('forwards to install.sh with RECALL_PACKAGED=1 in the env', () => {
+    root = mkdtempSync(join(tmpdir(), 'recall-install-'));
+    writeFileSync(join(root, 'install.sh'), '#!/bin/bash\nexit 0\n');
+
+    let captured: { script: string; args: string[]; env?: NodeJS.ProcessEnv } | undefined;
+    const code = runInstall(['--yes'], {
+      repoRoot: root,
+      spawn: (script, args, env) => {
+        captured = { script, args, env };
+        return 0;
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(captured?.script).toBe(join(root, 'install.sh'));
+    expect(captured?.args).toEqual(['--yes']);
+    // Packaged mode is the whole point: install.sh must skip bun install/build/link.
+    expect(captured?.env?.RECALL_PACKAGED).toBe('1');
+  });
+
+  test('missing install.sh returns 1 without spawning', () => {
+    root = mkdtempSync(join(tmpdir(), 'recall-install-')); // no script
+    let spawned = false;
+    const code = runInstall([], {
+      repoRoot: root,
+      spawn: () => {
+        spawned = true;
+        return 0;
+      },
+    });
+    expect(code).toBe(1);
+    expect(spawned).toBe(false);
+  });
+});
 
 describe('lifecycle: resolveRepoRoot', () => {
   test('honors $RECALL_REPO_DIR (trimmed) over derivation', () => {
