@@ -98,6 +98,55 @@ describe('benign prose with a weak lead but no verb directive (#52 over-fire fix
   });
 });
 
+describe('#137: missed real corrections now captured (recall, no precision regression)', () => {
+  // Each phrase class from issue #137 (RedTeam finding #3 on PR #136) fires as a
+  // strong pattern...
+  test.each([
+    "that's not it",
+    "no, that's not it",
+    "you misunderstood",
+    "you've misunderstood the requirement",
+    'you have misunderstood me',
+    'revert that',
+    'undo that',
+    'please revert that change',
+    "that's the wrong approach",
+    "that's the wrong file",
+    'you got it wrong',
+    "you've got it wrong",
+    'nope, different file',
+    'no, different approach',
+    'nope — different function entirely',
+  ])('%j IS a correction', (text) => {
+    expect(detectCorrection(text).isCorrection).toBe(true);
+  });
+
+  // ...and each is paired with a benign-prose lookalike that must NOT fire, so the
+  // additions raise recall WITHOUT reintroducing the false positives PR #136 removed.
+  // Mutation: loosen any new pattern toward its bare lead → a row below flips → RED.
+  test.each([
+    "that's not ideal, but ship it", // "not it" vs "not ideal"
+    'you understood the spec perfectly', // affirmation, not "misunderstood"
+    'can you add an undo button to the toolbar', // "undo button", not "undo that/this/it"
+    "that's the right approach", // "the right", not "the wrong"
+    'you got it exactly right', // "got it right", not "got it wrong"
+    'you got it', // bare affirmation
+    'no different than before, leave it as is', // benign "no different than" idiom
+    'no, the diff looks different now', // pointer prose, not "no, different <target>"
+  ])('%j is NOT a correction', (text) => {
+    expect(detectCorrection(text).isCorrection).toBe(false);
+  });
+
+  test('reports the new pattern labels', () => {
+    expect(detectCorrection("that's not it").matched).toBe('thats-not-it');
+    expect(detectCorrection('you misunderstood').matched).toBe('you-misunderstood');
+    expect(detectCorrection('revert that').matched).toBe('revert-undo-that');
+    expect(detectCorrection("that's the wrong approach").matched).toBe('thats-wrong-approach');
+    expect(detectCorrection('you got it wrong').matched).toBe('you-got-it-wrong');
+    expect(detectCorrection('nope, different file').matched).toBe('nope-different');
+  });
+});
+
 describe('config-overridable extra patterns', () => {
   test('an env-provided pattern fires like a strong pattern; absent it does not', () => {
     expect(detectCorrection('zoinks the build broke').isCorrection).toBe(false);

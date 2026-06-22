@@ -66,6 +66,18 @@ const STRONG_PATTERNS: { label: string; re: RegExp }[] = [
   { label: 'thats-wrong', re: /that'?s wrong/i },
   { label: 'thats-incorrect', re: /that'?s incorrect/i },
   { label: 'thats-not-right', re: /that'?s not (right|correct)/i },
+  // #137: targeted strong patterns for real corrections the precision-tuned
+  // detector (PR #136, RedTeam finding #3) was letting through. Each is
+  // high-confidence ALONE — phrased so a benign-prose lookalike can't trip it
+  // (e.g. "you misunderstood" but not the affirmation "you understood";
+  // "no different than before" stays benign) — and is paired in the tests with a
+  // negative that must NOT fire. No bare pointer words are reintroduced.
+  { label: 'thats-not-it', re: /that'?s not it\b/i },
+  { label: 'thats-wrong-approach', re: /that'?s the wrong\b/i },
+  { label: 'you-misunderstood', re: /\byou(?:'ve| have)? misunderstood\b/i },
+  { label: 'you-got-it-wrong', re: /\byou(?:'ve| have)? got (?:it|this|that) wrong\b/i },
+  { label: 'revert-undo-that', re: /\b(?:revert|undo) (?:that|this|it)\b/i },
+  { label: 'nope-different', re: /^(?:no|nope)[,.\s!—–-]+different\s+(?!than\b|from\b)\w/i },
 ];
 
 // ── Pass 2: WEAK leads (require a directive) ─────────────────────────────────
