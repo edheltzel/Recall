@@ -68,19 +68,29 @@ const STRONG_PATTERNS: { label: string; re: RegExp }[] = [
   { label: 'thats-not-right', re: /that'?s not (right|correct)/i },
   // #137: targeted strong patterns for real corrections the precision-tuned
   // detector (PR #136, RedTeam finding #3) was letting through. On the
-  // verbatim-write surface precision wins, so every pattern here is STRUCTURAL,
-  // not a noun allowlist: each fires only on the TERSE correction and is
-  // end-bounded (`\s*[.!]?$`) so any trailing prose makes it benign. The
-  // tradeoff is deliberate — missing "that's the wrong approach, <long prose>"
-  // is acceptable; a false positive on generic prose ("that's the wrong path in
-  // life") is not. No bare pointer words are reintroduced.
-  //
-  // End-bounding is the load-bearing constraint: a noun allowlist cannot tell
-  // "wrong approach" (correction) from "wrong path in life" (prose), but the
-  // terse end-bound can — the latter always carries trailing words.
-  { label: 'thats-not-it', re: /that'?s not it\s*[.!]?$/i },
-  { label: 'thats-wrong-approach', re: /that'?s the wrong \w+\s*[.!]?$/i },
-  { label: 'you-got-it-wrong', re: /\byou(?:'ve| have)? got (?:it|this|that) wrong\s*[.!]?$/i },
+  // verbatim-write surface precision wins, so each pattern fires only on the
+  // TERSE correction. THREE structural constraints, together (RedTeam needed all
+  // three across 3 adversarial passes — any one alone leaks):
+  //   1. start-anchor with only a short `no/nope/actually` rejection lead — so
+  //      arbitrary leading prose ("the quiz says …", "honestly …", "she thinks …")
+  //      can't carry the trigger into a benign sentence;
+  //   2. end-bound (`\s*[.!]?$`) — so trailing prose ("…wrong path in life") is benign;
+  //   3. for "that's the wrong X", a TIGHT dev-action noun allowlist — a bare `\w+`
+  //      is NOT a narrowing (it fires on "wrong answer/number/tree"); the allowlist
+  //      separates "wrong approach/file" (correction) from "wrong answer" (prose).
+  // The tradeoff is deliberate and per #137/PR #136: missing "<long prose> wrong
+  // approach" is acceptable; a false positive on generic prose is not. No bare
+  // pointer words are reintroduced.
+  { label: 'thats-not-it', re: /^(?:no|nope|actually)?[,.\s—–-]*that'?s not it\s*[.!]?$/i },
+  {
+    label: 'thats-wrong-approach',
+    re: /^(?:no|nope|actually)?[,.\s—–-]*that'?s the wrong (?:approach|file|fix|change|line|method|function|command|path|import|name)\s*[.!]?$/i,
+  },
+  {
+    label: 'you-got-it-wrong',
+    re: /^(?:no|nope|actually)?[,.\s—–-]*you(?:'ve| have)? got (?:it|this|that) wrong\s*[.!]?$/i,
+  },
+  // ── These three were clean across all 3 RedTeam passes — left untouched. ──
   {
     label: 'you-misunderstood',
     re: /\byou(?:'ve| have)? misunderstood(?:\s+(?:me|my point|the point|what i|the question))?\s*[.!]?$/i,

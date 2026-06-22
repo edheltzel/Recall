@@ -103,7 +103,7 @@ describe('#137: missed real corrections now captured (recall, no precision regre
   // strong pattern — terse corrections directed at the agent's just-done work.
   test.each([
     "that's not it",
-    "no, that's not it",
+    "no, that's not it", // short rejection lead is allowed (and is a correction)
     'you misunderstood',
     "you've misunderstood",
     'you have misunderstood me',
@@ -113,8 +113,10 @@ describe('#137: missed real corrections now captured (recall, no precision regre
     'revert that change',
     "that's the wrong approach",
     "that's the wrong file",
+    "that's the wrong fix",
     'you got it wrong',
     "you've got it wrong",
+    'no, you got it wrong', // rejection lead
     'nope, different file',
     'no, different approach',
     'nope — different function',
@@ -129,6 +131,22 @@ describe('#137: missed real corrections now captured (recall, no precision regre
   // Mutation: drop the `\s*[.!]?$` end-bound (or restore a noun allowlist) → trailing-
   // prose rows below flip → RED.
   test.each([
+    // —— RedTeam round 3: 10 single-noun "wrong <noun>" + leading-prefix leaks ——
+    "that's the wrong answer",
+    "that's the wrong number",
+    "that's the wrong tree", // bark up the wrong tree
+    "that's the wrong color",
+    "that's the wrong question",
+    "that's the wrong moment",
+    "that's the wrong guy",
+    "that's the wrong call",
+    "that's the wrong idea",
+    "that's the wrong person",
+    'haha you got it wrong', // leading prefix, no rejection lead
+    'the quiz says you got it wrong',
+    'sometimes you got it wrong',
+    'lol you got it wrong',
+    "honestly that's not it", // leading prefix that is NOT a short rejection lead
     // —— RedTeam round 2: 13 fresh generic-prose false positives ——
     "that's the wrong way to think about it",
     "that's the wrong idea about marriage",
