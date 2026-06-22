@@ -67,28 +67,20 @@ const STRONG_PATTERNS: { label: string; re: RegExp }[] = [
   { label: 'thats-incorrect', re: /that'?s incorrect/i },
   { label: 'thats-not-right', re: /that'?s not (right|correct)/i },
   // #137: targeted strong patterns for real corrections the precision-tuned
-  // detector (PR #136, RedTeam finding #3) was letting through. Each is
-  // high-confidence ALONE and deliberately NARROW so a benign-prose lookalike
-  // can't trip it — every constraint below has a paired negative guard in the
-  // tests (RedTeam NO-GO on PR #159's first cut found 9 false positives when
-  // these were unanchored/greedy). No bare pointer words are reintroduced.
+  // detector (PR #136, RedTeam finding #3) was letting through. On the
+  // verbatim-write surface precision wins, so every pattern here is STRUCTURAL,
+  // not a noun allowlist: each fires only on the TERSE correction and is
+  // end-bounded (`\s*[.!]?$`) so any trailing prose makes it benign. The
+  // tradeoff is deliberate — missing "that's the wrong approach, <long prose>"
+  // is acceptable; a false positive on generic prose ("that's the wrong path in
+  // life") is not. No bare pointer words are reintroduced.
   //
-  //   - thats-not-it: `(?!')` keeps the possessive "that's not it's job" benign.
-  //   - thats-wrong-approach: a dev-noun allowlist, NOT bare "the wrong <noun>",
-  //     so "the wrong number/assumption" stay benign.
-  //   - you-misunderstood: end-bounded (optionally "me"/"my point"), so the
-  //     third-party "you misunderstood the assignment" stays benign.
-  //   - revert-undo-that: anchored + end-bounded to a terse object, so forward /
-  //     polite / future / user-state requests ("revert that … when you get a
-  //     chance", "can you undo this for me please") stay benign.
-  //   - nope-different: the redirect target is a dev-noun allowlist, so a topic
-  //     shift ("nope, different topic") and the idiom "different strokes" stay benign.
-  { label: 'thats-not-it', re: /that'?s not it\b(?!')/i },
-  {
-    label: 'thats-wrong-approach',
-    re: /that'?s the wrong (?:approach|file|direction|fix|change|way|method|one|order|function|command|version|branch|path|line|idea)\b/i,
-  },
-  { label: 'you-got-it-wrong', re: /\byou(?:'ve| have)? got (?:it|this|that) wrong\b/i },
+  // End-bounding is the load-bearing constraint: a noun allowlist cannot tell
+  // "wrong approach" (correction) from "wrong path in life" (prose), but the
+  // terse end-bound can — the latter always carries trailing words.
+  { label: 'thats-not-it', re: /that'?s not it\s*[.!]?$/i },
+  { label: 'thats-wrong-approach', re: /that'?s the wrong \w+\s*[.!]?$/i },
+  { label: 'you-got-it-wrong', re: /\byou(?:'ve| have)? got (?:it|this|that) wrong\s*[.!]?$/i },
   {
     label: 'you-misunderstood',
     re: /\byou(?:'ve| have)? misunderstood(?:\s+(?:me|my point|the point|what i|the question))?\s*[.!]?$/i,
@@ -97,10 +89,7 @@ const STRONG_PATTERNS: { label: string; re: RegExp }[] = [
     label: 'revert-undo-that',
     re: /^(?:revert|undo) (?:that|this|it)(?:\s+(?:last\s+)?(?:change|edit|commit|line|fix|file|diff|patch))?[.!]?$/i,
   },
-  {
-    label: 'nope-different',
-    re: /^(?:no|nope)[,.\s!—–-]+different\s+(?:file|approach|function|method|directory|folder|path|one|place|line|branch|command|name|variable|module|class)\b/i,
-  },
+  { label: 'nope-different', re: /^(?:no|nope)[,.\s!—–-]+different \w+\s*[.!]?$/i },
 ];
 
 // ── Pass 2: WEAK leads (require a directive) ─────────────────────────────────

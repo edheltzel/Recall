@@ -117,34 +117,46 @@ describe('#137: missed real corrections now captured (recall, no precision regre
     "you've got it wrong",
     'nope, different file',
     'no, different approach',
-    'nope — different function entirely',
+    'nope — different function',
   ])('%j IS a correction', (text) => {
     expect(detectCorrection(text).isCorrection).toBe(true);
   });
 
-  // No-false-positive-regression guard (PR #159 RedTeam NO-GO). The first nine are
-  // the exact benign phrases RedTeam confirmed fired ONLY on the over-broad first
-  // cut; the rest broaden the sample to realistic developer prose. ALL must stay
-  // benign — these are the verbatim-write false positives #137 forbids reintroducing.
-  // Mutation: loosen any new pattern back toward its unanchored/greedy form → a row
-  // below flips → RED.
+  // No-false-positive-regression guard (PR #159 RedTeam NO-GO ×2). The patterns
+  // are STRUCTURAL (terse + end-bounded), not allowlists — so the guard probes
+  // GENERIC NON-CODING prose, the surface where the brittle allowlist forms leaked.
+  // ALL must stay benign — these are the verbatim-write false positives #137 forbids.
+  // Mutation: drop the `\s*[.!]?$` end-bound (or restore a noun allowlist) → trailing-
+  // prose rows below flip → RED.
   test.each([
-    // —— the nine RedTeam-confirmed regressions ——
-    'revert that commit when you get a chance', // forward request, not a correction
+    // —— RedTeam round 2: 13 fresh generic-prose false positives ——
+    "that's the wrong way to think about it",
+    "that's the wrong idea about marriage",
+    "that's the wrong way to raise a child",
+    "that's the wrong one to blame",
+    "that's the wrong order at the restaurant",
+    "that's the wrong line of reasoning",
+    "that's the wrong path in life",
+    "that's the wrong version of events",
+    'you got it wrong in the quiz',
+    "you got it wrong on last week's trivia night",
+    'you have got this wrong about the weather forecast',
+    'nope, different name though',
+    "that's not it, but close",
+    // —— RedTeam round 1: 9 confirmed regressions (still must hold) ——
+    'revert that commit when you get a chance', // forward request
     'undo that last cell in my notebook', // request about the user's own state
     'can you undo this for me please', // polite request
     'lets revert this approach next sprint', // planning, future tense
-    "that's the wrong number you dialed", // fires on ANY "wrong <noun>"
-    "that's the wrong assumption people make", // about a concept, not the agent
-    'nope, different topic entirely', // benign topic shift, no dev target
+    "that's the wrong number you dialed", // trailing prose
+    "that's the wrong assumption people make", // about a concept
+    'nope, different topic entirely', // topic shift + trailing
     'no, different strokes for different folks', // idiom
-    'you misunderstood the assignment', // third-party / mid-sentence remark
-    // —— broadened realistic developer prose ——
-    'can you revert the migration after the deploy lands', // forward request
-    'we should undo this refactor eventually', // planning
+    'you misunderstood the assignment', // third-party / trailing object
+    // —— broadened generic + developer prose ——
+    'can you revert the migration after the deploy lands',
+    'we should undo this refactor eventually',
     'undo functionality is broken in the editor', // "undo" as a subject, no pointer
-    "that's the wrong button in the mockup, FYI", // non-dev-action noun
-    'you misunderstood my earlier message, let me re-explain', // trailing object
     "you understood the spec perfectly", // affirmation, not "misunderstood"
     'you got it exactly right', // "got it right", not "got it wrong"
     'you got it', // bare affirmation
