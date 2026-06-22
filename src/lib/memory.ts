@@ -388,7 +388,11 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
     params.push(limit);
 
     try {
-      const rows = db.prepare(sql).all(...params) as Array<{
+      // db.query (#151) caches the compiled statement per SQL shape on this
+      // connection, so repeat searches skip recompilation. There are a bounded
+      // number of shapes (per table × with/without project/duplicate filters);
+      // each is cached on first use. Identical SQL + params → identical output.
+      const rows = db.query(sql).all(...params) as Array<{
         id: number;
         content: string;
         project: string | null;
