@@ -298,6 +298,15 @@ CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
 // CREATE_FTS_TRIGGERS strings consumed by initDb are derived from this map,
 // and `recall repair` uses individual entries to recreate one missing index
 // without touching the others. All statements are idempotent (IF NOT EXISTS).
+//
+// The `*_au` triggers are scoped `AFTER UPDATE OF <indexed source columns>` (the
+// exact columns each FTS table indexes) — NOT a bare `AFTER UPDATE`. This is the
+// frecency bump-on-use guard (issue #153): an access-only UPDATE of
+// access_count/last_accessed must not re-fire a full FTS delete+reinsert on the
+// hot read path. A real edit to any indexed column still reindexes. Migration
+// 13→14 added the access columns; migration 14→15 rescopes these triggers for
+// existing installs from THESE SAME strings, so fresh-install DDL, the migration,
+// and `recall repair`/`doctor` never drift.
 export interface FtsTableSchema {
   /** FTS5 virtual table name (e.g. messages_fts). */
   ftsTable: string;
@@ -325,7 +334,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, content, project) VALUES('delete', old.id, old.content, old.project);
 END;
-CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content, project ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, content, project) VALUES('delete', old.id, old.content, old.project);
   INSERT INTO messages_fts(rowid, content, project) VALUES (new.id, new.content, new.project);
 END;
@@ -351,7 +360,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS decisions_ad AFTER DELETE ON decisions BEGIN
   INSERT INTO decisions_fts(decisions_fts, rowid, decision, reasoning, project) VALUES('delete', old.id, old.decision, old.reasoning, old.project);
 END;
-CREATE TRIGGER IF NOT EXISTS decisions_au AFTER UPDATE ON decisions BEGIN
+CREATE TRIGGER IF NOT EXISTS decisions_au AFTER UPDATE OF decision, reasoning, project ON decisions BEGIN
   INSERT INTO decisions_fts(decisions_fts, rowid, decision, reasoning, project) VALUES('delete', old.id, old.decision, old.reasoning, old.project);
   INSERT INTO decisions_fts(rowid, decision, reasoning, project) VALUES (new.id, new.decision, new.reasoning, new.project);
 END;
@@ -378,7 +387,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS learnings_ad AFTER DELETE ON learnings BEGIN
   INSERT INTO learnings_fts(learnings_fts, rowid, problem, solution, tags, project) VALUES('delete', old.id, old.problem, old.solution, old.tags, old.project);
 END;
-CREATE TRIGGER IF NOT EXISTS learnings_au AFTER UPDATE ON learnings BEGIN
+CREATE TRIGGER IF NOT EXISTS learnings_au AFTER UPDATE OF problem, solution, tags, project ON learnings BEGIN
   INSERT INTO learnings_fts(learnings_fts, rowid, problem, solution, tags, project) VALUES('delete', old.id, old.problem, old.solution, old.tags, old.project);
   INSERT INTO learnings_fts(rowid, problem, solution, tags, project) VALUES (new.id, new.problem, new.solution, new.tags, new.project);
 END;
@@ -404,7 +413,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS breadcrumbs_ad AFTER DELETE ON breadcrumbs BEGIN
   INSERT INTO breadcrumbs_fts(breadcrumbs_fts, rowid, content, category, project) VALUES('delete', old.id, old.content, old.category, old.project);
 END;
-CREATE TRIGGER IF NOT EXISTS breadcrumbs_au AFTER UPDATE ON breadcrumbs BEGIN
+CREATE TRIGGER IF NOT EXISTS breadcrumbs_au AFTER UPDATE OF content, category, project ON breadcrumbs BEGIN
   INSERT INTO breadcrumbs_fts(breadcrumbs_fts, rowid, content, category, project) VALUES('delete', old.id, old.content, old.category, old.project);
   INSERT INTO breadcrumbs_fts(rowid, content, category, project) VALUES (new.id, new.content, new.category, new.project);
 END;
@@ -432,7 +441,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS loa_ad AFTER DELETE ON loa_entries BEGIN
   INSERT INTO loa_fts(loa_fts, rowid, title, description, fabric_extract, tags, project) VALUES('delete', old.id, old.title, old.description, old.fabric_extract, old.tags, old.project);
 END;
-CREATE TRIGGER IF NOT EXISTS loa_au AFTER UPDATE ON loa_entries BEGIN
+CREATE TRIGGER IF NOT EXISTS loa_au AFTER UPDATE OF title, description, fabric_extract, tags, project ON loa_entries BEGIN
   INSERT INTO loa_fts(loa_fts, rowid, title, description, fabric_extract, tags, project) VALUES('delete', old.id, old.title, old.description, old.fabric_extract, old.tags, old.project);
   INSERT INTO loa_fts(rowid, title, description, fabric_extract, tags, project) VALUES (new.id, new.title, new.description, new.fabric_extract, new.tags, new.project);
 END;

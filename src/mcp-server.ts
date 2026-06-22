@@ -43,6 +43,7 @@ import { z } from "zod";
 import { getDb, initDb, getDbPath } from "./db/connection.js";
 import {
 	search,
+	bumpAccess,
 	SEARCH_TABLES,
 	recentMessages,
 	recentDecisions,
@@ -222,23 +223,27 @@ export async function hybridSearch(
 			.sort((a, b) => b.score - a.score)
 			.slice(0, limit);
 
+		// Bump-on-use (issue #153): only the final returned set, never the
+		// limit*2 candidate pool that fed search() above.
+		bumpAccess(results);
 		return { results, embeddingsAvailable };
 	}
 
 	// FTS only fallback
-	return {
-		results: ftsResults
-			.map((r) => ({
-				table: r.table,
-				id: r.id,
-				content: r.content,
-				score: r.rank || 0,
-				source: "fts" as const,
-				provenance: r.provenance ?? null,
-			}))
-			.slice(0, limit),
-		embeddingsAvailable: false,
-	};
+	const ftsOnly = ftsResults
+		.map((r) => ({
+			table: r.table,
+			id: r.id,
+			content: r.content,
+			score: r.rank || 0,
+			source: "fts" as const,
+			provenance: r.provenance ?? null,
+		}))
+		.slice(0, limit);
+
+	// Bump-on-use (issue #153): only the final returned set.
+	bumpAccess(ftsOnly);
+	return { results: ftsOnly, embeddingsAvailable: false };
 }
 
 // Ensure DB exists
@@ -317,6 +322,11 @@ server.tool(
 					content: [{ type: "text", text: `No results found for: "${query}"` }],
 				};
 			}
+
+			// Bump-on-use (issue #153): these keyword hits are surfaced to the
+			// agent. The fallback path above returns hybridSearch results, which
+			// are bumped inside hybridSearch — so this only covers the direct path.
+			bumpAccess(results);
 
 			const formatted = results
 				.map((r) => {
