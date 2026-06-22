@@ -44,6 +44,7 @@ import { migrateTrackerJson } from './lib/extraction-migration';
 import { getDbPath } from './lib/sqlite-writers';
 import type { DualWriteResult } from './lib/extraction-parsers';
 import { runExtractCore } from './lib/extract-core';
+import { scrub } from './lib/write-safety';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
@@ -615,10 +616,17 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     }
     logExtract("QUALITY GATE PASSED: extraction contains required sections");
 
-    // RAW (un-scrubbed) values for the unchanged legacy markdown side-effects.
-    const extracted = core.extracted!;
-    const topics = core.topics!;
-    const summary = core.summary!;
+    // Scrub the extracted text BEFORE it reaches any on-disk archive writer
+    // (#132): the SQLite path already scrubs inside runExtractCore, but the
+    // legacy markdown side-effects below all read these locals — so scrub them
+    // here, at the single markdown-write seam, to redact secrets and strip
+    // invisible unicode from all seven archive surfaces (DISTILLED.md,
+    // HOT_RECALL.md, SESSION_INDEX.json, the LoA transcript, DECISIONS.log,
+    // REJECTIONS.log, ERROR_PATTERNS.json). Reuses the same scrub() the SQLite
+    // path calls — no duplicated redaction logic.
+    const extracted = scrub(core.extracted!).text;
+    const topics = core.topics!.map((t) => scrub(t).text);
+    const summary = scrub(core.summary!).text;
 
     // SQLite dual-write already ran inside the core (with scrubbed text).
     logDualWrite(core.dualWrite!);
@@ -762,10 +770,13 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     }
     logExtract("QUALITY GATE PASSED (markdown)");
 
-    // RAW (un-scrubbed) values for the unchanged legacy markdown side-effects.
-    const extracted = core.extracted!;
-    const topics = core.topics!;
-    const summary = core.summary!;
+    // Scrub the extracted text BEFORE it reaches any on-disk archive writer
+    // (#132) — same single markdown-write seam as the Stop path. Redacts
+    // secrets and strips invisible unicode from every archive surface below.
+    // Reuses the same scrub() the SQLite path calls — no duplicated redaction.
+    const extracted = scrub(core.extracted!).text;
+    const topics = core.topics!.map((t) => scrub(t).text);
+    const summary = scrub(core.summary!).text;
 
     // SQLite dual-write already ran inside the core (with scrubbed text).
     logDualWrite(core.dualWrite!);
