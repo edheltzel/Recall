@@ -9,7 +9,7 @@
 // side; interpretation is the reader's job. We do not blend retrieval-presence
 // into accuracy or vice versa.
 
-export type SuiteId = 'A' | 'B' | 'C' | 'D' | 'E';
+export type SuiteId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 export interface MetricSample {
   /** Stable identifier (e.g. 'wake_up_chars', 'l1_records'). */

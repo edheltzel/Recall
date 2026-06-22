@@ -14,6 +14,7 @@ const SUITES_AVAILABLE = [
   { id: 'C', name: 'Precision under noise', status: 'built' },
   { id: 'D', name: 'Structured-knowledge fidelity', status: 'planned' },
   { id: 'E', name: 'Real-world replay', status: 'planned' },
+  { id: 'F', name: 'Search latency', status: 'built' },
 ] as const;
 
 type SuiteId = typeof SUITES_AVAILABLE[number]['id'];
