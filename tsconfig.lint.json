@@ -1,0 +1,8 @@
+{
+  "//": "Lint-only type-check config. Widens rootDir to the repo root so `tsc --noEmit` can resolve the permitted src/ -> hooks/ import in src/lib/write-safety.ts (the #50 single-source seam) without TS6059. Kept SEPARATE from tsconfig.json so the npm build (tsup --dts, which reads tsconfig.json) keeps its narrow src/-only declaration scope and stays fast — widening the shared rootDir slowed the --dts emit enough to time out the build-in-hook test on slower CI.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "."
+  },
+  "include": ["src/**/*"]
+}
