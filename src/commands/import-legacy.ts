@@ -124,10 +124,14 @@ export function runImportLegacy(options: ImportLegacyOptions): void {
   // otherwise be amplified straight into the DB. Scrubbing here (not just at
   // createLoaEntry) keeps extractExists and the insert keyed on the SAME
   // scrubbed title — a secret-bearing title can't slip the dedup and re-import.
+  // All three persisted fields (title, content, project) are scrubbed: project
+  // comes from the raw "## Extracted: DATE | PROJECT" header and lands in
+  // loa_entries.project, so it is just as much an amplifier as the body.
   // No-op on clean content, so behavior is preserved for the common case.
   for (const extract of totalExtracts) {
     extract.title = scrub(extract.title).text;
     extract.content = scrub(extract.content).text;
+    extract.project = scrub(extract.project).text;
   }
 
   // Check for duplicates

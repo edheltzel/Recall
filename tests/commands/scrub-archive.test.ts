@@ -12,7 +12,7 @@
 //   import-legacy run into the DB
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -150,26 +150,53 @@ describe('scrub-archive — malformed JSON', () => {
 });
 
 describe('import-legacy guard (#157)', () => {
-  test('a secret in DISTILLED.md cannot survive import-legacy into the DB', () => {
+  test('a secret in DISTILLED.md cannot survive import-legacy into the DB — content AND project columns', () => {
     setupTestDb();
     try {
       const distilled = join(memoryDir, 'DISTILLED.md');
+      // Plant a secret in BOTH the body and the PROJECT header field — the
+      // project lands in loa_entries.project and is just as much an amplifier.
       writeFileSync(
         distilled,
-        `## Extracted: 2026-01-02 | demo\nSESSION: Test session\nDeploy used ${AWS} for access.\n`,
+        `## Extracted: 2026-01-02 | proj-${AWS}\nSESSION: Test session\nDeploy used ${AWS} for access.\n`,
         'utf-8'
       );
 
       runImportLegacy({ yes: true, source: 'distilled', memoryDir });
 
       const row = getDb()
-        .prepare('SELECT title, fabric_extract FROM loa_entries ORDER BY id DESC LIMIT 1')
-        .get() as { title: string; fabric_extract: string };
+        .prepare('SELECT title, fabric_extract, project FROM loa_entries ORDER BY id DESC LIMIT 1')
+        .get() as { title: string; fabric_extract: string; project: string };
       expect(row).toBeTruthy();
       expect(row.fabric_extract).not.toContain(AWS);
       expect(row.fabric_extract).toContain('[REDACTED:aws-akid]');
+      // The project column must be scrubbed too (RedTeam reproduced a leak here).
+      expect(row.project).not.toContain(AWS);
+      expect(row.project).toContain('[REDACTED:aws-akid]');
     } finally {
       teardownTestDb();
     }
+  });
+});
+
+describe('scrub-archive — hostile filesystem', () => {
+  test('a dangling symlink under sessions/ does not abort the sweep; other surfaces still scrubbed', () => {
+    // A real MEMORY surface and a valid transcript that MUST still get scrubbed.
+    const distilled = join(memoryDir, 'DISTILLED.md');
+    writeFileSync(distilled, `leaked ${AWS} key\n`, 'utf-8');
+    const goodTranscript = writeTranscript('2026-01-03', 'sessA', `# Session\nsecret ${AWS} here\n`);
+
+    // A dangling symlink date entry pointing at a nonexistent target — statSync
+    // on it throws ENOENT, which previously crashed the whole sweep.
+    mkdirSync(sessionsDir, { recursive: true });
+    symlinkSync(join(root, 'does-not-exist'), join(sessionsDir, '2026-01-02'));
+
+    // Must not throw.
+    expect(() => runScrubArchive(opts())).not.toThrow();
+
+    // Sweep completed: the other surfaces were scrubbed despite the bad symlink.
+    expect(readFileSync(distilled, 'utf-8')).not.toContain(AWS);
+    expect(readFileSync(goodTranscript, 'utf-8')).not.toContain(AWS);
+    expect(logs.join('\n')).toMatch(/\[SKIP\] sessions\/2026-01-02/);
   });
 });

@@ -88,10 +88,18 @@ function scrubJsonValue(value: unknown, kinds: Set<string>): { value: unknown; c
     const obj: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
       const sk = scrub(k).text;
-      if (sk !== k) changed = true;
       const r = scrubJsonValue(v, kinds);
       changed = changed || r.changed;
-      obj[sk] = r.value;
+      // Collision guard: if two distinct keys scrub to the same string, keep the
+      // later one under its ORIGINAL key rather than silently overwriting the
+      // first. Never drop data; warn so the operator sees it.
+      if (sk !== k && Object.prototype.hasOwnProperty.call(obj, sk)) {
+        console.log(`[WARN] scrub-archive: JSON key collision on "${sk}"; kept original key "${k}" to avoid dropping data`);
+        obj[k] = r.value;
+      } else {
+        if (sk !== k) changed = true;
+        obj[sk] = r.value;
+      }
     }
     return { value: obj, changed };
   }
@@ -122,14 +130,35 @@ function inspectSurface(surface: Surface): SurfaceResult {
   return { surface, status: 'changed', scrubbed: text, redactions };
 }
 
-/** Enumerate ~/.claude/sessions/<date>/<session>/transcript.md surfaces. */
+/**
+ * Enumerate ~/.claude/sessions/<date>/<session>/transcript.md surfaces.
+ * Every filesystem touch is guarded: a dangling symlink or unreadable entry
+ * under sessions/ must be skipped-and-warned, never crash the whole sweep and
+ * leave the other surfaces un-scrubbed (a broken symlink makes statSync/readdir
+ * throw ENOENT). existsSync is safe — it follows symlinks and returns false on
+ * a missing target rather than throwing.
+ */
 function transcriptSurfaces(sessionsDir: string): Surface[] {
   if (!existsSync(sessionsDir)) return [];
   const surfaces: Surface[] = [];
-  for (const date of readdirSync(sessionsDir).sort()) {
+  let dates: string[];
+  try {
+    dates = readdirSync(sessionsDir).sort();
+  } catch (err) {
+    console.log(`[SKIP] sessions/ — unreadable (${(err as Error).message})`);
+    return surfaces;
+  }
+  for (const date of dates) {
     const dateDir = join(sessionsDir, date);
-    if (!statSync(dateDir).isDirectory()) continue;
-    for (const session of readdirSync(dateDir).sort()) {
+    let sessions: string[];
+    try {
+      if (!statSync(dateDir).isDirectory()) continue;
+      sessions = readdirSync(dateDir).sort();
+    } catch (err) {
+      console.log(`[SKIP] sessions/${date} — unreadable (${(err as Error).message})`);
+      continue;
+    }
+    for (const session of sessions) {
       const abs = join(dateDir, session, 'transcript.md');
       if (existsSync(abs)) {
         surfaces.push({ abs, rel: join('sessions', date, session, 'transcript.md'), kind: 'text' });
