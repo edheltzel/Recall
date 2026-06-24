@@ -83,6 +83,7 @@ import {
 	buildHybridFallbackOutcome,
 } from "./lib/search-fallback.js";
 import { provenanceLabel } from "./lib/provenance.js";
+import { scanForThreats } from "./lib/threat-detect.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
 
@@ -639,6 +640,27 @@ server.tool(
 	},
 	async ({ type, content, detail, project, tags, confidence, importance }) => {
 		try {
+			// #156 detection layer on the explicit, user-driven write path. memory_add
+			// is the STRICT path: an anchorless high-entropy token (likely a real
+			// pasted credential) BLOCKS the write with a single fixable error rather
+			// than being persisted — no bulk block-storm, since it is one deliberate
+			// call. Injection/exfil prose is flag-tier and never blocks. (scrub() is
+			// intentionally NOT wired here — that is #51 territory; this layer
+			// independently catches the anchorless high-entropy-token case.)
+			const contentScan = scanForThreats(content, "memory_add");
+			const detailScan = detail !== undefined ? scanForThreats(detail, "memory_add") : undefined;
+			if (contentScan.blocked || detailScan?.blocked) {
+				const reason = contentScan.blocked ? contentScan.blockReason : detailScan!.blockReason;
+				return {
+					content: [
+						{ type: "text", text: `Add blocked: ${reason}` },
+					],
+					isError: true,
+				};
+			}
+			content = contentScan.text;
+			if (detailScan) detail = detailScan.text;
+
 			let id: number;
 
 			switch (type) {
