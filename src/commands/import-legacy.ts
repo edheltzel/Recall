@@ -5,9 +5,9 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 import { createLoaEntry } from '../lib/memory.js';
+import { scrub } from '../lib/write-safety.js';
 
-const DISTILLED_PATH = join(homedir(), '.claude', 'MEMORY', 'DISTILLED.md');
-const HOT_RECALL_PATH = join(homedir(), '.claude', 'MEMORY', 'HOT_RECALL.md');
+const DEFAULT_MEMORY_DIR = join(homedir(), '.claude', 'MEMORY');
 
 interface LegacyExtract {
   date: string;
@@ -85,18 +85,24 @@ export interface ImportLegacyOptions {
   verbose?: boolean;
   yes?: boolean;
   source?: 'distilled' | 'hot_recall' | 'all';
+  /** Test seam — defaults to ~/.claude/MEMORY (matches RecallExtract.ts). */
+  memoryDir?: string;
 }
 
 export function runImportLegacy(options: ImportLegacyOptions): void {
   console.log('Import Legacy Memory');
   console.log('====================\n');
 
+  const memoryDir = options.memoryDir ?? DEFAULT_MEMORY_DIR;
+  const distilledPath = join(memoryDir, 'DISTILLED.md');
+  const hotRecallPath = join(memoryDir, 'HOT_RECALL.md');
+
   const sources: string[] = [];
   if (options.source === 'distilled' || options.source === 'all' || !options.source) {
-    sources.push(DISTILLED_PATH);
+    sources.push(distilledPath);
   }
   if (options.source === 'hot_recall' || options.source === 'all') {
-    sources.push(HOT_RECALL_PATH);
+    sources.push(hotRecallPath);
   }
 
   let totalExtracts: LegacyExtract[] = [];
@@ -111,6 +117,22 @@ export function runImportLegacy(options: ImportLegacyOptions): void {
   }
 
   console.log(`Total extracts found: ${totalExtracts.length}\n`);
+
+  // Defense-in-depth (#157): scrub secrets + invisible unicode from imported
+  // content once, at the trust boundary, BEFORE the dedup check and the insert.
+  // The legacy archive predates the write-safety scrub, so dirty content could
+  // otherwise be amplified straight into the DB. Scrubbing here (not just at
+  // createLoaEntry) keeps extractExists and the insert keyed on the SAME
+  // scrubbed title — a secret-bearing title can't slip the dedup and re-import.
+  // All three persisted fields (title, content, project) are scrubbed: project
+  // comes from the raw "## Extracted: DATE | PROJECT" header and lands in
+  // loa_entries.project, so it is just as much an amplifier as the body.
+  // No-op on clean content, so behavior is preserved for the common case.
+  for (const extract of totalExtracts) {
+    extract.title = scrub(extract.title).text;
+    extract.content = scrub(extract.content).text;
+    extract.project = scrub(extract.project).text;
+  }
 
   // Check for duplicates
   for (const extract of totalExtracts) {
