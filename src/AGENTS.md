@@ -22,6 +22,7 @@ Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `
 - DB lives at `~/.agents/Recall/recall.db` (override `RECALL_DB_PATH`; legacy `MEM_DB_PATH` accepted). WAL mode. FTS5 with sync triggers — keep table defs and triggers in `db/schema.ts` aligned.
 - DB-path resolution is shared with hooks via `hooks/lib/db-path.ts` so CLI and hooks agree — import that resolver, never fork the logic.
 - All project-path handling goes through `lib/project.ts` (`validateDirPath` injection guard) — never assemble project paths ad hoc.
+- Explicit add paths (`recall add` CLI + `memory_add` MCP) redact secrets at the choke point: `addDecision`/`addLearning`/`addBreadcrumb` in `lib/memory.ts` `scrub()` every free-text field before insert and report redacted kinds via the optional `redactionsOut` arg. A new explicit write path must route through these — never INSERT user free-text directly.
 
 ## Work Guidance
 

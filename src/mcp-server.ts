@@ -601,6 +601,15 @@ ${loa.fabric_extract}`;
 	},
 );
 
+// Surface known-prefix secrets the add path redacted before storing, so the
+// caller learns the persisted content was modified. Distinct kinds only, never
+// the values. Empty string when nothing was redacted.
+function redactionNotice(redactions: string[]): string {
+	return redactions.length > 0
+		? ` ⚠ redacted secrets before storing: ${redactions.join(", ")}`
+		: "";
+}
+
 // Tool: memory_add - Add structured memory records
 server.tool(
 	"memory_add",
@@ -675,6 +684,7 @@ server.tool(
 					// ADR-0001: provenance is stamped from the write path. memory_add
 					// deliberately exposes no provenance parameter — agents must not
 					// be able to launder extracted content as something else.
+					const redactions: string[] = [];
 					id = addDecision({
 						decision: content,
 						reasoning: detail,
@@ -683,12 +693,13 @@ server.tool(
 						confidence: confidence || "medium",
 						importance,
 						provenance: "user_authored",
-					});
+					}, redactions);
 
 					let resultText = `Added decision #${id}: ${content}`;
 					if (superseded.length > 0) {
 						resultText += ` (superseded decision(s) #${superseded.join(', #')})`;
 					}
+					resultText += redactionNotice(redactions);
 					return {
 						content: [
 							{ type: "text", text: resultText },
@@ -696,7 +707,8 @@ server.tool(
 					};
 				}
 
-				case "learning":
+				case "learning": {
+					const redactions: string[] = [];
 					id = addLearning({
 						problem: content,
 						solution: detail,
@@ -705,25 +717,28 @@ server.tool(
 						confidence: confidence || "medium",
 						importance,
 						provenance: "user_authored",
-					});
+					}, redactions);
 					return {
 						content: [
-							{ type: "text", text: `Added learning #${id}: ${content}` },
+							{ type: "text", text: `Added learning #${id}: ${content}${redactionNotice(redactions)}` },
 						],
 					};
+				}
 
-				case "breadcrumb":
+				case "breadcrumb": {
+					const redactions: string[] = [];
 					id = addBreadcrumb({
 						content,
 						project,
 						importance: importance ?? 5,
 						provenance: "user_authored",
-					});
+					}, redactions);
 					return {
 						content: [
-							{ type: "text", text: `Added breadcrumb #${id}: ${content}` },
+							{ type: "text", text: `Added breadcrumb #${id}: ${content}${redactionNotice(redactions)}` },
 						],
 					};
+				}
 			}
 		} catch (err) {
 			return {

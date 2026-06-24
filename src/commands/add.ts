@@ -3,6 +3,14 @@
 import { addBreadcrumb, addDecision, addLearning } from '../lib/memory.js';
 import { detectProject } from '../lib/project.js';
 
+// Surface known-prefix secrets that the add path redacted before storing —
+// visible-by-design, never silent. Distinct kinds only, never the values.
+function warnRedactions(redactions: string[]): void {
+  if (redactions.length > 0) {
+    console.log(`⚠ redacted secrets before storing: ${redactions.join(', ')}`);
+  }
+}
+
 interface AddBreadcrumbOptions {
   project?: string;
   category?: string;
@@ -17,6 +25,7 @@ export function runAddBreadcrumb(content: string, options: AddBreadcrumbOptions)
 
   const project = options.project || detectProject();
 
+  const redactions: string[] = [];
   const id = addBreadcrumb({
     content,
     project,
@@ -24,9 +33,10 @@ export function runAddBreadcrumb(content: string, options: AddBreadcrumbOptions)
     importance: options.importance ?? 5,
     // ADR-0001: provenance is stamped from the write path, never a CLI flag.
     provenance: 'user_authored'
-  });
+  }, redactions);
 
   console.log(`✓ Added breadcrumb #${id}${project ? ` [${project}]` : ''}`);
+  warnRedactions(redactions);
 }
 
 interface AddDecisionOptions {
@@ -46,6 +56,7 @@ export function runAddDecision(decision: string, options: AddDecisionOptions): v
   const project = options.project || detectProject();
   const confidence = (options.confidence || 'medium') as 'high' | 'medium' | 'low';
 
+  const redactions: string[] = [];
   const id = addDecision({
     decision,
     project,
@@ -55,9 +66,10 @@ export function runAddDecision(decision: string, options: AddDecisionOptions): v
     status: 'active',
     confidence,
     provenance: 'user_authored'
-  });
+  }, redactions);
 
   console.log(`✓ Added decision #${id}${project ? ` [${project}]` : ''} (${confidence})`);
+  warnRedactions(redactions);
 }
 
 interface AddLearningOptions {
@@ -75,6 +87,7 @@ export function runAddLearning(problem: string, solution: string, options: AddLe
 
   const project = options.project || detectProject();
 
+  const redactions: string[] = [];
   const id = addLearning({
     problem,
     solution,
@@ -83,7 +96,8 @@ export function runAddLearning(problem: string, solution: string, options: AddLe
     prevention: options.prevention,
     tags: options.tags,
     provenance: 'user_authored'
-  });
+  }, redactions);
 
   console.log(`✓ Added learning #${id}${project ? ` [${project}]` : ''}`);
+  warnRedactions(redactions);
 }
