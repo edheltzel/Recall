@@ -47,7 +47,7 @@ Memory-first orientation for an unfamiliar codebase. Searches Recall before touc
 - `/Recall:scout` — scout the whole repo
 - `/Recall:scout auth` — narrow the scout to a subsystem, path, or question
 
-The report covers: **memory summary** (what Recall already knew), **repo map**, **key paths**, **tests**, **risks**, and **next steps**. It enforces a strict sensitive-data boundary — no secrets, generated/vendored files, the live database, or cross-project memory — and is chat-only by default. Reports are persisted only when the repo endorses it, and then only to `.agents/atlas/artifacts/` (never `.agents/atlas/handoffs/`).
+The report covers: **memory summary** (what Recall already knew), **repo map**, **key paths**, **tests**, **risks**, and **next steps**. It enforces a strict sensitive-data boundary — no secrets, generated/vendored files, the live database, or cross-project memory — and is chat-only by default. Reports are persisted only when the repo endorses it, and then only to `.agents/atlas/artifacts/` (never `.agents/atlas/handoffs/`). When a codegraph index is available it grounds the repo map and key paths (running `codegraph init` first if the index is missing); codegraph is optional — scout works fully without it.
 
 ### /Recall:stats
 
