@@ -6,7 +6,7 @@ import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 import { createLoaEntry } from '../lib/memory.js';
 import { scrub } from '../lib/write-safety.js';
-import { scanForThreats } from '../lib/threat-detect.js';
+import { detectThreats, summarizeThreats } from '../lib/threat-detect.js';
 
 const DEFAULT_MEMORY_DIR = join(homedir(), '.claude', 'MEMORY');
 
@@ -135,15 +135,19 @@ export function runImportLegacy(options: ImportLegacyOptions): void {
     extract.project = scrub(extract.project).text;
   }
 
-  // #156 detection layer — runs AFTER scrub on the already-scrubbed fields. Bulk
-  // import is a lenient path: it NEVER blocks (a dirty legacy archive must still
-  // import) — flag-tier injection/exfil findings leave content byte-identical and
-  // redact-tier anchorless high-entropy tokens are neutralized in place, on the
-  // same scrubbed fields the dedup check and insert key on.
+  // #156 detection layer — DETECT-AND-SURFACE ONLY (Ed's ruling): it never
+  // mutates or blocks. Scan the scrubbed fields and surface any injection/exfil
+  // or anonymous-high-entropy flags as a non-fatal warning; the imported content
+  // is stored byte-identical.
   for (const extract of totalExtracts) {
-    extract.title = scanForThreats(extract.title, 'import-legacy').text;
-    extract.content = scanForThreats(extract.content, 'import-legacy').text;
-    extract.project = scanForThreats(extract.project, 'import-legacy').text;
+    const findings = [
+      ...detectThreats(extract.title),
+      ...detectThreats(extract.content),
+      ...detectThreats(extract.project),
+    ];
+    if (findings.length > 0) {
+      console.log(`[WARN] threat-detect: ${summarizeThreats(findings)} in "${extract.title.slice(0, 50)}" — surfaced, content stored unchanged`);
+    }
   }
 
   // Check for duplicates

@@ -26,7 +26,7 @@
 
 import { evaluateQuality, type QualityResult } from './extraction-quality';
 import { scrub } from './write-safety';
-import { scanForThreats, type ResolvedThreat } from './threat-detect';
+import { detectThreats, type ThreatFinding } from './threat-detect';
 import {
   dualWriteToSqlite,
   type DualWriteContext,
@@ -62,8 +62,8 @@ export interface ExtractCoreResult {
   summary?: string;
   /** Distinct secret kinds redacted across all persisted fields (never the values). */
   redactions?: string[];
-  /** #156 injection/exfil findings across persisted fields (flag-tier annotations + any redacted tokens). */
-  threats?: ResolvedThreat[];
+  /** #156 injection/exfil flag findings across persisted fields (surfaced only; persisted text is unchanged). */
+  threats?: ThreatFinding[];
   /** Present only when outcome === 'extracted'. */
   dualWrite?: DualWriteResult;
 }
@@ -108,25 +108,21 @@ export async function runExtractCore(
     ]),
   ];
 
-  // #156 detection layer — runs AFTER scrub on the already-scrubbed text. The
-  // bulk session path NEVER blocks (no block-storms): flag-tier injection/exfil
-  // findings leave the text byte-identical (annotation only), and redact-tier
-  // anchorless high-entropy tokens (the PR #128 residual scrub's anchored
-  // patterns miss) are neutralized in place.
-  const threatExtracted = scanForThreats(scrubbedExtracted.text, 'session');
-  const threatSummary = scanForThreats(scrubbedSummary.text, 'session');
-  const threatTopics = scrubbedTopics.map((r) => scanForThreats(r.text, 'session'));
-  const threats = [
-    ...threatExtracted.findings,
-    ...threatSummary.findings,
-    ...threatTopics.flatMap((t) => t.findings),
+  // #156 detection layer — runs AFTER scrub over the already-scrubbed text.
+  // DETECT-AND-SURFACE ONLY: it never mutates or blocks (Ed's ruling). Findings
+  // (injection/exfil prose + anonymous high-entropy tokens) are surfaced in the
+  // returned `threats` array; the persisted text is the scrubbed text, unchanged.
+  const threats: ThreatFinding[] = [
+    ...detectThreats(scrubbedExtracted.text),
+    ...detectThreats(scrubbedSummary.text),
+    ...scrubbedTopics.flatMap((r) => detectThreats(r.text)),
   ];
 
   const dualWrite = dualWriteToSqlite(dbPath, {
     ...ctx,
-    extracted: threatExtracted.text,
-    summary: threatSummary.text,
-    topics: threatTopics.map((t) => t.text),
+    extracted: scrubbedExtracted.text,
+    summary: scrubbedSummary.text,
+    topics: scrubbedTopics.map((r) => r.text),
   });
 
   return {
