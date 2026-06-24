@@ -219,4 +219,46 @@ describe('scrub-archive — hostile filesystem', () => {
       chmodSync(locked, 0o644); // restore so afterEach cleanup can remove it
     }
   });
+
+  test('an unwritable (mode 444) surface does not block a later surface from being scrubbed', () => {
+    // DISTILLED.md is processed before REJECTIONS.log (surface order). Make the
+    // earlier one read-only so its in-place write throws EACCES.
+    const distilled = join(memoryDir, 'DISTILLED.md');
+    const rejections = join(memoryDir, 'REJECTIONS.log');
+    writeFileSync(distilled, `leaked ${AWS} key\n`, 'utf-8');
+    writeFileSync(rejections, `rejected ${AWS} token\n`, 'utf-8');
+    chmodSync(distilled, 0o444);
+
+    try {
+      expect(() => runScrubArchive(opts())).not.toThrow();
+
+      // The later, writable surface was still scrubbed despite the earlier failure.
+      expect(readFileSync(rejections, 'utf-8')).not.toContain(AWS);
+      // The unwritable surface is left untouched (still dirty) and flagged.
+      expect(readFileSync(distilled, 'utf-8')).toContain(AWS);
+      expect(logs.join('\n')).toMatch(/\[SKIP\] MEMORY\/DISTILLED\.md — could not scrub/);
+      expect(logs.join('\n')).toMatch(/Changed:\s+1/);
+    } finally {
+      chmodSync(distilled, 0o644);
+    }
+  });
+
+  test('an unwritable backup dir does not abort the sweep; backup-before-rewrite leaves surfaces un-scrubbed and flagged', () => {
+    const distilled = join(memoryDir, 'DISTILLED.md');
+    const rejections = join(memoryDir, 'REJECTIONS.log');
+    writeFileSync(distilled, `leaked ${AWS} key\n`, 'utf-8');
+    writeFileSync(rejections, `rejected ${AWS} token\n`, 'utf-8');
+    // Make the backup dir a FILE, so mkdir of the backup root throws ENOTDIR.
+    writeFileSync(backupDir, 'not a directory', 'utf-8');
+
+    expect(() => runScrubArchive(opts())).not.toThrow();
+
+    // Backup-before-rewrite: no backup possible → nothing scrubbed (secrets kept),
+    // and EVERY changed surface is processed and skip-warned (loop didn't abort).
+    expect(readFileSync(distilled, 'utf-8')).toContain(AWS);
+    expect(readFileSync(rejections, 'utf-8')).toContain(AWS);
+    expect(logs.join('\n')).toMatch(/\[SKIP\] MEMORY\/DISTILLED\.md — could not scrub/);
+    expect(logs.join('\n')).toMatch(/\[SKIP\] MEMORY\/REJECTIONS\.log — could not scrub/);
+    expect(logs.join('\n')).toMatch(/Changed:\s+0/);
+  });
 });

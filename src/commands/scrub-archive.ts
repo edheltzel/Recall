@@ -207,6 +207,8 @@ export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
   // touches the disk, so a clean sweep or --dry-run leaves no empty folder.
   const backupRoot = join(backupDir, `scrub-archive-${timestampSlug(now)}`);
   let backedUp = false;
+  let scrubbed = 0;
+  const writeFailures: string[] = [];
 
   for (const r of changed) {
     const kinds = r.redactions.length ? `secrets: ${r.redactions.join(', ')}` : 'invisible/bidi unicode';
@@ -214,15 +216,27 @@ export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
       console.log(`[DRY] would scrub ${r.surface.rel} (${kinds})`);
       continue;
     }
-    if (!backedUp) {
-      mkdirSync(backupRoot, { recursive: true });
-      backedUp = true;
+    // Security invariant: processing one surface can fail in ANY way — backup
+    // mkdir, backup write, re-read, or in-place write — and that must NEVER
+    // abort the sweep or touch the other surfaces. Backup-before-rewrite is
+    // enforced by ordering: the in-place write is the LAST step, so if the
+    // backup can't be written the surface is left un-scrubbed (flagged), never
+    // scrubbed without a recoverable copy.
+    try {
+      if (!backedUp) {
+        mkdirSync(backupRoot, { recursive: true });
+        backedUp = true;
+      }
+      const backupTarget = join(backupRoot, r.surface.rel);
+      mkdirSync(dirname(backupTarget), { recursive: true });
+      writeNonClobbering(backupTarget, readFileSync(r.surface.abs, 'utf-8'));
+      writeFileSync(r.surface.abs, r.scrubbed, 'utf-8');
+      scrubbed++;
+      console.log(`[SCRUB] ${r.surface.rel} (${kinds})`);
+    } catch (err) {
+      writeFailures.push(r.surface.rel);
+      console.log(`[SKIP] ${r.surface.rel} — could not scrub (${(err as Error).message}), left untouched`);
     }
-    const backupTarget = join(backupRoot, r.surface.rel);
-    mkdirSync(dirname(backupTarget), { recursive: true });
-    writeNonClobbering(backupTarget, readFileSync(r.surface.abs, 'utf-8'));
-    writeFileSync(r.surface.abs, r.scrubbed, 'utf-8');
-    console.log(`[SCRUB] ${r.surface.rel} (${kinds})`);
   }
 
   for (const r of parseErrors) {
@@ -242,13 +256,17 @@ export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
 
   console.log('');
   console.log(`Surfaces scanned:  ${surfaces.length}`);
-  console.log(`${options.dryRun ? 'Would change' : 'Changed'}:      ${changed.length}`);
+  // On a real run, report what was ACTUALLY scrubbed on disk (a write/backup
+  // failure leaves a detected-changed surface un-scrubbed); dry-run reports what
+  // would change.
+  console.log(`${options.dryRun ? 'Would change' : 'Changed'}:      ${options.dryRun ? changed.length : scrubbed}`);
   if (kindTotals.size > 0) {
     const breakdown = [...kindTotals.entries()].map(([k, n]) => `${k}=${n}`).join(', ');
     console.log(`Secret kinds:      ${breakdown}`);
   }
   if (parseErrors.length > 0) console.log(`Skipped (bad JSON): ${parseErrors.length}`);
   if (unreadable.length > 0) console.log(`Skipped (unreadable): ${unreadable.length}`);
+  if (writeFailures.length > 0) console.log(`Skipped (write failed): ${writeFailures.length}`);
   if (backedUp) console.log(`Backups:           ${backupRoot}`);
   if (options.dryRun) console.log('\n[DRY RUN] No files were modified.');
 }
