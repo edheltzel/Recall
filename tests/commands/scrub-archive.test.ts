@@ -12,7 +12,7 @@
 //   import-legacy run into the DB
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -198,5 +198,25 @@ describe('scrub-archive — hostile filesystem', () => {
     expect(readFileSync(distilled, 'utf-8')).not.toContain(AWS);
     expect(readFileSync(goodTranscript, 'utf-8')).not.toContain(AWS);
     expect(logs.join('\n')).toMatch(/\[SKIP\] sessions\/2026-01-02/);
+  });
+
+  test('an unreadable (mode 000) surface does not abort the sweep; other surfaces still scrubbed', () => {
+    const distilled = join(memoryDir, 'DISTILLED.md');
+    writeFileSync(distilled, `leaked ${AWS} key\n`, 'utf-8');
+
+    // A transcript the process cannot read — readFileSync throws EACCES, which
+    // previously aborted the whole sweep and left DISTILLED.md un-scrubbed.
+    const locked = writeTranscript('2026-01-04', 'sessB', `secret ${AWS}\n`);
+    chmodSync(locked, 0o000);
+
+    try {
+      expect(() => runScrubArchive(opts())).not.toThrow();
+
+      // The readable surface was still scrubbed despite the unreadable one.
+      expect(readFileSync(distilled, 'utf-8')).not.toContain(AWS);
+      expect(logs.join('\n')).toMatch(/\[SKIP\] sessions\/2026-01-04\/sessB\/transcript\.md — unreadable/);
+    } finally {
+      chmodSync(locked, 0o644); // restore so afterEach cleanup can remove it
+    }
   });
 });

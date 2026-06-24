@@ -58,6 +58,7 @@ interface Surface {
 type SurfaceResult =
   | { surface: Surface; status: 'missing' }
   | { surface: Surface; status: 'parse-error' }
+  | { surface: Surface; status: 'unreadable'; error: string }
   | { surface: Surface; status: 'clean' }
   | { surface: Surface; status: 'changed'; scrubbed: string; redactions: string[] };
 
@@ -90,12 +91,16 @@ function scrubJsonValue(value: unknown, kinds: Set<string>): { value: unknown; c
       const sk = scrub(k).text;
       const r = scrubJsonValue(v, kinds);
       changed = changed || r.changed;
-      // Collision guard: if two distinct keys scrub to the same string, keep the
-      // later one under its ORIGINAL key rather than silently overwriting the
-      // first. Never drop data; warn so the operator sees it.
-      if (sk !== k && Object.prototype.hasOwnProperty.call(obj, sk)) {
-        console.log(`[WARN] scrub-archive: JSON key collision on "${sk}"; kept original key "${k}" to avoid dropping data`);
-        obj[k] = r.value;
+      // Collision guard: fire whenever the target key is ALREADY taken, whether
+      // or not scrubbing changed this key — a scrubbed key can collide with an
+      // earlier literal-form key (sk === k) just as easily. Preserve under a
+      // free fallback key and warn; never silently overwrite/drop data.
+      if (Object.prototype.hasOwnProperty.call(obj, sk)) {
+        let fallback = k;
+        for (let n = 1; Object.prototype.hasOwnProperty.call(obj, fallback); n++) fallback = `${k}#${n}`;
+        console.log(`[WARN] scrub-archive: JSON key collision on "${sk}"; preserved under "${fallback}" to avoid dropping data`);
+        obj[fallback] = r.value;
+        changed = true;
       } else {
         if (sk !== k) changed = true;
         obj[sk] = r.value;
@@ -109,7 +114,16 @@ function scrubJsonValue(value: unknown, kinds: Set<string>): { value: unknown; c
 /** Scrub one surface in memory, deciding clean vs changed without writing. */
 function inspectSurface(surface: Surface): SurfaceResult {
   if (!existsSync(surface.abs)) return { surface, status: 'missing' };
-  const raw = readFileSync(surface.abs, 'utf-8');
+  // existsSync only proves the path resolves (F_OK) — the read can still throw
+  // for an unreadable file (EACCES, mode 000), a surface that resolves to a
+  // directory (EISDIR), etc. One odd surface must never abort the whole sweep,
+  // so skip-and-warn here exactly as the transcript enumeration does.
+  let raw: string;
+  try {
+    raw = readFileSync(surface.abs, 'utf-8');
+  } catch (err) {
+    return { surface, status: 'unreadable', error: (err as Error).message };
+  }
 
   if (surface.kind === 'json') {
     let parsed: unknown;
@@ -185,6 +199,7 @@ export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
   const results = surfaces.map(inspectSurface);
   const changed = results.filter((r): r is Extract<SurfaceResult, { status: 'changed' }> => r.status === 'changed');
   const parseErrors = results.filter((r) => r.status === 'parse-error');
+  const unreadable = results.filter((r): r is Extract<SurfaceResult, { status: 'unreadable' }> => r.status === 'unreadable');
   const kindTotals = new Map<string, number>();
   for (const r of changed) for (const k of r.redactions) kindTotals.set(k, (kindTotals.get(k) ?? 0) + 1);
 
@@ -214,6 +229,10 @@ export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
     console.log(`[SKIP] ${r.surface.rel} — invalid JSON, left untouched`);
   }
 
+  for (const r of unreadable) {
+    console.log(`[SKIP] ${r.surface.rel} — unreadable (${r.error}), left untouched`);
+  }
+
   if (options.verbose) {
     for (const r of results) {
       if (r.status === 'clean') console.log(`[OK]   ${r.surface.rel} — clean`);
@@ -229,6 +248,7 @@ export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
     console.log(`Secret kinds:      ${breakdown}`);
   }
   if (parseErrors.length > 0) console.log(`Skipped (bad JSON): ${parseErrors.length}`);
+  if (unreadable.length > 0) console.log(`Skipped (unreadable): ${unreadable.length}`);
   if (backedUp) console.log(`Backups:           ${backupRoot}`);
   if (options.dryRun) console.log('\n[DRY RUN] No files were modified.');
 }
