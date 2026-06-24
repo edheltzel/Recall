@@ -3,7 +3,34 @@
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
 import { notMarkedDuplicateSql } from './dedup.js';
+import { scrub } from './write-safety.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
+
+// Choke point for redacting known-prefix secrets (and stripping invisible
+// unicode) on the EXPLICIT add paths — `recall add` (CLI) and `memory_add`
+// (MCP) both route through addDecision/addLearning/addBreadcrumb below, so
+// scrubbing here covers both surfaces (and any future caller) in one place.
+// Only free-text fields are scrubbed; structured/enum fields (category, status,
+// confidence, tags, importance, provenance) are never secret carriers and are
+// left untouched. Distinct redacted kinds are returned so the caller can
+// surface them to the user. Mirrors the session-extract precedent in
+// hooks/lib/extract-core.ts.
+function scrubFreeText<T extends object>(
+  record: T,
+  fields: readonly (keyof T)[],
+): { record: T; redactions: string[] } {
+  const kinds = new Set<string>();
+  const out: T = { ...record };
+  const bag = out as Record<string, unknown>;
+  for (const field of fields) {
+    const value = bag[field as string];
+    if (typeof value !== 'string' || value.length === 0) continue;
+    const scrubbed = scrub(value);
+    bag[field as string] = scrubbed.text;
+    for (const kind of scrubbed.redactions) kinds.add(kind);
+  }
+  return { record: out, redactions: [...kinds] };
+}
 
 // ============ Sessions ============
 
@@ -113,23 +140,28 @@ export function pinRecord(table: 'decisions' | 'learnings' | 'breadcrumbs' | 'lo
 
 // ============ Decisions ============
 
-export function addDecision(decision: Omit<Decision, 'id' | 'created_at'>): number {
+export function addDecision(
+  decision: Omit<Decision, 'id' | 'created_at'>,
+  redactionsOut?: string[]
+): number {
   const db = getDb();
+  const { record, redactions } = scrubFreeText(decision, ['decision', 'reasoning', 'alternatives']);
+  if (redactionsOut) redactionsOut.push(...redactions);
   const stmt = db.prepare(`
     INSERT INTO decisions (session_id, category, project, decision, reasoning, alternatives, status, confidence, importance, provenance)
     VALUES ($session_id, $category, $project, $decision, $reasoning, $alternatives, $status, $confidence, $importance, $provenance)
   `);
   const result = stmt.run({
-    $session_id: decision.session_id || null,
-    $category: decision.category || null,
-    $project: decision.project || null,
-    $decision: decision.decision,
-    $reasoning: decision.reasoning || null,
-    $alternatives: decision.alternatives || null,
-    $status: decision.status || 'active',
-    $confidence: decision.confidence || 'medium',
-    $importance: clampImportance(decision.importance, 5),
-    $provenance: decision.provenance ?? null
+    $session_id: record.session_id || null,
+    $category: record.category || null,
+    $project: record.project || null,
+    $decision: record.decision,
+    $reasoning: record.reasoning || null,
+    $alternatives: record.alternatives || null,
+    $status: record.status || 'active',
+    $confidence: record.confidence || 'medium',
+    $importance: clampImportance(record.importance, 5),
+    $provenance: record.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -208,23 +240,28 @@ export function findSimilarDecisions(text: string, limit = 3): Decision[] {
 
 // ============ Learnings ============
 
-export function addLearning(learning: Omit<Learning, 'id' | 'created_at'>): number {
+export function addLearning(
+  learning: Omit<Learning, 'id' | 'created_at'>,
+  redactionsOut?: string[]
+): number {
   const db = getDb();
+  const { record, redactions } = scrubFreeText(learning, ['problem', 'solution', 'prevention']);
+  if (redactionsOut) redactionsOut.push(...redactions);
   const stmt = db.prepare(`
     INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance, provenance)
     VALUES ($session_id, $category, $project, $problem, $solution, $prevention, $tags, $confidence, $importance, $provenance)
   `);
   const result = stmt.run({
-    $session_id: learning.session_id || null,
-    $category: learning.category || null,
-    $project: learning.project || null,
-    $problem: learning.problem,
-    $solution: learning.solution || null,
-    $prevention: learning.prevention || null,
-    $tags: learning.tags || null,
-    $confidence: learning.confidence || 'medium',
-    $importance: clampImportance(learning.importance, 5),
-    $provenance: learning.provenance ?? null
+    $session_id: record.session_id || null,
+    $category: record.category || null,
+    $project: record.project || null,
+    $problem: record.problem,
+    $solution: record.solution || null,
+    $prevention: record.prevention || null,
+    $tags: record.tags || null,
+    $confidence: record.confidence || 'medium',
+    $importance: clampImportance(record.importance, 5),
+    $provenance: record.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -236,20 +273,25 @@ export function getLearning(id: number): Learning | undefined {
 
 // ============ Breadcrumbs ============
 
-export function addBreadcrumb(breadcrumb: Omit<Breadcrumb, 'id' | 'created_at'>): number {
+export function addBreadcrumb(
+  breadcrumb: Omit<Breadcrumb, 'id' | 'created_at'>,
+  redactionsOut?: string[]
+): number {
   const db = getDb();
+  const { record, redactions } = scrubFreeText(breadcrumb, ['content']);
+  if (redactionsOut) redactionsOut.push(...redactions);
   const stmt = db.prepare(`
     INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at, provenance)
     VALUES ($session_id, $content, $category, $project, $importance, $expires_at, $provenance)
   `);
   const result = stmt.run({
-    $session_id: breadcrumb.session_id || null,
-    $content: breadcrumb.content,
-    $category: breadcrumb.category || null,
-    $project: breadcrumb.project || null,
-    $importance: breadcrumb.importance ?? 5,
-    $expires_at: breadcrumb.expires_at || null,
-    $provenance: breadcrumb.provenance ?? null
+    $session_id: record.session_id || null,
+    $content: record.content,
+    $category: record.category || null,
+    $project: record.project || null,
+    $importance: record.importance ?? 5,
+    $expires_at: record.expires_at || null,
+    $provenance: record.provenance ?? null
   });
   return result.lastInsertRowid as number;
 }
