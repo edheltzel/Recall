@@ -16,6 +16,7 @@ import { runImportConversations } from './commands/import-conversations.js';
 import { runLoa, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
 import { runDump } from './commands/dump.js';
 import { runImportLegacy } from './commands/import-legacy.js';
+import { runScrubArchive } from './commands/scrub-archive.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
 import { runImportDocs, runDocsList, runDocsSearch, runDocsShow } from './commands/import-docs.js';
 import { runSupersede, runRevert, runList as runDecisionList } from './commands/decision.js';
@@ -384,6 +385,20 @@ program
       verbose: options.verbose,
       yes: options.yes,
       source: options.source
+    });
+    closeDb();
+  });
+
+// recall scrub-archive - Retroactively scrub secrets from the legacy on-disk archive (#157)
+program
+  .command('scrub-archive')
+  .description('Scrub secrets + invisible unicode from the legacy ~/.claude/MEMORY archive in place')
+  .option('--dry-run', 'Report what would be redacted without writing')
+  .option('-v, --verbose', 'Show clean and missing surfaces too')
+  .action((options) => {
+    runScrubArchive({
+      dryRun: options.dryRun,
+      verbose: options.verbose
     });
     closeDb();
   });
@@ -795,7 +810,7 @@ program
   .option('-v, --vector', 'Use vector search only (semantic)')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {
