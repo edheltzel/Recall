@@ -83,6 +83,7 @@ import {
 	buildHybridFallbackOutcome,
 } from "./lib/search-fallback.js";
 import { provenanceLabel } from "./lib/provenance.js";
+import { detectThreats, summarizeThreats } from "./lib/threat-detect.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
 
@@ -639,6 +640,20 @@ server.tool(
 	},
 	async ({ type, content, detail, project, tags, confidence, importance }) => {
 		try {
+			// #156 detection layer — DETECT-AND-SURFACE ONLY (Ed's ruling): it never
+			// mutates or blocks. Scan the content + detail and surface any
+			// injection/exfil or anonymous-high-entropy flags as a non-fatal stderr
+			// log; the record is stored exactly as provided. (Anchored known-prefix
+			// secrets remain scrub()'s job on the scrub paths; memory_add lacks scrub
+			// today — out of scope for #156, tracked for a follow-up.)
+			const threats = [
+				...detectThreats(content),
+				...(detail !== undefined ? detectThreats(detail) : []),
+			];
+			if (threats.length > 0) {
+				console.error(`[recall] threat-detect: ${summarizeThreats(threats)} in memory_add — record stored unchanged`);
+			}
+
 			let id: number;
 
 			switch (type) {

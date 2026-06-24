@@ -26,6 +26,7 @@
 
 import { evaluateQuality, type QualityResult } from './extraction-quality';
 import { scrub } from './write-safety';
+import { detectThreats, type ThreatFinding } from './threat-detect';
 import {
   dualWriteToSqlite,
   type DualWriteContext,
@@ -61,6 +62,8 @@ export interface ExtractCoreResult {
   summary?: string;
   /** Distinct secret kinds redacted across all persisted fields (never the values). */
   redactions?: string[];
+  /** #156 injection/exfil flag findings across persisted fields (surfaced only; persisted text is unchanged). */
+  threats?: ThreatFinding[];
   /** Present only when outcome === 'extracted'. */
   dualWrite?: DualWriteResult;
 }
@@ -105,6 +108,16 @@ export async function runExtractCore(
     ]),
   ];
 
+  // #156 detection layer — runs AFTER scrub over the already-scrubbed text.
+  // DETECT-AND-SURFACE ONLY: it never mutates or blocks (Ed's ruling). Findings
+  // (injection/exfil prose + anonymous high-entropy tokens) are surfaced in the
+  // returned `threats` array; the persisted text is the scrubbed text, unchanged.
+  const threats: ThreatFinding[] = [
+    ...detectThreats(scrubbedExtracted.text),
+    ...detectThreats(scrubbedSummary.text),
+    ...scrubbedTopics.flatMap((r) => detectThreats(r.text)),
+  ];
+
   const dualWrite = dualWriteToSqlite(dbPath, {
     ...ctx,
     extracted: scrubbedExtracted.text,
@@ -119,6 +132,7 @@ export async function runExtractCore(
     topics,
     summary,
     redactions,
+    threats,
     dualWrite,
   };
 }
