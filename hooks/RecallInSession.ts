@@ -156,6 +156,25 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
+/**
+ * Resolve the extractor the child runs over the window. Normally the real model
+ * cascade (Claude CLI → Ollama). When RECALL_INSESSION_EXTRACT_STUB names a
+ * readable file, return its contents as a deterministic fake extractor instead —
+ * the test-only seam (#135) that lets the spawned child be driven end-to-end in
+ * CI with no live model backend.
+ */
+function resolveExtract(): (input: string) => Promise<string | null> {
+  const stubPath = process.env.RECALL_INSESSION_EXTRACT_STUB;
+  if (!stubPath) return runExtractionCascade;
+  return async () => {
+    try {
+      return readFileSync(stubPath, 'utf-8');
+    } catch {
+      return null;
+    }
+  };
+}
+
 /** Child (--run): run the incremental extraction over the window. */
 async function runChild(): Promise<void> {
   const config = readInSessionConfig(process.env);
@@ -184,7 +203,7 @@ async function runChild(): Promise<void> {
           return null;
         }
       },
-      extract: runExtractionCascade,
+      extract: resolveExtract(),
       deriveMeta: (text) => ({
         topics: extractTopics(text),
         summary: deriveSummary(text, sessionLabel),
