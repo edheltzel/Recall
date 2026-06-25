@@ -20,10 +20,16 @@
 // equivalent, the way hooks already duplicate other small utilities. No hook
 // builds an input-scaled list today.
 //
-// `tests/lib/chunk-audit.test.ts` enforces this note: it fails when a new
+// `tests/lib/chunk-audit.test.ts` partly enforces this note: it fails when a new
 // input-scaled placeholder list (`.map(() => '?')` / `Array.from(x, () => '?')`)
-// appears in src/ or hooks/ outside the allowlist of sites that already chunk
-// (or are provably fixed-size).
+// appears in a src/ or hooks/ file that doesn't already route some query through
+// `chunked()` (and isn't allowlisted fixed-size). The guard is file-granular, not
+// per-statement: a file that already calls `chunked()` anywhere is exempt
+// wholesale, so a new un-chunked sibling list added to one of these bulk-SQL
+// files (dump.ts, aging.ts, dedup.ts, memory.ts) is NOT caught — chunk those by
+// hand. (Per-statement granularity would need data-flow analysis: dump.ts binds
+// its chunk var two hops from `chunked()`, so a line-level regex can't tell a
+// chunk-derived `.map(() => '?')` from a raw-input one.)
 
 /**
  * Conservative default chunk size. Well under the historical 999-variable
