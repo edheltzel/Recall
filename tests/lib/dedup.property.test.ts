@@ -347,6 +347,50 @@ describe('dedup semantic threshold properties', () => {
       })
     );
   });
+
+  // Completeness, not soundness. The two tests above only constrain what IS
+  // planned (nothing below threshold, correct survivor/similarity) — they stay
+  // green even if findSemanticPairs dropped every pair. This exactly-determined
+  // two-record corpus pins the other direction: the single possible pair sits a
+  // fixed margin above the threshold, so it MUST be found. A dropped-pair
+  // regression (e.g. an off-by-one in the O(n^2) scan, or `>=` → `>`) fails here.
+  test('completeness: an exactly-determined pair above the threshold is always found', () => {
+    fc.assert(
+      fc.property(
+        angleArb,
+        fc.integer({ min: 0, max: 30 }), // separation in degrees → cos ∈ [cos 30°, 1]
+        semRecordArb,
+        semRecordArb,
+        (angleA, separationDeg, recA, recB) => {
+          withDb(db => {
+            const angleB = (angleA + separationDeg) % 360;
+            const records = insertSemCorpus(db, [
+              { ...recA, angleDeg: angleA },
+              { ...recB, angleDeg: angleB },
+            ]);
+            const trueSim = specCos(angleA, angleB);
+            // A 0.05 margin below the true similarity dwarfs F32_TOLERANCE, so
+            // the float32-stored similarity is guaranteed to clear the threshold.
+            const threshold = trueSim - 0.05;
+            const planned = planDedup(db, { semantic: true, threshold }).tables.flatMap(t => t.planned);
+
+            expect(planned.length).toBe(1);
+            const entry = planned[0];
+            expect(entry.reason).toBe('semantic');
+            const survivor = records.find(r => r.id === entry.survivor_id);
+            const duplicate = records.find(r => r.id === entry.duplicate_id);
+            expect(survivor).toBeDefined();
+            expect(duplicate).toBeDefined();
+            expect(entry.survivor_id).not.toBe(entry.duplicate_id);
+            // The found pair still keeps the spec-ordered survivor and records
+            // its true similarity — completeness without regressing soundness.
+            expect(specCompare(survivor!, duplicate!)).toBeLessThan(0);
+            expect(Math.abs((entry.similarity ?? 0) - trueSim)).toBeLessThanOrEqual(F32_TOLERANCE);
+          });
+        }
+      )
+    );
+  });
 });
 
 describe('dedup one-hop lineage and write-freeness', () => {
