@@ -14,6 +14,7 @@ mock.module('../../src/lib/embeddings', () => ({
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
 import { bumpAccess, search, addBreadcrumb } from '../../src/lib/memory';
+import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 
 let hybridSearch: typeof import('../../src/mcp-server')['hybridSearch'];
 
@@ -60,6 +61,20 @@ describe('bumpAccess (issue #153)', () => {
     const id = addBreadcrumb({ content: 'dedupe me', importance: 5 });
     bumpAccess([{ table: 'breadcrumbs', id }, { table: 'breadcrumbs', id }]);
     expect(accessCount('breadcrumbs', id)).toBe(1);
+  });
+
+  test('bumps every id across chunk boundaries for a >cap set (issue #189)', () => {
+    // bumpAccess chunks its IN (...) list through chunked() at
+    // SQLITE_SAFE_CHUNK_SIZE. A set larger than one chunk exercises the
+    // multi-chunk path inside its single transaction; assert ALL ids land at 1 —
+    // none dropped at a chunk boundary, the whole bump committed atomically.
+    const n = SQLITE_SAFE_CHUNK_SIZE * 2 + 1; // spans three chunks (500/500/1)
+    const ids = Array.from({ length: n }, (_, i) =>
+      addBreadcrumb({ content: `chunkword row ${i}`, importance: 5 })
+    );
+    bumpAccess(ids.map((id) => ({ table: 'breadcrumbs', id })));
+    const bumped = ids.filter((id) => accessCount('breadcrumbs', id) === 1).length;
+    expect(bumped).toBe(n);
   });
 
   test('ignores unknown / non-bumpable tables and an empty set (no throw)', () => {
