@@ -117,6 +117,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
 - **Hook registration**: `Stop`, `SessionStart`, `PreCompact` events in `~/.claude/settings.json` under `hooks.*`.
 - **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.
+- **Input-scaled SQL bind lists**: any `IN (...)` or multi-row `VALUES` whose placeholder count grows with input MUST chunk through `src/lib/chunk.ts`'s `chunked()` (conservative 500, under SQLite's bind-variable limit) — never bind the whole list at once. Because hooks can't import `src/` (see above), a hook with an input-scaled list inlines a local equivalent. Enforced by `tests/lib/chunk-audit.test.ts`, which fails when a new input-scaled placeholder list appears outside the allowlist of sites that already chunk.
 - **Shell-to-JS safety**: `install.sh` passes variables to `bun -e` via environment variables, never shell interpolation in JS strings.
 - **Tests**: `bun:test` (not vitest, despite devDependency). Test files at `tests/**/*.test.ts`.
 - **No Fabric dependency**: Fabric is optional. Core functionality works without it.
