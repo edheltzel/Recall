@@ -143,6 +143,37 @@ describe('importConversations', () => {
     expect(session.project).toBe('slack:eng-recall');
   });
 
+  // Companion to the directory test, through the same registry dispatch but
+  // with a SINGLE-FILE input: here rootPath === the file itself, so the channel
+  // resolves from the file basename via the isFile branch — not the parent
+  // directory. The directory test cannot catch a dropped `rootPath` destructure
+  // because its dirname fallback coincidentally yields the same channel; this
+  // single-file case unmasks it (a dropped rootPath would derive the channel
+  // from the parent dir 'eng-recall', yielding 'slack:eng-recall:general').
+  test('imports a single Slack export file, deriving the channel from the file name (not the parent directory)', async () => {
+    const channelDir = join(tempDir, 'eng-recall');
+    mkdirSync(channelDir);
+    const file = join(channelDir, 'general.json');
+    writeFileSync(file, JSON.stringify([
+      { ts: '1710000000.000100', user: 'U1', user_profile: { real_name: 'Ada Lovelace' }, text: 'ship it' },
+      { ts: '1710000001.000200', bot_id: 'B1', username: 'Recall Bot', subtype: 'bot_message', text: 'import finished' },
+    ]));
+
+    const result = await importConversations(file, { format: 'auto', noExtract: true });
+
+    expect(result.sessionsFound).toBe(1);
+    expect(result.sessionsImported).toBe(1);
+    expect(result.messagesImported).toBe(2);
+
+    const db = readDb();
+    const session = db.prepare('SELECT session_id, source, project FROM sessions').get() as any;
+    db.close();
+
+    expect(session.session_id).toBe('slack:general:general');
+    expect(session.source).toBe('slack');
+    expect(session.project).toBe('slack:general');
+  });
+
   test('runs extraction by default and writes LoA, decisions, learnings, breadcrumbs, and extraction session metadata', async () => {
     const file = join(tempDir, 'claude.json');
     writeFileSync(file, JSON.stringify([
