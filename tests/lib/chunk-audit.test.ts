@@ -6,9 +6,16 @@ import { join } from 'path';
 // every input-scaled SQL placeholder list in src/ and hooks/ routes through
 // `chunked()` — a point-in-time global assertion that rots silently the first
 // time someone adds an unchunked `IN (${ids.map(() => '?')})` elsewhere. This
-// test turns that prose into an enforced invariant: a new input-scaled
-// placeholder list that bypasses the helper (and is not a provably fixed-size
+// test turns that prose into a partial invariant: a new input-scaled placeholder
+// list in a file that doesn't already chunk (and isn't a provably fixed-size
 // site) fails CI.
+//
+// LIMITATION — file-granular, not per-statement (issue #189): the offender check
+// exempts a file wholesale once it contains any `chunked(` call, so a new
+// un-chunked sibling list added to a file that already chunks (memory.ts,
+// dump.ts, aging.ts, dedup.ts) is NOT flagged. Tightening to per-statement would
+// need data-flow analysis (dump.ts binds its chunk var two hops from `chunked()`),
+// which is overkill for a meta-test; those files are chunked by hand + review.
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const SCAN_DIRS = ['src', 'hooks'];
