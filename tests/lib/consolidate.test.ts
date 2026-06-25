@@ -15,6 +15,7 @@ import { addDecision, addLearning, createLoaEntry } from '../../src/lib/memory';
 import { planConsolidate, type ConsolidatePlan } from '../../src/lib/consolidate';
 import {
   runConsolidate,
+  parseConsolidateProgress,
   type ConsolidateApplyResult,
 } from '../../src/commands/consolidate';
 import type { LineageStatus } from '../../src/lib/dedup';
@@ -183,5 +184,47 @@ describe('runConsolidate — dry-run / execute gate', () => {
     expect(result).toBeUndefined();
     expect(process.exitCode).toBe(1);
     expect(spy.calls.length).toBe(0);
+  });
+
+  test('surfaces partial progress when apply errors after committing work (#145.3)', async () => {
+    oldDecision('alpha'); oldDecision('beta'); oldDecision('gamma');
+    const applied: ConsolidateApplyResult = {
+      written: 2, demoted: 5, redactions: [], skipped: [],
+      error: 'consolidate engine failed: timed out',
+    };
+
+    const result = await runConsolidate({ execute: true }, { apply: async () => applied });
+
+    expect(process.exitCode).toBe(1);
+    const out = logged.join('\n');
+    expect(out).toContain('Consolidation failed: consolidate engine failed: timed out');
+    expect(out).toContain('Partial progress before failure: wrote 2 derived summary(ies), demoted 5 source record(s).');
+    expect(result!.applied).toBe(applied);
+  });
+});
+
+// parseConsolidateProgress — recover committed counts from a killed child's stderr (#145.3).
+describe('parseConsolidateProgress', () => {
+  const PREFIX = 'RECALL_CONSOLIDATE_PROGRESS ';
+
+  test('returns the LAST cumulative marker, ignoring surrounding stderr noise', () => {
+    const stderr = [
+      'some cascade diagnostic line',
+      `${PREFIX}{"written":1,"demoted":3}`,
+      'another noisy line from the nested model call',
+      `${PREFIX}{"written":2,"demoted":5}`,
+    ].join('\n');
+    expect(parseConsolidateProgress(stderr)).toEqual({ written: 2, demoted: 5 });
+  });
+
+  test('matches a marker even when other text precedes it on the line', () => {
+    expect(parseConsolidateProgress(`2026-01-01 worker: ${PREFIX}{"written":7,"demoted":9}`))
+      .toEqual({ written: 7, demoted: 9 });
+  });
+
+  test('ignores a malformed/partially-flushed marker and returns null when none parse', () => {
+    expect(parseConsolidateProgress(`${PREFIX}{"written":1,"demo`)).toBeNull();
+    expect(parseConsolidateProgress('no markers here at all')).toBeNull();
+    expect(parseConsolidateProgress('')).toBeNull();
   });
 });

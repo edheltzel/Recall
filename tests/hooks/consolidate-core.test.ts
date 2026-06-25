@@ -10,6 +10,10 @@
 // The model cascade is injected as a fake, so no real `claude`/Ollama is invoked.
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { Database } from 'bun:sqlite';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
 import { addDecision } from '../../src/lib/memory';
@@ -41,12 +45,12 @@ afterEach(() => { teardownTestDb(); });
 function seedDecisions(texts: string[], importance = 3): number[] {
   return texts.map((t) => addDecision({ decision: t, status: 'active', project: 'p', importance }));
 }
-function clusterFor(ids: number[]): ConsolidateInputCluster {
+function clusterFor(ids: number[], newImportance = 1, window = '2020-01-01'): ConsolidateInputCluster {
   return {
     table: 'decisions',
     project: 'p',
-    window: '2020-01-01',
-    records: ids.map((id) => ({ id, text: `decision ${id}`, newImportance: 1 })),
+    window,
+    records: ids.map((id) => ({ id, text: `decision ${id}`, newImportance })),
   };
 }
 function loaRows(): Array<{ provenance: string | null; source_ids: string | null; fabric_extract: string; importance: number }> {
@@ -115,5 +119,75 @@ describe('applyConsolidation — write + demote', () => {
     expect(result.skipped).toEqual([{ table: 'decisions', window: '2020-01-01', reason: 'extraction_failed' }]);
     expect(loaRows().length).toBe(0);
     for (const id of ids) expect(importanceOf(id)).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Defense-in-depth hardening (issue #145).
+// ---------------------------------------------------------------------------
+
+describe('applyConsolidation — child re-clamps the demote target (#145.1)', () => {
+  const summarize = async () => VALID_SUMMARY;
+
+  test('a hostile newImportance can only LOWER importance — never raises it', async () => {
+    // Sources at importance 4; payload tries to RAISE them to 9.
+    const ids = seedDecisions(['decision one', 'decision two', 'decision three'], 4);
+
+    const result = await applyConsolidation(dbPath, [clusterFor(ids, 9)], { summarize });
+
+    expect(result.written).toBe(1);
+    // MIN(importance, 9) = 4 → demotion never raises above the current value.
+    for (const id of ids) expect(importanceOf(id)).toBe(4);
+  });
+
+  test('an out-of-range newImportance is re-pinned to the absolute floor of 1', async () => {
+    const ids = seedDecisions(['decision one', 'decision two', 'decision three'], 4);
+
+    const result = await applyConsolidation(dbPath, [clusterFor(ids, 0)], { summarize });
+
+    expect(result.written).toBe(1);
+    // MAX(1, MIN(4, 0)) = 1 → never below the floor, even from a sub-floor payload.
+    for (const id of ids) expect(importanceOf(id)).toBe(1);
+  });
+});
+
+describe('applyConsolidation — NULL-lineage guard (#145.2)', () => {
+  test('fails loudly when loa_entries lacks provenance/source_ids columns', async () => {
+    // A bare DB whose loa_entries predates migration 13 (#140) — no lineage cols.
+    const dir = mkdtempSync(join(tmpdir(), 'recall-unmigrated-'));
+    const barePath = join(dir, 'bare.db');
+    const bare = new Database(barePath);
+    bare.exec('CREATE TABLE loa_entries (id INTEGER PRIMARY KEY, title TEXT, fabric_extract TEXT)');
+    bare.close();
+    try {
+      const ids = [1, 2, 3];
+      await expect(
+        applyConsolidation(barePath, [clusterFor(ids)], { summarize: async () => VALID_SUMMARY }),
+      ).rejects.toThrow(/provenance\/source_ids/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('applyConsolidation — progress callback (#145.3)', () => {
+  test('emits cumulative {written, demoted} after each committed cluster', async () => {
+    const a = seedDecisions(['a one', 'a two', 'a three']);
+    const b = seedDecisions(['b one', 'b two']);
+    const progress: Array<{ written: number; demoted: number }> = [];
+
+    const result = await applyConsolidation(
+      dbPath,
+      [clusterFor(a, 1, '2020-01-01'), clusterFor(b, 1, '2020-02-01')],
+      { summarize: async () => VALID_SUMMARY, onProgress: (p) => progress.push(p) },
+    );
+
+    expect(result.written).toBe(2);
+    // Cumulative totals, one event per committed cluster — exactly what the parent
+    // reads from the last stderr marker to report committed work on timeout.
+    expect(progress).toEqual([
+      { written: 1, demoted: 3 },
+      { written: 2, demoted: 5 },
+    ]);
   });
 });
