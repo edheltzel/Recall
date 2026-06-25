@@ -185,13 +185,14 @@ export async function applyConsolidation(
       ];
 
       // 4) Write + demote atomically. Sources are demoted, never deleted.
-      // Re-clamp in the child (defense-in-depth): MIN(importance, …) so a demote
-      // can only ever LOWER importance — a directly-piped payload can't raise it —
-      // and MAX(1, …) re-pins the absolute floor regardless of the supplied value.
+      // Re-clamp in the child (defense-in-depth): MIN(…, importance) so a demote can
+      // only ever LOWER importance — a directly-piped payload can't raise it.
+      // COALESCE(?, importance) makes a NULL payload a no-op (never nulls the column),
+      // and MAX(1, …) re-pins the absolute floor of 1 for every input, NULL included.
       const writeCluster = db.transaction(() => {
         insertLoa.run(...values);
         const demote = db.prepare(
-          `UPDATE ${cluster.table} SET importance = MAX(1, MIN(importance, CAST(? AS INTEGER))) WHERE id = ?`,
+          `UPDATE ${cluster.table} SET importance = MAX(1, MIN(CAST(COALESCE(?, importance) AS INTEGER), importance)) WHERE id = ?`,
         );
         for (const r of cluster.records) demote.run(r.newImportance, r.id);
       });

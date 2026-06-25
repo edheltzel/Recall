@@ -9,6 +9,10 @@
 // - runConsolidate --execute: hands the plan to the injected apply seam.
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { execSync } from 'child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
 import { addDecision, addLearning, createLoaEntry } from '../../src/lib/memory';
@@ -226,5 +230,37 @@ describe('parseConsolidateProgress', () => {
     expect(parseConsolidateProgress(`${PREFIX}{"written":1,"demo`)).toBeNull();
     expect(parseConsolidateProgress('no markers here at all')).toBeNull();
     expect(parseConsolidateProgress('')).toBeNull();
+  });
+});
+
+// End-to-end stderr→parser link (#188): the prior coverage proved the parser and
+// the apply separately, but never the live `spawn → err.stderr → parse` path that
+// spawnConsolidateChild relies on when it SIGTERMs a hung child on timeout.
+describe('parseConsolidateProgress — live spawn → stderr → parse (#188)', () => {
+  // Mirrors PROGRESS_PREFIX emitted by hooks/lib/consolidate-core.ts's onProgress.
+  const FIXTURE = `process.stderr.write('RECALL_CONSOLIDATE_PROGRESS {"written":2,"demoted":5}\\n');
+setInterval(() => {}, 1000); // hang so the parent must kill us on timeout
+`;
+
+  test('recovers committed counts from a killed child\'s captured stderr', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-consolidate-e2e-'));
+    const script = join(dir, 'hang-after-progress.ts');
+    writeFileSync(script, FIXTURE);
+    try {
+      // Same mechanism as spawnConsolidateChild: execSync with a timeout SIGTERMs
+      // the child, and the thrown error carries the stderr captured before the kill.
+      let captured: string | null = null;
+      try {
+        execSync(`${process.execPath} run ${script}`, {
+          encoding: 'utf-8', timeout: 1500, maxBuffer: 10 * 1024 * 1024,
+        });
+      } catch (err: any) {
+        captured = String(err?.stderr ?? '');
+      }
+      expect(captured).not.toBeNull(); // child was killed, not a clean exit
+      expect(parseConsolidateProgress(captured!)).toEqual({ written: 2, demoted: 5 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
