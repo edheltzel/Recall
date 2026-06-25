@@ -58,6 +58,29 @@ export interface ConsolidateRunResult {
   applied: ConsolidateApplyResult | null;
 }
 
+/** stderr marker the hook-side child emits after each committed cluster. Restated
+ *  here (not imported) because src cannot cross the hooks/src boundary — the
+ *  literal must stay in lockstep with PROGRESS_PREFIX in consolidate-core.ts. */
+const PROGRESS_PREFIX = 'RECALL_CONSOLIDATE_PROGRESS ';
+
+/** Recover the child's last cumulative {written, demoted} from its captured
+ *  stderr. Used when the subprocess is killed on timeout so the summary reflects
+ *  the per-cluster transactions it committed before SIGTERM. null if none found. */
+export function parseConsolidateProgress(stderr: string): { written: number; demoted: number } | null {
+  let latest: { written: number; demoted: number } | null = null;
+  for (const line of stderr.split('\n')) {
+    const at = line.indexOf(PROGRESS_PREFIX);
+    if (at === -1) continue;
+    try {
+      const parsed = JSON.parse(line.slice(at + PROGRESS_PREFIX.length));
+      if (typeof parsed?.written === 'number' && typeof parsed?.demoted === 'number') {
+        latest = { written: parsed.written, demoted: parsed.demoted };
+      }
+    } catch { /* ignore a partially-flushed marker line */ }
+  }
+  return latest;
+}
+
 /** Parse a `<n>d` duration into days; null on malformed input. */
 function parseDays(value: string): number | null {
   const match = value.match(/^(\d+)d$/);
@@ -99,8 +122,11 @@ function spawnConsolidateChild(plan: ConsolidatePlan): Promise<ConsolidateApplyR
     });
     return Promise.resolve(JSON.parse(out) as ConsolidateApplyResult);
   } catch (err: any) {
+    // On timeout the child is SIGTERM'd after committing N per-cluster transactions;
+    // recover those counts from its captured stderr so the summary doesn't understate.
+    const progress = parseConsolidateProgress(String(err?.stderr ?? ''));
     return Promise.resolve({
-      written: 0, demoted: 0, redactions: [], skipped: [],
+      written: progress?.written ?? 0, demoted: progress?.demoted ?? 0, redactions: [], skipped: [],
       error: `consolidate engine failed: ${(err?.message || String(err)).slice(0, 200)}`,
     });
   }
@@ -198,6 +224,12 @@ export async function runConsolidate(
 
   if (applied.error) {
     console.error(`\nConsolidation failed: ${applied.error}`);
+    if (applied.written > 0 || applied.demoted > 0) {
+      console.error(
+        `Partial progress before failure: wrote ${applied.written.toLocaleString()} derived summary(ies), ` +
+        `demoted ${applied.demoted.toLocaleString()} source record(s).`
+      );
+    }
     process.exitCode = 1;
     return { plan, applied };
   }

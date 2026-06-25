@@ -65,7 +65,15 @@ export interface ConsolidateApplyResult {
 /** Injected model behavior — defaults to the cheap cascade; tests pass a fake. */
 export interface ConsolidateDeps {
   summarize: (prompt: string) => Promise<string | null>;
+  /** Called with the running cumulative totals after each cluster commits, so a
+   *  parent that kills us on timeout can still report the work we landed. */
+  onProgress?: (progress: { written: number; demoted: number }) => void;
 }
+
+/** stderr marker the child prints after each committed cluster. The parent
+ *  (src/commands/consolidate.ts) matches the same literal to recover committed
+ *  counts when it kills us on timeout — restated there per the hooks/src split. */
+export const PROGRESS_PREFIX = 'RECALL_CONSOLIDATE_PROGRESS ';
 
 /**
  * Build the summarization prompt for one cluster. Pure. The output structure
@@ -122,11 +130,15 @@ export async function applyConsolidation(
   const result: ConsolidateApplyResult = { written: 0, demoted: 0, redactions: [], skipped: [] };
   const db = openDb(dbPath);
   try {
-    const hasProvenance = columnExists(db, 'loa_entries', 'provenance');
-    const hasSourceIds = columnExists(db, 'loa_entries', 'source_ids');
-    const cols = ['title', 'description', 'fabric_extract', 'project', 'tags', 'importance'];
-    if (hasProvenance) cols.push('provenance');
-    if (hasSourceIds) cols.push('source_ids');
+    // Lineage columns are guaranteed by migration 13 (#140). If they are absent
+    // the schema is unmigrated/corrupt — fail loudly rather than silently writing
+    // NULL provenance/source_ids and losing the lineage we just computed.
+    if (!columnExists(db, 'loa_entries', 'provenance') || !columnExists(db, 'loa_entries', 'source_ids')) {
+      throw new Error(
+        'loa_entries is missing provenance/source_ids columns — run `recall migrate` (schema must be >= v13) before consolidating',
+      );
+    }
+    const cols = ['title', 'description', 'fabric_extract', 'project', 'tags', 'importance', 'provenance', 'source_ids'];
     const insertSql =
       `INSERT INTO loa_entries (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
     const insertLoa = db.prepare(insertSql);
@@ -168,21 +180,26 @@ export async function applyConsolidation(
         cluster.project,
         'consolidated,derived',
         DERIVED_LOA_IMPORTANCE,
+        'derived',
+        sourceIds,
       ];
-      if (hasProvenance) values.push('derived');
-      if (hasSourceIds) values.push(sourceIds);
 
-      // 4) Write + demote atomically. Importance only ever moves to the planner's
-      // clampImportance target. Sources are demoted, never deleted.
+      // 4) Write + demote atomically. Sources are demoted, never deleted.
+      // Re-clamp in the child (defense-in-depth): MIN(importance, …) so a demote
+      // can only ever LOWER importance — a directly-piped payload can't raise it —
+      // and MAX(1, …) re-pins the absolute floor regardless of the supplied value.
       const writeCluster = db.transaction(() => {
         insertLoa.run(...values);
-        const demote = db.prepare(`UPDATE ${cluster.table} SET importance = ? WHERE id = ?`);
+        const demote = db.prepare(
+          `UPDATE ${cluster.table} SET importance = MAX(1, MIN(importance, CAST(? AS INTEGER))) WHERE id = ?`,
+        );
         for (const r of cluster.records) demote.run(r.newImportance, r.id);
       });
       writeCluster();
 
       result.written += 1;
       result.demoted += cluster.records.length;
+      deps.onProgress?.({ written: result.written, demoted: result.demoted });
     }
 
     result.redactions = [...redactions];
@@ -228,7 +245,13 @@ async function main(): Promise<void> {
   const result = await applyConsolidation(
     resolveDbPath(),
     payload.clusters ?? [],
-    { summarize: runExtractionCascade },
+    {
+      summarize: runExtractionCascade,
+      // Cumulative progress to stderr — the parent reads the last marker to report
+      // committed work if it has to SIGTERM us on timeout (stdout carries only the
+      // final JSON result, so progress must not pollute it).
+      onProgress: (p) => process.stderr.write(`${PROGRESS_PREFIX}${JSON.stringify(p)}\n`),
+    },
   );
   process.stdout.write(JSON.stringify(result));
   process.exit(0);
