@@ -149,6 +149,22 @@ describe('applyConsolidation — child re-clamps the demote target (#145.1)', ()
     // MAX(1, MIN(4, 0)) = 1 → never below the floor, even from a sub-floor payload.
     for (const id of ids) expect(importanceOf(id)).toBe(1);
   });
+
+  test('a NULL newImportance no-ops to the current value — never writes NULL (#188)', async () => {
+    // A NULL payload used to null the column (CAST(NULL)→NULL, MIN/MAX with NULL→NULL).
+    // COALESCE(?, importance) makes it a no-op so the floor-of-1 invariant holds for NULL too.
+    const ids = seedDecisions(['decision one', 'decision two', 'decision three'], 4);
+    const nullCluster: ConsolidateInputCluster = {
+      ...clusterFor(ids),
+      records: ids.map((id) => ({ id, text: `decision ${id}`, newImportance: null as unknown as number })),
+    };
+
+    const result = await applyConsolidation(dbPath, [nullCluster], { summarize });
+
+    expect(result.written).toBe(1);
+    // Unchanged at 4 (not NULL) — a non-null integer proves the column was not nulled.
+    for (const id of ids) expect(importanceOf(id)).toBe(4);
+  });
 });
 
 describe('applyConsolidation — NULL-lineage guard (#145.2)', () => {
