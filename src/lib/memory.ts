@@ -3,6 +3,7 @@
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
 import { notMarkedDuplicateSql } from './dedup.js';
+import { chunked } from './chunk.js';
 import { scrub } from './write-safety.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
 
@@ -522,10 +523,16 @@ export function bumpAccess(records: Array<{ table: string; id: number }>): void 
     const db = getDb();
     const apply = db.transaction(() => {
       for (const [table, ids] of idsByTable) {
-        const placeholders = Array.from(ids, () => '?').join(', ');
-        db.prepare(
-          `UPDATE ${table} SET access_count = access_count + 1, last_accessed = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`
-        ).run(...ids);
+        // Input-scaled IN (...) list: a large surfaced result set (e.g. a
+        // high --limit recall) could otherwise exceed the bind-variable limit,
+        // so chunk through the SQLite-safe helper. All chunks share one
+        // transaction, keeping the bump all-or-nothing.
+        for (const chunk of chunked([...ids])) {
+          const placeholders = chunk.map(() => '?').join(', ');
+          db.prepare(
+            `UPDATE ${table} SET access_count = access_count + 1, last_accessed = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`
+          ).run(...chunk);
+        }
       }
     });
     apply();
