@@ -6,6 +6,7 @@
 import { Command } from 'commander';
 import { VERSION, DISPLAY_NAME } from './version.js';
 import { runInit } from './commands/init.js';
+import { runIndexCode } from './commands/index-code.js';
 import { runAddBreadcrumb, runAddDecision, runAddLearning } from './commands/add.js';
 import { runSearch } from './commands/search.js';
 import { runRecent } from './commands/recent.js';
@@ -62,6 +63,16 @@ program
   .action(() => {
     runInit();
     closeDb();
+  });
+
+// recall index
+program
+  .command('index [path]')
+  .description('Index source code into the native code knowledge graph')
+  .option('-p, --project <name>', 'Project name')
+  .option('--changed', 'Skip files whose content hash is already indexed')
+  .action(async (target, options) => {
+    await runIndexCode(target, options);
   });
 
 // recall add breadcrumb
