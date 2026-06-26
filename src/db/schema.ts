@@ -234,6 +234,56 @@ CREATE TABLE IF NOT EXISTS session_progress (
   last_correction_turn INTEGER DEFAULT 0,
   updated_at           TEXT
 );
+
+-- Code KG: indexed source files (incremental re-index keyed on content_hash)
+CREATE TABLE IF NOT EXISTS code_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  path TEXT NOT NULL,                 -- repo-relative ONLY, POSIX separators
+  language TEXT,
+  content_hash TEXT NOT NULL,         -- incremental key: skip re-parse when unchanged
+  size_bytes INTEGER,
+  node_count INTEGER DEFAULT 0,
+  parse_error TEXT,                   -- NULL = parsed clean; else the tree-sitter error summary
+  indexed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (project, path)
+);
+
+-- Code KG: symbols (functions, classes, methods, …). FTS external-content source.
+CREATE TABLE IF NOT EXISTS code_nodes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  file_id INTEGER NOT NULL,
+  node_id TEXT NOT NULL,              -- stable: '<kind>:<relpath>:<qualified_name>'
+  kind TEXT NOT NULL,                 -- function|method|class|interface|type|enum|variable|module (no CHECK: extensible)
+  name TEXT NOT NULL,                 -- simple name (FTS column)
+  qualified_name TEXT,                -- FQN, e.g. 'Foo.bar' (FTS column)
+  signature TEXT,                     -- e.g. '(a: string) => number' (FTS column)
+  is_exported INTEGER DEFAULT 0,      -- 0/1
+  language TEXT,
+  start_line INTEGER,
+  start_col INTEGER,
+  end_line INTEGER,
+  end_col INTEGER,
+  UNIQUE (project, node_id),
+  FOREIGN KEY (file_id) REFERENCES code_files(id) ON DELETE CASCADE
+);
+
+-- Code KG: typed edges. src is always a known node; dst may be unresolved (candidate).
+-- No project column: edge scope inherits via src_id → code_nodes.project (§9-C2).
+CREATE TABLE IF NOT EXISTS code_edges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  src_id INTEGER NOT NULL,
+  dst_id INTEGER,                     -- NULL = unresolved/ambiguous; resolved = dst_id IS NOT NULL (§9-C3)
+  dst_hint TEXT,                      -- raw target ref for resolution & candidates
+  kind TEXT NOT NULL CHECK (kind IN ('imports', 'structural', 'calls', 'inheritance')),
+  provenance TEXT NOT NULL CHECK (provenance IN ('EXTRACTED', 'INFERRED', 'AMBIGUOUS')),
+  line INTEGER,
+  col INTEGER,
+  metadata TEXT,                      -- optional JSON (e.g. {"import_kind":"named"})
+  FOREIGN KEY (src_id) REFERENCES code_nodes(id) ON DELETE CASCADE,
+  FOREIGN KEY (dst_id) REFERENCES code_nodes(id) ON DELETE SET NULL
+);
 `;
 
 export const CREATE_INDEXES = `
@@ -292,6 +342,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup_lineage_duplicate
   ON dedup_lineage(duplicate_table, duplicate_id) WHERE status = 'marked';
 CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
   ON dedup_lineage(survivor_table, survivor_id);
+
+-- Code KG indexes
+CREATE INDEX IF NOT EXISTS idx_code_files_project_path ON code_files(project, path);
+CREATE INDEX IF NOT EXISTS idx_code_nodes_file        ON code_nodes(file_id);
+CREATE INDEX IF NOT EXISTS idx_code_nodes_project_qn  ON code_nodes(project, qualified_name);
+CREATE INDEX IF NOT EXISTS idx_code_edges_src         ON code_edges(src_id);
+CREATE INDEX IF NOT EXISTS idx_code_edges_dst         ON code_edges(dst_id);
+CREATE INDEX IF NOT EXISTS idx_code_edges_unresolved  ON code_edges(dst_hint) WHERE dst_id IS NULL;
 `;
 
 // Per-source-table FTS5 DDL. Single source of truth: the CREATE_FTS /
@@ -500,6 +558,32 @@ END;
 CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
   INSERT INTO documents_fts(documents_fts, rowid, title, type, content, summary, path) VALUES('delete', old.id, old.title, old.type, old.content, old.summary, old.path);
   INSERT INTO documents_fts(rowid, title, type, content, summary, path) VALUES (new.id, new.title, new.type, new.content, new.summary, new.path);
+END;
+`,
+  },
+  code_nodes: {
+    ftsTable: 'code_nodes_fts',
+    createTable: `
+-- FTS5 virtual table for code nodes (symbol search)
+CREATE VIRTUAL TABLE IF NOT EXISTS code_nodes_fts USING fts5(
+  name,
+  qualified_name,
+  signature,
+  content='code_nodes',
+  content_rowid='id'
+);
+`,
+    createTriggers: `
+-- Code nodes FTS triggers
+CREATE TRIGGER IF NOT EXISTS code_nodes_ai AFTER INSERT ON code_nodes BEGIN
+  INSERT INTO code_nodes_fts(rowid, name, qualified_name, signature) VALUES (new.id, new.name, new.qualified_name, new.signature);
+END;
+CREATE TRIGGER IF NOT EXISTS code_nodes_ad AFTER DELETE ON code_nodes BEGIN
+  INSERT INTO code_nodes_fts(code_nodes_fts, rowid, name, qualified_name, signature) VALUES('delete', old.id, old.name, old.qualified_name, old.signature);
+END;
+CREATE TRIGGER IF NOT EXISTS code_nodes_au AFTER UPDATE OF name, qualified_name, signature ON code_nodes BEGIN
+  INSERT INTO code_nodes_fts(code_nodes_fts, rowid, name, qualified_name, signature) VALUES('delete', old.id, old.name, old.qualified_name, old.signature);
+  INSERT INTO code_nodes_fts(rowid, name, qualified_name, signature) VALUES (new.id, new.name, new.qualified_name, new.signature);
 END;
 `,
   },
