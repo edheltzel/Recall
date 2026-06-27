@@ -361,6 +361,28 @@ export const MIGRATIONS: Migration[] = [
       }
     }
   },
+
+  // Migration 15 → 16: Native code knowledge graph (epic #196, issue #197).
+  // Base tables (code_files, code_nodes, code_edges) are declared in CREATE_TABLES
+  // for fresh installs — initDb runs CREATE_TABLES before this migration on every
+  // init, so re-creating them here would be redundant. This migration's job is:
+  // (a) advance user_version to 16 — the capability gate scout/doctor check for
+  // "native KG present" — and (b) ensure the code_nodes_fts virtual table and its
+  // sync triggers exist on existing installs, sliced from FTS_SCHEMA.code_nodes
+  // so fresh-install DDL, this migration, and repair/doctor never drift (same
+  // idiom as 14 → 15). The runner wraps each migration in its own transaction;
+  // this body must not open one.
+  (db) => {
+    const schema = FTS_SCHEMA.code_nodes;
+    if (!schema) return; // FTS_SCHEMA entry absent — nothing to ensure
+    try {
+      db.exec(schema.createTable);
+      db.exec(schema.createTriggers);
+    } catch {
+      // Content table absent on a partial schema — initDb's CREATE_TABLES +
+      // CREATE_FTS will establish it on the next init. Never block the chain.
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------
