@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { VERSION, DISPLAY_NAME } from './version.js';
 import { runInit } from './commands/init.js';
 import { runIndexCode } from './commands/index-code.js';
+import { runCodeContext } from './commands/code-context.js';
 import { runAddBreadcrumb, runAddDecision, runAddLearning } from './commands/add.js';
 import { runSearch } from './commands/search.js';
 import { runRecent } from './commands/recent.js';
@@ -73,6 +74,16 @@ program
   .option('--changed', 'Skip files whose content hash is already indexed')
   .action(async (target, options) => {
     await runIndexCode(target, options);
+  });
+
+// recall code-context
+program
+  .command('code-context <relpath>')
+  .description('Show decisions/learnings made about the symbols in a source file')
+  .option('-p, --project <name>', 'Project name')
+  .option('-l, --limit <n>', 'Max records per type', (v) => parseInt(v, 10), 20)
+  .action((relpath, options) => {
+    runCodeContext(relpath, options);
   });
 
 // recall add breadcrumb
