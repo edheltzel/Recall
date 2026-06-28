@@ -319,11 +319,14 @@ describe('safety invariants', () => {
     expect(remaining.c).toBe(1);
   });
 
-  test('a genuine pre-dedup legacy database does not crash and reports pending migrations', async () => {
-    // Build the schema an install older than the dedup migration actually
-    // has: full DDL of its era but no dedup_lineage table (that DDL ships
-    // via `recall init` on current versions; getDb() runs no DDL at all).
-    // PRAGMA user_version on a current schema would not reproduce this.
+  test('a genuine pre-dedup legacy database is self-healed on open and does not crash (#202)', async () => {
+    // Build the schema an install older than the dedup migration actually has:
+    // full DDL of its era but no dedup_lineage table, pinned at user_version 9.
+    // Before #202, getDb() ran no DDL, so repair inspected this drifted schema
+    // directly and the embed gap query crashed with a raw SQLiteError on the
+    // missing dedup_lineage table. getDb() now applies pending migrations on
+    // open, so it recreates dedup_lineage (via CREATE_TABLES) and advances to
+    // current before repair ever inspects — the crash can no longer occur.
     const legacyPath = join(dirname(process.env.RECALL_DB_PATH!), 'legacy.db');
     closeDb();
     const legacy = new Database(legacyPath);
@@ -340,14 +343,17 @@ describe('safety invariants', () => {
     legacy.close();
     process.env.RECALL_DB_PATH = legacyPath;
 
-    // Plain dry-run — the path that crashed with a raw SQLiteError when the
-    // embed gap query referenced the missing dedup_lineage table.
     const result = (await runRepair({}, upDeps))!;
 
-    // The plan completes: the recall init recommendation can actually print.
-    expect(result.plan.migrations.pending).toBeGreaterThan(0);
-    // The embed pass still reports gaps — without the exclusion clause,
-    // since nothing can be marked as a duplicate on this schema.
+    // getDb() self-healed the schema on open (#202): migrations are now current
+    // and dedup_lineage is back, so nothing is left pending.
+    expect(result.plan.migrations.pending).toBe(0);
+    expect(result.plan.migrations.current).toBe(result.plan.migrations.target);
+    const dedup = getDb()
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name = 'dedup_lineage'")
+      .get() as { name: string } | null;
+    expect(dedup?.name).toBe('dedup_lineage');
+    // The embed pass still reports the un-embedded decision row as a gap.
     expect(result.plan.embedGaps.find(g => g.table === 'decisions')?.missing).toBe(1);
     expect(process.exitCode).not.toBe(1);
   });
