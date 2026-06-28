@@ -414,6 +414,17 @@ export function applyMigrations(db: Database): MigrationResult {
   for (let i = current; i < target; i++) {
     db.prepare('BEGIN IMMEDIATE').run();
     try {
+      // Concurrency safety (#202): `current` was read once, outside any lock,
+      // before this loop. Now that getDb applies migrations on every open, two
+      // processes can both observe version i and race here. BEGIN IMMEDIATE
+      // takes the write lock (the loser waits out busy_timeout), so re-read
+      // user_version under it: if a concurrent migrator already advanced past
+      // i, skip this iteration — never double-apply migration i.
+      const live = (db.prepare('PRAGMA user_version').get() as any).user_version as number;
+      if (live > i) {
+        db.prepare('COMMIT').run();
+        continue;
+      }
       MIGRATIONS[i](db);
       db.prepare(`PRAGMA user_version = ${i + 1}`).run();
       db.prepare('COMMIT').run();
