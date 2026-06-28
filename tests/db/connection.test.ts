@@ -5,6 +5,7 @@ import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDbPath, getDb, initDb, closeDb, getDbStats } from '../../src/db/connection';
+import { MIGRATIONS, applyMigrations } from '../../src/db/migrations';
 
 describe('connection', () => {
   let testDbPath: string;
@@ -195,6 +196,120 @@ describe('connection', () => {
     test('returns a valid Database instance after init', () => {
       const database = getDb();
       expect(database).toBeInstanceOf(Database);
+    });
+  });
+
+  describe('getDb migration self-heal (#202)', () => {
+    // Build a current-schema DB on a fresh path, run `degrade` against the raw
+    // file to simulate a live install that drifted behind source, then assert
+    // that opening it through getDb() (NOT initDb) brings it current. Mirrors
+    // the existing v7 initDb regression, but proves the runtime open path.
+    function withDriftedDb(degrade: (raw: Database) => void, assert: () => void): void {
+      closeDb();
+      const freshDir = mkdtempSync(join(tmpdir(), 'recall-test-getdb-migrate-'));
+      const freshPath = join(freshDir, 'drifted.db');
+      const originalPath = process.env.RECALL_DB_PATH;
+      try {
+        process.env.RECALL_DB_PATH = freshPath;
+        initDb();   // build a full current-schema DB at user_version = MIGRATIONS.length
+        closeDb();
+
+        const raw = new Database(freshPath);
+        degrade(raw);
+        raw.close();
+
+        assert();
+      } finally {
+        closeDb();
+        process.env.RECALL_DB_PATH = originalPath;
+        rmSync(freshDir, { recursive: true, force: true });
+        initDb(); // restore the shared test DB connection for subsequent tests
+      }
+    }
+
+    test('migrates a DB pinned at user_version N-1 to current on open', () => {
+      withDriftedDb(
+        (raw) => {
+          // Pin one migration behind, exactly as a live DB sits when init last
+          // ran before the newest migration landed (the #202 failure mode).
+          raw.prepare(`PRAGMA user_version = ${MIGRATIONS.length - 1}`).run();
+        },
+        () => {
+          const uv = getDb().query('PRAGMA user_version').get() as { user_version: number };
+          expect(uv.user_version).toBe(MIGRATIONS.length);
+        }
+      );
+    });
+
+    test('self-heals a base table a pending migration depends on (live v15 code_* gap)', () => {
+      // The observed live bug: a DB at user_version 15 had NO code_* base tables
+      // because they live in CREATE_TABLES (run only by initDb), and migration
+      // 15->16 tolerates their absence and just bumps the version. getDb calling
+      // applyMigrations *alone* would advance to 16 while leaving code_* missing.
+      // Reproduce that drift and assert getDb recreates the base tables — proof
+      // that the open path runs initDb's full CREATE_TABLES->migrate->indexes
+      // ordering, not migrations in isolation.
+      withDriftedDb(
+        (raw) => {
+          raw.prepare('PRAGMA foreign_keys = OFF').run();
+          for (const obj of ['code_edges', 'code_nodes', 'code_files']) {
+            raw.prepare(`DROP TABLE IF EXISTS ${obj}`).run();
+          }
+          raw.prepare(`PRAGMA user_version = ${MIGRATIONS.length - 1}`).run();
+        },
+        () => {
+          const db = getDb();
+          const uv = db.query('PRAGMA user_version').get() as { user_version: number };
+          expect(uv.user_version).toBe(MIGRATIONS.length);
+          for (const table of ['code_files', 'code_nodes', 'code_edges']) {
+            const row = db
+              .query("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+              .get(table) as { name: string } | null;
+            expect(row?.name).toBe(table);
+          }
+        }
+      );
+    });
+
+    test('concurrent migrators converge without double-applying (#202)', () => {
+      // applyMigrations reads user_version once before its loop, so two processes
+      // can both observe version N-1 and race. Open two handles to one file at
+      // N-1: the winner advances to current; the loser must no-op (applied 0),
+      // not double-apply or throw. (BEGIN IMMEDIATE + the under-lock re-read are
+      // what make the truly-interleaved case safe; this asserts convergence.)
+      closeDb();
+      const freshDir = mkdtempSync(join(tmpdir(), 'recall-test-getdb-concurrent-'));
+      const freshPath = join(freshDir, 'concurrent.db');
+      const originalPath = process.env.RECALL_DB_PATH;
+      try {
+        process.env.RECALL_DB_PATH = freshPath;
+        initDb();
+        closeDb();
+
+        const seed = new Database(freshPath);
+        seed.prepare(`PRAGMA user_version = ${MIGRATIONS.length - 1}`).run();
+        seed.close();
+
+        const a = new Database(freshPath);
+        const b = new Database(freshPath);
+        try {
+          const ra = applyMigrations(a);
+          const rb = applyMigrations(b);
+          expect(ra.applied).toBe(1);
+          expect(ra.to).toBe(MIGRATIONS.length);
+          expect(rb.applied).toBe(0); // loser sees the new version and no-ops
+          const uv = b.query('PRAGMA user_version').get() as { user_version: number };
+          expect(uv.user_version).toBe(MIGRATIONS.length);
+        } finally {
+          a.close();
+          b.close();
+        }
+      } finally {
+        closeDb();
+        process.env.RECALL_DB_PATH = originalPath;
+        rmSync(freshDir, { recursive: true, force: true });
+        initDb();
+      }
     });
   });
 
