@@ -91,9 +91,68 @@ export function getDb(): Database {
     // vector path falls back to the brute-force cosine scan.
     loadVecExtension(db);
 
+    // Self-heal schema drift (#202). Only initDb (run by `recall init` / the
+    // installer) used to apply migrations, so a live DB stayed pinned at
+    // whatever user_version it held when init last ran — every getDb caller
+    // then used a stale schema (e.g. memory_add INSERTing a provenance column
+    // that the migration never added). Bring the DB current on open, exactly
+    // as initDb does, so the runtime is self-healing.
+    //
+    // Best-effort by design: the 68 getDb callers include pure read paths and
+    // concurrent processes. On a read-only FS, or when the write lock can't be
+    // won within busy_timeout, ensureSchema throws — we swallow it and proceed
+    // with the DB as-is rather than introducing a new crash for callers that
+    // work today. The DB stays at its current version; the next writable open
+    // retries. (applyMigrations is idempotent and concurrency-safe; see there.)
+    try {
+      ensureSchema(db);
+    } catch {
+      // Degrade gracefully — read-only / locked DB. No new throw on the read path.
+    }
+
     return db;
   } finally {
     dbInitializing = false;
+  }
+}
+
+/**
+ * Idempotent schema bootstrap shared by initDb (create path) and getDb (#202
+ * self-heal on open). The ordering is load-bearing — see CHANGELOG 0.7.11:
+ *
+ * 1) CREATE_TABLES: idempotent — creates tables that don't exist yet (incl.
+ *    base tables a later migration depends on but does not itself create, e.g.
+ *    code_* for migration 15->16).
+ * 2) applyMigrations: mutates existing tables (ADD COLUMN etc.) based on
+ *    PRAGMA user_version. Must run BEFORE any step that references
+ *    post-migration columns.
+ * 3) CREATE_INDEXES / FTS / vector tables: may reference columns added by
+ *    migrations (e.g. idx_messages_importance from 7->8). Running these before
+ *    applyMigrations breaks every upgrade path.
+ *
+ * Every statement is IF NOT EXISTS / try-caught idempotent, so re-running on an
+ * already-current DB is a no-op. Throws if a write cannot complete (e.g. a
+ * read-only FS or a write lock not won within busy_timeout) — getDb swallows
+ * that to degrade gracefully; initDb lets it surface.
+ */
+function ensureSchema(database: Database): void {
+  database.exec(CREATE_TABLES);
+  const migration = applyMigrations(database);
+  database.exec(CREATE_INDEXES);
+  database.exec(CREATE_FTS);
+  database.exec(CREATE_FTS_TRIGGERS);
+  database.exec(CREATE_VECTOR_TABLES);
+  // sqlite-vec index table (#148) — created ONLY when the extension loaded.
+  // Deliberately NOT a migration: a vec0 CREATE throws where the extension is
+  // absent, which would break setup and violate the OPTIONAL invariant. This
+  // idempotent, availability-guarded create is the correct home.
+  if (isVecAvailable()) {
+    createVecTable(database);
+  }
+
+  if (migration.applied > 0) {
+    // Keep schema_meta in sync for backward compatibility with older code.
+    database.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run('version', String(migration.to));
   }
 }
 
@@ -114,32 +173,7 @@ export function initDb(): { created: boolean; path: string } {
   // index table can be created below when the extension is available.
   loadVecExtension(db);
 
-  // Schema setup — ordering matters. See CHANGELOG 0.7.11.
-  // 1) CREATE_TABLES: idempotent — creates tables that don't exist yet.
-  // 2) applyMigrations: mutates existing tables (ADD COLUMN etc.) based on
-  //    PRAGMA user_version. Must run BEFORE any step that references
-  //    post-migration columns.
-  // 3) CREATE_INDEXES / FTS / vector tables: may reference columns added
-  //    by migrations (e.g. idx_messages_importance from migration 7->8).
-  //    Running these before applyMigrations breaks every upgrade path.
-  db.exec(CREATE_TABLES);
-  const migration = applyMigrations(db);
-  db.exec(CREATE_INDEXES);
-  db.exec(CREATE_FTS);
-  db.exec(CREATE_FTS_TRIGGERS);
-  db.exec(CREATE_VECTOR_TABLES);
-  // sqlite-vec index table (#148) — created ONLY when the extension loaded.
-  // Deliberately NOT a migration: a vec0 CREATE throws where the extension is
-  // absent, which would break initDb and violate the OPTIONAL invariant. This
-  // idempotent, availability-guarded create is the correct home.
-  if (isVecAvailable()) {
-    createVecTable(db);
-  }
-
-  if (migration.applied > 0) {
-    // Keep schema_meta in sync for backward compatibility with older code.
-    db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run('version', String(migration.to));
-  }
+  ensureSchema(db);
 
   // SECURITY: Set restrictive permissions (owner read/write only)
   // Prevents other users on system from reading conversation history
