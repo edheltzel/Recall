@@ -46,7 +46,7 @@ describe('core tables', () => {
 });
 
 describe('FTS5 virtual tables', () => {
-  test('all 8 FTS5 virtual tables exist', () => {
+  test('all 7 FTS5 virtual tables exist', () => {
     const db = getDb();
     const rows = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts' ORDER BY name")
@@ -55,7 +55,6 @@ describe('FTS5 virtual tables', () => {
 
     const expectedFts = [
       'breadcrumbs_fts',
-      'code_nodes_fts',
       'decisions_fts',
       'documents_fts',
       'learnings_fts',
@@ -138,9 +137,6 @@ describe('FTS triggers', () => {
       'breadcrumbs_ad',
       'breadcrumbs_ai',
       'breadcrumbs_au',
-      'code_nodes_ad',
-      'code_nodes_ai',
-      'code_nodes_au',
       'decisions_ad',
       'decisions_ai',
       'decisions_au',
