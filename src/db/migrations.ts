@@ -362,26 +362,36 @@ export const MIGRATIONS: Migration[] = [
     }
   },
 
-  // Migration 15 → 16: Native code knowledge graph (epic #196, issue #197).
-  // Base tables (code_files, code_nodes, code_edges) are declared in CREATE_TABLES
-  // for fresh installs — initDb runs CREATE_TABLES before this migration on every
-  // init, so re-creating them here would be redundant. This migration's job is:
-  // (a) advance user_version to 16 — the capability gate scout/doctor check for
-  // "native KG present" — and (b) ensure the code_nodes_fts virtual table and its
-  // sync triggers exist on existing installs, sliced from FTS_SCHEMA.code_nodes
-  // so fresh-install DDL, this migration, and repair/doctor never drift (same
-  // idiom as 14 → 15). The runner wraps each migration in its own transaction;
-  // this body must not open one.
+  // Migration 15 → 16: Native code knowledge graph (epic #196, issue #197) —
+  // TOMBSTONED by the #214 rollback. This migration once created the code_*
+  // tables + code_nodes_fts; the native KG has since been removed (a regenerable
+  // code cache does not belong in the durable recall.db). The body is now a
+  // no-op so the chain stays monotonic and version 16 remains a valid waypoint;
+  // the 16 → 17 migration below DROPs anything an old install created here. The
+  // array index IS the version number, so this entry must not be deleted.
+  (_db) => {},
+
+  // Migration 16 → 17: Roll back the native code knowledge graph (issue #214,
+  // supersedes epic #196). A regenerable code cache does not belong in the
+  // durable, cross-project recall.db, and external CodeGraph covers the use
+  // case more broadly — so the native KG is removed. Fresh installs never
+  // create the KG objects (CREATE_TABLES / FTS_SCHEMA no longer declare them);
+  // this migration DROPs them from any DB already at v16 (including installs
+  // that ran the 15 → 16 migration), keeping the chain monotonic. Order: sync
+  // triggers and the FTS virtual table first, then the base tables in
+  // FK-dependency order (edges → nodes → files). Everything is IF EXISTS, so
+  // this is a no-op on a DB that never had the KG. The runner wraps each
+  // migration in its own transaction; this body must not open one.
   (db) => {
-    const schema = FTS_SCHEMA.code_nodes;
-    if (!schema) return; // FTS_SCHEMA entry absent — nothing to ensure
-    try {
-      db.exec(schema.createTable);
-      db.exec(schema.createTriggers);
-    } catch {
-      // Content table absent on a partial schema — initDb's CREATE_TABLES +
-      // CREATE_FTS will establish it on the next init. Never block the chain.
-    }
+    db.exec(`
+      DROP TRIGGER IF EXISTS code_nodes_ai;
+      DROP TRIGGER IF EXISTS code_nodes_ad;
+      DROP TRIGGER IF EXISTS code_nodes_au;
+      DROP TABLE IF EXISTS code_nodes_fts;
+      DROP TABLE IF EXISTS code_edges;
+      DROP TABLE IF EXISTS code_nodes;
+      DROP TABLE IF EXISTS code_files;
+    `);
   },
 ];
 
