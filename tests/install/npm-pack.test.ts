@@ -21,9 +21,11 @@ const REPO = process.cwd();
 // yet. The published tarball always contains dist/ (prepublishOnly builds it),
 // so build once here — unconditionally, so a stale dist/ can't mask a current
 // source change — to make the packaging assertions faithful and deterministic.
+// Explicit 180s timeout: a cold `bun run build` on the macOS CI runner exceeds
+// bun:test's default 5s hook timeout (timeout, not a build error).
 beforeAll(() => {
   execFileSync('bun', ['run', 'build'], { cwd: REPO, stdio: 'ignore' });
-});
+}, 180_000);
 
 function packFileList(): string[] {
   const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {

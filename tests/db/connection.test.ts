@@ -241,32 +241,28 @@ describe('connection', () => {
       );
     });
 
-    test('self-heals a base table a pending migration depends on (live v15 code_* gap)', () => {
-      // The observed live bug: a DB at user_version 15 had NO code_* base tables
-      // because they live in CREATE_TABLES (run only by initDb), and migration
-      // 15->16 tolerates their absence and just bumps the version. getDb calling
-      // applyMigrations *alone* would advance to 16 while leaving code_* missing.
-      // Reproduce that drift and assert getDb recreates the base tables — proof
-      // that the open path runs initDb's full CREATE_TABLES->migrate->indexes
+    test('self-heals a base table dropped out from under a pending migration (#202)', () => {
+      // The #202 failure mode: base tables live in CREATE_TABLES (run only by
+      // initDb), so a DB pinned behind by a version while missing a base table
+      // would have getDb's applyMigrations *alone* bump the version while leaving
+      // the table absent. Drop a representative core table (sessions — no FTS
+      // dependents), pin one version behind, and assert getDb recreates it —
+      // proof the open path runs the full CREATE_TABLES->migrate->indexes
       // ordering, not migrations in isolation.
       withDriftedDb(
         (raw) => {
           raw.prepare('PRAGMA foreign_keys = OFF').run();
-          for (const obj of ['code_edges', 'code_nodes', 'code_files']) {
-            raw.prepare(`DROP TABLE IF EXISTS ${obj}`).run();
-          }
+          raw.prepare('DROP TABLE IF EXISTS sessions').run();
           raw.prepare(`PRAGMA user_version = ${MIGRATIONS.length - 1}`).run();
         },
         () => {
           const db = getDb();
           const uv = db.query('PRAGMA user_version').get() as { user_version: number };
           expect(uv.user_version).toBe(MIGRATIONS.length);
-          for (const table of ['code_files', 'code_nodes', 'code_edges']) {
-            const row = db
-              .query("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
-              .get(table) as { name: string } | null;
-            expect(row?.name).toBe(table);
-          }
+          const row = db
+            .query("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+            .get('sessions') as { name: string } | null;
+          expect(row?.name).toBe('sessions');
         }
       );
     });

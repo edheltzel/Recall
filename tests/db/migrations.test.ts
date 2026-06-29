@@ -444,7 +444,7 @@ describe('source-lineage column migration (12 to 13)', () => {
     // Mutation guard: dropping the 12 → 13 entry shrinks MIGRATIONS.length to
     // 12, so user_version would land at 12 and the column would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(16);
+    expect(MIGRATIONS.length).toBe(17);
     const cols = (db.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
     expect(cols).toContain('source_ids');
   });
@@ -528,7 +528,7 @@ describe('access-tracking columns migration (13 to 14)', () => {
     // Mutation guard: dropping the 13 → 14 entry shrinks MIGRATIONS.length to 13,
     // so user_version would land at 13 and the columns would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(16);
+    expect(MIGRATIONS.length).toBe(17);
     for (const table of ACCESS_TABLES) {
       const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => c.name);
       expect(cols).toContain('access_count');
@@ -628,7 +628,7 @@ describe('FTS trigger scoping migration (14 to 15)', () => {
     // Mutation guard: dropping the 14 → 15 entry shrinks MIGRATIONS.length to 14,
     // so user_version would land at 14 with the triggers still bare → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(16);
+    expect(MIGRATIONS.length).toBe(17);
     for (const name of MEMORY_AU_TRIGGERS) {
       const sql = triggerSql(db, name);
       expect(sql).not.toBeNull();
@@ -690,55 +690,126 @@ describe('FTS trigger scoping migration (14 to 15)', () => {
   });
 });
 
-describe('code-KG schema migration (15 to 16)', () => {
-  // §9-C1: the live DB may be at any sub-15 version (e.g. v8 on this machine).
-  // The test uses a v8 fixture to prove the chain advances cleanly through 16.
+describe('code-KG rollback migration (16 to 17)', () => {
+  // The native code KG (epic #196) was rolled back in #214. Fresh installs no
+  // longer declare the code_* objects (CREATE_TABLES / FTS_SCHEMA dropped them),
+  // and the 16 → 17 migration DROPs them from any DB already at v16. The four
+  // objects: code_files, code_nodes, code_edges, code_nodes_fts (+ 3 triggers).
+  const KG_TABLES = ['code_files', 'code_nodes', 'code_edges', 'code_nodes_fts'];
+  const KG_TRIGGERS = ['code_nodes_ai', 'code_nodes_ad', 'code_nodes_au'];
 
-  test('fresh DB has code_files, code_nodes, code_edges, code_nodes_fts and lands at version 16', () => {
+  // The v16 KG DDL, recreated inline so a fixture can simulate a DB that ran the
+  // (now-tombstoned) 15 → 16 migration. schema.ts no longer carries this.
+  const LEGACY_KG_DDL = `
+    CREATE TABLE IF NOT EXISTS code_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project TEXT NOT NULL,
+      path TEXT NOT NULL,
+      language TEXT,
+      content_hash TEXT NOT NULL,
+      size_bytes INTEGER,
+      node_count INTEGER DEFAULT 0,
+      parse_error TEXT,
+      indexed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (project, path)
+    );
+    CREATE TABLE IF NOT EXISTS code_nodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project TEXT NOT NULL,
+      file_id INTEGER NOT NULL,
+      node_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      qualified_name TEXT,
+      signature TEXT,
+      is_exported INTEGER DEFAULT 0,
+      language TEXT,
+      start_line INTEGER,
+      start_col INTEGER,
+      end_line INTEGER,
+      end_col INTEGER,
+      UNIQUE (project, node_id),
+      FOREIGN KEY (file_id) REFERENCES code_files(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS code_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      src_id INTEGER NOT NULL,
+      dst_id INTEGER,
+      dst_hint TEXT,
+      kind TEXT NOT NULL CHECK (kind IN ('imports', 'structural', 'calls', 'inheritance')),
+      provenance TEXT NOT NULL CHECK (provenance IN ('EXTRACTED', 'INFERRED', 'AMBIGUOUS')),
+      line INTEGER,
+      col INTEGER,
+      metadata TEXT,
+      FOREIGN KEY (src_id) REFERENCES code_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY (dst_id) REFERENCES code_nodes(id) ON DELETE SET NULL
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS code_nodes_fts USING fts5(
+      name, qualified_name, signature, content='code_nodes', content_rowid='id'
+    );
+    CREATE TRIGGER IF NOT EXISTS code_nodes_ai AFTER INSERT ON code_nodes BEGIN
+      INSERT INTO code_nodes_fts(rowid, name, qualified_name, signature) VALUES (new.id, new.name, new.qualified_name, new.signature);
+    END;
+    CREATE TRIGGER IF NOT EXISTS code_nodes_ad AFTER DELETE ON code_nodes BEGIN
+      INSERT INTO code_nodes_fts(code_nodes_fts, rowid, name, qualified_name, signature) VALUES('delete', old.id, old.name, old.qualified_name, old.signature);
+    END;
+    CREATE TRIGGER IF NOT EXISTS code_nodes_au AFTER UPDATE OF name, qualified_name, signature ON code_nodes BEGIN
+      INSERT INTO code_nodes_fts(code_nodes_fts, rowid, name, qualified_name, signature) VALUES('delete', old.id, old.name, old.qualified_name, old.signature);
+      INSERT INTO code_nodes_fts(rowid, name, qualified_name, signature) VALUES (new.id, new.name, new.qualified_name, new.signature);
+    END;
+  `;
+
+  test('fresh DB has no code_* objects and lands at version 17', () => {
     applyMigrations(db);
-    // Mutation guard: dropping the 15 → 16 entry shrinks MIGRATIONS.length to 15,
-    // so user_version lands at 15 and the FTS table is absent → RED.
+    // Mutation guard: dropping the 16 → 17 entry shrinks MIGRATIONS.length to 16,
+    // so user_version lands at 16 → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(16);
+    expect(MIGRATIONS.length).toBe(17);
 
-    for (const table of ['code_files', 'code_nodes', 'code_edges']) {
+    for (const table of KG_TABLES) {
       const tbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table) as any;
-      expect(tbl?.name).toBe(table);
+      expect(tbl).toBeNull();
     }
-    const fts = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='code_nodes_fts'`).get() as any;
-    expect(fts?.name).toBe('code_nodes_fts');
+    for (const trigger of KG_TRIGGERS) {
+      const t = db.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name=?`).get(trigger) as any;
+      expect(t).toBeNull();
+    }
   });
 
-  test('upgrade path: a v8 fixture migrates cleanly through 16 with all 4 objects present', () => {
-    // Build a minimal v8 install: only the tables the 8→9 provenance migration
-    // touches need to exist; the code_* tables are added by CREATE_TABLES DDL
-    // (which initDb runs before migrations, G1) — simulated here by exec'ing
-    // the full CREATE_TABLES before setting user_version to 8.
-    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-kg-mig-v8-'));
-    const legacyDb = new Database(join(legacyDir, 'legacy8.db'));
+  test('seeded v16 DB migrates 16 → 17 with all 4 code_* objects dropped', () => {
+    // Simulate a DB that ran the (now-tombstoned) 15 → 16 migration: code_*
+    // objects present, user_version = 16. The 16 → 17 migration must drop them.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-kg-rollback-v16-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy16.db'));
     try {
       legacyDb.exec(CREATE_TABLES);
       legacyDb.exec(CREATE_INDEXES);
-      legacyDb.prepare('PRAGMA user_version = 8').run();
+      legacyDb.exec(LEGACY_KG_DDL);
+      legacyDb.prepare('PRAGMA user_version = 16').run();
 
-      const result = applyMigrations(legacyDb);
-      expect(result.from).toBe(8);
-      expect(result.to).toBe(16);
-      expect(getMigrationVersion(legacyDb)).toBe(16);
-
-      // All three base tables present
-      for (const table of ['code_files', 'code_nodes', 'code_edges']) {
+      // Precondition: all four objects + triggers present at v16.
+      for (const table of KG_TABLES) {
         const tbl = legacyDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table) as any;
         expect(tbl?.name).toBe(table);
       }
-      // FTS virtual table present
-      const fts = legacyDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='code_nodes_fts'`).get() as any;
-      expect(fts?.name).toBe('code_nodes_fts');
-
-      // FTS triggers present
-      for (const trigger of ['code_nodes_ai', 'code_nodes_ad', 'code_nodes_au']) {
+      for (const trigger of KG_TRIGGERS) {
         const t = legacyDb.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name=?`).get(trigger) as any;
         expect(t?.name).toBe(trigger);
+      }
+
+      const result = applyMigrations(legacyDb);
+      expect(result.from).toBe(16);
+      expect(result.to).toBe(17);
+      expect(getMigrationVersion(legacyDb)).toBe(17);
+
+      // All four objects + triggers dropped.
+      for (const table of KG_TABLES) {
+        const tbl = legacyDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table) as any;
+        expect(tbl).toBeNull();
+      }
+      for (const trigger of KG_TRIGGERS) {
+        const t = legacyDb.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name=?`).get(trigger) as any;
+        expect(t).toBeNull();
       }
     } finally {
       legacyDb.close();
@@ -746,51 +817,26 @@ describe('code-KG schema migration (15 to 16)', () => {
     }
   });
 
-  test('code_edges has no project column (§9-C2)', () => {
-    applyMigrations(db);
-    const cols = (db.prepare('PRAGMA table_info(code_edges)').all() as any[]).map((c) => c.name);
-    expect(cols).not.toContain('project');
-    expect(cols).toContain('src_id');
-    expect(cols).toContain('dst_id');
+  test('drop migration is a no-op on a DB that never had the KG', () => {
+    // A v16 DB without the code_* objects (e.g. an install that reached 16 only
+    // by the rebased schema): the IF EXISTS drops must not throw.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'recall-kg-rollback-noobj-'));
+    const legacyDb = new Database(join(legacyDir, 'legacy16-noobj.db'));
+    try {
+      legacyDb.exec(CREATE_TABLES);
+      legacyDb.exec(CREATE_INDEXES);
+      legacyDb.prepare('PRAGMA user_version = 16').run();
+
+      const result = applyMigrations(legacyDb);
+      expect(result.from).toBe(16);
+      expect(getMigrationVersion(legacyDb)).toBe(17);
+    } finally {
+      legacyDb.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
   });
 
-  test('FK actions: src_id CASCADE, dst_id SET NULL (§9-C3)', () => {
-    applyMigrations(db);
-    // Insert a file, two nodes, and an edge between them
-    db.prepare(`INSERT INTO code_files (project, path, content_hash) VALUES ('p', 'a.ts', 'h1')`).run();
-    const fileId = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-    db.prepare(`INSERT INTO code_nodes (project, file_id, node_id, kind, name) VALUES ('p', ?, 'function:a.ts:foo', 'function', 'foo')`).run(fileId);
-    const srcId = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-
-    db.prepare(`INSERT INTO code_files (project, path, content_hash) VALUES ('p', 'b.ts', 'h2')`).run();
-    const fileId2 = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-    db.prepare(`INSERT INTO code_nodes (project, file_id, node_id, kind, name) VALUES ('p', ?, 'function:b.ts:bar', 'function', 'bar')`).run(fileId2);
-    const dstId = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-
-    db.prepare(`INSERT INTO code_edges (src_id, dst_id, kind, provenance) VALUES (?, ?, 'calls', 'EXTRACTED')`).run(srcId, dstId);
-    const edgeId = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-
-    // DELETE src file → cascades to src node → cascades to edge (ON DELETE CASCADE)
-    db.prepare('DELETE FROM code_files WHERE id = ?').run(fileId);
-    const edgeAfterSrcDel = db.prepare('SELECT * FROM code_edges WHERE id = ?').get(edgeId);
-    expect(edgeAfterSrcDel).toBeNull();
-
-    // Re-insert src node and edge with a fresh src pointing to the surviving dst node
-    db.prepare(`INSERT INTO code_files (project, path, content_hash) VALUES ('p', 'a2.ts', 'h3')`).run();
-    const fileId3 = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-    db.prepare(`INSERT INTO code_nodes (project, file_id, node_id, kind, name) VALUES ('p', ?, 'function:a2.ts:foo', 'function', 'foo')`).run(fileId3);
-    const srcId2 = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-    db.prepare(`INSERT INTO code_edges (src_id, dst_id, kind, provenance) VALUES (?, ?, 'calls', 'EXTRACTED')`).run(srcId2, dstId);
-    const edgeId2 = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-
-    // DELETE dst file → cascades to dst node → edge dst_id set to NULL (ON DELETE SET NULL)
-    db.prepare('DELETE FROM code_files WHERE id = ?').run(fileId2);
-    const edgeAfterDstDel = db.prepare('SELECT dst_id FROM code_edges WHERE id = ?').get(edgeId2) as any;
-    expect(edgeAfterDstDel).not.toBeNull();
-    expect(edgeAfterDstDel.dst_id).toBeNull();
-  });
-
-  test('idempotent: re-running after 16 applies nothing', () => {
+  test('idempotent: re-running after 17 applies nothing', () => {
     applyMigrations(db);
     const result = applyMigrations(db);
     expect(result.applied).toBe(0);
@@ -808,8 +854,9 @@ describe('MIGRATIONS array', () => {
     // 12 → 13: source_ids lineage column on loa_entries (issue #140)
     // 13 → 14: access_count + last_accessed on all five memory tables (issue #152)
     // 14 → 15: scope FTS AFTER UPDATE triggers to indexed columns (issue #153)
-    // 15 → 16: native code knowledge graph schema (epic #196, issue #197)
-    expect(MIGRATIONS.length).toBe(16);
+    // 15 → 16: native code knowledge graph schema (epic #196, issue #197) — tombstoned
+    // 16 → 17: roll back the native code knowledge graph (issue #214)
+    expect(MIGRATIONS.length).toBe(17);
   });
 
   test('all entries are functions', () => {
