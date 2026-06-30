@@ -5,12 +5,56 @@ All notable changes to Recall are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Recall is now 1.0.0. The CLI and MCP binaries use the project name (`recall`)
-while MCP tool names (`memory_search`, `memory_add`, etc.) remain stable.
+The CLI and MCP binaries use the project name (`recall` / `recall-mcp`) while
+MCP tool names (`memory_search`, `memory_add`, etc.) remain stable. 1.0.0 is
+intentionally reserved for a later, deliberate milestone — see the versioning
+note in the 0.9.0 entry.
 
 ## [Unreleased]
 
-### Added
+_Nothing yet. Going forward, each small, vertical slice lands its own entry here
+and ships as its own incremental release (0.9.1, 0.9.2, …) rather than
+accumulating into another large drain._
+
+## [0.9.0] — 2026-06-30 — "search performance & memory hygiene"
+
+A large catch-up release that drains roughly two months of work merged to `main`
+since 0.8.0. It folds in the previously-unreleased 1.0.0 milestone (the
+`mem → recall` rename and the move to a `~/.agents/Recall/` install root) plus
+the search-performance, memory-lifecycle, provenance, and security work that
+landed afterward. See **Note on versioning** at the end of this entry for why
+this ships as 0.9.0 rather than 1.0.0.
+
+### Changed (BREAKING for fresh installs; existing installs auto-migrate)
+
+- **CLI binary renamed from `mem` to `recall`.** The MCP server binary is now
+  `recall-mcp`. Existing installs are relinked on install/update, and
+  Recall-managed legacy `mem` / `mem-mcp` symlinks are removed when safe.
+- **Install layout moved to `~/.agents/Recall/`.** Canonical hook files, slash
+  commands, agent guides, and the SQLite database now live under a Recall-owned
+  install root instead of being scattered across `~/.claude/`. Platform homes
+  (`~/.claude/`, `~/.config/opencode/`, `~/.pi/agent/`) receive **per-file
+  symlinks** back to the canonicals.
+- **Database renamed to `recall.db`.** Default path is now
+  `~/.agents/Recall/recall.db` (sidecars: `recall.db-wal`, `recall.db-shm`).
+- **New env var: `RECALL_DB_PATH`.** Primary database-path override. The legacy
+  `MEM_DB_PATH` is still honored as a silent fallback for this release.
+
+### Added — Search & performance
+
+- **`sqlite-vec` native KNN vector index** with graceful fallback to the JS
+  path when the extension is unavailable (#148) — replaces the brute-force
+  O(n) cosine scan that grew with the database.
+- **Default embedding model swapped to Qwen3-Embedding-0.6B** (1024-dim) (#107).
+- **In-process LRU cache for query embeddings** in the MCP server (#149).
+- **Embedding-service liveness check cached** with a 30s TTL, dropping a
+  per-query Ollama round-trip (#150).
+- **Read-path PRAGMA tuning + cached prepared statements** (#151).
+- **Search-latency benchmark harness** — Suite F baseline before/after (#147).
+- **Auto-fallback to hybrid search** on zero keyword hits.
+- **Provenance display** across the default, semantic, and hybrid search paths.
+
+### Added — Memory lifecycle & hygiene
 
 - **`recall dedup`** — non-destructive dedup with provenance-aware survivor
   selection (#45): dry-run by default, `--execute` marks duplicates in the new
@@ -29,49 +73,89 @@ while MCP tool names (`memory_search`, `memory_add`, etc.) remain stable.
   (counts + provenance counts including explicit `unknown`), a stdout/file/
   directory output contract, and `--backup` writing timestamped, never-
   overwritten SQL dumps to `~/.agents/Recall/backups/`.
-- Added macOS-primary GitHub Actions CI with Ubuntu portability smoke coverage
-  and deterministic release/tag version consistency checks.
+- **`recall age`** — type-aware aging policy that decays importance over time
+  per record type (#139).
+- **`recall consolidate`** — LLM consolidation pass that merges related
+  memories, recording lineage via `source_ids` (#141).
+- **`recall repair`** — data and index maintenance.
+- **Record provenance** across memory records — every record carries an
+  explicit origin (`user_authored` / `verbatim` / `extracted` / `derived` /
+  `unknown`).
+- **Frecency groundwork** — zoxide-style frecency score (compute-only, #154),
+  access-tracking columns (migration 13→14, #152), and bump-on-use access
+  tracking on surfaced results (#153).
+- **`source_ids` lineage column** on `loa_entries` (migration 12→13, #140).
+- **Soft type bias** for memory search ranking.
 
-## [1.0.0] - 2026-06-08
+### Added — In-session learning
 
-### Changed (BREAKING for fresh installs; existing installs auto-migrate)
+- **Mid-session learning loop** — `session_progress` table + CRUD for capture
+  on a turn/tool-call cadence (#51).
+- **Correction detection** — capture user corrections as high-confidence
+  learnings in near-real-time, with reduced false negatives (#52, #137).
 
-- **CLI binary renamed from `mem` to `recall`.** The MCP server binary is now
-  `recall-mcp`. Existing installs are relinked on install/update, and
-  Recall-managed legacy `mem` / `mem-mcp` symlinks are removed when safe.
+### Added — Lifecycle, packaging & CI
 
-- **Install layout moved to `~/.agents/Recall/`.** Canonical hook files, slash
-  commands, agent guides, and the SQLite database now live under a Recall-owned
-  install root instead of being scattered across `~/.claude/`. Platform homes
-  (`~/.claude/`, `~/.config/opencode/`, `~/.pi/agent/`) receive **per-file
-  symlinks** back to the canonicals.
-- **Database renamed to `recall.db`.** Default path is now
-  `~/.agents/Recall/recall.db` (sidecars: `recall.db-wal`, `recall.db-shm`).
-- **New env var: `RECALL_DB_PATH`.** Primary database-path override. The legacy
-  `MEM_DB_PATH` is still honored as a silent fallback for this release.
-
-### Added
-
+- **`recall update` / `recall uninstall`** subcommands (#34).
+- **Bundled lifecycle scripts for npm publish** + `recall install` (#35).
+- **`recall migrate --to <path>`** — relocate the SQLite database and rewrite
+  MCP/hook configs across all detected platforms. Refuses to overwrite
+  non-empty destinations and refuses to run while a process holds the source
+  DB open. `--dry-run` prints the plan; a pre-migration snapshot is written to
+  `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
+- **`recall path`** — print the resolved DB path, install root, active env-var
+  source, and per-platform symlink state. `--json` for scripting.
+- **`recall doctor --fix`** — repair drifted or missing Recall-managed
+  symlinks (missing → created; user-modified → backed up then replaced;
+  identical-content files → converted to symlinks).
 - **Auto-migration on update.** `update.sh` (and `install.sh` on existing
   systems) detects a legacy `~/.claude/memory.db` (or any `MEM_DB_PATH`
-  override) and moves it to `~/.agents/Recall/recall.db` along with WAL/SHM
-  sidecars. User-authored MEMORY artifacts (`identity.md`, `DISTILLED.md`)
-  also migrate. A full pre-migration snapshot is preserved at
-  `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
-- **Interactive DB-path prompt.** `install.sh` asks where to put the
-  database, defaulting to `~/.agents/Recall/recall.db`. Skipped on
-  `--yes`/non-TTY.
-- **`./install.sh --db-path <path>`.** Non-interactive override for scripted
-  installs.
-- **Per-file collision rule.** When the installer creates a symlink at a path
-  that already exists, identical content is silently replaced; user-modified
-  files are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/collisions/`
-  before being replaced. Re-running install is idempotent.
-- **Shared DB-path resolver** at `hooks/lib/db-path.ts` so the CLI, MCP
-  server, and every hook agree on the resolution precedence.
+  override) and moves it to `~/.agents/Recall/recall.db` with WAL/SHM
+  sidecars and user-authored MEMORY artifacts. A full pre-migration snapshot
+  is preserved at `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
+- **Interactive DB-path prompt** (`install.sh`, skipped on `--yes`/non-TTY) and
+  **`./install.sh --db-path <path>`** for scripted installs.
+- **Per-file collision rule** — identical content is silently replaced;
+  user-modified files are backed up under
+  `~/.agents/Recall/backups/<TIMESTAMP>/collisions/` before replacement.
+  Re-running install is idempotent.
+- **Shared DB-path resolver** at `hooks/lib/db-path.ts` so the CLI, MCP server,
+  and every hook agree on resolution precedence.
+- **macOS-primary GitHub Actions CI** with Ubuntu portability smoke coverage
+  and a deterministic release/tag version-consistency guard.
+
+### Changed — Hooks & plugins
+
+- **Hook source files renamed** to a `Recall*` namespace:
+  `SessionExtract.ts` → `RecallExtract.ts`, `SessionRecall.ts` →
+  `RecallStart.ts`, `SessionPreCompact.ts` → `RecallPreCompact.ts`,
+  `BatchExtract.ts` → `RecallBatchExtract.ts`, `TelosSync.ts` →
+  `RecallTelosSync.ts`, `ClearExtract.ts` → `RecallClearExtract.ts`.
+- **OpenCode + Pi plugins renamed** to PascalCase to match.
+- **`update.sh` auto-migrates existing `settings.json` entries** — rewrites
+  legacy hook command paths to their new equivalents, then removes stale
+  Recall-managed symlinks at the old paths. No manual intervention needed.
+- **`uninstall.sh` cleans up both naming eras** so half-migrated installs
+  uninstall cleanly.
+
+### Security
+
+- **Secret redaction on the explicit add paths** — `recall add` and the MCP
+  add tools scrub secrets before persisting (#179).
+- **Injection / exfil threat detection** with severity tiers and an entropy
+  guard (#156).
+- **Retroactive archive scrub** + import-legacy guard for the on-disk markdown
+  archive (#157), plus scrubbing on the markdown-archive write path (#132).
+- **Single-source `scrub()`** wired into both the CLI and MCP write paths via a
+  minimal write-safety guard (#50, #51).
 
 ### Fixed
 
+- **`getDb()` applies pending migrations on open** — the live `recall.db`
+  self-heals after a schema bump instead of silently re-drifting (#202).
+- **`recall consolidate`** floors a NULL demote target instead of nulling
+  importance (#188).
+- **`busy_timeout`** now extends to hook DB opens and `initDb` (was CLI-only).
 - Claude Code MCP registration was previously written with `env: {}`, so the
   spawned `recall-mcp` process couldn't see any database-path override. The
   installer now patches `env.RECALL_DB_PATH` in whichever config file
@@ -82,46 +166,25 @@ while MCP tool names (`memory_search`, `memory_add`, etc.) remain stable.
 - Auto-migration runs **once** on the next `update.sh`. If you've manually
   relocated `memory.db`, set `RECALL_DB_PATH` (or keep `MEM_DB_PATH`) before
   running update.
-- Users with custom MCP env configs may want to switch `MEM_DB_PATH` → `RECALL_DB_PATH`. Both work today; the legacy name will be removed in a future release.
-- The pre-migration snapshot at `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` is the recovery path if anything goes wrong.
+- Users with custom MCP env configs may want to switch `MEM_DB_PATH` →
+  `RECALL_DB_PATH`. Both work today; the legacy name will be removed in a
+  future release.
+- The pre-migration snapshot at
+  `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` is the recovery path if
+  anything goes wrong.
 
-### Added (new CLI commands, Phase 3)
+### Note on versioning
 
-- **`recall migrate --to <path>`** — relocate the SQLite database to a new path
-  and rewrite MCP/hook configs across all detected platforms. Refuses to
-  overwrite non-empty destinations and refuses to run while a process has
-  the source DB open. `--dry-run` prints the plan without mutation. A
-  pre-migration snapshot of the DB + sidecars + relevant configs is written
-  to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/`.
-- **`recall path`** — print the resolved DB path, the install root, the active
-  env var source (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the
-  per-platform symlink state. `--json` for scripting.
-- **`recall doctor --fix`** — repair drifted or missing Recall-managed
-  symlinks. Missing → created. User-modified files at symlink targets →
-  backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` then
-  replaced. Identical-content regular files → silently converted to
-  symlinks.
-
-### Changed (hook + plugin renames, Phase 2)
-
-- **Hook source files renamed.** `SessionExtract.ts` → `RecallExtract.ts`,
-  `SessionRecall.ts` → `RecallStart.ts`, `SessionPreCompact.ts` →
-  `RecallPreCompact.ts`, `BatchExtract.ts` → `RecallBatchExtract.ts`,
-  `TelosSync.ts` → `RecallTelosSync.ts`, `ClearExtract.ts` →
-  `RecallClearExtract.ts`. The `Recall*` namespace prevents clashes when
-  other tools install hook files into `~/.claude/hooks/`.
-- **OpenCode + Pi plugins renamed** to match the PascalCase convention:
-  `recall-extract.ts` → `RecallExtract.ts`, `recall-compaction.ts` →
-  `RecallPreCompact.ts` in both `opencode/` and `pi/`.
-- **`update.sh` auto-migrates existing `settings.json` entries.** A new
-  `recall_rename_hooks_in_settings` function rewrites legacy hook command
-  paths (`/SessionExtract.ts` etc.) to their new equivalents, then a cleanup
-  pass removes stale Recall-managed symlinks at the old paths under
-  `~/.claude/hooks/`. Users see the rename happen automatically on next
-  update with no manual intervention.
-- **`uninstall.sh` cleans up both naming eras.** Hook-file arrays and
-  settings-filter patterns now match both `Recall*` and `Session*`/`Batch*`/
-  `Telos*`/`Clear*` names so half-migrated installs still uninstall cleanly.
+- This release is numbered **0.9.0**, even though `package.json` and an earlier
+  CHANGELOG draft briefly carried `1.0.0`. **1.0.0 is reserved for a
+  deliberate, marketed milestone.** Under 0.x SemVer a minor bump may carry
+  breaking changes, so the `mem → recall` rename ships here; existing installs
+  auto-migrate. The previously-drafted `[1.0.0] - 2026-06-08` notes are folded
+  into this entry — nothing was lost.
+- A native code knowledge graph (`recall index` + code-graph query verbs) was
+  built and then removed during this same window; it never reached a published
+  release, so it is intentionally **not** listed here. CodeGraph remains the
+  code-intelligence source for `Recall:scout`.
 
 ## [0.8.0] — 2026-04-30 — "installer aesthetic overhaul"
 
