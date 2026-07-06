@@ -36,10 +36,11 @@ describe('hybridSearch FTS5 fallback when the embedding model/backend is absent 
   });
   afterAll(() => teardownTestDb());
 
-  test('returns FTS matches and reports embeddings unavailable, without throwing', async () => {
-    const { results, embeddingsAvailable } = await hybridSearch('quokka meridian', {});
+  test('returns FTS matches and reports no semantic backend when embeddings are unavailable', async () => {
+    const { results, embeddingsAvailable, semanticBackend } = await hybridSearch('quokka meridian', {});
 
     expect(embeddingsAvailable).toBe(false);
+    expect(semanticBackend).toBe('none');
     expect(results.length).toBeGreaterThan(0);
     expect(results.every(r => r.source === 'fts')).toBe(true);
     expect(results.some(r => r.content.includes('quokka meridian'))).toBe(true);
