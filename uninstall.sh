@@ -13,6 +13,7 @@
 #   ./uninstall.sh --no-confirm     # non-interactive; prints what was removed
 #   ./uninstall.sh --skip-opencode  # leave OpenCode integration alone
 #   ./uninstall.sh --skip-pi        # leave Pi integration alone
+#   ./uninstall.sh --skip-omp       # leave omp integration alone
 #   ./uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
 #   ./uninstall.sh --help           # show this help
 #
@@ -35,6 +36,7 @@ PURGE=false
 NO_CONFIRM=false
 SKIP_OPENCODE=false
 SKIP_PI=false
+SKIP_OMP=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -43,9 +45,10 @@ while [[ $# -gt 0 ]]; do
   --no-confirm) NO_CONFIRM=true ;;
   --skip-opencode) SKIP_OPENCODE=true ;;
   --skip-pi) SKIP_PI=true ;;
+  --skip-omp) SKIP_OMP=true ;;
   --no-gum) export RECALL_NO_GUM=1 ;;
   --help | -h)
-    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   *)
@@ -108,6 +111,16 @@ RECALL_HOOK_NAMES=(
   SessionExtract BatchExtract TelosSync SessionRecall SessionPreCompact ClearExtract
 )
 
+# Agent Skills — subdirectory names under */skills/ that Recall owns
+# (mirrors agentSkills/*/ in the repo). Hardcoded rather than derived from
+# the checkout so uninstall works even against a stale/removed source tree.
+RECALL_SKILL_NAMES=(
+  recall-doctor
+  recall-loa
+  recall-stats
+  recall-update
+)
+
 # ── Summary + confirmation ───────────────────────────────────────────────────
 
 print_summary() {
@@ -118,9 +131,11 @@ print_summary() {
   [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy ~/.agents/Recall/ tree, including the DB)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
+  [[ "$SKIP_OMP" == "true" ]] && echo "Skipping: omp"
   echo ""
   echo "Will REMOVE (symlinks back to ~/.agents/Recall/ — canonical files stay):"
   echo "  • ~/.claude/commands/Recall/ (and legacy ~/.claude/commands/recall/ if present)"
+  echo "  • ~/.claude/skills/{recall-doctor,recall-loa,recall-stats,recall-update}/"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json and ~/.claude.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"
@@ -129,7 +144,8 @@ print_summary() {
   echo "  • ## MEMORY section in ~/.claude/CLAUDE.md (preserves everything else)"
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
-  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + AGENTS.md MEMORY section"
+  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + AGENTS.md MEMORY section + skills"
+  [[ "$SKIP_OMP" != "true" ]] && echo "  • omp agent skills (~/.omp/agent/skills/)"
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
   if [[ "$PURGE" == "true" ]]; then
@@ -191,6 +207,28 @@ remove_guide() {
   if [[ -f "$f" ]]; then
     run rm -f "$f"
     log_success "Removed $f"
+  fi
+}
+
+# Remove Recall-owned skill directories from a */skills/ root. Only touches
+# names in RECALL_SKILL_NAMES — never wipes the whole skills/ directory,
+# since it may hold skills owned by other tools.
+#
+# Args: SKILLS_ROOT (e.g. "$CLAUDE_DIR/skills")
+remove_skills_from() {
+  local skills_root="$1"
+  [[ -d "$skills_root" ]] || return 0
+
+  local name dir removed=0
+  for name in "${RECALL_SKILL_NAMES[@]}"; do
+    dir="$skills_root/$name"
+    if [[ -d "$dir" ]]; then
+      run rm -rf "$dir"
+      removed=$((removed + 1))
+    fi
+  done
+  if [[ $removed -gt 0 ]]; then
+    log_success "Removed $removed Recall skill dir(s) from $skills_root"
   fi
 }
 
@@ -493,6 +531,15 @@ remove_pi() {
   fi
 
   remove_memory_section "$agents_md"
+  remove_skills_from "$PI_CONFIG_DIR/skills"
+}
+
+# ── omp removal ──────────────────────────────────────────────────────────────
+#
+# omp integration is skills-only (no MCP registration, hooks, or guide exist
+# for omp in this repo) — see recall_install_omp_platform in install-lib.sh.
+remove_omp() {
+  remove_skills_from "$OMP_CONFIG_DIR/skills"
 }
 
 # ── Purge ────────────────────────────────────────────────────────────────────
@@ -590,6 +637,10 @@ main() {
   remove_slash_commands
   echo ""
 
+  log_info "Removing agent skills..."
+  remove_skills_from "$CLAUDE_DIR/skills"
+  echo ""
+
   log_info "Removing guide..."
   remove_guide
   echo ""
@@ -617,6 +668,12 @@ main() {
   if [[ "$SKIP_PI" != "true" ]]; then
     log_info "Removing Pi integration..."
     remove_pi
+    echo ""
+  fi
+
+  if [[ "$SKIP_OMP" != "true" ]]; then
+    log_info "Removing omp integration..."
+    remove_omp
     echo ""
   fi
 

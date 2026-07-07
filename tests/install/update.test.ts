@@ -224,7 +224,7 @@ describe('update.sh', () => {
   // by stubbing each install/configure function to echo its name, sourcing
   // step_refresh_runtime, and asserting all expected stub lines appear.
   describe('step_refresh_runtime call topology', () => {
-    function runRefresh(env: { OPENCODE_DETECTED: string; PI_DETECTED: string }) {
+    function runRefresh(env: { OPENCODE_DETECTED: string; PI_DETECTED: string; OMP_DETECTED?: string }) {
       const harness = `
         set -e
         source "${REPO}/lib/install-lib.sh" >/dev/null 2>&1
@@ -249,10 +249,12 @@ describe('update.sh', () => {
         recall_install_pi_guide()        { echo "CALL:recall_install_pi_guide"; }
         recall_install_opencode_platform() { echo "CALL:recall_install_opencode_platform"; }
         recall_install_pi_platform()     { echo "CALL:recall_install_pi_platform"; }
+        recall_install_omp_platform()    { echo "CALL:recall_install_omp_platform"; }
 
         CLAUDE_CODE_DETECTED=false
         OPENCODE_DETECTED=${env.OPENCODE_DETECTED}
         PI_DETECTED=${env.PI_DETECTED}
+        OMP_DETECTED=${env.OMP_DETECTED ?? 'false'}
         DRY_RUN=false
 
         # Pull step_refresh_runtime out of update.sh and define it inline.
@@ -306,13 +308,20 @@ describe('update.sh', () => {
       expect(ok).toBe(true);
     });
 
+    test('omp: invokes recall_install_omp_platform when OMP_DETECTED=true', () => {
+      const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false', OMP_DETECTED: 'true' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('CALL:recall_install_omp_platform');
+    });
+
     test('No platforms: skips all platform install calls', () => {
-      const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false' });
+      const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false', OMP_DETECTED: 'false' });
       expect(r.status).toBe(0);
       expect(r.stdout).not.toContain('CALL:recall_install_opencode_');
       expect(r.stdout).not.toContain('CALL:recall_configure_opencode_');
       expect(r.stdout).not.toContain('CALL:recall_install_pi_');
       expect(r.stdout).not.toContain('CALL:recall_configure_pi_');
+      expect(r.stdout).not.toContain('CALL:recall_install_omp_');
     });
   });
 });

@@ -40,6 +40,7 @@ fi
 : "${RECALL_SHARED_DIR:=$RECALL_DIR/shared}"
 : "${RECALL_SHARED_HOOKS_DIR:=$RECALL_SHARED_DIR/hooks}"
 : "${RECALL_SHARED_HOOKS_LIB_DIR:=$RECALL_SHARED_HOOKS_DIR/lib}"
+: "${RECALL_SHARED_SKILLS_DIR:=$RECALL_SHARED_DIR/skills}"
 : "${RECALL_CLAUDE_ROOT:=$RECALL_DIR/claude}"
 : "${RECALL_CLAUDE_COMMANDS_DIR:=$RECALL_CLAUDE_ROOT/commands/Recall}"
 : "${RECALL_OPENCODE_ROOT:=$RECALL_DIR/opencode}"
@@ -95,12 +96,16 @@ fi
 # Platform configuration
 : "${OPENCODE_CONFIG_DIR:=${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
 : "${PI_CONFIG_DIR:=$HOME/.pi/agent}"
+# omp is skills-only (no MCP/hooks integration exists for it yet) — its
+# config dir is used solely as the target for `~/.omp/agent/skills`.
+: "${OMP_CONFIG_DIR:=$HOME/.omp/agent}"
 
 # Platform detection flags (populated by recall_detect_platforms,
 # possibly cleared again by recall_select_platforms when the user opts out)
 : "${CLAUDE_CODE_DETECTED:=false}"
 : "${OPENCODE_DETECTED:=false}"
 : "${PI_DETECTED:=false}"
+: "${OMP_DETECTED:=false}"
 
 # When true, recall_select_platforms / _confirm skip their interactive prompts.
 # Set via install.sh --yes / -y, or implicitly when stdin is not a TTY.
@@ -682,10 +687,16 @@ recall_detect_platforms() {
     [[ "$quiet" == "--quiet" ]] || log_success "Detected: Pi"
   fi
 
+  if command -v omp &>/dev/null; then
+    OMP_DETECTED=true
+    [[ "$quiet" == "--quiet" ]] || log_success "Detected: omp"
+  fi
+
   if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
     && [[ "$OPENCODE_DETECTED" == "false" ]] \
-    && [[ "$PI_DETECTED" == "false" ]]; then
-    log_warn "No coding agents detected (Claude Code, OpenCode, Pi)"
+    && [[ "$PI_DETECTED" == "false" ]] \
+    && [[ "$OMP_DETECTED" == "false" ]]; then
+    log_warn "No coding agents detected (Claude Code, OpenCode, Pi, omp)"
     log_info "Recall will install core tools. Configure MCP manually later."
   fi
 }
@@ -704,6 +715,7 @@ recall_select_platforms() {
   [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && options+=("Claude Code")
   [[ "$OPENCODE_DETECTED" == "true" ]] && options+=("OpenCode")
   [[ "$PI_DETECTED" == "true" ]] && options+=("Pi")
+  [[ "$OMP_DETECTED" == "true" ]] && options+=("omp")
 
   if [[ ${#options[@]} -eq 0 ]]; then
     return 0
@@ -715,20 +727,24 @@ recall_select_platforms() {
   local was_cc="$CLAUDE_CODE_DETECTED"
   local was_oc="$OPENCODE_DETECTED"
   local was_pi="$PI_DETECTED"
+  local was_omp="$OMP_DETECTED"
   CLAUDE_CODE_DETECTED=false
   OPENCODE_DETECTED=false
   PI_DETECTED=false
+  OMP_DETECTED=false
   while IFS= read -r line; do
     case "$line" in
       "Claude Code") [[ "$was_cc" == "true" ]] && CLAUDE_CODE_DETECTED=true ;;
       "OpenCode")    [[ "$was_oc" == "true" ]] && OPENCODE_DETECTED=true ;;
       "Pi")          [[ "$was_pi" == "true" ]] && PI_DETECTED=true ;;
+      "omp")         [[ "$was_omp" == "true" ]] && OMP_DETECTED=true ;;
     esac
   done <<<"$selected"
 
   if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
     && [[ "$OPENCODE_DETECTED" == "false" ]] \
-    && [[ "$PI_DETECTED" == "false" ]]; then
+    && [[ "$PI_DETECTED" == "false" ]] \
+    && [[ "$OMP_DETECTED" == "false" ]]; then
     log_warn "All agents skipped — Recall will install core tools only."
     log_info "Re-run ./install.sh later to configure agent integrations."
   fi
@@ -991,6 +1007,7 @@ recall_create_install_root() {
   mkdir -p \
     "$RECALL_DIR" \
     "$RECALL_SHARED_HOOKS_LIB_DIR" \
+    "$RECALL_SHARED_SKILLS_DIR" \
     "$RECALL_CLAUDE_COMMANDS_DIR" \
     "$RECALL_OPENCODE_PLUGINS_DIR" \
     "$RECALL_PI_EXTENSIONS_DIR" \
@@ -1145,6 +1162,80 @@ recall_unlink_if_managed() {
   fi
 }
 
+# ── Agent Skills ─────────────────────────────────────────────────────────────
+#
+# Recall ships Agent Skills (SKILL.md, one per skill directory) under
+# $RECALL_REPO_DIR/agentSkills/<skill-name>/. These are host-agnostic — the
+# same canonical files get symlinked into whichever agent skills directories
+# are present: Claude Code (~/.claude/skills), Pi (~/.pi/agent/skills), and
+# omp (~/.omp/agent/skills). Canonicals live once under
+# $RECALL_SHARED_SKILLS_DIR/<skill-name>/, matching the shared-hooks pattern.
+
+# Copy every file from each agentSkills/<name>/ directory into its canonical
+# home under $RECALL_SHARED_SKILLS_DIR/<name>/. Idempotent — recall_copy_canonical
+# overwrites unconditionally so re-runs always pick up the latest source.
+_recall_copy_skill_files() {
+  local skills_src="$RECALL_REPO_DIR/agentSkills"
+  [[ -d "$skills_src" ]] || return 0
+
+  recall_create_install_root
+
+  local skill_dir skill_name f base
+  for skill_dir in "$skills_src"/*/; do
+    [[ -d "$skill_dir" ]] || continue
+    skill_name="$(basename "$skill_dir")"
+    for f in "$skill_dir"*; do
+      [[ -f "$f" ]] || continue
+      base="$(basename "$f")"
+      recall_copy_canonical "$f" "$RECALL_SHARED_SKILLS_DIR/$skill_name/$base"
+    done
+  done
+}
+
+# Symlink every canonical skill file into TARGET_ROOT/<skill-name>/<file>.
+# Per-file symlinks (never directory-level), matching recall_link's collision
+# rule everywhere else in this file.
+#
+# Args: TARGET_ROOT (e.g. "$CLAUDE_DIR/skills")
+_recall_link_skills_to() {
+  local target_root="$1"
+  [[ -d "$RECALL_SHARED_SKILLS_DIR" ]] || return 0
+
+  local skill_dir skill_name f base
+  for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
+    [[ -d "$skill_dir" ]] || continue
+    skill_name="$(basename "$skill_dir")"
+    for f in "$skill_dir"*; do
+      [[ -f "$f" ]] || continue
+      base="$(basename "$f")"
+      recall_link "$target_root/$skill_name/$base" "$f"
+    done
+  done
+}
+
+# Claude Code skills — core platform, installed unconditionally (mirrors how
+# slash commands are always installed regardless of CLAUDE_CODE_DETECTED).
+recall_install_claude_skills() {
+  _recall_copy_skill_files
+  _recall_link_skills_to "$CLAUDE_DIR/skills"
+}
+
+# Pi skills — canonicals are already refreshed by whichever caller ran
+# recall_install_claude_skills / recall_copy_runtime_files first; this only
+# adds the Pi-side symlinks. Called from recall_install_pi_platform.
+recall_install_pi_skills() {
+  _recall_copy_skill_files
+  _recall_link_skills_to "$PI_CONFIG_DIR/skills"
+}
+
+# omp integration is skills-only today — no MCP registration, hooks, or guide
+# exist for omp in this repo. Gated behind OMP_DETECTED like the other
+# platforms so we never create ~/.omp on a machine that doesn't use it.
+recall_install_omp_platform() {
+  _recall_copy_skill_files
+  _recall_link_skills_to "$OMP_CONFIG_DIR/skills"
+}
+
 # ── Post-install symlink verification ────────────────────────────────────────
 #
 # After install completes, walk every symlink the installer was supposed to
@@ -1204,6 +1295,21 @@ recall_verify_install() {
       local base
       base="$(basename "$cmdfile")"
       _check_symlink "$CLAUDE_DIR/commands/Recall/$base" "$cmdfile"
+    done
+  fi
+
+  # Agent Skills — derived from the canonical dir, same adapt-to-release logic
+  # as slash commands above.
+  if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]]; then
+    local skill_dir skill_name skillfile base
+    for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
+      [[ -d "$skill_dir" ]] || continue
+      skill_name="$(basename "$skill_dir")"
+      for skillfile in "$skill_dir"*; do
+        [[ -f "$skillfile" ]] || continue
+        base="$(basename "$skillfile")"
+        _check_symlink "$CLAUDE_DIR/skills/$skill_name/$base" "$skillfile"
+      done
     done
   fi
 
@@ -2073,22 +2179,25 @@ Tool syntax:
   log_success "Added MEMORY section to AGENTS.md"
 }
 
-# Canonical Pi platform install entry point — composes the four Pi surfaces
-# (adapter package, MCP config, extensions, guide) in the order install.sh has
-# always used. Same scope caveats as recall_install_opencode_platform above:
-# closes within-platform drift, not broader gap classes.
+# Canonical Pi platform install entry point — composes the five Pi surfaces
+# (adapter package, MCP config, extensions, guide, skills) in the order
+# install.sh has always used. Same scope caveats as
+# recall_install_opencode_platform above: closes within-platform drift, not
+# broader gap classes.
 recall_install_pi_platform() {
   recall_install_pi_adapter
   recall_configure_pi_mcp
   recall_install_pi_extensions
   recall_install_pi_guide
+  recall_install_pi_skills
 }
 
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────
 #
-# Copies hooks/, hooks/lib/, commands/Recall/, FOR_CLAUDE.md → Recall_GUIDE.md,
-# and extract_prompt.md (with drift preservation). Called by install.sh Step 7+8b
-# and update.sh Step 7 to keep runtime artifacts in sync with the source tree.
+# Copies hooks/, hooks/lib/, commands/Recall/, agentSkills/, FOR_CLAUDE.md →
+# Recall_GUIDE.md, and extract_prompt.md (with drift preservation). Called by
+# install.sh Step 7+8b and update.sh Step 7 to keep runtime artifacts in sync
+# with the source tree.
 
 recall_copy_runtime_files() {
   recall_create_install_root
@@ -2122,6 +2231,13 @@ recall_copy_runtime_files() {
       log_info "Removed legacy lowercase slash commands at $commands_legacy"
     fi
     log_success "Installed Recall: slash commands to $commands_dest"
+  fi
+
+  # Agent Skills: canonicals under $RECALL_SHARED_SKILLS_DIR/<name>/, per-file
+  # symlinks at $CLAUDE_DIR/skills/<name>/.
+  if [[ -d "$RECALL_REPO_DIR/agentSkills" ]]; then
+    recall_install_claude_skills
+    log_success "Installed Recall: agent skills to $CLAUDE_DIR/skills"
   fi
 
   # Symlink any user-authored MEMORY files that auto_migrate already moved.

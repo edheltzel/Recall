@@ -334,7 +334,7 @@ step_refresh_runtime() {
   log_info "Refreshing runtime files (canonical + symlinks)..."
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [dry-run] would: write canonicals to $RECALL_DIR and per-file symlinks into platform homes"
-    echo "  [dry-run] would: refresh OpenCode/Pi guide + agent prompt for any detected platform"
+    echo "  [dry-run] would: refresh OpenCode/Pi guide + agent prompt, and skills for any detected platform"
     return
   fi
   # The collision rule in recall_link backs up any user-modified file at the
@@ -356,6 +356,9 @@ step_refresh_runtime() {
   fi
   if [[ "$PI_DETECTED" == "true" ]]; then
     recall_install_pi_platform
+  fi
+  if [[ "$OMP_DETECTED" == "true" ]]; then
+    recall_install_omp_platform
   fi
 }
 
