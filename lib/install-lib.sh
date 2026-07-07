@@ -2226,7 +2226,10 @@ recall_copy_runtime_files() {
       recall_copy_canonical "$cmdfile" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
       recall_link "$commands_dest/$base" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
     done
-    if [[ -d "$commands_legacy" && "$commands_legacy" != "$commands_dest" ]]; then
+    # -ef (same device+inode), not a string compare — see install.sh's matching
+    # block for why: on case-insensitive macOS filesystems "commands/recall"
+    # and "commands/Recall" are the same directory on disk.
+    if [[ -d "$commands_legacy" ]] && ! [[ "$commands_legacy" -ef "$commands_dest" ]]; then
       rm -rf "$commands_legacy"
       log_info "Removed legacy lowercase slash commands at $commands_legacy"
     fi
