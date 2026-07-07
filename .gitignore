@@ -18,6 +18,7 @@ dist/
 .claude/worktrees
 .maestro/
 .agents/
+.pi-subagents/
 .pi/*
 !.pi/APPEND_SYSTEM.md
 
