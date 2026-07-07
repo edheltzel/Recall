@@ -90,16 +90,17 @@ do_install() {
   local RESOLVED_DB_PATH
   RESOLVED_DB_PATH="$(recall_resolve_db_path)"
 
-  # Step counter — 11 always-run steps (added Migrate); +1 each for OpenCode/Pi.
-  # Packaged installs (npm / npx / `bun install -g` via `recall install`) arrive
-  # with deps vendored, dist/ prebuilt, and the bins already on PATH, so the
-  # Installing / Building / Linking steps are skipped (see RECALL_PACKAGED guard
-  # below) — drop 3 from the total.
+  # Step counter — 12 always-run steps (added Migrate, Skills); +1 each for
+  # OpenCode/Pi/omp. Packaged installs (npm / npx / `bun install -g` via
+  # `recall install`) arrive with deps vendored, dist/ prebuilt, and the bins
+  # already on PATH, so the Installing / Building / Linking steps are skipped
+  # (see RECALL_PACKAGED guard below) — drop 3 from the total.
   STEP_NUM=0
-  STEP_TOTAL=11
+  STEP_TOTAL=12
   [[ "${RECALL_PACKAGED:-false}" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL - 3))
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
+  [[ "$OMP_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
   # Pre-flight summary panel — shows what's about to happen and asks the
   # user to confirm before any state changes. Skipped when --yes / non-TTY
@@ -109,6 +110,7 @@ do_install() {
     [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && _platforms+=("Claude Code")
     [[ "$OPENCODE_DETECTED" == "true" ]] && _platforms+=("OpenCode")
     [[ "$PI_DETECTED" == "true" ]] && _platforms+=("Pi")
+    [[ "$OMP_DETECTED" == "true" ]] && _platforms+=("omp")
     local _plist
     _plist=$(IFS=", "; echo "${_platforms[*]:-(none — core install only)}")
 
@@ -222,6 +224,14 @@ do_install() {
     log_warn "Slash commands directory not found at $commands_src — skipping"
   fi
 
+  _step "Skills" "Installing agent skills"
+  if [[ -d "$RECALL_REPO_DIR/agentSkills" ]]; then
+    recall_install_claude_skills
+    log_success "Installed Recall: agent skills to $CLAUDE_DIR/skills"
+  else
+    log_warn "Agent skills directory not found at $RECALL_REPO_DIR/agentSkills — skipping"
+  fi
+
   _step "CLAUDE.md" "Configuring CLAUDE.md"
   recall_configure_claude_md
 
@@ -233,6 +243,11 @@ do_install() {
   if [[ "$PI_DETECTED" == "true" ]]; then
     _step "Pi" "Configuring Pi integration"
     recall_install_pi_platform
+  fi
+
+  if [[ "$OMP_DETECTED" == "true" ]]; then
+    _step "omp" "Configuring omp integration"
+    recall_install_omp_platform
   fi
   echo ""
 

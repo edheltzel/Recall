@@ -12,9 +12,14 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
-_Nothing yet. Going forward, each small, vertical slice lands its own entry here
-and ships as its own incremental release (0.9.1, 0.9.2, …) rather than
-accumulating into another large drain._
+### Added
+
+- **Agent Skills.** `recall-doctor`, `recall-loa`, `recall-stats`, and
+  `recall-update` ship as Agent Skills (`agentSkills/<name>/SKILL.md`) in
+  addition to Claude Code slash commands. `install.sh`/`update.sh` symlink
+  them into `~/.claude/skills`, `~/.pi/agent/skills`, and (when the `omp`
+  CLI is detected) `~/.omp/agent/skills`; `uninstall.sh` removes only the
+  Recall-owned skill directories, leaving any other skills in place.
 
 ## [0.9.0] — 2026-06-30 — "search performance & memory hygiene"
 
