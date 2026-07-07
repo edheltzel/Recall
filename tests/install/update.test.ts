@@ -213,6 +213,55 @@ describe('update.sh', () => {
     });
   });
 
+  // Regression: on the default case-insensitive-but-case-preserving macOS
+  // filesystem, "$CLAUDE_DIR/commands/recall" and "$CLAUDE_DIR/commands/Recall"
+  // are the SAME directory on disk. recall_copy_runtime_files used to compare
+  // them with a plain string `!=`, which sees "recall" and "Recall" as
+  // different paths — so it ran `rm -rf` on the legacy path immediately after
+  // the loop above it had populated that same directory with the slash-command
+  // symlinks, wiping out every commands/Recall/*.md symlink on every install.
+  // Re-running install.sh reproduced the identical create-then-delete cycle
+  // forever; only `recall doctor --fix` (no such cleanup step) broke it.
+  test('legacy commands cleanup does not delete commands/Recall when legacy path aliases dest (case-insensitive fs)', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-commands-legacy-'));
+    try {
+      const fakeRepo = join(tempRoot, 'repo');
+      const commandsSrc = join(fakeRepo, 'commands', 'Recall');
+      mkdirSync(commandsSrc, { recursive: true });
+      writeFileSync(join(commandsSrc, 'scout.md'), '# scout\n');
+      // _recall_copy_hook_files (also called by recall_copy_runtime_files)
+      // bails with a non-zero return when this is missing — provide the
+      // minimal fixture so the driver's `set -e` doesn't abort early.
+      mkdirSync(join(fakeRepo, 'hooks'), { recursive: true });
+      writeFileSync(join(fakeRepo, 'hooks', 'RecallExtract.ts'), '// stub\n');
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${tempRoot}/.claude"`,
+        `export RECALL_DIR="${tempRoot}/.agents/Recall"`,
+        `export RECALL_REPO_DIR="${fakeRepo}"`,
+        'log_info() { :; }',
+        'log_success() { :; }',
+        'log_warn() { :; }',
+        'log_error() { :; }',
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_copy_runtime_files',
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO },
+      });
+
+      expect(r.status).toBe(0);
+      const dest = join(tempRoot, '.claude', 'commands', 'Recall', 'scout.md');
+      expect(existsSync(dest)).toBe(true);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   // ─── Cycle 2/3 — refresh-step call topology (red-team-driven) ───
   //
   // Behavioral assertion that update.sh's step_refresh_runtime actually invokes
