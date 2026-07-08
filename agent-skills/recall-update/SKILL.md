@@ -1,5 +1,5 @@
 ---
-name: "source-command-recall-update"
+name: "recall-update"
 description: "Check for the latest Recall release on GitHub and print the exact update command (check-only — does not run update.sh)."
 ---
 
@@ -51,16 +51,20 @@ directory is locatable — it implements all of the logic below.
 
 1. **Locate the source directory.** Resolve the symlink target of the
    `recall` binary and strip `/dist/index.js` to get the Recall checkout:
+
    ```bash
    readlink -f "$(which recall)" | sed 's|/dist/index.js$||'
    ```
+
    Call this `RECALL_SRC`.
 
 2. **Run the check helper.** If `$RECALL_SRC/update.sh` exists, delegate
    to it — it prints the exact recipe on its own:
+
    ```bash
    cd "$RECALL_SRC" && ./update.sh --check
    ```
+
    Its output already includes the "cd ... && ./update.sh" line. Relay
    it to the user and stop.
 
@@ -76,6 +80,7 @@ directory is locatable — it implements all of the logic below.
      Parse JSON with `jq -r .tag_name` and `jq -r .body` (or with `bun -e`
      if `jq` is not available).
    - Compare versions (strip leading `v`). Present the result as:
+
      ```
      Current: vX.Y.Z
      Latest:  vA.B.C

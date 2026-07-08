@@ -15,7 +15,7 @@ note in the 0.9.0 entry.
 ### Added
 
 - **Agent Skills.** `recall-doctor`, `recall-loa`, `recall-stats`, and
-  `recall-update` ship as Agent Skills (`agentSkills/<name>/SKILL.md`) in
+  `recall-update` ship as Agent Skills (`agent-skills/<name>/SKILL.md`) in
   addition to Claude Code slash commands. `install.sh`/`update.sh` symlink
   them into `~/.claude/skills`, `~/.pi/agent/skills`, and (when the `omp`
   CLI is detected) `~/.omp/agent/skills`; `uninstall.sh` removes only the

@@ -1,4 +1,4 @@
-// Agent Skills (agentSkills/<name>/SKILL.md) are installed the same way as
+// Agent Skills (agent-skills/<name>/SKILL.md) are installed the same way as
 // slash commands: canonical copy under $RECALL_SHARED_SKILLS_DIR/<name>/,
 // per-file symlinks into each detected platform's skills directory
 // (~/.claude/skills, ~/.pi/agent/skills, ~/.omp/agent/skills).
@@ -50,14 +50,14 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     ompConfigDir = join(tempRoot, '.omp', 'agent');
 
     mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(join(fakeRepo, 'agentSkills', 'recall-doctor'), { recursive: true });
-    mkdirSync(join(fakeRepo, 'agentSkills', 'recall-stats'), { recursive: true });
+    mkdirSync(join(fakeRepo, 'agent-skills', 'recall-doctor'), { recursive: true });
+    mkdirSync(join(fakeRepo, 'agent-skills', 'recall-stats'), { recursive: true });
     writeFileSync(
-      join(fakeRepo, 'agentSkills', 'recall-doctor', 'SKILL.md'),
+      join(fakeRepo, 'agent-skills', 'recall-doctor', 'SKILL.md'),
       '---\nname: "source-command-recall-doctor"\n---\n# doctor\n',
     );
     writeFileSync(
-      join(fakeRepo, 'agentSkills', 'recall-stats', 'SKILL.md'),
+      join(fakeRepo, 'agent-skills', 'recall-stats', 'SKILL.md'),
       '---\nname: "source-command-recall-stats"\n---\n# stats\n',
     );
   });

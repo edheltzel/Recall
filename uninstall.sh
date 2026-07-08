@@ -112,7 +112,7 @@ RECALL_HOOK_NAMES=(
 )
 
 # Agent Skills — subdirectory names under */skills/ that Recall owns
-# (mirrors agentSkills/*/ in the repo). Hardcoded rather than derived from
+# (mirrors agent-skills/*/ in the repo). Hardcoded rather than derived from
 # the checkout so uninstall works even against a stale/removed source tree.
 RECALL_SKILL_NAMES=(
   recall-doctor
