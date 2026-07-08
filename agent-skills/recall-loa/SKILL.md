@@ -1,5 +1,5 @@
 ---
-name: "source-command-recall-loa"
+name: "recall-loa"
 description: "Browse and search the Library of Alexandria — curated knowledge entries with extracted wisdom"
 ---
 
@@ -25,6 +25,7 @@ recall loa quote <id>
 ```
 
 **List options:**
+
 - `-l <n>` — Max entries (default: 10)
 
 ## Examples

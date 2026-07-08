@@ -26,7 +26,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
 - `commands/` — `/Recall:*` slash-command definitions
-- `agentSkills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`
+- `agent-skills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
@@ -130,7 +130,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
-- **Add an Agent Skill**: Create `agentSkills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so uninstall removes it.
+- **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so uninstall removes it.
 - **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
 - **Cut a release**: See `docs/releasing.md` for the tag → GitHub release flow.
 

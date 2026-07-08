@@ -232,11 +232,11 @@ do_install() {
   fi
 
   _step "Skills" "Installing agent skills"
-  if [[ -d "$RECALL_REPO_DIR/agentSkills" ]]; then
+  if [[ -d "$RECALL_REPO_DIR/agent-skills" ]]; then
     recall_install_claude_skills
     log_success "Installed Recall: agent skills to $CLAUDE_DIR/skills"
   else
-    log_warn "Agent skills directory not found at $RECALL_REPO_DIR/agentSkills — skipping"
+    log_warn "Agent skills directory not found at $RECALL_REPO_DIR/agent-skills — skipping"
   fi
 
   _step "CLAUDE.md" "Configuring CLAUDE.md"

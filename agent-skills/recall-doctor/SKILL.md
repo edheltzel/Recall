@@ -1,5 +1,5 @@
 ---
-name: "source-command-recall-doctor"
+name: "recall-doctor"
 description: "Run health checks on all Recall memory subsystems — database, MCP, hooks, embeddings"
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: "source-command-recall-stats"
+name: "recall-stats"
 description: "Show Recall database statistics — record counts, database size, and table breakdown"
 ---
 

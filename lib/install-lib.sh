@@ -1165,17 +1165,17 @@ recall_unlink_if_managed() {
 # ── Agent Skills ─────────────────────────────────────────────────────────────
 #
 # Recall ships Agent Skills (SKILL.md, one per skill directory) under
-# $RECALL_REPO_DIR/agentSkills/<skill-name>/. These are host-agnostic — the
+# $RECALL_REPO_DIR/agent-skills/<skill-name>/. These are host-agnostic — the
 # same canonical files get symlinked into whichever agent skills directories
 # are present: Claude Code (~/.claude/skills), Pi (~/.pi/agent/skills), and
 # omp (~/.omp/agent/skills). Canonicals live once under
 # $RECALL_SHARED_SKILLS_DIR/<skill-name>/, matching the shared-hooks pattern.
 
-# Copy every file from each agentSkills/<name>/ directory into its canonical
+# Copy every file from each agent-skills/<name>/ directory into its canonical
 # home under $RECALL_SHARED_SKILLS_DIR/<name>/. Idempotent — recall_copy_canonical
 # overwrites unconditionally so re-runs always pick up the latest source.
 _recall_copy_skill_files() {
-  local skills_src="$RECALL_REPO_DIR/agentSkills"
+  local skills_src="$RECALL_REPO_DIR/agent-skills"
   [[ -d "$skills_src" ]] || return 0
 
   recall_create_install_root
@@ -2194,7 +2194,7 @@ recall_install_pi_platform() {
 
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────
 #
-# Copies hooks/, hooks/lib/, commands/Recall/, agentSkills/, FOR_CLAUDE.md →
+# Copies hooks/, hooks/lib/, commands/Recall/, agent-skills/, FOR_CLAUDE.md →
 # Recall_GUIDE.md, and extract_prompt.md (with drift preservation). Called by
 # install.sh Step 7+8b and update.sh Step 7 to keep runtime artifacts in sync
 # with the source tree.
@@ -2238,7 +2238,7 @@ recall_copy_runtime_files() {
 
   # Agent Skills: canonicals under $RECALL_SHARED_SKILLS_DIR/<name>/, per-file
   # symlinks at $CLAUDE_DIR/skills/<name>/.
-  if [[ -d "$RECALL_REPO_DIR/agentSkills" ]]; then
+  if [[ -d "$RECALL_REPO_DIR/agent-skills" ]]; then
     recall_install_claude_skills
     log_success "Installed Recall: agent skills to $CLAUDE_DIR/skills"
   fi
