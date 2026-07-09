@@ -141,10 +141,10 @@ print_summary() {
   echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"
   echo "  • ~/.claude/hooks/*.ts (Recall-managed symlinks only)"
   echo "  • ~/.claude/hooks/lib/*.ts (Recall-managed symlinks only)"
-  echo "  • ## MEMORY section in ~/.claude/CLAUDE.md (preserves everything else)"
+  echo "  • Recall-generated ## MEMORY section in ~/.claude/CLAUDE.md (external sections stay)"
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
-  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + AGENTS.md MEMORY section + skills"
+  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + Recall-generated AGENTS.md MEMORY section + skills"
   [[ "$SKIP_OMP" != "true" ]] && echo "  • omp agent skills (~/.omp/agent/skills/)"
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
@@ -348,39 +348,29 @@ remove_extract_prompt_if_unmodified() {
   fi
 }
 
-# Strip the "## MEMORY" section (and everything up to the next heading at
-# level 1-2, or EOF) without disturbing anything else.
+# Remove only Recall-generated "## MEMORY" sections through the shared
+# ownership classifier in lib/install-lib.sh.
 remove_memory_section() {
-  local f="$1"
-  [[ ! -f "$f" ]] && return
-  if ! grep -q "^## MEMORY" "$f"; then return; fi
+  local file="$1"
+  local platform="$2"
 
-  if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would remove ## MEMORY section from $f"
-    return
+  if recall_memory_section_mutate "$file" "$platform" remove; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would remove Recall-generated ## MEMORY section from $file"
+    else
+      log_success "Removed Recall-generated ## MEMORY section from $file"
+    fi
+  else
+    local status=$?
+    if [[ "$status" -eq 3 ]]; then
+      return
+    fi
+    if [[ "$status" -eq 4 ]]; then
+      log_warn "Preserved ## MEMORY section in $file (not Recall-generated)"
+      return
+    fi
+    return "$status"
   fi
-
-  MD_FILE="$f" bun -e '
-    const fs = require("fs");
-    const file = process.env.MD_FILE;
-    const src = fs.readFileSync(file, "utf8");
-    const lines = src.split("\n");
-
-    const startIdx = lines.findIndex(l => /^## MEMORY\b/.test(l));
-    if (startIdx === -1) process.exit(0);
-
-    let endIdx = lines.length;
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      if (/^#{1,2} \S/.test(lines[i])) { endIdx = i; break; }
-    }
-
-    let trimStart = startIdx;
-    if (trimStart > 0 && lines[trimStart - 1].trim() === "") trimStart--;
-
-    const next = [...lines.slice(0, trimStart), ...lines.slice(endIdx)].join("\n");
-    fs.writeFileSync(file, next);
-  '
-  log_success "Removed ## MEMORY section from $f"
 }
 
 run_bun_unlink() {
@@ -530,7 +520,7 @@ remove_pi() {
     log_success "Removed $guide"
   fi
 
-  remove_memory_section "$agents_md"
+  remove_memory_section "$agents_md" pi
   remove_skills_from "$PI_CONFIG_DIR/skills"
 }
 
@@ -656,7 +646,7 @@ main() {
   echo ""
 
   log_info "Removing CLAUDE.md MEMORY section..."
-  remove_memory_section "$CLAUDE_DIR/CLAUDE.md"
+  remove_memory_section "$CLAUDE_DIR/CLAUDE.md" claude
   echo ""
 
   if [[ "$SKIP_OPENCODE" != "true" ]]; then

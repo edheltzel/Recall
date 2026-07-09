@@ -178,9 +178,9 @@ describe('update.sh', () => {
     // symlink is never repaired and MCP fails silently on next
     // Claude Code restart.
     expect(r.stdout).toMatch(/would: bun link/);
-    // Regression: the refresh step must also narrate OpenCode/Pi guide +
-    // agent-prompt propagation (see "refresh path propagates" tests below).
-    expect(r.stdout).toMatch(/would: refresh OpenCode\/Pi guide/);
+    // Regression: refresh must narrate owned-memory migration plus detected
+    // platform guide, prompt, and skill propagation.
+    expect(r.stdout).toMatch(/would: migrate Recall-owned Claude\/Pi MEMORY bootstraps/);
   });
 
   // Regression: recall_copy_runtime_files only refreshes the Claude guide +
@@ -287,6 +287,7 @@ describe('update.sh', () => {
         # Stub every install/configure function step_refresh_runtime might call.
         # Each prints CALL:<name> so test assertions can grep for invocations.
         recall_copy_runtime_files()      { echo "CALL:recall_copy_runtime_files"; }
+        recall_configure_claude_md()      { echo "CALL:recall_configure_claude_md"; }
         recall_detect_platforms()        { echo "CALL:recall_detect_platforms"; }
         recall_install_opencode_agent()  { echo "CALL:recall_install_opencode_agent"; }
         recall_install_opencode_guide()  { echo "CALL:recall_install_opencode_guide"; }
@@ -315,6 +316,12 @@ describe('update.sh', () => {
       `;
       return spawnSync('bash', ['-c', harness], { encoding: 'utf-8' });
     }
+
+    test('Claude: always invokes shared bootstrap migration during refresh', () => {
+      const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('CALL:recall_configure_claude_md');
+    });
 
     test('OpenCode: invokes all 4 install functions when OPENCODE_DETECTED=true', () => {
       const r = runRefresh({ OPENCODE_DETECTED: 'true', PI_DETECTED: 'false' });
@@ -363,9 +370,10 @@ describe('update.sh', () => {
       expect(r.stdout).toContain('CALL:recall_install_omp_platform');
     });
 
-    test('No platforms: skips all platform install calls', () => {
+    test('No optional platforms: skips their install calls after Claude migration', () => {
       const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false', OMP_DETECTED: 'false' });
       expect(r.status).toBe(0);
+      expect(r.stdout).toContain('CALL:recall_configure_claude_md');
       expect(r.stdout).not.toContain('CALL:recall_install_opencode_');
       expect(r.stdout).not.toContain('CALL:recall_configure_opencode_');
       expect(r.stdout).not.toContain('CALL:recall_install_pi_');

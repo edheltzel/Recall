@@ -334,13 +334,14 @@ step_refresh_runtime() {
   log_info "Refreshing runtime files (canonical + symlinks)..."
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [dry-run] would: write canonicals to $RECALL_DIR and per-file symlinks into platform homes"
-    echo "  [dry-run] would: refresh OpenCode/Pi guide + agent prompt, and skills for any detected platform"
+    echo "  [dry-run] would: migrate Recall-owned Claude/Pi MEMORY bootstraps and refresh all detected platform guides, prompts, and skills"
     return
   fi
   # The collision rule in recall_link backs up any user-modified file at the
   # symlink target before replacing it, so the .new-suffix drift dance the
   # legacy version did is no longer needed.
   recall_copy_runtime_files
+  recall_configure_claude_md
 
   # recall_copy_runtime_files only refreshes the Claude guide + slash commands.
   # Without the calls below, existing OpenCode/Pi users who run update.sh never
