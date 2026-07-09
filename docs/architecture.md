@@ -212,8 +212,8 @@ registration, and global-link state identically.
 | Script | Purpose | Key characteristics |
 |---|---|---|
 | `install.sh` | Fresh install or repair | Idempotent, creates a timestamped backup first, per-hook registration (not blanket), supports `restore` and `list` subcommands |
-| `update.sh` | Pull + build + migrate + relink | Version check against GitHub Releases API; aborts cleanly if already current unless `--force`. Writes a `ROLLBACK.txt` recipe to the backup dir on any failure |
-| `uninstall.sh` | Surgical removal | Preserve-default (keeps `recall.db`, backups, `MEMORY/`). `--purge` destroys DB + backups after double-confirmation. AST-aware CLAUDE.md `## MEMORY` section removal; diff-checked removal of user-edited `extract_prompt.md` |
+| `update.sh` | Pull + build + migrate + relink | Version check against GitHub Releases API; aborts cleanly if already current unless `--force`. Refreshes host integrations and migrates Recall-owned Claude/Pi memory bootstraps through the shared ownership classifier. Writes a `ROLLBACK.txt` recipe to the backup dir on any failure |
+| `uninstall.sh` | Surgical removal | Preserve-default (keeps `recall.db`, backups, `MEMORY/`). `--purge` destroys DB + backups after double-confirmation. Heading-bounded, ownership-checked removal only for Recall-generated Claude/Pi `## MEMORY` sections; unmarked customized/external sections survive, while marked sections remain Recall-owned. Diff-checked removal of user-edited `extract_prompt.md` |
 
 All three accept `--dry-run` to narrate changes without touching anything.
 
@@ -229,7 +229,8 @@ Sourced by all three scripts. Key functions:
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
 | `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/Recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |
-| `recall_configure_claude_md` | Appends a `## MEMORY` section to `~/.claude/CLAUDE.md` only if absent; uninstall's counterpart removes it via an AST-aware node script that preserves everything before and after the section |
+| `recall_append_memory_section` | Shared Claude/Pi append path: completes an unterminated final line, inserts one blank separator, then writes the generated pointer |
+| `recall_memory_section_mutate` / `recall_configure_claude_md` | Shared Claude/Pi ownership classifier plus Claude bootstrap entry point. Marked sections and normalized exact legacy-generated bodies are refreshed on install/update and removable on uninstall; unmarked customized/external sections survive. Remove the marker before taking external ownership. A Recall-specific `~/.claude/rules/memory.md` takes precedence during install/update and leaves `CLAUDE.md` unchanged |
 
 ### Globals (overridable via env)
 

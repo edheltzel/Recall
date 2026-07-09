@@ -77,7 +77,7 @@ If `recall` is unavailable or times out (5s limit), the hook skips silently.
 | `~/.pi/agent/extensions/RecallPreCompact.ts` | Memory injection hook |
 | `~/.pi/agent/mcp.json` | MCP server registration |
 | `~/.pi/agent/Recall_GUIDE.md` | Agent guide (installed from `FOR_PI.md` with Pi-specific tool names) |
-| `~/.pi/agent/AGENTS.md` | Pi agent config snippet enabling recall-memory tools |
+| `~/.pi/agent/AGENTS.md` | Syntax-free pointer to the installed Recall guide and live MCP schemas |
 | `~/.claude/MEMORY/pi-sessions/` | Drop directory for extracted session markdown |
 | `~/.agents/Recall/recall.db` | Shared SQLite DB (same as Claude Code and OpenCode) |
 
@@ -97,20 +97,23 @@ Pi uses `pi-mcp-adapter` in server prefix mode, which prepends `recall-memory_` 
 
 This is the same prefix pattern as OpenCode. The `Recall_GUIDE.md` installed at `~/.pi/agent/` documents these prefixed names.
 
-## AGENTS.md Snippet
+## AGENTS.md Pointer
 
-The snippet installed at `~/.pi/agent/AGENTS.md` enables Recall tools and sets expectations:
+The installer adds a marked, syntax-free pointer to `~/.pi/agent/AGENTS.md`.
+The workflow and Pi-prefixed tool names stay canonical in `Recall_GUIDE.md`
+and the live MCP schemas:
 
 ```markdown
-## Memory (Recall)
+## MEMORY
+<!-- RECALL_MANAGED_MEMORY -->
 
-You have persistent memory via recall-memory MCP tools. Before asking the user
-to repeat anything, search first with `recall-memory_memory_search`. Use
-`table` when you need only one record type; use `bias_type` when that type
-should rank first while preserving other matching context. Record important
-decisions with `recall-memory_memory_add`. Before delegating tasks, call
-`recall-memory_context_for_agent`.
+Read and follow the canonical Recall guide at `~/.pi/agent/Recall_GUIDE.md`. Use the live `recall-memory` MCP schemas as the source of truth for tool call shapes.
 ```
+
+Install and update refresh marked sections and migrate the normalized exact
+legacy-generated Pi body. Unmarked customized/external `## MEMORY` sections
+are preserved; marked sections remain Recall-owned, so remove the marker before
+taking external ownership.
 
 ## Database
 

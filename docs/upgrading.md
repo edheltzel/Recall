@@ -44,9 +44,14 @@ cd /path/to/Recall
 5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 6. Copies refreshed hooks, shared lib files, slash commands, and
-   `FOR_CLAUDE.md`. `extract_prompt.md` gets a drift check — if you
-   edited it, the new version lands at `extract_prompt.md.new` and
-   your edits are preserved.
+   `FOR_CLAUDE.md`; refreshes detected host integrations; and runs the shared
+   Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
+   exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
+   unmarked customized/external sections are preserved, while marked sections
+   remain Recall-owned. A Recall-specific `~/.claude/rules/memory.md` leaves
+   `CLAUDE.md` unchanged.
+   `extract_prompt.md` gets a drift check — if you edited it, the new version
+   lands at `extract_prompt.md.new` and your edits are preserved.
 7. Forces re-registration of all four hooks (RecallExtract,
    RecallTelosSync, RecallStart, RecallPreCompact) — this permanently
    prevents the pre-0.7.1 bug class where a partial install could
