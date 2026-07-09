@@ -127,7 +127,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
 | 7. Setup hooks | Copies `RecallExtract.ts` and `RecallBatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
 | 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs slash commands to `~/.claude/commands/Recall/` |
-| 9. Update CLAUDE.md | Appends a MEMORY section to `~/.claude/CLAUDE.md` with core usage rules |
+| 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
 
 **After install:** Restart Claude Code to load the MCP server and hooks.
 
@@ -145,7 +145,8 @@ flowchart LR
     F --> G[Register MCP\nsettings.json]
     G --> H[Register Hooks\nsettings.json]
     H --> I[Copy Guide\nRecall_GUIDE.md]
-    I --> J[Done\nRestart Claude Code]
+    I --> J[Configure Memory Pointer\nor defer to managed Recall rule]
+    J --> K[Done\nRestart Claude Code]
 ```
 
 ---
@@ -265,10 +266,10 @@ cd /path/to/Recall
 - `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved
 - `~/.claude/hooks/{RecallExtract,RecallBatchExtract,RecallTelosSync,RecallStart,RecallPreCompact}.ts`
 - `~/.claude/hooks/lib/{extraction-*,pid-utils}.ts` — only Recall-owned files, never the whole `hooks/lib/` directory
-- The `## MEMORY` section in `~/.claude/CLAUDE.md` — the rest of your CLAUDE.md is preserved (AST-aware removal)
+- The `## MEMORY` section in `~/.claude/CLAUDE.md` only if Recall generated it (current ownership marker or a normalized exact match of the complete legacy-generated body); unmarked customized/externally owned sections and the rest of `CLAUDE.md` are preserved; a marked section remains Recall-owned even if its body was edited
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
 - OpenCode MCP entry + plugins + agent (unless `--skip-opencode`)
-- Pi MCP entry + extensions + `AGENTS.md` MEMORY section (unless `--skip-pi`)
+- Pi MCP entry + extensions + Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); unmarked customized/external Pi sections survive, while marked sections remain Recall-owned (unless `--skip-pi`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
 ### What is preserved (default)
