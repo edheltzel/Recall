@@ -21,6 +21,15 @@ note in the 0.9.0 entry.
   CLI is detected) `~/.omp/agent/skills`; `uninstall.sh` removes only the
   Recall-owned skill directories, leaving any other skills in place.
 
+### Changed
+
+- **Claude and Pi memory bootstraps now self-migrate without copying MCP
+  syntax.** Install and update refresh marked Recall sections and replace exact
+  legacy-generated bodies with canonical `Recall_GUIDE.md` pointers; uninstall
+  uses the same ownership classifier. Unmarked customized/external sections
+  are preserved; marked sections remain Recall-owned. A Recall-specific
+  `~/.claude/rules/memory.md` keeps `CLAUDE.md` untouched during install/update.
+
 ## [0.9.0] — 2026-06-30 — "search performance & memory hygiene"
 
 A large catch-up release that drains roughly two months of work merged to `main`

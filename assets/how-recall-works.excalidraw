@@ -236,8 +236,8 @@
       "y": 385,
       "width": 340,
       "height": 150,
-      "text": "Inputs\n\n•  Stop hook every turn (SessionExtract)\n•  recall add  (CLI direct)\n•  memory_add  (MCP)\n•  BatchExtract cron  (crash recovery)",
-      "originalText": "Inputs\n\n•  Stop hook every turn (SessionExtract)\n•  recall add  (CLI direct)\n•  memory_add  (MCP)\n•  BatchExtract cron  (crash recovery)",
+      "text": "Extraction inputs\n\n•  Stop hook every turn (RecallExtract)\n•  RecallBatchExtract cron  (crash recovery)",
+      "originalText": "Extraction inputs\n\n•  Stop hook every turn (RecallExtract)\n•  RecallBatchExtract cron  (crash recovery)",
       "fontSize": 15,
       "fontFamily": 3,
       "textAlign": "left",
@@ -293,6 +293,10 @@
         },
         {
           "id": "arrow_w3",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow_mirror",
           "type": "arrow"
         }
       ],
@@ -561,10 +565,6 @@
           "type": "text"
         },
         {
-          "id": "arrow_mirror",
-          "type": "arrow"
-        },
-        {
           "id": "arrow_r2",
           "type": "arrow"
         },
@@ -589,8 +589,8 @@
       "y": 925,
       "width": 600,
       "height": 200,
-      "text": "SQLite — ~/.claude/memory.db\nTHE QUERY SURFACE\n\nsessions  ·  messages  ·  decisions\nlearnings  ·  breadcrumbs  ·  loa_entries\nembeddings (768-dim vectors)\n\nFTS5 indexes auto-sync  ·  WAL  ·  0600",
-      "originalText": "SQLite — ~/.claude/memory.db\nTHE QUERY SURFACE\n\nsessions  ·  messages  ·  decisions\nlearnings  ·  breadcrumbs  ·  loa_entries\nembeddings (768-dim vectors)\n\nFTS5 indexes auto-sync  ·  WAL  ·  0600",
+      "text": "SQLite — ~/.agents/Recall/recall.db\nTHE QUERY SURFACE\n\nsessions  ·  messages  ·  decisions\nlearnings  ·  breadcrumbs  ·  loa_entries\nembeddings (1024-dim vectors)\n\nFTS5 indexes auto-sync  ·  WAL  ·  0600",
+      "originalText": "SQLite — ~/.agents/Recall/recall.db\nTHE QUERY SURFACE\n\nsessions  ·  messages  ·  decisions\nlearnings  ·  breadcrumbs  ·  loa_entries\nembeddings (1024-dim vectors)\n\nFTS5 indexes auto-sync  ·  WAL  ·  0600",
       "fontSize": 16,
       "fontFamily": 3,
       "textAlign": "center",
@@ -912,10 +912,10 @@
     {
       "type": "arrow",
       "id": "arrow_mirror",
-      "x": 1217.4598214285716,
-      "y": 1031.0817856409767,
-      "width": 281.9375000000002,
-      "height": 1.0985267124053735,
+      "x": 520,
+      "y": 760,
+      "width": 978.9118303571431,
+      "height": 270,
       "strokeColor": "#64748b",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
@@ -938,16 +938,24 @@
           0
         ],
         [
-          281.9375000000002,
-          -1.0985267124053735
+          40,
+          100
+        ],
+        [
+          900,
+          100
+        ],
+        [
+          978.9118303571431,
+          270
         ]
       ],
       "startBinding": {
-        "elementId": "sqlite_rect",
-        "mode": "inside",
+        "elementId": "extract_rect",
+        "mode": "orbit",
         "fixedPoint": [
-          0.9960309709821431,
-          0.5253407735040696
+          1,
+          0.7272727272727273
         ]
       },
       "endBinding": {
@@ -969,12 +977,12 @@
     {
       "type": "text",
       "id": "mirror_label",
-      "x": 1246.6852678571431,
-      "y": 1001.3671875,
-      "width": 220,
+      "x": 940,
+      "y": 830,
+      "width": 250,
       "height": 22,
-      "text": "mirror write",
-      "originalText": "mirror write",
+      "text": "extraction dual-write",
+      "originalText": "extraction dual-write",
       "fontSize": 13,
       "fontFamily": 3,
       "textAlign": "center",
@@ -1551,6 +1559,162 @@
       "roundness": null,
       "updated": 1778075673227,
       "autoResize": true
+    },
+    {
+      "type": "rectangle",
+      "id": "direct_write_rect",
+      "x": 600,
+      "y": 370,
+      "width": 360,
+      "height": 180,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "#ffedd5",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "angle": 0,
+      "seed": 700001,
+      "version": 1,
+      "versionNonce": 700003,
+      "isDeleted": false,
+      "groupIds": [],
+      "boundElements": [
+        {
+          "id": "direct_write_text",
+          "type": "text"
+        }
+      ],
+      "link": null,
+      "locked": false,
+      "roundness": {
+        "type": 3
+      },
+      "index": "ab",
+      "frameId": null,
+      "updated": 1778075800000
+    },
+    {
+      "type": "text",
+      "id": "direct_write_text",
+      "x": 620,
+      "y": 390,
+      "width": 320,
+      "height": 140,
+      "text": "Explicit writes (direct)\n\n•  recall add  (CLI)\n•  memory_add  (MCP)\n\nscrub → typed DB insert\n(no extraction model)",
+      "originalText": "Explicit writes (direct)\n\n•  recall add  (CLI)\n•  memory_add  (MCP)\n\nscrub → typed DB insert\n(no extraction model)",
+      "fontSize": 15,
+      "fontFamily": 3,
+      "textAlign": "left",
+      "verticalAlign": "middle",
+      "strokeColor": "#374151",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "angle": 0,
+      "seed": 700005,
+      "version": 1,
+      "versionNonce": 700007,
+      "isDeleted": false,
+      "groupIds": [],
+      "boundElements": [],
+      "link": null,
+      "locked": false,
+      "containerId": "direct_write_rect",
+      "lineHeight": 1.25,
+      "index": "ac",
+      "frameId": null,
+      "roundness": null,
+      "updated": 1778075800000,
+      "autoResize": true
+    },
+    {
+      "type": "arrow",
+      "id": "arrow_direct_entry",
+      "x": 820,
+      "y": 283,
+      "width": 0,
+      "height": 87,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "angle": 0,
+      "seed": 700009,
+      "version": 1,
+      "versionNonce": 700011,
+      "isDeleted": false,
+      "groupIds": [],
+      "boundElements": [],
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          87
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "index": "ad",
+      "frameId": null,
+      "roundness": null,
+      "updated": 1778075800000
+    },
+    {
+      "type": "arrow",
+      "id": "arrow_direct_storage",
+      "x": 780,
+      "y": 550,
+      "width": 0,
+      "height": 355,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "angle": 0,
+      "seed": 700013,
+      "version": 1,
+      "versionNonce": 700015,
+      "isDeleted": false,
+      "groupIds": [],
+      "boundElements": [],
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          355
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "index": "ae",
+      "frameId": null,
+      "roundness": null,
+      "updated": 1778075800000
     }
   ],
   "appState": {
