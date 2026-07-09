@@ -17,6 +17,7 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { legacyClaudeMemorySection, legacyPiMemorySection } from '../fixtures/legacy-memory-sections';
 
 const REPO = process.cwd();
 const UNINSTALL = join(REPO, 'uninstall.sh');
@@ -54,6 +55,34 @@ function runUninstall(
     stdout: r.stdout ?? '',
     stderr: r.stderr ?? '',
     status: r.status ?? 1,
+  };
+}
+
+function runUninstallIncludingPi(
+  claudeDir: string,
+  backupBase: string,
+  piConfigDir: string,
+): RunResult {
+  const result = spawnSync(
+    'bash',
+    [UNINSTALL, '--no-confirm', '--skip-opencode'],
+    {
+      encoding: 'utf-8',
+      cwd: REPO,
+      env: {
+        ...process.env,
+        CLAUDE_DIR: claudeDir,
+        BACKUP_BASE: backupBase,
+        PI_CONFIG_DIR: piConfigDir,
+        HOME: claudeDir,
+        RECALL_SKIP_BUN_UNLINK: 'true',
+      },
+    },
+  );
+  return {
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    status: result.status ?? 1,
   };
 }
 
@@ -170,7 +199,8 @@ Terse, surgical, precise.
 
 ## MEMORY
 
-You have persistent memory via Recall. Stuff.
+<!-- RECALL_MANAGED_MEMORY -->
+Read and follow the canonical Recall guide at \`~/.claude/Recall_GUIDE.md\`.
 
 ## After-memory section
 
@@ -238,7 +268,7 @@ This content must be preserved across an uninstall.
     expect(s.mcpServers?.['other-server']).toBeDefined();
   });
 
-  test('CLAUDE.md: MEMORY section removed, other sections preserved', () => {
+  test('CLAUDE.md: Recall-managed MEMORY section removed, other sections preserved', () => {
     runUninstall(claudeDir, backupBase);
     const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
     expect(content).not.toContain('## MEMORY');
@@ -246,6 +276,135 @@ This content must be preserved across an uninstall.
     expect(content).toContain('## Style');
     expect(content).toContain('## After-memory section');
     expect(content).toContain('This content must be preserved');
+  });
+
+  test('CLAUDE.md: legacy Recall-generated MEMORY section is removed', () => {
+    const legacySection = legacyClaudeMemorySection(claudeDir);
+    writeFileSync(
+      join(claudeDir, 'CLAUDE.md'),
+      `# Existing instructions
+
+${legacySection}
+
+## After-memory section
+
+Preserve this.
+`,
+    );
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
+    expect(content).not.toContain('## MEMORY');
+    expect(content).toContain('## After-memory section');
+    expect(content).toContain('Preserve this.');
+  });
+
+  test('CLAUDE.md: externally owned MEMORY section is preserved', () => {
+    const pointer = "Recall's Claude operating contract is loaded from `~/.claude/rules/memory.md`.";
+    writeFileSync(
+      join(claudeDir, 'CLAUDE.md'),
+      `# Existing instructions
+
+## MEMORY
+
+${pointer}
+
+## After-memory section
+
+Preserve this.
+`,
+    );
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
+    expect(content).toContain('## MEMORY');
+    expect(content).toContain(pointer);
+    expect(content).toContain('## After-memory section');
+  });
+
+  test('CLAUDE.md: customized section retaining the legacy sentence is preserved', () => {
+    const custom = `You have persistent memory via Recall. **Read the full guide:** ${claudeDir}/Recall_GUIDE.md
+
+Custom memory policy that Recall did not generate.`;
+    writeFileSync(
+      join(claudeDir, 'CLAUDE.md'),
+      `# Existing instructions
+
+## MEMORY
+
+${custom}
+
+## After-memory section
+
+Preserve this.
+`,
+    );
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
+    expect(content).toContain('## MEMORY');
+    expect(content).toContain(custom);
+    expect(content).toContain('## After-memory section');
+  });
+
+  test('Pi AGENTS.md: complete legacy Recall section is removed', () => {
+    const piConfigDir = join(tempRoot, '.pi', 'agent');
+    mkdirSync(piConfigDir, { recursive: true });
+    const legacyPiSection = legacyPiMemorySection;
+    writeFileSync(
+      join(piConfigDir, 'AGENTS.md'),
+      `# Existing Pi instructions
+
+${legacyPiSection}
+
+## After-memory section
+
+Preserve this.
+`,
+    );
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).toBe(0);
+    const content = readFileSync(join(piConfigDir, 'AGENTS.md'), 'utf-8');
+    expect(content).not.toContain('## MEMORY');
+    expect(content).toContain('## After-memory section');
+    expect(content).toContain('Preserve this.');
+  });
+
+  test('Pi AGENTS.md: customized legacy-looking section is preserved', () => {
+    const piConfigDir = join(tempRoot, '.pi', 'agent');
+    mkdirSync(piConfigDir, { recursive: true });
+    const custom = `You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Recall_GUIDE.md
+
+Custom Pi memory policy that Recall did not generate.`;
+    writeFileSync(
+      join(piConfigDir, 'AGENTS.md'),
+      `# Existing Pi instructions
+
+## MEMORY
+
+${custom}
+
+## After-memory section
+
+Preserve this.
+`,
+    );
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).toBe(0);
+    const content = readFileSync(join(piConfigDir, 'AGENTS.md'), 'utf-8');
+    expect(content).toContain('## MEMORY');
+    expect(content).toContain(custom);
+    expect(content).toContain('## After-memory section');
   });
 
   test('--purge: destroys memory.db and backups, keeps MEMORY/', () => {
