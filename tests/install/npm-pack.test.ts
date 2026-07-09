@@ -32,8 +32,11 @@ function packFileList(): string[] {
     cwd: REPO,
     encoding: 'utf-8',
   });
-  const data = JSON.parse(out) as Array<{ files: Array<{ path: string }> }>;
-  return data[0].files.map(f => f.path);
+  type PackEntry = { files: Array<{ path: string }> };
+  const data = JSON.parse(out) as PackEntry[] | Record<string, PackEntry>;
+  const entry = Array.isArray(data) ? data[0] : Object.values(data)[0];
+  if (!entry) throw new Error('npm pack returned no package metadata');
+  return entry.files.map(f => f.path);
 }
 
 describe('npm package: files whitelist', () => {
