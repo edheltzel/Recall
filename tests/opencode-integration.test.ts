@@ -507,16 +507,6 @@ describe('Installer: Pi Detection and MCP Config', () => {
     expect(parsed.mcpServers['recall-memory'].command).toBe('recall-mcp');
   });
 
-  test('AGENTS.md snippet has no unexpanded shell variables', () => {
-    const agentsMdSnippet = `
-## MEMORY
-
-You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Recall_GUIDE.md
-    `;
-
-    // The rendered snippet should not contain unexpanded $VARIABLE patterns
-    expect(agentsMdSnippet).not.toMatch(/\$[A-Z_]+/);
-  });
 
   test('installer backup list includes Pi config files', () => {
     const installPath = join(__dirname, '..', 'install.sh');

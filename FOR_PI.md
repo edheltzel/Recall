@@ -76,7 +76,7 @@ Show a full Library of Alexandria entry with its extracted wisdom.
 Get context to pass to a subagent before delegating tasks:
 
 ```
-recall-memory_context_for_agent({ task_description: "implement the auth middleware" })
+recall-memory_context_for_agent({ agent_task: "implement the auth middleware", project: "my-app" })
 ```
 
 ## The CLI

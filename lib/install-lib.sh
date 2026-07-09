@@ -1844,46 +1844,192 @@ recall_rename_hooks_in_settings() {
 
 # ── CLAUDE.md ────────────────────────────────────────────────────────────────
 
+# recall_memory_section_mutate FILE PLATFORM ACTION [REPLACEMENT]
+#
+# Single ownership classifier and mutator for Claude/Pi `## MEMORY` sections.
+# Current Recall sections carry RECALL_MANAGED_MEMORY; pre-marker sections are
+# owned only when the complete normalized body exactly matches that platform's
+# legacy generator. Returns 0 when an owned section was handled, 3 when absent,
+# and 4 when the section is customized/externally owned.
+recall_memory_section_mutate() {
+  local file="$1"
+  local platform="$2"
+  local action="$3"
+  local replacement="${4:-}"
+
+  [[ -f "$file" ]] || return 3
+
+  MEMORY_FILE="$file" \
+    MEMORY_PLATFORM="$platform" \
+    MEMORY_ACTION="$action" \
+    MEMORY_REPLACEMENT="$replacement" \
+    MEMORY_DRY_RUN="${DRY_RUN:-false}" \
+    CLAUDE_ROOT="$CLAUDE_DIR" \
+    bun -e '
+      const fs = require("fs");
+      const file = process.env.MEMORY_FILE;
+      const platform = process.env.MEMORY_PLATFORM;
+      const action = process.env.MEMORY_ACTION;
+      const replacement = process.env.MEMORY_REPLACEMENT || "";
+      const src = fs.readFileSync(file, "utf8");
+      const eol = src.includes("\r\n") ? "\r\n" : "\n";
+      const lines = src.replace(/\r\n/g, "\n").split("\n");
+
+      const startIdx = lines.findIndex((line) => /^## MEMORY\b/.test(line));
+      if (startIdx === -1) process.exit(3);
+
+      let endIdx = lines.length;
+      for (let i = startIdx + 1; i < lines.length; i++) {
+        if (/^#{1,2} \S/.test(lines[i])) {
+          endIdx = i;
+          break;
+        }
+      }
+
+      const normalizedSection = lines
+        .slice(startIdx, endIdx)
+        .join("\n")
+        .trim();
+      const claudeRoot = process.env.CLAUDE_ROOT;
+      const legacyClaudeSection = [
+        "## MEMORY",
+        "",
+        "You have persistent memory via Recall. **Read the full guide:** " + claudeRoot + "/Recall_GUIDE.md",
+        "",
+        "A SessionStart hook automatically loads recent memory context. Review it before your first response.",
+        "",
+        "Core rules:",
+        "1. **Memory-first** → Review SessionStart hook output, then search Recall before falling back to git log",
+        "2. Before asking user to repeat anything → search first with `memory_search` or `memory_hybrid_search`",
+        "3. Before spawning agents (Task tool) → call `context_for_agent`",
+        "4. When decisions are made → record with `memory_add`",
+        "5. End of session when user says `/dump` or `/Recall:dump` → call `memory_dump({ title: \"Descriptive Title\" })`",
+        "",
+        "Context resolution order:",
+        "1. SessionStart hook output (already loaded)",
+        "2. `memory_hybrid_search` (keyword + semantic search)",
+        "3. `memory_recall` (recent LoA, decisions, breadcrumbs)",
+        "4. Native Claude memory / conversation context",
+        "5. `git log` / `git show` (last resort)",
+        "",
+        "Tool syntax:",
+        "- `memory_search({ query: \"search terms\" })`",
+        "- `memory_hybrid_search({ query: \"natural language question\" })`",
+        "- `memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })`",
+        "- `memory_dump({ title: \"Session title\", skip_fabric: true })`",
+        "- `context_for_agent({ task_description: \"what the agent will do\" })`",
+      ].join("\n");
+      const legacyPiSection = [
+        "## MEMORY",
+        "",
+        "You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Recall_GUIDE.md",
+        "",
+        "Core rules:",
+        "1. Before asking user to repeat anything → search first with `recall-memory_memory_search`",
+        "2. When decisions are made → record with `recall-memory_memory_add`",
+        "3. End of session when user says `/dump` → call `recall-memory_memory_dump({ title: \"Descriptive Title\" })`",
+        "4. Dumped sessions are immediately searchable from new sessions via `recall-memory_memory_search`",
+        "",
+        "Tool syntax:",
+        "- `recall-memory_memory_search({ query: \"search terms\" })`",
+        "- `recall-memory_memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })`",
+        "- `recall-memory_memory_dump({ title: \"Session title\", skip_fabric: true })`",
+        "- `recall-memory_context_for_agent({ task_description: \"what the agent will do\" })`",
+      ].join("\n");
+      const legacySection =
+        platform === "claude" ? legacyClaudeSection :
+        platform === "pi" ? legacyPiSection :
+        null;
+      if (!legacySection || !["migrate", "remove"].includes(action)) process.exit(2);
+
+      const owned =
+        normalizedSection.includes("<!-- RECALL_MANAGED_MEMORY -->") ||
+        normalizedSection === legacySection;
+      if (!owned) process.exit(4);
+      if (process.env.MEMORY_DRY_RUN === "true") process.exit(0);
+
+      let nextLines;
+      if (action === "remove") {
+        let trimStart = startIdx;
+        if (trimStart > 0 && lines[trimStart - 1].trim() === "") trimStart--;
+        nextLines = [...lines.slice(0, trimStart), ...lines.slice(endIdx)];
+      } else {
+        const replacementLines = replacement.replace(/\r\n/g, "\n").trim().split("\n");
+        const separator = endIdx < lines.length ? [""] : [];
+        nextLines = [
+          ...lines.slice(0, startIdx),
+          ...replacementLines,
+          ...separator,
+          ...lines.slice(endIdx),
+        ];
+      }
+
+      let next = nextLines.join(eol);
+      if (src.endsWith(eol) && !next.endsWith(eol)) next += eol;
+      if (next !== src) fs.writeFileSync(file, next);
+    '
+}
+
+# Append one generated MEMORY section with a blank separator, preserving an
+# unterminated final line instead of joining the heading onto user content.
+recall_append_memory_section() {
+  local file="$1"
+  local section="$2"
+
+  MEMORY_FILE="$file" MEMORY_SECTION="$section" bun -e '
+    const fs = require("fs");
+    const file = process.env.MEMORY_FILE;
+    const section = process.env.MEMORY_SECTION || "";
+    const src = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const eol = src.includes("\r\n") ? "\r\n" : "\n";
+    const renderedSection = section
+      .replace(/\r\n/g, "\n")
+      .trim()
+      .split("\n")
+      .join(eol);
+
+    let next = src;
+    if (next.length > 0) {
+      if (!next.endsWith("\n")) next += eol;
+      if (!next.endsWith(eol + eol)) next += eol;
+    }
+    next += renderedSection + eol;
+    fs.writeFileSync(file, next);
+  '
+}
+
 recall_configure_claude_md() {
   local claude_md="$CLAUDE_DIR/CLAUDE.md"
-
   local memory_section="## MEMORY
+<!-- RECALL_MANAGED_MEMORY -->
 
-You have persistent memory via Recall. **Read the full guide:** $CLAUDE_DIR/Recall_GUIDE.md
+Read and follow the canonical Recall guide at \`$CLAUDE_DIR/Recall_GUIDE.md\`. Use the live \`recall-memory\` MCP schemas as the source of truth for tool call shapes."
 
-A SessionStart hook automatically loads recent memory context. Review it before your first response.
+  if [[ -f "$CLAUDE_DIR/rules/memory.md" ]] \
+    && grep -Eq 'Recall_GUIDE\.md|recall-memory' "$CLAUDE_DIR/rules/memory.md"; then
+    log_success "CLAUDE.md MEMORY contract provided by $CLAUDE_DIR/rules/memory.md"
+    return
+  fi
 
-Core rules:
-1. **Memory-first** → Review SessionStart hook output, then search Recall before falling back to git log
-2. Before asking user to repeat anything → search first with \`memory_search\` or \`memory_hybrid_search\`
-3. Before spawning agents (Task tool) → call \`context_for_agent\`
-4. When decisions are made → record with \`memory_add\`
-5. End of session when user says \`/dump\` or \`/Recall:dump\` → call \`memory_dump({ title: \"Descriptive Title\" })\`
-
-Context resolution order:
-1. SessionStart hook output (already loaded)
-2. \`memory_hybrid_search\` (keyword + semantic search)
-3. \`memory_recall\` (recent LoA, decisions, breadcrumbs)
-4. Native Claude memory / conversation context
-5. \`git log\` / \`git show\` (last resort)
-
-Tool syntax:
-- \`memory_search({ query: \"search terms\" })\`
-- \`memory_hybrid_search({ query: \"natural language question\" })\`
-- \`memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })\`
-- \`memory_dump({ title: \"Session title\", skip_fabric: true })\`
-- \`context_for_agent({ task_description: \"what the agent will do\" })\`"
+  if [[ -f "$claude_md" ]] && grep -q "^## MEMORY" "$claude_md"; then
+    if recall_memory_section_mutate "$claude_md" claude migrate "$memory_section"; then
+      log_success "Migrated/refreshed Recall-generated CLAUDE.md MEMORY section"
+    else
+      local status=$?
+      if [[ "$status" -eq 4 ]]; then
+        log_success "Preserved externally owned CLAUDE.md MEMORY section"
+      else
+        return "$status"
+      fi
+    fi
+    return
+  fi
 
   if [[ -f "$claude_md" ]]; then
-    if grep -q "## MEMORY" "$claude_md"; then
-      log_success "CLAUDE.md already has MEMORY section"
-      return
-    fi
-    echo "" >>"$claude_md"
-    echo "$memory_section" >>"$claude_md"
+    recall_append_memory_section "$claude_md" "$memory_section"
     log_success "Added MEMORY section to existing CLAUDE.md"
   else
-    echo "$memory_section" >"$claude_md"
+    recall_append_memory_section "$claude_md" "$memory_section"
     log_success "Created CLAUDE.md with MEMORY section"
   fi
 }
@@ -2148,34 +2294,26 @@ recall_install_pi_guide() {
   fi
 
   local agents_md="$PI_CONFIG_DIR/AGENTS.md"
+  local memory_section="## MEMORY
+<!-- RECALL_MANAGED_MEMORY -->
 
-  if [[ -f "$agents_md" ]] && grep -q "## MEMORY" "$agents_md"; then
-    log_success "AGENTS.md already has MEMORY section"
+Read and follow the canonical Recall guide at \`~/.pi/agent/Recall_GUIDE.md\`. Use the live \`recall-memory\` MCP schemas as the source of truth for tool call shapes."
+
+  if [[ -f "$agents_md" ]] && grep -q "^## MEMORY" "$agents_md"; then
+    if recall_memory_section_mutate "$agents_md" pi migrate "$memory_section"; then
+      log_success "Migrated/refreshed Recall-generated Pi AGENTS.md MEMORY section"
+    else
+      local status=$?
+      if [[ "$status" -eq 4 ]]; then
+        log_success "Preserved externally owned Pi AGENTS.md MEMORY section"
+      else
+        return "$status"
+      fi
+    fi
     return
   fi
 
-  local memory_section="
-## MEMORY
-
-You have persistent memory via Recall. **Read the full guide:** ~/.pi/agent/Recall_GUIDE.md
-
-Core rules:
-1. Before asking user to repeat anything → search first with \`recall-memory_memory_search\`
-2. When decisions are made → record with \`recall-memory_memory_add\`
-3. End of session when user says \`/dump\` → call \`recall-memory_memory_dump({ title: \"Descriptive Title\" })\`
-4. Dumped sessions are immediately searchable from new sessions via \`recall-memory_memory_search\`
-
-Tool syntax:
-- \`recall-memory_memory_search({ query: \"search terms\" })\`
-- \`recall-memory_memory_add({ type: \"decision\", content: \"what\", detail: \"why\" })\`
-- \`recall-memory_memory_dump({ title: \"Session title\", skip_fabric: true })\`
-- \`recall-memory_context_for_agent({ task_description: \"what the agent will do\" })\`"
-
-  if [[ -f "$agents_md" ]] && [[ -s "$agents_md" ]] \
-    && [[ "$(tail -c 1 "$agents_md" | wc -l)" -eq 0 ]]; then
-    echo "" >>"$agents_md"
-  fi
-  echo "$memory_section" >>"$agents_md"
+  recall_append_memory_section "$agents_md" "$memory_section"
   log_success "Added MEMORY section to AGENTS.md"
 }
 
