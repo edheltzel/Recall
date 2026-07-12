@@ -1,6 +1,6 @@
 {
   "name": "recall-memory",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "RECALL - Persistent memory system for coding agents",
   "type": "module",
   "bin": {
