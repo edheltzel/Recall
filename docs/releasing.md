@@ -56,9 +56,10 @@ node -e '
   fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
 ' "X.Y.Z"
 
-# 3. Commit + tag.
+# 3. Commit + tag. Release tags are annotated (v0.9.0 onward), and a plain
+#    `git tag` fails under `tag.forceSignAnnotated=true` — always pass -a -m.
 git commit -am "chore(release): vX.Y.Z"
-git tag "vX.Y.Z"
+git tag -a "vX.Y.Z" -m "vX.Y.Z — <codename>"
 git push origin main --follow-tags
 
 # 4. Create the GitHub release with notes extracted from CHANGELOG.
