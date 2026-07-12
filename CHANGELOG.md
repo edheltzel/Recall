@@ -12,6 +12,12 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **CI runs `actions/checkout@v7`** (was `@v4`, which targets deprecated
+  Node 20) (#222). The release recipe in `docs/releasing.md` now shows the
+  annotated-tag form (`git tag -a -m`) that release tags actually use.
+
 ## [0.9.1] — 2026-07-12 — "agent skills & installer fixes"
 
 ### Added
