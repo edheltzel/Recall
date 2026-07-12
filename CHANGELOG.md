@@ -12,6 +12,14 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+### Added
+
+- **Hybrid search reports which semantic backend served the query** (#217).
+  `memory_hybrid_search` MCP output now carries
+  `semanticBackend: "knn" | "bruteforce" | "none"` so indexed sqlite-vec KNN
+  search is distinguishable from the brute-force fallback, and Suite F emits
+  indexed vector/hybrid latency metrics with KNN-vs-bruteforce counters.
+
 ### Changed
 
 - **CI runs `actions/checkout@v7`** (was `@v4`, which targets deprecated
