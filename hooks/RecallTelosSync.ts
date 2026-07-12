@@ -17,7 +17,10 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 
 const HOME = process.env.HOME || '/Users/ed';
-const TELOS_DIR = join(HOME, '.claude', 'skills', 'PAI', 'USER', 'TELOS');
+// TELOS lives in the LifeOS USER tree when installed; fall back to the legacy PAI path.
+const LIFEOS_TELOS = join(HOME, '.config', 'LIFEOS', 'USER', 'TELOS');
+const LEGACY_TELOS = join(HOME, '.claude', 'skills', 'PAI', 'USER', 'TELOS');
+const TELOS_DIR = existsSync(LIFEOS_TELOS) ? LIFEOS_TELOS : LEGACY_TELOS;
 const MEMORY_DIR = join(HOME, '.claude', 'MEMORY');
 const MTIME_FILE = join(MEMORY_DIR, '.telos_last_import');
 
