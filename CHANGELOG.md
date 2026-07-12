@@ -12,6 +12,8 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-07-12 — "agent skills & installer fixes"
+
 ### Added
 
 - **Agent Skills.** `recall-doctor`, `recall-loa`, `recall-stats`, and
@@ -29,6 +31,17 @@ note in the 0.9.0 entry.
   uses the same ownership classifier. Unmarked customized/external sections
   are preserved; marked sections remain Recall-owned. A Recall-specific
   `~/.claude/rules/memory.md` keeps `CLAUDE.md` untouched during install/update.
+
+### Fixed
+
+- **`install.sh` no longer deletes the slash commands it just installed on
+  case-insensitive filesystems** (#219). The legacy `commands/recall` cleanup
+  compared paths with a plain string `!=`, so on macOS's default
+  case-insensitive-but-case-preserving filesystem it removed the freshly
+  created `commands/Recall/*.md` symlinks.
+- **`RecallTelosSync` hook resolves the TELOS directory from the LifeOS USER
+  tree** (`~/.config/LIFEOS/USER/TELOS`) when present, falling back to the
+  legacy PAI path.
 
 ## [0.9.0] — 2026-06-30 — "search performance & memory hygiene"
 
