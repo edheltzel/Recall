@@ -144,9 +144,10 @@ function bruteForceVectorScan(
 
 /**
  * Vector search with the sqlite-vec fast tier and a brute-force fallback (#148).
- * vec0 uses cosine distance, so nearest == most similar — the same ordering the
- * brute-force cosineSimilarity sort produces. On any vec failure (e.g. the
- * extension absent or a stale dimension), falls back to brute-force.
+ * knnSearch returns exact cosine distances (normalized-L2 index, #217), so
+ * nearest == most similar — the same ordering the brute-force cosineSimilarity
+ * sort produces. On any vec failure (e.g. the extension absent or a stale
+ * dimension), falls back to brute-force.
  */
 function vectorSearch(
 	db: ReturnType<typeof getDb>,
