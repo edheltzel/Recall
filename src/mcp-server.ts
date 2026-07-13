@@ -149,6 +149,11 @@ function bruteForceVectorScan(
  * sort produces. On any vec failure (e.g. the extension absent or a stale
  * dimension), falls back to brute-force.
  */
+// Once-per-process stderr marker for the KNN→brute-force fallback: the
+// transition matters (a failing vec tier is invisible otherwise) but must not
+// spam a long-lived server on every query (#217 review).
+let vecFallbackLogged = false;
+
 function vectorSearch(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
@@ -156,15 +161,36 @@ function vectorSearch(
 ): VectorSearchOutcome {
 	if (isVecAvailable()) {
 		try {
-			ensureVecIndexSynced(db); // once per process, cached — never per query
+			ensureVecIndexSynced(db); // once per process, cached on success — never per query
 			const hits = knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
 				source_table: h.source_table,
 				source_id: h.source_id,
 				similarity: 1 - h.distance,
 			}));
-			return { hits, semanticBackend: "knn" };
-		} catch {
+			// #217 ruling: an empty KNN result over a non-empty canonical
+			// embeddings table is a FAILURE (e.g. a failed self-heal left the vec
+			// index empty — knnSearch returns [] rather than throwing), not a valid
+			// knn run. Fall through to brute-force so semantic search still works
+			// and the label stays truthful.
+			if (hits.length > 0) return { hits, semanticBackend: "knn" };
+			const embCount = (db
+				.prepare("SELECT COUNT(*) AS c FROM embeddings")
+				.get() as { c: number }).c;
+			if (embCount === 0) return { hits, semanticBackend: "knn" };
+			if (!vecFallbackLogged) {
+				vecFallbackLogged = true;
+				console.error(
+					`[recall] vec index returned no hits while ${embCount} embeddings exist — falling back to brute-force scan`,
+				);
+			}
+		} catch (err) {
 			// vec query failed — fall back to the brute-force scan.
+			if (!vecFallbackLogged) {
+				vecFallbackLogged = true;
+				console.error(
+					`[recall] vec KNN failed — falling back to brute-force scan: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 		}
 	}
 	const hits = bruteForceVectorScan(db, queryEmbedding, limit);

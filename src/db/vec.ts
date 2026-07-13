@@ -134,23 +134,38 @@ export function reindexVec(db: Database): number {
 }
 
 let syncedThisProcess = false;
+let syncInFlight = false;
 
 /**
- * Ensure the vec index reflects the canonical BLOBs. Runs the (O(n)) rebuild at
- * most ONCE per process and only when out of sync (row counts differ) — e.g.
- * the first run after a #107 re-backfill, when the index is empty. Cached
- * thereafter; never rebuilt per query. Never throws.
+ * Ensure the vec index reflects the canonical BLOBs. Runs the (O(n)) rebuild
+ * only when out of sync (row counts differ) — e.g. the first vector query
+ * after a #107 re-backfill or a #217 legacy-index drop — and caches SUCCESS
+ * for the process lifetime; never rebuilt per query. A FAILED sync (e.g.
+ * SQLITE_BUSY losing the rebuild race to a concurrent writer) does NOT latch:
+ * it logs to stderr and retries on the next query, so a process can't spend
+ * its lifetime silently serving an empty index (#217 review, 225-1). Never
+ * throws.
  */
 export function ensureVecIndexSynced(db: Database): void {
-  if (!vecAvailable || syncedThisProcess) return;
-  syncedThisProcess = true;
+  if (!vecAvailable || syncedThisProcess || syncInFlight) return;
+  syncInFlight = true;
   try {
     createVecTable(db);
     const want = (db.prepare('SELECT COUNT(*) AS c FROM embeddings WHERE dimensions = ?').get(EMBEDDING_DIMENSIONS) as { c: number }).c;
     const have = (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
-    if (have !== want) reindexVec(db);
-  } catch {
-    // Never block startup/query on index sync — brute-force remains available.
+    if (have !== want) {
+      // One-time O(n) rebuild (~4s @100k) inside the first vector query after
+      // an upgrade — say so on stderr so an agent host doesn't read it as a hang.
+      console.error(`[recall] vec index out of sync (${have}/${want} rows) — rebuilding from canonical embeddings...`);
+      reindexVec(db);
+    }
+    syncedThisProcess = true;
+  } catch (err) {
+    // Never block startup/query on index sync — brute-force remains available,
+    // and the un-latched flag retries the rebuild on the next vector query.
+    console.error(`[recall] vec index rebuild failed (will retry on next vector query): ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    syncInFlight = false;
   }
 }
 

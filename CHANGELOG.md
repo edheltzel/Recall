@@ -47,9 +47,12 @@ note in the 0.9.0 entry.
   `mmap_size` was raised 256 MB → 2 GB so a ~1 GB DB no longer overflows
   the memory map into per-page reads. Suite F (REPEATS=12):
   `hybrid_index_latency_p50` 1.0/3.7/23.5 ms at 1k/10k/100k, p95 41.1 ms
-  at 100k — under the ≤50 ms acceptable SLO on the KNN-backed path. A
-  pre-existing cosine-metric index self-heals on next open (one-time
-  rebuild from the canonical embedding BLOBs).
+  at 100k — under the ≤50 ms acceptable SLO on the KNN-backed path.
+  (Protocol caveat: the pre-fix baseline was captured at REPEATS=3 vs the
+  after-run's REPEATS=12; the SLO pass rests on the after-run's numbers.)
+  A pre-existing cosine-metric index self-heals: it is dropped on the next
+  open and rebuilt from the canonical embedding BLOBs on the first vector
+  query (one-time, logged to stderr).
 - **CI runs `actions/checkout@v7`** (was `@v4`, which targets deprecated
   Node 20) (#222). The release recipe in `docs/releasing.md` now shows the
   annotated-tag form (`git tag -a -m`) that release tags actually use.

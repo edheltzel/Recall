@@ -30,6 +30,8 @@ let dbInitializing = false; // Lock to prevent race condition
  *   from 256 MB (#217): a 100k-embedding DB is ~1 GB on disk, and a KNN scan
  *   overflowing the map fell back to page reads (~2× slower at 100k). This is
  *   address space, not resident RAM — the OS pages in only what is touched.
+ *   Note: SQLite silently clamps to SQLITE_MAX_MMAP_SIZE (default 0x7fff0000,
+ *   ~64 KiB short of 2 GB) — raising the PRAGMA above that has no effect.
  * - temp_store  = MEMORY → keep transient sort/temp B-trees in RAM.
  */
 function applyConnectionPragmas(database: Database): void {

@@ -141,18 +141,19 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(hit!.content).toContain('knn deterministic vector-only issue 146');
   });
 
-  test('keeps embeddings available when KNN is empty and FTS supplies fallback results', async () => {
+  test('treats empty KNN over non-empty embeddings as failure and falls back to brute-force (#217 ruling)', async () => {
     resetVecMock();
     vecAvailable = true;
-    knnHits = [];
+    knnHits = []; // e.g. a failed self-heal left an empty vec index behind
 
     const { results, embeddingsAvailable, semanticBackend } = await hybridSearch('wibblefrotz zharkon', { limit: 5 });
 
-    expect(semanticBackend).toBe('knn');
+    expect(knnCalls).toHaveLength(1); // KNN ran and came back empty...
+    expect(semanticBackend).toBe('bruteforce'); // ...a failure, so the fallback scan served the query
     expect(embeddingsAvailable).toBe(true);
-    expect(knnCalls).toHaveLength(1);
-    expect(results.every((r) => r.source === 'fts')).toBe(true);
-    expect(results.some((r) => r.table === 'decisions' && r.id === bruteForceDecisionId)).toBe(true);
+    const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
+    expect(hit).toBeDefined();
+    expect(['vec', 'both']).toContain(hit!.source); // the semantic hit came from brute-force
   });
 
   test('falls back to brute-force and reports it when the KNN tier throws', async () => {
@@ -194,5 +195,24 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(formatHybridModeNote(true, 'knn')).toBe('(hybrid: FTS5 + embeddings; semantic backend: knn)');
     expect(formatHybridModeNote(true, 'bruteforce')).toBe('(hybrid: FTS5 + embeddings; semantic backend: bruteforce)');
     expect(formatHybridModeNote(false, 'none')).toBe('(keyword-only: embeddings unavailable; semantic backend: none)');
+  });
+
+  test('zero-hit labels over an EMPTY embeddings table: knn stays "knn", brute-force stays "bruteforce"', async () => {
+    // Runs last in this file — it empties the canonical embeddings table.
+    // #217 ruling: with nothing to index, an empty KNN result is a valid knn
+    // run (not a failure), and a brute-force scan that ran reports itself.
+    resetVecMock();
+    getDb().prepare('DELETE FROM embeddings').run();
+
+    vecAvailable = true;
+    knnHits = [];
+    let out = await hybridSearch('emptycorpuslabelquery217a', { limit: 5 });
+    expect(out.semanticBackend).toBe('knn');
+
+    resetVecMock();
+    vecAvailable = false;
+    out = await hybridSearch('emptycorpuslabelquery217b', { limit: 5 });
+    expect(out.semanticBackend).toBe('bruteforce');
+    expect(out.results).toEqual([]);
   });
 });
