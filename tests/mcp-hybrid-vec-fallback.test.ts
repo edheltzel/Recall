@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll, mock } from 'bun:test';
+import * as vecReal from '../src/db/vec';
 import type { VecHit } from '../src/db/vec';
 import type { hybridSearch as HybridSearchFn, formatHybridModeNote as FormatHybridModeNoteFn } from '../src/mcp-server';
 
@@ -16,6 +17,20 @@ let ensureVecIndexSyncedCalls = 0;
 let knnCalls: Array<{ queryEmbedding: number[]; k: number }> = [];
 let knnHits: VecHit[] = [];
 
+// bun's mock.module is PROCESS-GLOBAL and applies to every test file sharing
+// the run, so the mock must delegate to the real module unless this file's
+// tests are actually running (mockEngaged, set in beforeAll / cleared in
+// afterAll). Without the gate, tests/db/vec.test.ts sees the stub knnSearch
+// (empty hits) and fails whenever the two files run in one invocation.
+let mockEngaged = false;
+
+// Snapshot the real implementations BEFORE mock.module registers below: bun
+// patches existing importers too, so reading them any later (even via require
+// inside the factory) returns the mock and the delegation self-recurses.
+const realIsVecAvailable = vecReal.isVecAvailable;
+const realEnsureVecIndexSynced = vecReal.ensureVecIndexSynced;
+const realKnnSearch = vecReal.knnSearch;
+
 function resetVecMock(): void {
   vecAvailable = false;
   ensureVecIndexSyncedCalls = 0;
@@ -25,11 +40,13 @@ function resetVecMock(): void {
 
 mock.module('../src/db/vec', () => ({
   ...require('../src/db/vec'),
-  isVecAvailable: () => vecAvailable,
-  ensureVecIndexSynced: () => {
+  isVecAvailable: () => (mockEngaged ? vecAvailable : realIsVecAvailable()),
+  ensureVecIndexSynced: (db: Parameters<typeof realEnsureVecIndexSynced>[0]) => {
+    if (!mockEngaged) return realEnsureVecIndexSynced(db);
     ensureVecIndexSyncedCalls += 1;
   },
-  knnSearch: (_db: unknown, queryEmbedding: number[], k: number) => {
+  knnSearch: (db: Parameters<typeof realKnnSearch>[0], queryEmbedding: number[], k: number) => {
+    if (!mockEngaged) return realKnnSearch(db, queryEmbedding, k);
     knnCalls.push({ queryEmbedding, k });
     return knnHits;
   },
@@ -52,6 +69,7 @@ let knnDecisionId: number;
 
 describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
   beforeAll(async () => {
+    mockEngaged = true;
     setupTestDb();
     // Dynamic import is required: mcp-server performs import-time DB
     // initialization, so setupTestDb() must set RECALL_DB_PATH first.
@@ -66,7 +84,10 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
        VALUES ('decisions', ?, 'qwen3-embedding:0.6b', 1024, ?)`
     ).run(bruteForceDecisionId, embeddingToBlob(QV));
   });
-  afterAll(() => teardownTestDb());
+  afterAll(() => {
+    mockEngaged = false;
+    teardownTestDb();
+  });
 
   test('reports brute-force backend while preserving the vector fallback result', async () => {
     resetVecMock();
