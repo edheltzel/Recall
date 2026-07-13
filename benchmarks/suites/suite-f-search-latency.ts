@@ -1,23 +1,27 @@
 // Suite F — Search latency.
 //
 // The A0 verify gate for the Search-Performance epic (#146 / #147). Captures a
-// reproducible LATENCY baseline (p50/p95) for the three search paths a query
-// can take, at growing DB sizes, so the rest of the epic (sqlite-vec index in
-// #148, the A1–A4 caches) can prove its wins against a fixed before/after.
+// reproducible LATENCY baseline (p50/p95) for the brute-force and indexed
+// search paths a query can take, at growing DB sizes, so the rest of the epic
+// (sqlite-vec index in #148, the A1–A4 caches) can prove its wins against a
+// fixed before/after.
 //
-// The three paths, measured with the REAL production primitives:
-//   - fts    — `search()` (src/lib/memory.ts): the FTS5 keyword path.
-//   - vector — the brute-force semantic scan inside `hybridSearch`
-//              (src/mcp-server.ts): SELECT every embedding, decode each BLOB,
-//              `cosineSimilarity` against the query vector in a JS loop, sort,
-//              slice. This O(n) scan is the confirmed root cause #148 fixes.
-//   - hybrid — fts + vector + `reciprocalRankFusion` + vec-only content/
-//              provenance resolution: the full `hybridSearch` fusion.
+// The measured paths, using the REAL production primitives:
+//   - fts          — `search()` (src/lib/memory.ts): the FTS5 keyword path.
+//   - vector       — the brute-force semantic scan inside `hybridSearch`
+//                    (src/mcp-server.ts): SELECT every embedding, decode each
+//                    BLOB, `cosineSimilarity` in a JS loop, sort, slice. This
+//                    O(n) scan is the confirmed root cause #148 fixes.
+//   - vec_index    — sqlite-vec KNN over the native vec0 index, when available.
+//   - hybrid       — fts + brute-force vector + `reciprocalRankFusion` +
+//                    vec-only content/provenance resolution.
+//   - hybrid_index — the same hybrid fusion/content-resolution work as
+//                    `hybrid`, but using sqlite-vec KNN semantic hits.
 //
 // Determinism without a model: the vector/hybrid paths need stored embeddings
 // and a query embedding, which production gets from Ollama. To stay
 // reproducible AND zero-dependency (no live embedding service), this suite
-// seeds DETERMINISTIC synthetic 768-dim vectors directly into the `embeddings`
+// seeds deterministic EMBEDDING_DIMENSIONS-length vectors directly into the `embeddings`
 // table and uses a seeded query vector in place of the Ollama `embed()` call.
 // That isolates the scan/fusion cost — exactly what the epic optimizes — and
 // makes it measurable on any machine, in CI, with no network.
@@ -32,6 +36,7 @@
 // No pass/fail threshold — baseline-first, like Suite C. Later runs re-run this
 // same harness to confirm the ≤10 ms ideal / ≤50 ms acceptable SLO.
 
+import type { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -113,7 +118,7 @@ export function syntheticVector(base: number, label: string): number[] {
  * `embeddings` table the CLI does. Returns the number of embeddings indexed —
  * the size of the brute-force scan the vector path pays per query.
  */
-function backfillSyntheticEmbeddings(db: ReturnType<typeof getDb>, seed: number): number {
+function backfillSyntheticEmbeddings(db: Database, seed: number): number {
   const insert = db.prepare(`
     INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
     VALUES (?, ?, ?, ?, ?)
@@ -133,7 +138,7 @@ function backfillSyntheticEmbeddings(db: ReturnType<typeof getDb>, seed: number)
   return indexed;
 }
 
-// ── The three measured search paths ──────────────────────────────────
+// ── The measured search paths ─────────────────────────────────────────
 // Each mirrors the production code path exactly, using its real primitives,
 // substituting a seeded query vector for the Ollama embed() call.
 
@@ -143,10 +148,13 @@ interface SemanticHit {
   similarity: number;
 }
 
-/** The brute-force vector scan from hybridSearch (mcp-server.ts lines 124–146):
- *  pull every non-duplicate embedding, decode + score against the query vector,
- *  sort by similarity, keep the top limit*2. Prepares per call, as prod does. */
-function vectorScan(db: ReturnType<typeof getDb>, queryVec: number[]): SemanticHit[] {
+type SemanticSearchPath = (db: Database, queryVec: number[]) => SemanticHit[];
+
+/** The brute-force vector scan from hybridSearch (`bruteForceVectorScan` in
+ *  mcp-server.ts): pull every non-duplicate embedding, decode + score against
+ *  the query vector, sort by similarity, keep the top limit*2. Prepares per
+ *  call, as prod does. */
+function vectorScan(db: Database, queryVec: number[]): SemanticHit[] {
   const rows = db
     .prepare(`
       SELECT source_table, source_id, embedding FROM embeddings
@@ -170,7 +178,7 @@ function vectorScan(db: ReturnType<typeof getDb>, queryVec: number[]): SemanticH
  *  brute-force scan above. Queries the vec0 index for the nearest LIMIT*2 by
  *  cosine distance. Only meaningful when the extension loaded (isVecAvailable);
  *  this is the "after" number compared to the brute-force `vec` baseline. */
-function vecIndexPath(db: ReturnType<typeof getDb>, queryVec: number[]): SemanticHit[] {
+function vecIndexPath(db: Database, queryVec: number[]): SemanticHit[] {
   return knnSearch(db, queryVec, LIMIT * 2).map((h) => ({
     source_table: h.source_table,
     source_id: h.source_id,
@@ -188,11 +196,11 @@ function ftsPath(query: FixtureQuery): void {
   }
 }
 
-/** Full hybridSearch fusion (mcp-server.ts lines 100–219), minus the Ollama
- *  embed/availability calls: FTS + vector scan + RRF + vec-only resolution. */
-function hybridPath(db: ReturnType<typeof getDb>, query: FixtureQuery, queryVec: number[]): void {
+/** Full hybridSearch fusion (`hybridSearch` in mcp-server.ts), minus the Ollama
+ *  embed/availability calls: FTS + semantic hits + RRF + vec-only resolution. */
+function hybridPath(db: Database, query: FixtureQuery, queryVec: number[], semanticPath: SemanticSearchPath = vectorScan): void {
   const ftsResults = search(query.text, { project: query.project, limit: LIMIT * 2 });
-  const semanticResults = vectorScan(db, queryVec);
+  const semanticResults = semanticPath(db, queryVec);
 
   const ftsRanked = ftsResults.map((r) => ({
     id: `${r.table === 'loa' ? 'loa_entries' : r.table}:${r.id}`,
@@ -237,6 +245,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
   const repeats = options.repeats ?? parseEnvInts('RECALL_BENCH_F_REPEATS')?.[0] ?? DEFAULT_REPEATS;
 
   const samples: MetricSample[] = [];
+  let vecAvailableForRun = false;
 
   // Never touch the user's real DB: every corpus lives in a temp dir, and the
   // env override + module connection are restored after.
@@ -258,6 +267,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
       // Build the sqlite-vec index (#148) from the same canonical BLOBs so the
       // native KNN path can be measured against the brute-force baseline.
       const vecReady = isVecAvailable();
+      vecAvailableForRun = vecReady;
       if (vecReady) reindexVec(db);
       const scope = `corpus=${size}`;
 
@@ -272,6 +282,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
       const vecLat: number[] = [];
       const vecIndexLat: number[] = [];
       const hybridLat: number[] = [];
+      const hybridIndexLat: number[] = [];
 
       const measure = (bucket: number[] | null, fn: () => void) => {
         const t = performance.now();
@@ -288,6 +299,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
           measure(null, () => vectorScan(db, qv));
           if (vecReady) measure(null, () => vecIndexPath(db, qv));
           measure(null, () => hybridPath(db, q, qv));
+          if (vecReady) measure(null, () => hybridPath(db, q, qv, vecIndexPath));
         }
       }
 
@@ -298,6 +310,7 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
           measure(vecLat, () => vectorScan(db, qv));
           if (vecReady) measure(vecIndexLat, () => vecIndexPath(db, qv));
           measure(hybridLat, () => hybridPath(db, q, qv));
+          if (vecReady) measure(hybridIndexLat, () => hybridPath(db, q, qv, vecIndexPath));
         }
       }
       closeDb();
@@ -315,6 +328,11 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
       }
       samples.push({ name: 'hybrid_latency_p50_ms', value: round(percentile(hybridLat, 50), 3), unit: 'ms', scope });
       samples.push({ name: 'hybrid_latency_p95_ms', value: round(percentile(hybridLat, 95), 3), unit: 'ms', scope });
+      if (vecReady) {
+        // sqlite-vec native KNN plus the same hybrid RRF/content-resolution work.
+        samples.push({ name: 'hybrid_index_latency_p50_ms', value: round(percentile(hybridIndexLat, 50), 3), unit: 'ms', scope });
+        samples.push({ name: 'hybrid_index_latency_p95_ms', value: round(percentile(hybridIndexLat, 95), 3), unit: 'ms', scope });
+      }
     }
   } finally {
     closeDb();
@@ -340,17 +358,25 @@ export async function runSuiteF(options: SuiteFOptions = {}): Promise<SuiteResul
     suite: 'F',
     name: 'Search latency',
     description:
-      `Measures search latency (p50/p95) for the FTS5 keyword, brute-force vector, and hybrid (RRF) paths against ` +
-      `seeded synthetic corpora (sizes: ${sizes.join(', ')}; seed: ${seed}). Establishes the A0 baseline (#147) for the ` +
-      `Search-Performance epic (#146) so the sqlite-vec index (#148) and A1–A4 caches can be verified before/after.`,
+      `Measures search latency (p50/p95) for the FTS5 keyword, brute-force vector, brute-force hybrid (RRF), ` +
+      `and sqlite-vec indexed KNN vector/hybrid paths against seeded synthetic corpora (sizes: ${sizes.join(', ')}; seed: ${seed}). ` +
+      `Establishes the A0 baseline (#147) for the Search-Performance epic (#146) so the sqlite-vec index (#148) and A1–A4 caches ` +
+      `can be verified before/after without confusing brute-force hybrid with the indexed SLO path.`,
     ranAt: new Date().toISOString(),
     durationMs,
     samples,
     caveats: [
       `Latency only — NOT relevance. The vector/hybrid paths use DETERMINISTIC synthetic ${EMBEDDING_DIMENSIONS}-dim seeded random embeddings (seed ${seed}), not real model embeddings, so their ranking is meaningless. Precision lives in Suite C.`,
       `Latency protocol: ${WARMUP_PASSES} unmeasured warmup pass per corpus size, then ${repeats} measured repeats per query on a warm connection; p50/p95 are computed across all measured calls at that size.`,
-      `Vector path measures the brute-force O(n) scan inside hybridSearch (SELECT all embeddings + JS cosine loop) — the confirmed bottleneck #148 (sqlite-vec) replaces. It scans every embedding in the corpus per query, so vec/hybrid p50/p95 grow with DB size by design; that growth is the number the epic must flatten.`,
-      `vec_index_latency_* is the sqlite-vec native KNN path (#148) — the "after" compared to the brute-force vec_latency "before". It is emitted ONLY when the extension loaded on this host (isVecAvailable); absent on a host without an extension-capable libsqlite3, where production also falls back to the brute-force path.`,
+      `Vector path measures the brute-force O(n) scan inside hybridSearch (SELECT all embeddings + JS cosine loop) — the confirmed bottleneck #148 (sqlite-vec) replaces. It scans every embedding in the corpus per query, so vec_latency_* and brute-force hybrid_latency_* p50/p95 grow with DB size by design; that growth is the number the epic must flatten.`,
+      `vec_index_latency_* is the sqlite-vec native KNN semantic path (#148) — the "after" compared to the brute-force vec_latency "before". It is emitted ONLY when the extension loaded on this host (isVecAvailable).`,
+      ...(vecAvailableForRun
+        ? [
+            `hybrid_index_latency_* is the KNN-backed hybrid path, emitted only when sqlite-vec is available: the same FTS + RRF + vec-only content/provenance resolution as hybrid_latency_*, but with vecIndexPath instead of vectorScan. Treat this as the indexed hybrid SLO measurement.`,
+          ]
+        : [
+            `sqlite-vec unavailable: vec_index_latency_* and hybrid_index_latency_* are emitted only when sqlite-vec is available, so they were not emitted. hybrid_latency_* remains the brute-force fallback path and must NOT be read as the KNN-backed hybrid SLO measurement.`,
+          ]),
       `The Ollama embed(query) network call is intentionally EXCLUDED — production hybrid latency additionally pays it per query. This suite isolates the in-process scan/fusion cost so before/after deltas reflect the index change, not embedding-service variance.`,
       `Absolute milliseconds are machine- and load-dependent and do NOT transfer across hosts; the harness (corpus, query set, sizes, synthetic vectors) is deterministic, so compare distributions only against runs of this same suite on the same machine.`,
       `Epic SLO (for reference, not gated here): ≤10 ms ideal / ≤50 ms acceptable per query. No pass/fail threshold — baseline-first; re-run post-fix to confirm.`,

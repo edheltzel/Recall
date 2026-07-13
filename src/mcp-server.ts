@@ -88,6 +88,29 @@ import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
 
 /**
+ * Which semantic backend RAN for this query (#217 design ruling):
+ * - "knn"        — the sqlite-vec KNN index executed the semantic search.
+ * - "bruteforce" — the JS cosine scan executed it (extension absent, or the
+ *                  KNN tier failed and the fallback ran).
+ * - "none"       — the semantic tier never executed (embedding service
+ *                  unavailable, or the query embed failed).
+ * The label reports execution, not hit count: a backend that ran and found
+ * nothing still reports its name.
+ */
+export type SemanticBackend = "none" | "knn" | "bruteforce";
+
+type VectorSearchHit = {
+	source_table: string;
+	source_id: number;
+	similarity: number;
+};
+
+type VectorSearchOutcome = {
+	hits: VectorSearchHit[];
+	semanticBackend: SemanticBackend;
+};
+
+/**
  * Brute-force cosine scan over all non-duplicate embeddings — the fallback when
  * sqlite-vec is unavailable (and the original #45/#107 behavior). Returns the
  * top limit*2 by similarity.
@@ -96,7 +119,7 @@ function bruteForceVectorScan(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
 	limit: number,
-): Array<{ source_table: string; source_id: number; similarity: number }> {
+): VectorSearchHit[] {
 	// Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 	// hidden from the vector path, matching the FTS5 default.
 	const embeddings = db
@@ -110,7 +133,7 @@ function bruteForceVectorScan(
 		embedding: Buffer;
 	}>;
 
-	const out: Array<{ source_table: string; source_id: number; similarity: number }> = [];
+	const out: VectorSearchHit[] = [];
 	for (const row of embeddings) {
 		const similarity = cosineSimilarity(queryEmbedding, blobToEmbedding(row.embedding));
 		out.push({ source_table: row.source_table, source_id: row.source_id, similarity });
@@ -129,20 +152,35 @@ function vectorSearch(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
 	limit: number,
-): Array<{ source_table: string; source_id: number; similarity: number }> {
+): VectorSearchOutcome {
 	if (isVecAvailable()) {
 		try {
 			ensureVecIndexSynced(db); // once per process, cached — never per query
-			return knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
+			const hits = knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
 				source_table: h.source_table,
 				source_id: h.source_id,
 				similarity: 1 - h.distance,
 			}));
+			return { hits, semanticBackend: "knn" };
 		} catch {
 			// vec query failed — fall back to the brute-force scan.
 		}
 	}
-	return bruteForceVectorScan(db, queryEmbedding, limit);
+	const hits = bruteForceVectorScan(db, queryEmbedding, limit);
+	// "Which backend ran" semantics (#217 ruling): the scan executed, so report
+	// "bruteforce" even on zero hits — "none" is reserved for the semantic tier
+	// never executing at all.
+	return { hits, semanticBackend: "bruteforce" };
+}
+
+export function formatHybridModeNote(
+	embeddingsAvailable: boolean,
+	semanticBackend: SemanticBackend,
+): string {
+	const backendNote = `semantic backend: ${semanticBackend}`;
+	return embeddingsAvailable
+		? `(hybrid: FTS5 + embeddings; ${backendNote})`
+		: `(keyword-only: embeddings unavailable; ${backendNote})`;
 }
 
 /**
@@ -162,6 +200,7 @@ export async function hybridSearch(
 		provenance: Provenance | null;
 	}>;
 	embeddingsAvailable: boolean;
+	semanticBackend: SemanticBackend;
 }> {
 	const db = getDb();
 	const limit = options.limit || 10;
@@ -173,11 +212,8 @@ export async function hybridSearch(
 	});
 
 	// 2. Try semantic search (graceful degradation if unavailable)
-	let semanticResults: Array<{
-		source_table: string;
-		source_id: number;
-		similarity: number;
-	}> = [];
+	let semanticResults: VectorSearchHit[] = [];
+	let semanticBackend: SemanticBackend = "none";
 	let embeddingsAvailable = false;
 
 	try {
@@ -195,10 +231,16 @@ export async function hybridSearch(
 			// Fast tier: sqlite-vec native KNN when the extension loaded (#148);
 			// otherwise the brute-force cosine scan. Both exclude recall-dedup
 			// marked duplicates and return the top limit*2 in the same order.
-			semanticResults = vectorSearch(db, queryResult.embedding, limit);
+			const vectorOutcome = vectorSearch(db, queryResult.embedding, limit);
+			semanticResults = vectorOutcome.hits;
+			semanticBackend = vectorOutcome.semanticBackend;
 		}
 	} catch {
-		// Embedding service unavailable - continue with FTS only
+		// Embedding service unavailable or the query embed failed — continue with
+		// FTS only. Reset the flag (it may have been set optimistically before a
+		// stale-liveness embed() threw): for THIS query, embeddings were not
+		// available, and the mode note must not report hybrid (#224 review).
+		embeddingsAvailable = false;
 	}
 
 	// 3. Apply RRF fusion if we have both
@@ -273,7 +315,7 @@ export async function hybridSearch(
 		// Bump-on-use (issue #153): only the final returned set, never the
 		// limit*2 candidate pool that fed search() above.
 		bumpAccess(results);
-		return { results, embeddingsAvailable };
+		return { results, embeddingsAvailable, semanticBackend };
 	}
 
 	// FTS only fallback
@@ -290,7 +332,7 @@ export async function hybridSearch(
 
 	// Bump-on-use (issue #153): only the final returned set.
 	bumpAccess(ftsOnly);
-	return { results: ftsOnly, embeddingsAvailable: false };
+	return { results: ftsOnly, embeddingsAvailable, semanticBackend };
 }
 
 // Ensure DB exists
@@ -428,7 +470,7 @@ server.tool(
 	},
 	async ({ query, project, limit }) => {
 		try {
-			const { results, embeddingsAvailable } = await hybridSearch(query, {
+			const { results, embeddingsAvailable, semanticBackend } = await hybridSearch(query, {
 				project,
 				limit,
 			});
@@ -442,9 +484,10 @@ server.tool(
 				};
 			}
 
-			const modeNote = embeddingsAvailable
-				? "(hybrid: FTS5 + embeddings)"
-				: "(keyword-only: embeddings unavailable)";
+			const modeNote = formatHybridModeNote(
+				embeddingsAvailable,
+				semanticBackend,
+			);
 
 			const formatted = results
 				.map((r) => {
