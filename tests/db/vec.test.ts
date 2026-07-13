@@ -5,6 +5,7 @@ import {
   isVecAvailable,
   reindexVec,
   knnSearch,
+  createVecTable,
   resetVecSyncCache,
 } from '../../src/db/vec';
 import {
@@ -105,5 +106,42 @@ describe('sqlite-vec index (issue #148)', () => {
   test('knnSearch throws when the extension is unavailable (callers fall back)', () => {
     if (isVecAvailable()) return; // only meaningful on an extension-less host
     expect(() => knnSearch(getDb(), vec(1), 5)).toThrow();
+  });
+
+  test('legacy cosine-metric index is dropped and rebuilt (#217)', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    // Simulate a pre-#217 install: cosine-metric vec0 table already on disk.
+    db.exec('DROP TABLE IF EXISTS vec_embeddings');
+    db.exec(`CREATE VIRTUAL TABLE vec_embeddings USING vec0(
+      source_table TEXT,
+      source_id INTEGER,
+      embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine
+    )`);
+    for (let i = 1; i <= 3; i++) insertEmbedding(i, gradedVec(i * 0.2));
+
+    createVecTable(db); // the every-open path must replace the stale metric
+    const ddl = (db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_embeddings'`
+    ).get() as { sql: string }).sql;
+    expect(ddl).not.toContain('distance_metric=cosine');
+
+    // The rebuilt index still serves the exact brute-force cosine ranking.
+    reindexVec(db);
+    const query = gradedVec(0);
+    const knn = knnSearch(db, query, 3).map((h) => `${h.source_table}:${h.source_id}`);
+    expect(knn).toEqual(bruteForceOrder(query, 3));
+  });
+
+  test('knnSearch distances are exact cosine distances, norm-invariant (#217)', () => {
+    if (!isVecAvailable()) return;
+    // Scaled (non-unit) stored vectors: cosine is norm-invariant, so distances
+    // must still equal 1 - cos(theta) regardless of stored magnitude.
+    for (let i = 1; i <= 3; i++) insertEmbedding(i, gradedVec(i * 0.3).map((x) => 3 * x));
+    reindexVec(getDb());
+    const hits = knnSearch(getDb(), gradedVec(0), 3);
+    hits.forEach((h, idx) => {
+      expect(h.distance).toBeCloseTo(1 - Math.cos((idx + 1) * 0.3), 5);
+    });
   });
 });
