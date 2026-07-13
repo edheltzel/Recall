@@ -1,5 +1,7 @@
 ---
-description: Flush current session to Recall database and capture a Library of Alexandria entry
+name: "recall-dump"
+description: "Flush current session to Recall database and capture a Library of Alexandria entry"
+disable-model-invocation: true
 ---
 
 Dump the current conversation session into the Recall SQLite database, making all messages immediately searchable. Also creates a curated LoA (Library of Alexandria) entry with extracted wisdom.
@@ -9,11 +11,11 @@ Run this at the end of every session or when you want to persist the current con
 ## Usage
 
 ```bash
-recall dump "$1"
+recall dump "<title>"
 ```
 
 **Arguments:**
-- `$1` (required): Descriptive title for this session (e.g., "Auth refactor planning", "Fixed rate limiter bug")
+- `<title>` (required): Descriptive title for this session (e.g., "Auth refactor planning", "Fixed rate limiter bug"). Use the user's argument text; if none was given, derive a short title from the session.
 
 **Options:**
 - `-p <project>` — Tag with a project name
@@ -36,5 +38,3 @@ recall dump "Auth refactor part 2" -c 15
 # Quick import without Fabric extraction
 recall dump "Quick fix session" --skip-fabric
 ```
-
-$@

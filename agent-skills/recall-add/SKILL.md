@@ -1,20 +1,21 @@
 ---
-description: Add a structured memory record to Recall — breadcrumb, decision, or learning
+name: "recall-add"
+description: "Add a structured memory record to Recall — breadcrumb, decision, or learning"
 ---
 
-Manually add a structured record to the Recall memory database. Three record types are available: breadcrumbs (context notes), decisions (architectural choices), and learnings (problem/solution pairs).
+Manually add a structured record to the Recall memory database. Three record types are available: breadcrumbs (context notes), decisions (architectural choices), and learnings (problem/solution pairs). Use the user's request text as the record content.
 
 ## Usage
 
 ```bash
 # Breadcrumb — quick context note
-recall add breadcrumb "$1"
+recall add breadcrumb "<content>"
 
 # Decision — architectural or process decision
-recall add decision "$1" --why "reasoning"
+recall add decision "<content>" --why "reasoning"
 
 # Learning — problem and solution pair
-recall add learning "$1" "solution"
+recall add learning "<problem>" "<solution>"
 ```
 
 **Breadcrumb options:**
@@ -47,5 +48,3 @@ recall add learning "Port conflict on 4000" "Kill process or change port" --prev
 # Tagged learning
 recall add learning "bun:sqlite uses \$param syntax" "Not :param like better-sqlite3" -t "bun,sqlite,gotcha"
 ```
-
-$@

@@ -74,7 +74,7 @@ never diverge.
 
 ## `update.sh` and the check commands
 
-`./update.sh --check` and `/Recall:update` both query
+`./update.sh --check` and `/recall-update` both query
 `https://api.github.com/repos/edheltzel/Recall/releases/latest` for the
 current tag name. Make sure the release you create is marked as
 "Latest" (GitHub does this automatically for the newest non-draft,
@@ -105,7 +105,7 @@ release so the entry captures `### Added` / `### Changed` too.
 
 ## Never skip the CHANGELOG
 
-`./update.sh` and `/Recall:update` read the GitHub release body for the
+`./update.sh` and `/recall-update` read the GitHub release body for the
 excerpt shown to users. If you push a tag without a release note, the
 update experience degrades to "new version available" with no detail —
 users won't know what they're updating to. Always release from the

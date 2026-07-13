@@ -213,27 +213,33 @@ describe('update.sh', () => {
     });
   });
 
-  // Regression: on the default case-insensitive-but-case-preserving macOS
-  // filesystem, "$CLAUDE_DIR/commands/recall" and "$CLAUDE_DIR/commands/Recall"
-  // are the SAME directory on disk. recall_copy_runtime_files used to compare
-  // them with a plain string `!=`, which sees "recall" and "Recall" as
-  // different paths — so it ran `rm -rf` on the legacy path immediately after
-  // the loop above it had populated that same directory with the slash-command
-  // symlinks, wiping out every commands/Recall/*.md symlink on every install.
-  // Re-running install.sh reproduced the identical create-then-delete cycle
-  // forever; only `recall doctor --fix` (no such cleanup step) broke it.
-  test('legacy commands cleanup does not delete commands/Recall when legacy path aliases dest (case-insensitive fs)', () => {
+  // The /Recall:* slash commands migrated to Agent Skills (#228).
+  // recall_copy_runtime_files must clean up what older releases installed —
+  // Recall-managed symlinks at ~/.claude/commands/Recall/ plus the canonicals
+  // under ~/.agents/Recall/claude/commands/Recall/ — WITHOUT touching
+  // user-authored files that happen to live in the same directory, and must
+  // install the skills that replaced the commands.
+  test('runtime refresh removes legacy command symlinks, preserves user files, installs skills', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-commands-legacy-'));
     try {
       const fakeRepo = join(tempRoot, 'repo');
-      const commandsSrc = join(fakeRepo, 'commands', 'Recall');
-      mkdirSync(commandsSrc, { recursive: true });
-      writeFileSync(join(commandsSrc, 'scout.md'), '# scout\n');
+      mkdirSync(join(fakeRepo, 'agent-skills', 'recall-scout'), { recursive: true });
+      writeFileSync(join(fakeRepo, 'agent-skills', 'recall-scout', 'SKILL.md'), '# scout\n');
       // _recall_copy_hook_files (also called by recall_copy_runtime_files)
       // bails with a non-zero return when this is missing — provide the
       // minimal fixture so the driver's `set -e` doesn't abort early.
       mkdirSync(join(fakeRepo, 'hooks'), { recursive: true });
       writeFileSync(join(fakeRepo, 'hooks', 'RecallExtract.ts'), '// stub\n');
+
+      // Simulate a pre-migration install: command canonical + managed symlink,
+      // plus a user-authored file sitting in the same directory.
+      const cmdCanonicalDir = join(tempRoot, '.agents', 'Recall', 'claude', 'commands', 'Recall');
+      mkdirSync(cmdCanonicalDir, { recursive: true });
+      writeFileSync(join(cmdCanonicalDir, 'scout.md'), '# scout\n');
+      const cmdDir = join(tempRoot, '.claude', 'commands', 'Recall');
+      mkdirSync(cmdDir, { recursive: true });
+      symlinkSync(join(cmdCanonicalDir, 'scout.md'), join(cmdDir, 'scout.md'));
+      writeFileSync(join(cmdDir, 'mine.md'), '# user-authored\n');
 
       const driver = [
         'set -e',
@@ -255,8 +261,12 @@ describe('update.sh', () => {
       });
 
       expect(r.status).toBe(0);
-      const dest = join(tempRoot, '.claude', 'commands', 'Recall', 'scout.md');
-      expect(existsSync(dest)).toBe(true);
+      // Managed symlink removed; user file survives; canonicals dropped.
+      expect(existsSync(join(cmdDir, 'scout.md'))).toBe(false);
+      expect(existsSync(join(cmdDir, 'mine.md'))).toBe(true);
+      expect(existsSync(cmdCanonicalDir)).toBe(false);
+      // The replacing skill is installed.
+      expect(existsSync(join(tempRoot, '.claude', 'skills', 'recall-scout', 'SKILL.md'))).toBe(true);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

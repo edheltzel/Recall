@@ -1,8 +1,8 @@
-// Contract tests for the /Recall:scout codebase-scouting workflow.
+// Contract tests for the recall-scout codebase-scouting workflow.
 //
 // The scout workflow is a doc/prompt surface, not executable code, so these
 // tests assert the *contracts* that make it correct and safe:
-//   1. The canonical slash command exists and carries the full workflow.
+//   1. The canonical agent skill exists and carries the full workflow.
 //   2. It is memory-first, has the required report sections, enforces the
 //      sensitive-data boundary, and keeps artifacts opt-in.
 //   2b. CodeGraph integration: the capability ladder probes with
@@ -12,7 +12,7 @@
 //      hand-copy its body (per the MANDATORY DRY rule in CLAUDE.md/AGENTS.md).
 //   4. The artifacts policy is recorded in canonical AGENTS.md; CLAUDE.md is a
 //      shim that @-imports it.
-//   5. /Recall:scout is listed in the user-facing docs (slash-commands, README).
+//   5. recall-scout is listed in the user-facing docs (agent-skills, README).
 
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
@@ -21,7 +21,7 @@ import { join } from 'path';
 const repoRoot = join(import.meta.dir, '..', '..');
 const read = (rel: string) => readFileSync(join(repoRoot, rel), 'utf-8');
 
-const SCOUT = read('commands/Recall/scout.md');
+const SCOUT = read('agent-skills/recall-scout/SKILL.md');
 
 // The four platform guides that must REFERENCE the canonical block, never copy it.
 const GUIDE_PATHS = [
@@ -36,7 +36,7 @@ const GUIDE_PATHS = [
 const CANONICAL_SENTINEL =
   'This is the canonical scouting workflow; platform guides reference it and only remap tool names.';
 
-describe('commands/Recall/scout.md — canonical workflow', () => {
+describe('agent-skills/recall-scout/SKILL.md — canonical workflow', () => {
   test('has frontmatter describing a codebase scout', () => {
     expect(SCOUT.startsWith('---')).toBe(true);
     expect(SCOUT).toMatch(/description:.*scout/i);
@@ -130,8 +130,8 @@ describe('CodeGraph integration — capability ladder + query discipline', () =>
 
 describe('DRY — guides reference the canonical block, never copy it', () => {
   for (const guide of GUIDE_PATHS) {
-    test(`${guide} references commands/Recall/scout.md`, () => {
-      expect(read(guide)).toContain('commands/Recall/scout.md');
+    test(`${guide} references agent-skills/recall-scout/SKILL.md`, () => {
+      expect(read(guide)).toContain('agent-skills/recall-scout/SKILL.md');
     });
 
     test(`${guide} does not hand-copy the canonical body`, () => {
@@ -139,7 +139,7 @@ describe('DRY — guides reference the canonical block, never copy it', () => {
     });
   }
 
-  test('the canonical sentinel lives only in scout.md', () => {
+  test('the canonical sentinel lives only in the scout skill', () => {
     expect(SCOUT).toContain(CANONICAL_SENTINEL);
     const copies = GUIDE_PATHS.filter((g) => read(g).includes(CANONICAL_SENTINEL));
     expect(copies).toEqual([]);
@@ -164,12 +164,12 @@ describe('artifacts policy is recorded in the canonical dev guide', () => {
   });
 });
 
-describe('/Recall:scout is listed for users', () => {
-  test('docs/slash-commands.md lists the command', () => {
-    expect(read('docs/slash-commands.md')).toContain('/Recall:scout');
+describe('recall-scout is listed for users', () => {
+  test('docs/agent-skills.md lists the skill', () => {
+    expect(read('docs/agent-skills.md')).toContain('recall-scout');
   });
 
-  test('README.md lists the command', () => {
-    expect(read('README.md')).toContain('/Recall:scout');
+  test('README.md lists the skill', () => {
+    expect(read('README.md')).toContain('recall-scout');
   });
 });

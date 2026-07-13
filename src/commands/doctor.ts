@@ -496,22 +496,27 @@ function buildSymlinkProbes(): SymlinkProbe[] {
     canonical: join(root, 'claude', 'Recall_GUIDE.md'),
   });
 
-  // Slash commands — discovered dynamically from whatever canonicals exist
-  // under the install root, so doctor adapts as commands are added/removed.
+  // Agent Skills — discovered dynamically from whatever canonicals exist
+  // under the install root, so doctor adapts as skills are added/removed.
   // We hit this class of breakage in one user's install (install.sh ran
-  // recall_copy_canonical but never reached recall_link for the commands
-  // step); covering it here lets `recall doctor --fix` repair without reinstall.
-  const cmdCanonicalDir = join(root, 'claude', 'commands', 'Recall');
-  if (existsSync(cmdCanonicalDir)) {
-    let entries: string[] = [];
-    try { entries = readdirSync(cmdCanonicalDir); } catch { entries = []; }
-    for (const file of entries) {
-      if (!file.endsWith('.md')) continue;
-      probes.push({
-        label: `slash command: ${file}`,
-        target: join(home, '.claude', 'commands', 'Recall', file),
-        canonical: join(cmdCanonicalDir, file),
-      });
+  // recall_copy_canonical but never reached recall_link); covering it here
+  // lets `recall doctor --fix` repair without reinstall. (The former slash
+  // commands migrated to these skills — #228.)
+  const skillsCanonicalDir = join(root, 'shared', 'skills');
+  if (existsSync(skillsCanonicalDir)) {
+    let skillNames: string[] = [];
+    try { skillNames = readdirSync(skillsCanonicalDir); } catch { skillNames = []; }
+    for (const name of skillNames) {
+      const skillDir = join(skillsCanonicalDir, name);
+      let files: string[] = [];
+      try { files = readdirSync(skillDir); } catch { continue; }
+      for (const file of files) {
+        probes.push({
+          label: `agent skill: ${name}/${file}`,
+          target: join(home, '.claude', 'skills', name, file),
+          canonical: join(skillDir, file),
+        });
+      }
     }
   }
 

@@ -98,11 +98,11 @@ recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP confi
 
 ## Codebase Scouting
 
-Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`commands/Recall/scout.md`](commands/Recall/scout.md). This guide supplies only the tool-name mapping:
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`agent-skills/recall-scout/SKILL.md`](agent-skills/recall-scout/SKILL.md). This guide supplies only the tool-name mapping:
 
 | Canonical step | Your tool / invocation |
 |---|---|
-| Invoke the workflow | No slash command in OpenCode — follow the steps in `commands/Recall/scout.md` |
+| Invoke the workflow | No skill host in OpenCode — follow the steps in `agent-skills/recall-scout/SKILL.md` |
 | "Search Recall first" (memory-first) | `recall-memory_memory_search` (keyword), `recall-memory_memory_hybrid_search` (natural language) |
 | Persist a report (only if endorsed) | Write to `.agents/atlas/artifacts/YYYY-MM-DD-scout-<focus>.md` |
 
