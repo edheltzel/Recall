@@ -5,6 +5,9 @@
 //   1. The canonical slash command exists and carries the full workflow.
 //   2. It is memory-first, has the required report sections, enforces the
 //      sensitive-data boundary, and keeps artifacts opt-in.
+//   2b. CodeGraph integration: the capability ladder probes with
+//       `codegraph status --json` and OFFERS `codegraph init` (never auto-runs),
+//       and the query discipline keeps the scout token-frugal.
 //   3. DRY: the four platform guides reference the canonical block and do NOT
 //      hand-copy its body (per the MANDATORY DRY rule in CLAUDE.md/AGENTS.md).
 //   4. The artifacts policy is recorded in canonical AGENTS.md; CLAUDE.md is a
@@ -49,7 +52,9 @@ describe('commands/Recall/scout.md — canonical workflow', () => {
     for (const section of [
       'Memory summary',
       'Repo map',
+      'Tech stack',
       'Key paths',
+      'Conventions',
       'Tests',
       'Risks',
       'Next steps',
@@ -81,6 +86,45 @@ describe('commands/Recall/scout.md — canonical workflow', () => {
     expect(SCOUT).toMatch(/opt-in|already exists|explicitly asks/i);
     // handoffs/ stays reserved — scout artifacts must never go there.
     expect(SCOUT).toMatch(/\.agents\/atlas\/handoffs\/.*reserved|never write scout artifacts/i);
+  });
+});
+
+describe('CodeGraph integration — capability ladder + query discipline', () => {
+  test('probes with codegraph status --json and branches on initialized', () => {
+    expect(SCOUT).toContain('codegraph status --json');
+    expect(SCOUT).toContain('initialized');
+  });
+
+  test('offers codegraph init on an unindexed repo — never auto-runs it', () => {
+    expect(SCOUT).toMatch(/explicit user yes/i);
+    expect(SCOUT).toMatch(/never auto-run/i);
+  });
+
+  test('caps explore calls and forbids re-pasting source into the report', () => {
+    expect(SCOUT).toMatch(/query discipline/i);
+    expect(SCOUT).toMatch(/at most two/i);
+    expect(SCOUT).toMatch(/never re-paste/i);
+  });
+
+  test('prefers cappable CLI forms and treats the backstop as fallback', () => {
+    expect(SCOUT).toContain('--limit');
+    expect(SCOUT).toContain('--symbols-only');
+    expect(SCOUT).toMatch(/backstop means fallback, not second pass/i);
+  });
+
+  test('symbol misses are string-matched, not exit-checked', () => {
+    expect(SCOUT).toMatch(/not found/i);
+    expect(SCOUT).toContain('exit 0');
+  });
+
+  test('remains an enhancement, never a hard dependency', () => {
+    expect(SCOUT).toMatch(/enhancement, never a hard dependency/i);
+    expect(SCOUT).toMatch(/producible with zero CodeGraph/i);
+  });
+
+  test('tech stack reads manifests only — lockfiles stay boundary-excluded', () => {
+    expect(SCOUT).toMatch(/from manifests only/i);
+    expect(SCOUT).toMatch(/lockfiles stay behind the sensitive-data boundary/i);
   });
 });
 
