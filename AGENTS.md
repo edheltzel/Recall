@@ -160,6 +160,8 @@ For the full editing procedure (read-before-editing, update-after-editing, hiera
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
+- **Graph capabilities: build on CodeGraph, never from scratch** (Ed, 2026-07-13). Any future graph/edge/related-memories feature must be scoped as a Recall↔CodeGraph integration, not a new edge table + traversal engine in `recall.db`. This generalizes the #196→#214 knowledge-graph revert; do not re-propose an in-Recall graph layer. (Recall decision #2892.)
+
 ## Child DOX Index
 
 Child AGENTS.md files own domain-specific local rules. Read the applicable one before editing inside its subtree.
