@@ -98,11 +98,11 @@ recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP confi
 
 ## Codebase Scouting
 
-Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`commands/Recall/scout.md`](commands/Recall/scout.md). This guide supplies only the tool-name mapping:
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`agent-skills/recall-scout/SKILL.md`](agent-skills/recall-scout/SKILL.md). This guide supplies only the tool-name mapping:
 
 | Canonical step | Your tool / invocation |
 |---|---|
-| Invoke the workflow | No slash command in Pi — follow the steps in `commands/Recall/scout.md` |
+| Invoke the workflow | `recall-scout` agent skill (installed at `~/.pi/agent/skills/recall-scout/`) |
 | "Search Recall first" (memory-first) | `recall-memory_memory_search` (keyword), `recall-memory_memory_hybrid_search` (natural language) |
 | Persist a report (only if endorsed) | Write to `.agents/atlas/artifacts/YYYY-MM-DD-scout-<focus>.md` |
 
@@ -132,7 +132,7 @@ exit Pi first.
 1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
-4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` via a slash command to persist the conversation
+4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` (the `recall-dump` skill) to persist the conversation
 5. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
 6. **Never store secrets** — `recall-memory_memory_add` and `recall dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 7. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.

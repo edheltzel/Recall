@@ -115,8 +115,13 @@ RECALL_HOOK_NAMES=(
 # (mirrors agent-skills/*/ in the repo). Hardcoded rather than derived from
 # the checkout so uninstall works even against a stale/removed source tree.
 RECALL_SKILL_NAMES=(
+  recall-add
   recall-doctor
+  recall-dump
   recall-loa
+  recall-recent
+  recall-scout
+  recall-search
   recall-stats
   recall-update
 )
@@ -134,8 +139,8 @@ print_summary() {
   [[ "$SKIP_OMP" == "true" ]] && echo "Skipping: omp"
   echo ""
   echo "Will REMOVE (symlinks back to ~/.agents/Recall/ — canonical files stay):"
-  echo "  • ~/.claude/commands/Recall/ (and legacy ~/.claude/commands/recall/ if present)"
-  echo "  • ~/.claude/skills/{recall-doctor,recall-loa,recall-stats,recall-update}/"
+  echo "  • ~/.claude/commands/Recall/ (legacy, and lowercase ~/.claude/commands/recall/ if present)"
+  echo "  • ~/.claude/skills/recall-*/ (all 9 Recall-owned skills)"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json and ~/.claude.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"

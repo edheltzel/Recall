@@ -43,12 +43,12 @@ describe('install.sh completion sentinel (#27)', () => {
     recallDir = join(tempRoot, '.agents', 'Recall');
     fakeRepo = join(tempRoot, 'repo');
     marker = join(recallDir, '.install-incomplete');
-    cmdCanonical = join(recallDir, 'claude', 'commands', 'Recall', 'scout.md');
-    cmdTarget = join(claudeDir, 'commands', 'Recall', 'scout.md');
+    cmdCanonical = join(recallDir, 'shared', 'skills', 'recall-scout', 'SKILL.md');
+    cmdTarget = join(claudeDir, 'skills', 'recall-scout', 'SKILL.md');
 
     mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(join(fakeRepo, 'commands', 'Recall'), { recursive: true });
-    writeFileSync(join(fakeRepo, 'commands', 'Recall', 'scout.md'), '# scout\n');
+    mkdirSync(join(fakeRepo, 'agent-skills', 'recall-scout'), { recursive: true });
+    writeFileSync(join(fakeRepo, 'agent-skills', 'recall-scout', 'SKILL.md'), '# scout\n');
     writeFileSync(join(fakeRepo, 'package.json'), JSON.stringify({ version: '9.9.9' }));
   });
 
@@ -117,13 +117,13 @@ describe('install.sh completion sentinel (#27)', () => {
 
   // ── Interrupt simulation + self-heal (the load-bearing pair) ────────────────
 
-  test('interrupt mid-Commands-step leaves a canonical with no symlink, marker present', () => {
+  test('interrupt mid-Skills-step leaves a canonical with no symlink, marker present', () => {
     // Reproduce #27's exact state: mark in-flight, copy the canonical, then die
     // before recall_link (the non-atomic window between copy and link).
     const r = runDriver([
       'recall_create_install_root',
       'recall_mark_install_incomplete',
-      `recall_copy_canonical "$RECALL_REPO_DIR/commands/Recall/scout.md" "${cmdCanonical}"`,
+      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/recall-scout/SKILL.md" "${cmdCanonical}"`,
       '# interrupted here — before recall_link',
     ]);
     expect(r.status).toBe(0);
@@ -137,7 +137,7 @@ describe('install.sh completion sentinel (#27)', () => {
     runDriver([
       'recall_create_install_root',
       'recall_mark_install_incomplete',
-      `recall_copy_canonical "$RECALL_REPO_DIR/commands/Recall/scout.md" "${cmdCanonical}"`,
+      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/recall-scout/SKILL.md" "${cmdCanonical}"`,
     ]);
     expect(existsSync(cmdTarget)).toBe(false);
 
@@ -145,7 +145,7 @@ describe('install.sh completion sentinel (#27)', () => {
     const r = runDriver([
       'recall_create_install_root',
       'recall_mark_install_incomplete',
-      `recall_copy_canonical "$RECALL_REPO_DIR/commands/Recall/scout.md" "${cmdCanonical}"`,
+      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/recall-scout/SKILL.md" "${cmdCanonical}"`,
       `recall_link "${cmdTarget}" "${cmdCanonical}"`,
       'recall_finalize_install true',
     ]);

@@ -18,7 +18,7 @@ symlinks back to those canonicals.
 │   │   └── lib/                        # Hook helpers (.ts)
 │   └── extract_prompt.md               # Extraction prompt template
 ├── claude/
-│   ├── commands/Recall/                # Slash-command files
+│   ├── shared/skills/                  # Agent Skill canonicals (recall-*)
 │   └── Recall_GUIDE.md                 # Guide for Claude Code
 ├── opencode/
 │   ├── plugins/                        # OpenCode plugin canonicals
@@ -228,7 +228,7 @@ Sourced by all three scripts. Key functions:
 | `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`RecallExtract`, `RecallTelosSync`, `RecallStart`, `RecallPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
-| `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `commands/Recall/*.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits) |
+| `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `agent-skills/*/SKILL.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits); removes legacy `/Recall:*` slash-command symlinks |
 | `recall_append_memory_section` | Shared Claude/Pi append path: completes an unterminated final line, inserts one blank separator, then writes the generated pointer |
 | `recall_memory_section_mutate` / `recall_configure_claude_md` | Shared Claude/Pi ownership classifier plus Claude bootstrap entry point. Marked sections and normalized exact legacy-generated bodies are refreshed on install/update and removable on uninstall; unmarked customized/external sections survive. Remove the marker before taking external ownership. A Recall-specific `~/.claude/rules/memory.md` takes precedence during install/update and leaves `CLAUDE.md` unchanged |
 
@@ -249,7 +249,7 @@ All use `: "${VAR:=default}"` so an override set *before* `source`
 sticks. The test harness uses this to drive the lib against a tmpdir
 `CLAUDE_DIR` without touching the real home.
 
-### Slash command: `/Recall:update`
+### Agent skill: `recall-update`
 
 Check-only. Reads the current version, polls GitHub Releases, and
 prints the exact `cd <path> && ./update.sh` recipe. **Never runs
