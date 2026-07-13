@@ -25,8 +25,13 @@ let dbInitializing = false; // Lock to prevent race condition
  * Read tuning (kept only because Suite F showed a win):
  * - cache_size  = -65536 → 64 MB page cache per connection (negative = KiB),
  *   up from the 2 MB default, so warm reads stay in memory.
- * - mmap_size   = 256 MB → memory-map the DB file so large scans (the vector
- *   BLOB reads) avoid per-page read() syscalls.
+ * - mmap_size   = 2 GB → memory-map the DB file so large scans (the vector
+ *   BLOB reads and the vec0 KNN scan) avoid per-page read() syscalls. Raised
+ *   from 256 MB (#217): a 100k-embedding DB is ~1 GB on disk, and a KNN scan
+ *   overflowing the map fell back to page reads (~2× slower at 100k). This is
+ *   address space, not resident RAM — the OS pages in only what is touched.
+ *   Note: SQLite silently clamps to SQLITE_MAX_MMAP_SIZE (default 0x7fff0000,
+ *   ~64 KiB short of 2 GB) — raising the PRAGMA above that has no effect.
  * - temp_store  = MEMORY → keep transient sort/temp B-trees in RAM.
  */
 function applyConnectionPragmas(database: Database): void {
@@ -39,7 +44,7 @@ function applyConnectionPragmas(database: Database): void {
   database.exec('PRAGMA busy_timeout = 5000');
   // Read-path tuning (#151) — see doc comment above. No durability change.
   database.exec('PRAGMA cache_size = -65536');
-  database.exec('PRAGMA mmap_size = 268435456');
+  database.exec('PRAGMA mmap_size = 2147483648');
   database.exec('PRAGMA temp_store = MEMORY');
 }
 

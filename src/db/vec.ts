@@ -81,18 +81,32 @@ export function isVecAvailable(): boolean {
   return vecAvailable;
 }
 
-/** vec0 index DDL, declared at the canonical embedding dimension with cosine
- *  distance to match the brute-force cosineSimilarity ranking. Idempotent. */
+/** vec0 index DDL, declared at the canonical embedding dimension. The index
+ *  stores NORMALIZED vectors under the default L2 metric (#217): sqlite-vec's
+ *  L2 kernel is SIMD-accelerated while its cosine kernel is scalar (~2× slower
+ *  per row at 100k), and for unit vectors L2² = 2·(1 − cosine), so the KNN
+ *  ordering matches the brute-force cosineSimilarity ranking (exact for
+ *  practically-distinct vectors; see the precision note in knnSearch) and
+ *  knnSearch converts distances back. Idempotent. */
 function vecTableDdl(): string {
   return `CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
     source_table TEXT,
     source_id INTEGER,
-    embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine
+    embedding float[${EMBEDDING_DIMENSIONS}]
   )`;
 }
 
-/** Create the vec0 index table (idempotent). Caller ensures vec is loaded. */
+/** Create the vec0 index table (idempotent). Caller ensures vec is loaded.
+ *  Self-heals a pre-#217 cosine-metric index: the metric is baked into the
+ *  vec0 DDL, so a legacy table is dropped here and re-synced from the
+ *  canonical BLOBs by the next ensureVecIndexSynced (counts now differ). */
 export function createVecTable(db: Database): void {
+  const existing = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_embeddings'`
+  ).get() as { sql: string } | null;
+  if (existing?.sql?.includes('distance_metric=cosine')) {
+    db.exec('DROP TABLE IF EXISTS vec_embeddings');
+  }
   db.exec(vecTableDdl());
 }
 
@@ -108,9 +122,11 @@ export function reindexVec(db: Database): number {
   createVecTable(db);
   const rebuild = db.transaction(() => {
     db.exec('DELETE FROM vec_embeddings');
+    // vec_normalize: the index stores unit vectors so the default L2 metric
+    // reproduces the exact cosine ranking (see vecTableDdl).
     db.prepare(
       `INSERT INTO vec_embeddings (source_table, source_id, embedding)
-       SELECT source_table, source_id, embedding FROM embeddings WHERE dimensions = ?`
+       SELECT source_table, source_id, vec_normalize(embedding) FROM embeddings WHERE dimensions = ?`
     ).run(EMBEDDING_DIMENSIONS);
   });
   rebuild();
@@ -118,23 +134,38 @@ export function reindexVec(db: Database): number {
 }
 
 let syncedThisProcess = false;
+let syncInFlight = false;
 
 /**
- * Ensure the vec index reflects the canonical BLOBs. Runs the (O(n)) rebuild at
- * most ONCE per process and only when out of sync (row counts differ) — e.g.
- * the first run after a #107 re-backfill, when the index is empty. Cached
- * thereafter; never rebuilt per query. Never throws.
+ * Ensure the vec index reflects the canonical BLOBs. Runs the (O(n)) rebuild
+ * only when out of sync (row counts differ) — e.g. the first vector query
+ * after a #107 re-backfill or a #217 legacy-index drop — and caches SUCCESS
+ * for the process lifetime; never rebuilt per query. A FAILED sync (e.g.
+ * SQLITE_BUSY losing the rebuild race to a concurrent writer) does NOT latch:
+ * it logs to stderr and retries on the next query, so a process can't spend
+ * its lifetime silently serving an empty index (#217 review, 225-1). Never
+ * throws.
  */
 export function ensureVecIndexSynced(db: Database): void {
-  if (!vecAvailable || syncedThisProcess) return;
-  syncedThisProcess = true;
+  if (!vecAvailable || syncedThisProcess || syncInFlight) return;
+  syncInFlight = true;
   try {
     createVecTable(db);
     const want = (db.prepare('SELECT COUNT(*) AS c FROM embeddings WHERE dimensions = ?').get(EMBEDDING_DIMENSIONS) as { c: number }).c;
     const have = (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
-    if (have !== want) reindexVec(db);
-  } catch {
-    // Never block startup/query on index sync — brute-force remains available.
+    if (have !== want) {
+      // One-time O(n) rebuild (~4s @100k) inside the first vector query after
+      // an upgrade — say so on stderr so an agent host doesn't read it as a hang.
+      console.error(`[recall] vec index out of sync (${have}/${want} rows) — rebuilding from canonical embeddings...`);
+      reindexVec(db);
+    }
+    syncedThisProcess = true;
+  } catch (err) {
+    // Never block startup/query on index sync — brute-force remains available,
+    // and the un-latched flag retries the rebuild on the next vector query.
+    console.error(`[recall] vec index rebuild failed (will retry on next vector query): ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    syncInFlight = false;
   }
 }
 
@@ -169,9 +200,17 @@ export function knnSearch(db: Database, queryEmbedding: number[], k: number): Ve
   const hits = db.prepare(
     `SELECT source_table, source_id, distance
      FROM vec_embeddings
-     WHERE embedding MATCH ? AND k = ?
+     WHERE embedding MATCH vec_normalize(?) AND k = ?
      ORDER BY distance`
   ).all(blob, k + markedCount) as VecHit[];
+
+  // The index is normalized-L2 (#217); convert each L2 distance back to the
+  // cosine distance the VecHit contract promises: for unit vectors
+  // L2² = 2·(1 − cos), so cos_dist = L2²/2. Monotonic, so ordering is exact
+  // for practically-distinct vectors; at genuine near-ties (≲1e-6
+  // cosine-distance separation, float32 noise floor) positions may permute
+  // within the top-K while distance values stay accurate to ~5e-7.
+  for (const h of hits) h.distance = (h.distance * h.distance) / 2;
 
   if (markedCount === 0) return hits.slice(0, k);
 
