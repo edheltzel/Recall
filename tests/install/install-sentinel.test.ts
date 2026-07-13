@@ -165,6 +165,22 @@ describe('install.sh completion sentinel (#27)', () => {
     expect(r.stderr).toContain('re-run ./install.sh'); // recovery via log_error → stderr
   });
 
+  // ── Skill command surface floor (#235) ──────────────────────────────────────
+  //
+  // Since #228 the agent skills are the SOLE command surface. recall_verify_install
+  // derives its skill probes from whatever canonicals exist, so before this floor a
+  // partial/absent copy step (bad pack, partial checkout, interrupt) left `missing`
+  // empty and verification passed green on a blank surface. The fakeRepo fixture
+  // ships one source skill (agent-skills/recall-scout/SKILL.md) but no canonical was
+  // copied here, so the floor must fail red.
+  test('verify fails red when source ships skills but zero canonicals exist', () => {
+    const r = runDriver(['recall_verify_install']);
+    expect(r.status).not.toBe(0);
+    // Pin the distinctive floor message so an unrelated missing symlink can't
+    // green this test for the wrong reason.
+    expect(r.stderr).toContain('agent skill canonicals');
+  });
+
   // ── DRY: one canonical recovery story ───────────────────────────────────────
 
   test('recovery wording has a single source of truth (recall_print_recovery)', () => {
@@ -188,7 +204,7 @@ describe('install.sh completion sentinel (#27)', () => {
     const src = readFileSync(INSTALL_SH, 'utf-8');
     for (const step of [
       'Backup', 'Migrate', 'Installing', 'Building', 'Linking', 'Database',
-      'MCP', 'Hooks', 'Guide', 'Commands', 'CLAUDE.md',
+      'MCP', 'Hooks', 'Guide', 'Commands', 'Skills', 'CLAUDE.md',
     ]) {
       expect(src).toContain(`_step "${step}"`);
     }
