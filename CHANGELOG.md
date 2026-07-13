@@ -47,6 +47,20 @@ note in the 0.9.0 entry.
   `files` whitelist, so packaged installs shipped no skills; `commands/`
   dropped from the whitelist with the migration).
 
+### Fixed
+
+- **Install verification now fails on a blank/partial skill surface** (#235,
+  from the #230 audit). Since #228 the agent skills are the sole command
+  surface, but `recall_verify_install` and `recall doctor` derived their probes
+  from whatever canonicals existed with no lower bound — a bad npm pack, partial
+  checkout, or an interrupt before the skill copy step yielded zero probes and
+  install printed "All symlinks verified" over an empty surface.
+  `recall_verify_install` now asserts a floor (source ships skill dirs ⇒ the
+  canonical count must match), and `recall doctor` WARNs when the install root
+  exists with zero skill canonicals. `tests/install/npm-pack.test.ts` now
+  asserts all 9 `agent-skills/<name>/SKILL.md` are packed and `commands/` is
+  excluded; the install-sentinel unconditional-step guard now covers `Skills`.
+
 ## [0.9.2] — 2026-07-13 — "hybrid search at scale"
 
 ### Added
