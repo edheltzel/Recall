@@ -85,8 +85,9 @@ export function isVecAvailable(): boolean {
  *  stores NORMALIZED vectors under the default L2 metric (#217): sqlite-vec's
  *  L2 kernel is SIMD-accelerated while its cosine kernel is scalar (~2× slower
  *  per row at 100k), and for unit vectors L2² = 2·(1 − cosine), so the KNN
- *  ordering is exactly the brute-force cosineSimilarity ranking and knnSearch
- *  converts distances back losslessly. Idempotent. */
+ *  ordering matches the brute-force cosineSimilarity ranking (exact for
+ *  practically-distinct vectors; see the precision note in knnSearch) and
+ *  knnSearch converts distances back. Idempotent. */
 function vecTableDdl(): string {
   return `CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
     source_table TEXT,
@@ -189,8 +190,11 @@ export function knnSearch(db: Database, queryEmbedding: number[], k: number): Ve
   ).all(blob, k + markedCount) as VecHit[];
 
   // The index is normalized-L2 (#217); convert each L2 distance back to the
-  // exact cosine distance the VecHit contract promises: for unit vectors
-  // L2² = 2·(1 − cos), so cos_dist = L2²/2. Monotonic — ordering unchanged.
+  // cosine distance the VecHit contract promises: for unit vectors
+  // L2² = 2·(1 − cos), so cos_dist = L2²/2. Monotonic, so ordering is exact
+  // for practically-distinct vectors; at genuine near-ties (≲1e-6
+  // cosine-distance separation, float32 noise floor) positions may permute
+  // within the top-K while distance values stay accurate to ~5e-7.
   for (const h of hits) h.distance = (h.distance * h.distance) / 2;
 
   if (markedCount === 0) return hits.slice(0, k);

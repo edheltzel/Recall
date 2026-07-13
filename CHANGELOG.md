@@ -36,11 +36,14 @@ note in the 0.9.0 entry.
 - **Indexed hybrid search meets the 100k SLO: 180ms → 23.5ms p50** (#217,
   epic #146). The vec0 KNN scan was effectively the entire indexed hybrid
   latency at 100k embeddings (FTS5, RRF fusion, and provenance resolution
-  together were ~4ms). Two exact, ordering-preserving fixes: the
+  together were ~4ms). Two fixes, ordering-preserving for
+  practically-distinct vectors: the
   `vec_embeddings` index now stores normalized vectors under sqlite-vec's
   SIMD-accelerated L2 metric (for unit vectors L2² = 2·(1−cos), so
-  `knnSearch` converts distances back losslessly — results and the
-  cosine-distance contract are unchanged), and the per-connection
+  `knnSearch` converts distances back — exact ordering for
+  practically-distinct vectors; genuine near-ties (≲1e-6 cosine-distance
+  separation) may permute within the top-K with correct distance values,
+  and the cosine-distance contract is unchanged), and the per-connection
   `mmap_size` was raised 256 MB → 2 GB so a ~1 GB DB no longer overflows
   the memory map into per-page reads. Suite F (REPEATS=12):
   `hybrid_index_latency_p50` 1.0/3.7/23.5 ms at 1k/10k/100k, p95 41.1 ms
