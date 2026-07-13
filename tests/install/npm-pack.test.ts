@@ -66,6 +66,20 @@ describe('npm package: files whitelist', () => {
     expect(has('FOR_PI.md')).toBe(true);
   });
 
+  // #235: the agent skills are the sole command surface since #228, so the pack
+  // must ship every one — a partial pack (the pre-#230 failure mode) silently
+  // blanks the surface. Enumerate all 9 explicitly rather than trusting the
+  // agent-skills/ prefix alone (which passes with just 1 of 9 present).
+  test('bundles all 9 agent-skills/<name>/SKILL.md', () => {
+    const skills = [
+      'recall-add', 'recall-doctor', 'recall-dump', 'recall-loa', 'recall-recent',
+      'recall-scout', 'recall-search', 'recall-stats', 'recall-update',
+    ];
+    for (const name of skills) {
+      expect(has(`agent-skills/${name}/SKILL.md`)).toBe(true);
+    }
+  });
+
   test('excludes dev / local bloat', () => {
     for (const bad of [
       'tests/',
@@ -75,6 +89,7 @@ describe('npm package: files whitelist', () => {
       'scripts/',
       '.agents/',
       '.claude/',
+      'commands/', // #235: the migrated slash-command surface must not ship
     ]) {
       expect(hasUnder(bad)).toBe(false);
     }

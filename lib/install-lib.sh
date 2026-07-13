@@ -1344,6 +1344,31 @@ recall_verify_install() {
     _check_symlink "$CLAUDE_DIR/MEMORY/extract_prompt.md" "$RECALL_SHARED_DIR/extract_prompt.md"
   fi
 
+  # Skill command surface floor (#235). Since #228 the agent skills are the
+  # SOLE command surface, and the loop above derives its probes from whatever
+  # canonicals happen to exist — so a bad npm pack, partial checkout, or an
+  # interrupt before _recall_copy_skill_files yields zero/fewer probes, `missing`
+  # stays empty, and verification would pass green on a blank surface. Assert a
+  # floor instead: if the source tree ships skill dirs, the canonical dir must
+  # hold at least as many, else the copy step didn't complete — fail red. The
+  # glob matches directories only, so agent-skills/AGENTS.md never inflates the
+  # source count (the copy loop excludes it identically).
+  local skills_src="$RECALL_REPO_DIR/agent-skills"
+  if [[ -d "$skills_src" ]]; then
+    local sd src_count=0 canon_count=0
+    for sd in "$skills_src"/*/; do
+      [[ -d "$sd" ]] && src_count=$((src_count + 1))
+    done
+    if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]]; then
+      for sd in "$RECALL_SHARED_SKILLS_DIR"/*/; do
+        [[ -d "$sd" ]] && canon_count=$((canon_count + 1))
+      done
+    fi
+    if [[ $src_count -gt 0 ]] && [[ $canon_count -lt $src_count ]]; then
+      missing+=("agent skill canonicals: found $canon_count of $src_count under $RECALL_SHARED_SKILLS_DIR (command surface incomplete)")
+    fi
+  fi
+
   if [[ ${#missing[@]} -eq 0 ]] && [[ ${#wrong_target[@]} -eq 0 ]]; then
     return 0
   fi

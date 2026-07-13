@@ -470,6 +470,24 @@ export interface SymlinkProbe {
   canonical: string;  // path the symlink should point at
 }
 
+// Enumerate the depth-1 skill canonical files (name/file pairs) under the
+// install root's shared/skills dir. Shared by buildSymlinkProbes (to derive
+// per-file symlink probes) and probeSkillSurface (to floor the command surface,
+// #235) so both agree on what counts as a shipped skill file.
+function listSkillCanonicalFiles(root: string): { name: string; file: string }[] {
+  const skillsCanonicalDir = join(root, 'shared', 'skills');
+  if (!existsSync(skillsCanonicalDir)) return [];
+  let skillNames: string[] = [];
+  try { skillNames = readdirSync(skillsCanonicalDir); } catch { return []; }
+  const out: { name: string; file: string }[] = [];
+  for (const name of skillNames) {
+    let files: string[] = [];
+    try { files = readdirSync(join(skillsCanonicalDir, name)); } catch { continue; }
+    for (const file of files) out.push({ name, file });
+  }
+  return out;
+}
+
 function buildSymlinkProbes(): SymlinkProbe[] {
   const home = homedir();
   const root = join(home, '.agents', 'Recall');
@@ -502,25 +520,37 @@ function buildSymlinkProbes(): SymlinkProbe[] {
   // recall_copy_canonical but never reached recall_link); covering it here
   // lets `recall doctor --fix` repair without reinstall. (The former slash
   // commands migrated to these skills — #228.)
-  const skillsCanonicalDir = join(root, 'shared', 'skills');
-  if (existsSync(skillsCanonicalDir)) {
-    let skillNames: string[] = [];
-    try { skillNames = readdirSync(skillsCanonicalDir); } catch { skillNames = []; }
-    for (const name of skillNames) {
-      const skillDir = join(skillsCanonicalDir, name);
-      let files: string[] = [];
-      try { files = readdirSync(skillDir); } catch { continue; }
-      for (const file of files) {
-        probes.push({
-          label: `agent skill: ${name}/${file}`,
-          target: join(home, '.claude', 'skills', name, file),
-          canonical: join(skillDir, file),
-        });
-      }
-    }
+  for (const { name, file } of listSkillCanonicalFiles(root)) {
+    probes.push({
+      label: `agent skill: ${name}/${file}`,
+      target: join(home, '.claude', 'skills', name, file),
+      canonical: join(root, 'shared', 'skills', name, file),
+    });
   }
 
   return probes;
+}
+
+// Skill command surface floor (#235). Since #228 the agent skills are the sole
+// command surface, and buildSymlinkProbes derives probes from whatever
+// canonicals exist — so a missing/empty shared/skills dir yields zero probes and
+// doctor stays green on a blanked surface. Surface it as a WARN when the install
+// root exists but no skill canonicals are present. Exported + path-injected for
+// unit testing, mirroring probeInstallSentinel.
+export function probeSkillSurface(root: string): CheckResult {
+  const label = 'Agent skill command surface';
+  if (!existsSync(root)) {
+    return { label, status: 'INFO', message: 'Recall install root not present — skipping skill surface check' };
+  }
+  const count = listSkillCanonicalFiles(root).length;
+  if (count === 0) {
+    return {
+      label,
+      status: 'WARN',
+      message: 'No agent skill canonicals under shared/skills — the recall-* command surface is blank; re-run ./install.sh to converge',
+    };
+  }
+  return { label, status: 'PASS', message: `${count} agent skill file(s) present` };
 }
 
 function hashFile(path: string): string | null {
@@ -888,6 +918,11 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
       results.push(sc.result);
     }
   }
+
+  // Skill command surface floor (#235): the per-file probes above go silent
+  // when zero skill canonicals exist, so add an explicit WARN for a blanked
+  // command surface — the sole command surface since #228.
+  results.push(probeSkillSurface(join(homedir(), '.agents', 'Recall')));
 
   // MCP env health (issue #28): the recall-memory registration must carry
   // env.RECALL_DB_PATH matching the resolved DB path, or the MCP server can
