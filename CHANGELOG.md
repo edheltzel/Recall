@@ -12,6 +12,25 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **`/Recall:scout` v2 — deep CodeGraph integration** (#85). The scout
+  workflow now runs a deterministic capability ladder (`codegraph status
+  --json` probe; on an unindexed repo it **offers** `codegraph init` and runs
+  it only on an explicit yes — never auto-runs), replaces the blind tree walk
+  with a ~600-token orientation bundle (`status --json` + `files --max-depth 2
+  --no-metadata`), and pins an explicit query discipline (at most two narrow
+  `explore` calls, cappable CLI forms for edge questions, no source re-paste
+  into the report). The report grows from 7 to 9 sections with **Tech stack**
+  (declared versions from manifests only; lockfiles stay boundary-excluded)
+  and **Conventions** (declared rules + one observed CodeGraph style probe +
+  Recall learnings). Three bounded orienters (`git log -10 --oneline`,
+  `git status -s | head`, the status probe) are `!`-inlined on Claude Code
+  with manual-run phrasing for other hosts. The sensitive-data boundary,
+  memory-first ordering, chat-only default, and per-key-file decisions &
+  learnings are unchanged; CodeGraph remains an enhancement, never a hard
+  dependency.
+
 ## [0.9.2] — 2026-07-13 — "hybrid search at scale"
 
 ### Added
