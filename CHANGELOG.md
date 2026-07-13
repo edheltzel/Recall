@@ -12,6 +12,8 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-07-13 — "hybrid search at scale"
+
 ### Added
 
 - **Hybrid search reports which semantic backend ran for the query** (#217).
