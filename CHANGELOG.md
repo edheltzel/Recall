@@ -12,9 +12,11 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-07-13 — "one namespace"
+
 ### Changed
 
-- **`/Recall:scout` v2 — deep CodeGraph integration** (#85). The scout
+- **`recall-scout` v2 — deep CodeGraph integration** (#85). The scout
   workflow now runs a deterministic capability ladder (`codegraph status
   --json` probe; on an unindexed repo it **offers** `codegraph init` and runs
   it only on an explicit yes — never auto-runs), replaces the blind tree walk
