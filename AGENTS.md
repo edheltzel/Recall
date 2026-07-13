@@ -25,8 +25,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `hooks/` — self-contained lifecycle hooks + cron jobs (never import from `src/`)
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
-- `commands/` — `/Recall:*` slash-command definitions
-- `agent-skills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`
+- `agent-skills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills` — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
@@ -64,7 +63,7 @@ This applies to every agent and every planning surface (`EnterPlanMode`, design 
 
 ## Scout Artifacts Directory (MANDATORY)
 
-Codebase scout reports (`/Recall:scout`, see `commands/Recall/scout.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
+Codebase scout reports (`recall-scout`, see `agent-skills/recall-scout/SKILL.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
 
 - Generated scout reports and agent artifacts → `.agents/atlas/artifacts/`
 - This directory is **opt-in**: write to it only when it already exists or the user explicitly asks for a saved report
@@ -115,7 +114,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Runtime**: Bun (not Node). Uses `bun:sqlite` directly. Shebangs are `#!/usr/bin/env bun`.
 - **Build**: tsup produces ESM. Build script replaces node shebang with bun shebang.
 - **Database**: SQLite at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`; legacy `MEM_DB_PATH` still accepted). WAL mode. FTS5 full-text search with sync triggers.
-- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `claude/commands/Recall/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/pencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
+- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `shared/skills/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/pencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
 - **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
 - **Hook registration**: `Stop`, `SessionStart`, `PreCompact` events in `~/.claude/settings.json` under `hooks.*`.
 - **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.
@@ -170,6 +169,6 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`tests/AGENTS.md`](tests/AGENTS.md) — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - [`benchmarks/AGENTS.md`](benchmarks/AGENTS.md) — wake-up context-efficiency benchmark harness
 - [`docs/AGENTS.md`](docs/AGENTS.md) — user-facing published docs, ADRs, agent skill docs (never plans/specs)
-- [`commands/AGENTS.md`](commands/AGENTS.md) — `/Recall:*` slash-command definitions
+- [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
 
 Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh`; platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).

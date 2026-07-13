@@ -68,7 +68,7 @@ recall install
 npx --package=recall-memory recall install
 ```
 
-`recall install` runs the canonical setup (MCP server, hooks, slash commands, guides) for all detected agents. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+`recall install` runs the canonical setup (MCP server, hooks, agent skills, guides) for all detected agents. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
 <details>
 <summary>Install from source instead</summary>
@@ -108,7 +108,7 @@ like `no force-push, ever` survives as a single entry.
 
 ### Updating
 
-From inside Claude Code, `/Recall:update` prints the current vs. latest
+From inside Claude Code, `/recall-update` prints the current vs. latest
 release and the exact command to run. From a shell:
 
 ```bash
@@ -249,8 +249,8 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.claude/MEMORY/{opencode,pi}-sessions/`; RecallBatchExtract pulls them into the same SQLite DB. One memory layer across agents
 - **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
-- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or slash commands (`/Recall:add`)
-- **Codebase scouting** — `/Recall:scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
+- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `recall-add` agent skill
+- **Codebase scouting** — `/recall-scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
 - **Benchmark harness** — `recall benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
 - **Onboarding** — `recall onboard` runs a 7-question interview that writes your L0 identity file
 
@@ -333,7 +333,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [MCP Tools](docs/mcp-tools.md)             | Tools available to AI agents                                              |
 | [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
 | Codebase Map (local)                       | Interactive visual map at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html` — generated from the codegraph index, not committed (`.agents/` is gitignored) |
-| [Slash Commands](docs/slash-commands.md)   | `/Recall:*` commands for Claude Code                                      |
+| [Agent Skills](docs/agent-skills.md)       | `recall-*` skills for Claude Code, Pi, and omp                            |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
 | [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |

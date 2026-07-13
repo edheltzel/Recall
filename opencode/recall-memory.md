@@ -51,7 +51,7 @@ You have access to persistent memory via the recall-memory MCP server.
 
 ## Codebase Scouting
 
-Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in `commands/Recall/scout.md`. This guide supplies only the tool-name mapping:
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in `agent-skills/recall-scout/SKILL.md`. This guide supplies only the tool-name mapping:
 
 | Canonical step | Your tool / invocation |
 |------|---------|

@@ -1,5 +1,6 @@
 ---
-description: Show recent Recall memory records across all tables or a specific table
+name: "recall-recent"
+description: "Show recent Recall memory records across all tables or a specific table"
 ---
 
 Display the most recent records from Recall memory. Shows entries across all tables by default, or filter to a specific table.
@@ -7,11 +8,11 @@ Display the most recent records from Recall memory. Shows entries across all tab
 ## Usage
 
 ```bash
-recall recent $1
+recall recent [table]
 ```
 
 **Arguments:**
-- `$1` (optional): Table to filter — messages, decisions, learnings, breadcrumbs, or all (default: all)
+- `[table]` (optional): Table to filter — messages, decisions, learnings, breadcrumbs, or all (default: all)
 
 **Options:**
 - `-p <project>` — Filter by project name
@@ -32,5 +33,3 @@ recall recent learnings -p my-api
 # Last 20 breadcrumbs
 recall recent breadcrumbs -l 20
 ```
-
-$@

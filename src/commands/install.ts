@@ -1,5 +1,5 @@
 // `recall install` — run the canonical Recall install (MCP registration, hooks,
-// slash commands, guides, platform integrations) for an already-on-PATH binary.
+// agent skills, guides, platform integrations) for an already-on-PATH binary.
 //
 // This is the post-bootstrap entry point for npm / npx / `bun install -g`
 // installs: the package manager has already placed deps, the prebuilt dist/,

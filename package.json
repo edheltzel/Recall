@@ -10,7 +10,7 @@
   "files": [
     "dist/",
     "hooks/",
-    "commands/",
+    "agent-skills/",
     "lib/",
     "opencode/",
     "pi/",

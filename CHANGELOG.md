@@ -29,7 +29,23 @@ note in the 0.9.0 entry.
   with manual-run phrasing for other hosts. The sensitive-data boundary,
   memory-first ordering, chat-only default, and per-key-file decisions &
   learnings are unchanged; CodeGraph remains an enhancement, never a hard
-  dependency.
+  dependency. (The scout workflow now ships as the `recall-scout` Agent
+  Skill — see the migration entry below.)
+- **All `/Recall:*` slash commands migrated to `recall-*` Agent Skills** (#228).
+  The four existing skills (doctor/loa/stats/update) gained five siblings
+  (add/dump/recent/scout/search), making `agent-skills/` the single command
+  surface across Claude Code, Pi, and omp — one namespace, no more duplicate
+  `Recall:` + `recall-` entries in the Claude Code picker. `recall-dump`
+  carries `disable-model-invocation: true` (session dumps stay user-initiated).
+  `commands/Recall/` is gone; `install.sh` / `update.sh` now remove the stale
+  `~/.claude/commands/Recall/` symlinks (user-authored files in that directory
+  survive), and `recall doctor --fix` probes/repairs skill symlinks instead of
+  command symlinks. `docs/slash-commands.md` → `docs/agent-skills.md`. If your
+  own rules files reference `/Recall:dump` etc., update them to `/recall-dump`
+  — see the migration note in `docs/upgrading.md`.
+- **npm packs now bundle `agent-skills/`** (previously missing from the
+  `files` whitelist, so packaged installs shipped no skills; `commands/`
+  dropped from the whitelist with the migration).
 
 ## [0.9.2] — 2026-07-13 — "hybrid search at scale"
 

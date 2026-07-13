@@ -1,9 +1,10 @@
 ---
-description: Scout an unfamiliar codebase — memory-first repo map, key paths, tests, risks, and next steps, with a strict sensitive-data boundary
+name: "recall-scout"
+description: "Scout an unfamiliar codebase — memory-first repo map, key paths, tests, risks, and next steps, with a strict sensitive-data boundary"
 allowed-tools: Bash(git log -10 --oneline), Bash(git status -s | head), Bash(codegraph status --json)
 ---
 
-Produce a **scout report** for the current repository: a fast, structured orientation for whoever is about to work in this codebase. Optional focus (`$1`) narrows the scout to a subsystem, path, or question (e.g. `auth`, `the extraction pipeline`, `src/db`). With no focus, scout the repo as a whole.
+Produce a **scout report** for the current repository: a fast, structured orientation for whoever is about to work in this codebase. An optional focus argument narrows the scout to a subsystem, path, or question (e.g. `auth`, `the extraction pipeline`, `src/db`). With no focus, scout the repo as a whole.
 
 This is the canonical scouting workflow; platform guides reference it and only remap tool names. Do not hand-copy these steps into `FOR_CLAUDE.md`, `FOR_PI.md`, `FOR_OPENCODE.md`, or `opencode/recall-memory.md` — those files point here and supply only their own tool-name mapping.
 
@@ -69,5 +70,3 @@ Never read, echo, summarize, or write any of the following — if the focus woul
 ## Artifacts (opt-in)
 
 The scout report is **chat-only by default — write nothing to disk.** Persist an artifact only when the repo endorses it: a `.agents/atlas/artifacts/` directory already exists, or the user explicitly asks for a saved report. When endorsed, write **only** to `.agents/atlas/artifacts/` as `YYYY-MM-DD-scout-<focus>.md`. Never write scout artifacts to `.agents/atlas/handoffs/` (reserved for handoffs) or anywhere else.
-
-$@

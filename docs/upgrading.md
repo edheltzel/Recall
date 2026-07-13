@@ -2,12 +2,18 @@
 
 [← Back to README](../README.md)
 
+## Migration note: `/Recall:*` slash commands → `recall-*` Agent Skills
+
+The `/Recall:*` Claude Code slash commands were retired in favor of [Agent Skills](agent-skills.md) (issue #228) — same bodies, one `recall-*` namespace across Claude Code, Pi, and omp. `install.sh` / `update.sh` remove the stale `~/.claude/commands/Recall/` symlinks automatically on the next run.
+
+One thing the installer can't reach: **your own files**. If a personal rules file (e.g. `~/.claude/rules/memory.md`) or project doc references `/Recall:dump` or another `/Recall:*` command, update it to the `/recall-*` form by hand.
+
 ## Check for a new release
 
 From inside Claude Code:
 
 ```
-/Recall:update
+/recall-update
 ```
 
 This is a **check-only** command — it prints the current vs. latest
@@ -43,7 +49,7 @@ cd /path/to/Recall
 4. `bun install && bun run build`.
 5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
-6. Copies refreshed hooks, shared lib files, slash commands, and
+6. Copies refreshed hooks, shared lib files, agent skills, and
    `FOR_CLAUDE.md`; refreshes detected host integrations; and runs the shared
    Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
    exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
@@ -100,7 +106,7 @@ bun link
 recall init
 ```
 
-Then re-run `./install.sh` to refresh hooks and slash commands — it's
+Then re-run `./install.sh` to refresh hooks and agent skills — it's
 idempotent.
 
 ## v0.7.22 Migration Notes

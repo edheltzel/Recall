@@ -4,11 +4,11 @@
 
 ## Purpose
 
-User-facing published documentation: installation, CLI / MCP / slash-command reference, architecture, troubleshooting, releasing/upgrading, host integration guides, ADRs, and agent skill docs.
+User-facing published documentation: installation, CLI / MCP / agent-skill reference, architecture, troubleshooting, releasing/upgrading, host integration guides, ADRs, and agent skill docs.
 
 ## Ownership
 
-- Reference & guides — `installation.md`, `cli-reference.md`, `mcp-tools.md`, `slash-commands.md`, `architecture.md`, `troubleshooting.md`, `releasing.md`, `upgrading.md`, `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`
+- Reference & guides — `installation.md`, `cli-reference.md`, `mcp-tools.md`, `agent-skills.md`, `architecture.md`, `troubleshooting.md`, `releasing.md`, `upgrading.md`, `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`
 - `adr/` — architectural decision records
 - `agents/` — agent skill docs (`issue-tracker.md`, `triage-labels.md`, `board-status.md`, `domain.md`, `worker-flow.md`, `dox-framework.md`)
 
@@ -16,7 +16,7 @@ User-facing published documentation: installation, CLI / MCP / slash-command ref
 
 - `docs/` is EXCLUSIVELY user-facing published docs. NEVER store plans, specs, designs, handoffs, or scout artifacts here — those live under `.agents/atlas/` (see root `AGENTS.md`).
 - ADRs are numbered and append-only: change a decision by adding a new `NNNN-*.md`; don't rewrite a past ADR's decision.
-- Keep docs in sync with behavior — a command, MCP, or lifecycle change must update the matching reference (`cli-reference`, `mcp-tools`, `slash-commands`, `installation`, `upgrading`).
+- Keep docs in sync with behavior — a command, MCP, or lifecycle change must update the matching reference (`cli-reference`, `mcp-tools`, `agent-skills`, `installation`, `upgrading`).
 - Host integration guides stay aligned with their root counterparts (`FOR_OPENCODE.md`, `FOR_PI.md`).
 
 ## Work Guidance

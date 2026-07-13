@@ -58,7 +58,7 @@ describe('npm package: files whitelist', () => {
   test('bundles the runtime assets install.sh / install-lib.sh read', () => {
     expect(hasUnder('dist/')).toBe(true);
     expect(hasUnder('hooks/lib/')).toBe(true); // hooks need their lib/ subtree
-    expect(hasUnder('commands/Recall/')).toBe(true);
+    expect(hasUnder('agent-skills/')).toBe(true);
     expect(hasUnder('opencode/')).toBe(true);
     expect(hasUnder('pi/')).toBe(true);
     expect(has('FOR_CLAUDE.md')).toBe(true);

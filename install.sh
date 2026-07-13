@@ -201,35 +201,10 @@ do_install() {
     log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
   fi
 
-  _step "Commands" "Installing slash commands"
-  local commands_src="$RECALL_REPO_DIR/commands/Recall"
-  local commands_dest="$CLAUDE_DIR/commands/Recall"
-  local commands_legacy="$CLAUDE_DIR/commands/recall"
-  if [[ -d "$commands_src" ]]; then
-    mkdir -p "$commands_dest"
-    local cmdfile
-    for cmdfile in "$commands_src"/*.md; do
-      [[ -f "$cmdfile" ]] || continue
-      local base
-      base="$(basename "$cmdfile")"
-      recall_copy_canonical "$cmdfile" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
-      recall_link "$commands_dest/$base" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
-    done
-    # -ef (same device+inode) rather than a string compare: on the default
-    # case-insensitive-but-case-preserving macOS filesystem, "commands/recall"
-    # and "commands/Recall" are the SAME directory on disk even though they
-    # differ as strings. The old string compare treated them as distinct,
-    # so this block deleted the symlinks the loop above had just created —
-    # every install left every Recall:* symlink missing until `recall doctor
-    # --fix` (which has no such cleanup step) repaired them.
-    if [[ -d "$commands_legacy" ]] && ! [[ "$commands_legacy" -ef "$commands_dest" ]]; then
-      rm -rf "$commands_legacy"
-      log_info "Removed legacy lowercase slash commands at $commands_legacy"
-    fi
-    log_success "Installed Recall: slash commands to $commands_dest"
-  else
-    log_warn "Slash commands directory not found at $commands_src — skipping"
-  fi
+  _step "Commands" "Cleaning up legacy slash commands"
+  # Slash commands migrated to Agent Skills (#228) — remove what older
+  # releases installed so retired /Recall:* commands don't linger.
+  recall_remove_legacy_slash_commands
 
   _step "Skills" "Installing agent skills"
   if [[ -d "$RECALL_REPO_DIR/agent-skills" ]]; then
@@ -267,8 +242,8 @@ do_install() {
 
   # First: verify every expected symlink is in place. This catches the class
   # of failure where an inner loop got interrupted between canonical-copy and
-  # symlink creation (we hit this once — slash commands canonicals were
-  # copied but the symlinks at ~/.claude/commands/Recall/ never materialized).
+  # symlink creation (we hit this once — canonicals were copied but the
+  # platform-home symlinks never materialized).
   if recall_verify_install; then
     log_success "All symlinks verified"
   else

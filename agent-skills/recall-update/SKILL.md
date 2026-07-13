@@ -3,17 +3,11 @@ name: "recall-update"
 description: "Check for the latest Recall release on GitHub and print the exact update command (check-only — does not run update.sh)."
 ---
 
-# source-command-recall-update
-
-Use this skill when the user asks to run the migrated source command `Recall-update`.
-
-## Command Template
-
-Check whether Recall has a newer release on GitHub. This command is
+Check whether Recall has a newer release on GitHub. This skill is
 read-only — it prints the recommended next step but NEVER runs
-`update.sh` inline. Running the update while Codex is attached
-can corrupt in-flight hook invocations (the `recall` binary lives in the
-same process tree via `bun link`).
+`update.sh` inline. Running the update while a coding agent session is
+attached can corrupt in-flight hook invocations (the `recall` binary
+lives in the same process tree via `bun link`).
 
 ## What this does
 
@@ -32,10 +26,9 @@ same process tree via `bun link`).
 ## Why not auto-run?
 
 `update.sh` pulls, rebuilds, migrates the DB, and re-registers hooks.
-If Codex is currently attached to this session, rebuilding the
-`recall` binary mid-session can leave the running hook scripts in a
-half-updated state. The safe sequence is: exit Codex →
-`./update.sh` → restart Codex.
+Rebuilding the `recall` binary mid-session can leave the running hook
+scripts in a half-updated state. The safe sequence is: exit the coding
+agent → `./update.sh` → restart it.
 
 ## Rate-limit fallback
 
@@ -93,6 +86,5 @@ directory is locatable — it implements all of the logic below.
      ```
 
 4. **Do not** run `./update.sh` on the user's behalf. Stop at printing
-   the recipe. The user runs it themselves after exiting Codex.
-
-$@
+   the recipe. The user runs it themselves after exiting the coding
+   agent.

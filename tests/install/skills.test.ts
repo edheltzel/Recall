@@ -1,7 +1,8 @@
-// Agent Skills (agent-skills/<name>/SKILL.md) are installed the same way as
-// slash commands: canonical copy under $RECALL_SHARED_SKILLS_DIR/<name>/,
-// per-file symlinks into each detected platform's skills directory
-// (~/.claude/skills, ~/.pi/agent/skills, ~/.omp/agent/skills).
+// Agent Skills (agent-skills/<name>/SKILL.md) are the single command surface
+// (#228 — the old /Recall:* slash commands are gone): canonical copy under
+// $RECALL_SHARED_SKILLS_DIR/<name>/, per-file symlinks into each detected
+// platform's skills directory (~/.claude/skills, ~/.pi/agent/skills,
+// ~/.omp/agent/skills).
 //
 // Install-side tests drive lib/install-lib.sh directly against a
 // tmpdir-scoped HOME/CLAUDE_DIR/RECALL_DIR/RECALL_REPO_DIR, mirroring

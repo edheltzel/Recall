@@ -1,5 +1,6 @@
 ---
-description: Search Recall memory using FTS5 full-text search across all tables
+name: "recall-search"
+description: "Search Recall memory using FTS5 full-text search across all tables"
 ---
 
 Search across all Recall memory tables (messages, LoA entries, decisions, learnings, breadcrumbs) using SQLite FTS5 full-text search. Supports AND, OR, NOT operators, prefix matching, exact phrases, hard table filtering, and soft table biasing.
@@ -7,11 +8,11 @@ Search across all Recall memory tables (messages, LoA entries, decisions, learni
 ## Usage
 
 ```bash
-recall search "$1"
+recall search "<query>"
 ```
 
 **Arguments:**
-- `$1` (required): Search query
+- `<query>` (required): Search query — use the user's argument text
 
 **Options:**
 - `-p <project>` — Filter by project name
@@ -43,5 +44,3 @@ recall search "webpack OR vite" -t learnings
 
 # Rule of thumb: use -t when you want ONLY that table; use --bias-type when you want that table first.
 ```
-
-$@

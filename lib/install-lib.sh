@@ -22,10 +22,10 @@
 # update.sh, uninstall.sh) all live in the repo root and source this library
 # from lib/install-lib.sh, so `dirname BASH_SOURCE/..` is the repo every time.
 #
-# This replaces $(pwd) for source-file lookups (FOR_*.md, commands/Recall,
+# This replaces $(pwd) for source-file lookups (FOR_*.md, agent-skills/,
 # hooks/, opencode/, pi/). $(pwd) silently mis-resolved whenever a user
-# invoked a script via absolute path from another cwd — the slash-command
-# loop then skipped and `recall_verify_install` reported every Recall:*
+# invoked a script via absolute path from another cwd — the copy/link
+# loops then skipped and `recall_verify_install` reported every Recall
 # symlink as missing. DRY single source of truth for the repo path.
 if [[ -z "${RECALL_REPO_DIR:-}" ]]; then
   RECALL_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -1008,7 +1008,6 @@ recall_create_install_root() {
     "$RECALL_DIR" \
     "$RECALL_SHARED_HOOKS_LIB_DIR" \
     "$RECALL_SHARED_SKILLS_DIR" \
-    "$RECALL_CLAUDE_COMMANDS_DIR" \
     "$RECALL_OPENCODE_PLUGINS_DIR" \
     "$RECALL_PI_EXTENSIONS_DIR" \
     "$RECALL_MEMORY_DIR" \
@@ -1162,6 +1161,43 @@ recall_unlink_if_managed() {
   fi
 }
 
+# ── Legacy slash-command cleanup ─────────────────────────────────────────────
+#
+# All Recall slash commands (`/Recall:*`) migrated to Agent Skills
+# (`recall-*`, agent-skills/) — see issue #228. Existing installs still carry
+# the old symlinks at ~/.claude/commands/Recall/ plus their canonicals under
+# $RECALL_CLAUDE_COMMANDS_DIR; remove them so retired commands don't sit next
+# to the skills that replaced them. Only Recall-managed symlinks are unlinked —
+# user-authored files in the directory survive, and the dir is removed only
+# when that leaves it empty.
+recall_remove_legacy_slash_commands() {
+  local dir="$CLAUDE_DIR/commands/Recall"
+  local legacy="$CLAUDE_DIR/commands/recall"
+
+  if [[ -d "$dir" ]]; then
+    local f
+    for f in "$dir"/*.md; do
+      [[ -e "$f" || -L "$f" ]] || continue
+      recall_unlink_if_managed "$f"
+    done
+    rmdir "$dir" 2>/dev/null || true
+    [[ -d "$dir" ]] || log_info "Removed legacy slash commands at $dir"
+  fi
+
+  # -ef (same device+inode), not a string compare: on case-insensitive macOS
+  # filesystems "commands/recall" IS "commands/Recall", so only remove the
+  # lowercase dir when it's genuinely a distinct directory.
+  if [[ -d "$legacy" ]] && ! [[ "$legacy" -ef "$dir" ]]; then
+    rm -rf "$legacy"
+    log_info "Removed legacy lowercase slash commands at $legacy"
+  fi
+
+  # Command canonicals under $RECALL_CLAUDE_COMMANDS_DIR are no longer shipped.
+  if [[ -d "$RECALL_CLAUDE_COMMANDS_DIR" ]]; then
+    rm -rf "$RECALL_CLAUDE_COMMANDS_DIR"
+  fi
+}
+
 # ── Agent Skills ─────────────────────────────────────────────────────────────
 #
 # Recall ships Agent Skills (SKILL.md, one per skill directory) under
@@ -1213,8 +1249,9 @@ _recall_link_skills_to() {
   done
 }
 
-# Claude Code skills — core platform, installed unconditionally (mirrors how
-# slash commands are always installed regardless of CLAUDE_CODE_DETECTED).
+# Claude Code skills — core platform, installed unconditionally regardless of
+# CLAUDE_CODE_DETECTED. Skills are the single command surface (#228); the old
+# /Recall:* slash commands are gone.
 recall_install_claude_skills() {
   _recall_copy_skill_files
   _recall_link_skills_to "$CLAUDE_DIR/skills"
@@ -1249,7 +1286,7 @@ recall_install_omp_platform() {
 #
 # Coverage:
 #   - Each hook symlink (Recall*.ts → ~/.agents/Recall/shared/hooks/)
-#   - Each slash-command symlink (discovered from canonical dir)
+#   - Each agent-skill symlink (discovered from canonical dir)
 #   - The Claude Code Recall_GUIDE.md symlink
 recall_verify_install() {
   local missing=()
@@ -1286,20 +1323,8 @@ recall_verify_install() {
     _check_symlink "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
   fi
 
-  # Slash commands — derived from the canonical dir so we adapt to whatever
-  # commands ship in this release.
-  if [[ -d "$RECALL_CLAUDE_COMMANDS_DIR" ]]; then
-    local cmdfile
-    for cmdfile in "$RECALL_CLAUDE_COMMANDS_DIR"/*.md; do
-      [[ -f "$cmdfile" ]] || continue
-      local base
-      base="$(basename "$cmdfile")"
-      _check_symlink "$CLAUDE_DIR/commands/Recall/$base" "$cmdfile"
-    done
-  fi
-
-  # Agent Skills — derived from the canonical dir, same adapt-to-release logic
-  # as slash commands above.
+  # Agent Skills — derived from the canonical dir so we adapt to whatever
+  # skills ship in this release.
   if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]]; then
     local skill_dir skill_name skillfile base
     for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
@@ -2332,7 +2357,7 @@ recall_install_pi_platform() {
 
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────
 #
-# Copies hooks/, hooks/lib/, commands/Recall/, agent-skills/, FOR_CLAUDE.md →
+# Copies hooks/, hooks/lib/, agent-skills/, FOR_CLAUDE.md →
 # Recall_GUIDE.md, and extract_prompt.md (with drift preservation). Called by
 # install.sh Step 7+8b and update.sh Step 7 to keep runtime artifacts in sync
 # with the source tree.
@@ -2349,30 +2374,9 @@ recall_copy_runtime_files() {
     log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
   fi
 
-  # Slash commands: canonicals under $RECALL_CLAUDE_COMMANDS_DIR, per-file
-  # symlinks at $CLAUDE_DIR/commands/Recall/.
-  local commands_src="$RECALL_REPO_DIR/commands/Recall"
-  local commands_dest="$CLAUDE_DIR/commands/Recall"
-  local commands_legacy="$CLAUDE_DIR/commands/recall"
-  if [[ -d "$commands_src" ]]; then
-    mkdir -p "$commands_dest"
-    local cmdfile
-    for cmdfile in "$commands_src"/*.md; do
-      [[ -f "$cmdfile" ]] || continue
-      local base
-      base="$(basename "$cmdfile")"
-      recall_copy_canonical "$cmdfile" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
-      recall_link "$commands_dest/$base" "$RECALL_CLAUDE_COMMANDS_DIR/$base"
-    done
-    # -ef (same device+inode), not a string compare — see install.sh's matching
-    # block for why: on case-insensitive macOS filesystems "commands/recall"
-    # and "commands/Recall" are the same directory on disk.
-    if [[ -d "$commands_legacy" ]] && ! [[ "$commands_legacy" -ef "$commands_dest" ]]; then
-      rm -rf "$commands_legacy"
-      log_info "Removed legacy lowercase slash commands at $commands_legacy"
-    fi
-    log_success "Installed Recall: slash commands to $commands_dest"
-  fi
+  # Slash commands migrated to Agent Skills (#228) — clean up what older
+  # releases installed so retired /Recall:* commands don't linger.
+  recall_remove_legacy_slash_commands
 
   # Agent Skills: canonicals under $RECALL_SHARED_SKILLS_DIR/<name>/, per-file
   # symlinks at $CLAUDE_DIR/skills/<name>/.
