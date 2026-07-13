@@ -150,9 +150,10 @@ interface SemanticHit {
 
 type SemanticSearchPath = (db: Database, queryVec: number[]) => SemanticHit[];
 
-/** The brute-force vector scan from hybridSearch (mcp-server.ts lines 124–146):
- *  pull every non-duplicate embedding, decode + score against the query vector,
- *  sort by similarity, keep the top limit*2. Prepares per call, as prod does. */
+/** The brute-force vector scan from hybridSearch (`bruteForceVectorScan` in
+ *  mcp-server.ts): pull every non-duplicate embedding, decode + score against
+ *  the query vector, sort by similarity, keep the top limit*2. Prepares per
+ *  call, as prod does. */
 function vectorScan(db: Database, queryVec: number[]): SemanticHit[] {
   const rows = db
     .prepare(`
@@ -195,7 +196,7 @@ function ftsPath(query: FixtureQuery): void {
   }
 }
 
-/** Full hybridSearch fusion (mcp-server.ts lines 100–219), minus the Ollama
+/** Full hybridSearch fusion (`hybridSearch` in mcp-server.ts), minus the Ollama
  *  embed/availability calls: FTS + semantic hits + RRF + vec-only resolution. */
 function hybridPath(db: Database, query: FixtureQuery, queryVec: number[], semanticPath: SemanticSearchPath = vectorScan): void {
   const ftsResults = search(query.text, { project: query.project, limit: LIMIT * 2 });

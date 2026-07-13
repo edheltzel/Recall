@@ -87,6 +87,16 @@ import { detectThreats, summarizeThreats } from "./lib/threat-detect.js";
 import type { Provenance } from "./types/index.js";
 import { existsSync } from "fs";
 
+/**
+ * Which semantic backend RAN for this query (#217 design ruling):
+ * - "knn"        — the sqlite-vec KNN index executed the semantic search.
+ * - "bruteforce" — the JS cosine scan executed it (extension absent, or the
+ *                  KNN tier failed and the fallback ran).
+ * - "none"       — the semantic tier never executed (embedding service
+ *                  unavailable, or the query embed failed).
+ * The label reports execution, not hit count: a backend that ran and found
+ * nothing still reports its name.
+ */
 export type SemanticBackend = "none" | "knn" | "bruteforce";
 
 type VectorSearchHit = {
@@ -157,10 +167,10 @@ function vectorSearch(
 		}
 	}
 	const hits = bruteForceVectorScan(db, queryEmbedding, limit);
-	return {
-		hits,
-		semanticBackend: hits.length > 0 ? "bruteforce" : "none",
-	};
+	// "Which backend ran" semantics (#217 ruling): the scan executed, so report
+	// "bruteforce" even on zero hits — "none" is reserved for the semantic tier
+	// never executing at all.
+	return { hits, semanticBackend: "bruteforce" };
 }
 
 export function formatHybridModeNote(
@@ -226,7 +236,11 @@ export async function hybridSearch(
 			semanticBackend = vectorOutcome.semanticBackend;
 		}
 	} catch {
-		// Embedding service unavailable - continue with FTS only
+		// Embedding service unavailable or the query embed failed — continue with
+		// FTS only. Reset the flag (it may have been set optimistically before a
+		// stale-liveness embed() threw): for THIS query, embeddings were not
+		// available, and the mode note must not report hybrid (#224 review).
+		embeddingsAvailable = false;
 	}
 
 	// 3. Apply RRF fusion if we have both

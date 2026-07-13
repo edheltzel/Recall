@@ -14,11 +14,22 @@ note in the 0.9.0 entry.
 
 ### Added
 
-- **Hybrid search reports which semantic backend served the query** (#217).
-  `memory_hybrid_search` MCP output now carries
-  `semanticBackend: "knn" | "bruteforce" | "none"` so indexed sqlite-vec KNN
-  search is distinguishable from the brute-force fallback, and Suite F emits
-  indexed vector/hybrid latency metrics with KNN-vs-bruteforce counters.
+- **Hybrid search reports which semantic backend ran for the query** (#217).
+  The `memory_hybrid_search` mode note now reports
+  `semanticBackend: "knn" | "bruteforce" | "none"` (prose note, not a
+  structured field) so indexed sqlite-vec KNN search is distinguishable from
+  the brute-force fallback. The label reports execution, not hit count:
+  `"none"` means the semantic tier never executed (service down or the query
+  embed failed). Suite F emits indexed vector/hybrid latency metrics
+  (`vec_index_latency_*`, `hybrid_index_latency_*`) alongside the brute-force
+  baselines when sqlite-vec is available.
+- **`embeddingsAvailable` on the FTS-only fallback path now reports the live
+  liveness result instead of a hard-coded `false`** (#217). A reachable
+  embedding service with zero semantic hits (e.g. a fresh DB before backfill)
+  now truthfully reports hybrid mode; if the query embed itself fails inside
+  the 30s stale-liveness window, the flag resets to `false` for that query.
+  `context_for_agent`'s "Search Mode" label derives from this field and
+  follows.
 
 ### Changed
 
