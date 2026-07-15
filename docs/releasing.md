@@ -8,19 +8,19 @@ these steps.
 
 ## Pre-flight: agent context files
 
-Before tagging, confirm `CLAUDE.md` is still the one-line `@AGENTS.md` shim and
-has not been regenerated into a full duplicate:
+Before tagging, confirm `CLAUDE.md` is still a symlink to `AGENTS.md` and has
+not been regenerated into a full duplicate:
 
 ```bash
-# Should print the @AGENTS.md import (and the HTML comment) — nothing else.
-cat CLAUDE.md
+# Should print: CLAUDE.md -> AGENTS.md
+ls -l CLAUDE.md
 ```
 
-`AGENTS.md` is the canonical agent guide; `CLAUDE.md` only `@`-imports it so
+`AGENTS.md` is the canonical agent guide; `CLAUDE.md` is a symlink to it so
 Claude Code auto-loads it. **Never run `/init` in this repo** — it rewrites
 `CLAUDE.md` from scratch and reintroduces the duplication. If `CLAUDE.md` has
-drifted, restore the shim and fold any new content back into `AGENTS.md` before
-releasing.
+drifted into a regular file, restore it with `ln -sf AGENTS.md CLAUDE.md` and
+fold any new content back into `AGENTS.md` before releasing.
 
 ## Source of truth: `CHANGELOG.md`
 
