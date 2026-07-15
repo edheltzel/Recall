@@ -12,6 +12,72 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-07-15 — "the tier that wasn't there"
+
+Patch release: every change restores behavior that was already promised and
+silently broken. No new commands, flags, or MCP tools; no config change, no
+migration, nothing renamed or removed.
+
+### Fixed
+
+- **The embedding model is provisioned by the lifecycle again** (#240). The
+  default model swapped `nomic-embed-text`/768 → `qwen3-embedding:0.6b`/1024
+  (#107/#160, 2026-06-22), but **no install or update script ever pulled it**.
+  Every install that updated past that point without manually running
+  `ollama pull` silently lost semantic search: `embeddings` stayed at 0,
+  `memory_hybrid_search` degraded to keyword-only, and natural-language recall
+  returned "No results found" for memories the database was holding. Found in
+  the wild 23 days later. `install.sh` (self-check) and `update.sh`
+  (`step_verify`) now call the shared `recall_provision_embedding_model`, which
+  pulls the model when Ollama is reachable and prints the exact remediation when
+  it isn't. The model name is **read from `src/lib/embeddings.ts`, never
+  hardcoded in bash** — a duplicated constant is precisely how the last swap
+  drifted out of sync. Embeddings stay **optional**: no Ollama means an
+  informational line and a clean exit, never a failed install.
+- **Search scores are no longer rendered as percentages** (#240). The `score`
+  field was polymorphic — raw FTS5 `bm25()` rank on the FTS-only path (negative,
+  unbounded) and RRF on the fused path (0..~0.033) — while one formatter rendered
+  both as `(score * 100).toFixed(1) + '%'`. That printed real output like
+  `-1121.0%`, and later a meaningless `1.6%` against a 3.3% ceiling. The FTS-only
+  path now runs through `reciprocalRankFusion` so `score` carries one unit
+  everywhere (same ordering, honest unit), and results render as `rrf=0.0328`.
+  RRF is a relative ranking signal, comparable only within a single result set —
+  the `%` implied a confidence it never carried.
+- **`memory_hybrid_search` no longer hand-copies its result formatter.** It
+  duplicated `formatHybridResults`, so the score bug existed in two places and
+  had to be fixed twice. One definition now, per the DRY rule.
+- **CI: the `CLAUDE.md` contract matches reality** (#244). `CLAUDE.md` became a
+  symlink to `AGENTS.md`, but the contract test and docs still asserted the old
+  one-line `@AGENTS.md` shim, leaving `main` red. The test now asserts the
+  **link** rather than the content — a symlink satisfies "no duplicated content"
+  by construction — plus a new guard for the symlink's failure mode on checkouts
+  with `core.symlinks=false`, where git materializes `CLAUDE.md` as a plain file
+  containing the literal string `AGENTS.md` and Claude Code would silently load
+  that as the entire guide. `docs/releasing.md` pre-flight is now
+  `ls -l CLAUDE.md`; the documented `cat CLAUDE.md` check would have failed on
+  every release from here on.
+
+### Changed
+
+- **MCP hybrid-search result lines now read `rrf=0.0328 [VEC] [decisions#42]`
+  instead of `83.0% [VEC] [decisions#42]`.** User-visible, but LLM-facing prose
+  rather than a versioned contract — and the old number was not meaningful.
+  Called out here because it is a behavior change even though it ships in a
+  patch.
+
+### Known issues
+
+- `recall repair --execute` embeds rows but skips both post-embedding steps that
+  `recall embed backfill` performs: it does not rebuild the vec index (search
+  then silently runs `bruteforce` instead of `knn`) and does not stamp the
+  embedding marker (the MCP server then advises a full `rebackfill` — ~32 minutes
+  on 15k rows — to fix what is a two-row write). Until fixed, follow
+  `repair --execute` with `recall embed reindex`. Tracked in #241.
+- `recall doctor` has no vec-tier checks, so a dead or empty semantic tier is
+  invisible to it. Tracked in #226.
+- 10 lifecycle tests fail inside any git worktree and pass on a normal checkout.
+  Tracked in #243.
+
 ## [0.9.3] — 2026-07-13 — "one namespace"
 
 ### Changed
