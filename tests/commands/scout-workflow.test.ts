@@ -11,11 +11,11 @@
 //   3. DRY: the four platform guides reference the canonical block and do NOT
 //      hand-copy its body (per the MANDATORY DRY rule in CLAUDE.md/AGENTS.md).
 //   4. The artifacts policy is recorded in canonical AGENTS.md; CLAUDE.md is a
-//      shim that @-imports it.
+//      symlink to it.
 //   5. recall-scout is listed in the user-facing docs (agent-skills, README).
 
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'fs';
+import { readFileSync, lstatSync, readlinkSync } from 'fs';
 import { join } from 'path';
 
 const repoRoot = join(import.meta.dir, '..', '..');
@@ -147,8 +147,8 @@ describe('DRY — guides reference the canonical block, never copy it', () => {
 });
 
 describe('artifacts policy is recorded in the canonical dev guide', () => {
-  // AGENTS.md is the single source of truth; CLAUDE.md is a thin shim that
-  // @-imports it so Claude Code loads it. The policy lives in AGENTS.md only.
+  // AGENTS.md is the single source of truth; CLAUDE.md is a symlink to it so
+  // Claude Code loads it. The policy lives in AGENTS.md only.
   test('AGENTS.md documents the .agents/atlas/artifacts/ policy', () => {
     const body = read('AGENTS.md');
     expect(body).toContain('.agents/atlas/artifacts/');
@@ -156,11 +156,30 @@ describe('artifacts policy is recorded in the canonical dev guide', () => {
     expect(body).toMatch(/\.agents\/atlas\/handoffs\/.*reserved|reserved for session handoff/i);
   });
 
-  test('CLAUDE.md is a shim that @-imports AGENTS.md (no duplicated content)', () => {
+  test('CLAUDE.md is a symlink to AGENTS.md (no duplicated content)', () => {
+    // CLAUDE.md is a SYMLINK to AGENTS.md, not a file containing `@AGENTS.md`.
+    // The contract this test defends is unchanged — "CLAUDE.md must never carry
+    // a second copy of the guide" — but a symlink satisfies it by construction:
+    // there is literally one file, so content can't drift. Assert the LINK, not
+    // the content; reading CLAUDE.md now yields all of AGENTS.md, which is the
+    // point, so any content assertion here would be asserting AGENTS.md twice.
+    const link = lstatSync(join(repoRoot, 'CLAUDE.md'));
+    expect(link.isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(repoRoot, 'CLAUDE.md'))).toBe('AGENTS.md');
+
+    // Resolving it must land on the canonical guide, not a stale copy.
+    expect(read('CLAUDE.md')).toBe(read('AGENTS.md'));
+  });
+
+  // Guards the known cross-platform failure mode of the symlink approach: on a
+  // checkout with core.symlinks=false (common on Windows), git materializes
+  // CLAUDE.md as a PLAIN FILE whose whole content is the string "AGENTS.md" —
+  // and Claude Code would silently load that as the entire guide. The assertion
+  // above fails loudly in that case rather than shipping a broken guide.
+  test('CLAUDE.md did not degrade into a literal-path text file', () => {
     const body = read('CLAUDE.md');
-    expect(body).toMatch(/^@AGENTS\.md\s*$/m);
-    // It must NOT hand-copy the policy — that would reintroduce drift.
-    expect(body).not.toContain('.agents/atlas/artifacts/');
+    expect(body.trim()).not.toBe('AGENTS.md');
+    expect(body).toContain('.agents/atlas/artifacts/');
   });
 });
 

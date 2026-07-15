@@ -1,6 +1,6 @@
 # Recall — Persistent Memory for AI Coding Agents
 
-> **Canonical agent guide.** This is the single source of truth for developing Recall, written to the cross-agent [`AGENTS.md`](https://agents.md) standard. `CLAUDE.md` is a thin shim that `@`-imports this file so Claude Code loads it automatically — do not duplicate content there. See **Agent Context Files** at the bottom.
+> **Canonical agent guide.** This is the single source of truth for developing Recall, written to the cross-agent [`AGENTS.md`](https://agents.md) standard. `CLAUDE.md` is a symlink to this file so Claude Code loads it automatically — do not duplicate content there. See **Agent Context Files** at the bottom.
 
 ## Project Overview
 
@@ -34,7 +34,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`)
 - `assets/` — README banner + VHS demo tapes / gifs
 
-Key root files: `AGENTS.md` (canonical guide), `CLAUDE.md` (shim that `@`-imports it), `CHANGELOG.md`, `FOR_CLAUDE.md` / `FOR_OPENCODE.md` / `FOR_PI.md` (host usage guides), `CONTEXT.md`, `install.sh` / `update.sh` / `uninstall.sh`, `package.json`, `tsconfig.json`.
+Key root files: `AGENTS.md` (canonical guide), `CLAUDE.md` (symlink to it), `CHANGELOG.md`, `FOR_CLAUDE.md` / `FOR_OPENCODE.md` / `FOR_PI.md` (host usage guides), `CONTEXT.md`, `install.sh` / `update.sh` / `uninstall.sh`, `package.json`, `tsconfig.json`.
 
 For the **live source tree** (every file, current symbols, callers), use the **codegraph** index (`codegraph_*` MCP tools / `codegraph_explore`) or `fd` — never an enumerated tree that drifts. `docs/architecture.md` is complementary: it documents the installed/runtime layout under `~/.agents/Recall/`, not the source tree.
 
@@ -102,7 +102,7 @@ Workers run in an isolated worktree (`/ce-worktree`): verify `pwd` is the worktr
 - **Lifecycle scripts**: shared behavior lives in `lib/install-lib.sh` only — never re-implemented across `install.sh` / `update.sh` / `uninstall.sh`.
 - **Prompt / guide / workflow text**: when the same workflow must reach multiple guides (`FOR_CLAUDE.md`, `FOR_PI.md`, `FOR_OPENCODE.md`, `opencode/recall-memory.md`), author the workflow body **once** as a canonical block; each platform guide carries only its platform-specific tool-name mapping plus a reference to that canonical block. Do not hand-copy a full workflow into four files and hope they stay aligned.
 - **Host memory bootstraps**: generated `## MEMORY` sections point to the installed `Recall_GUIDE.md` and live MCP schemas; they never copy tool call syntax and carry `<!-- RECALL_MANAGED_MEMORY -->`. `recall_append_memory_section` is the shared separator-safe append path. `recall_memory_section_mutate` is the single Claude/Pi ownership classifier used by install, update, and uninstall: install/update refresh marked sections and migrate only normalized exact matches of complete legacy-generated bodies; uninstall removes those same owned sections. Unmarked customized/external sections survive. The marker explicitly retains Recall ownership even when the body is edited; remove it before taking external ownership. When `~/.claude/rules/memory.md` contains a Recall-specific marker (`Recall_GUIDE.md` or `recall-memory`), that external rule owns the Claude contract and install/update leave `~/.claude/CLAUDE.md` unchanged. An unrelated memory rule does not suppress Recall configuration.
-- **Agent context files**: this `AGENTS.md` is canonical; `CLAUDE.md` is a shim that imports it. Never copy content into `CLAUDE.md`.
+- **Agent context files**: this `AGENTS.md` is canonical; `CLAUDE.md` is a symlink to it. Never replace that symlink with a copy.
 - **Tests / docs**: assert or document a fact in one place; cross-reference rather than restate it.
 
 Before adding code or content, search for an existing definition and extend it. Code review **must** reject diffs that introduce copy-paste duplication.
@@ -138,10 +138,12 @@ Before adding code or content, search for an existing definition and extend it. 
 
 `AGENTS.md` (this file) is the **single source of truth** for agent guidance. To load it, each host points at it its own way:
 
-- **Claude Code** does not read `AGENTS.md` natively — it auto-loads `CLAUDE.md`. So `CLAUDE.md` is a one-line shim containing `@AGENTS.md`, which Claude Code expands into context at launch (the same way an inlined CLAUDE.md would load). All real content lives here.
+- **Claude Code** does not read `AGENTS.md` natively — it auto-loads `CLAUDE.md`. So `CLAUDE.md` is a **symlink** to `AGENTS.md` (git mode `120000`): Claude Code opens `CLAUDE.md`, git hands it this file, and only one copy ever exists on disk.
 - Other hosts that honor the `AGENTS.md` standard read this file directly.
 
-**Do not run `/init` in this repo.** Claude Code's `/init` regenerates `CLAUDE.md` from scratch, which would overwrite the `@AGENTS.md` shim with a full duplicate copy and silently reintroduce the drift this layout exists to prevent. If `CLAUDE.md` ever ends up with content other than the import line, restore it to the shim and move any new guidance into this file.
+**Do not run `/init` in this repo.** Claude Code's `/init` regenerates `CLAUDE.md` from scratch, which would replace the symlink with a full duplicate copy and silently reintroduce the drift this layout exists to prevent. If `CLAUDE.md` ever becomes a regular file, restore it with `ln -sf AGENTS.md CLAUDE.md` and move any new guidance into this file.
+
+**Known limitation — checkouts without symlink support.** With `core.symlinks=false` (a common Windows default) git materializes `CLAUDE.md` as a plain file whose entire content is the literal string `AGENTS.md` — and Claude Code would load *that* as the guide, silently and with no error. `tests/commands/scout-workflow.test.ts` asserts both that `CLAUDE.md` is a symlink and that it has not degraded into a literal-path file, so this fails loudly in CI instead of shipping a broken guide. It affects only contributors working on Recall; the `CLAUDE.md` that Recall *installs* for users comes from `templates/CLAUDE.md.template` and is unaffected.
 
 
 # DOX framework
