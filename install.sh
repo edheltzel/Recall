@@ -240,6 +240,10 @@ do_install() {
   log_info "Running self-check..."
   local _check_ok=true
 
+  # Provision the embedding model before the self-check reports health (#240).
+  # Optional by design: never flips _check_ok, never aborts the install.
+  recall_provision_embedding_model
+
   # First: verify every expected symlink is in place. This catches the class
   # of failure where an inner loop got interrupted between canonical-copy and
   # symlink creation (we hit this once — canonicals were copied but the

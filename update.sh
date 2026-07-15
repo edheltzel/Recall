@@ -430,6 +430,12 @@ step_verify() {
     exit 1
   fi
 
+  # Provision the embedding model (#240). This is the path that regressed: the
+  # model default swapped in #107/#160 and update.sh never pulled the new one,
+  # so every updated install silently lost semantic search. Optional by design —
+  # never exits non-zero.
+  recall_provision_embedding_model
+
   "$mem_bin" --version
   "$mem_bin" stats 2>/dev/null | head -10 || log_warn "recall stats output non-zero (db may be empty)"
 }

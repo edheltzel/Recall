@@ -46,8 +46,16 @@ export function shouldFallbackToHybrid(
 
 /**
  * Format hybrid results using the same display shape as memory_hybrid_search:
- * `${score}% ${sourceTag} [${table}#${id}] | provenance: ${provenance}` over a
+ * `rrf=${score} ${sourceTag} [${table}#${id}] | provenance: ${provenance}` over a
  * 200-char content preview, blocks joined by `\n\n---\n\n`.
+ *
+ * `score` is a Reciprocal Rank Fusion score, NOT a percentage (#240). RRF sums
+ * 1/(60+rank) per list, so it tops out near 0.033 for a rank-1-in-both-lists hit
+ * and has no upper bound of 1. Rendering it as `${score * 100}%` implied a
+ * confidence it never carried — and on the FTS-only path, where the field used to
+ * hold a raw negative bm25 rank, it printed impossibilities like "-1121.0%".
+ * It is a relative ranking signal: comparable within one result set, meaningless
+ * as an absolute. Labelled `rrf=` so it can never be misread as confidence.
  */
 export function formatHybridResults(results: HybridSearchResult[]): string {
 	return results
@@ -60,11 +68,11 @@ export function formatHybridResults(results: HybridSearchResult[]): string {
 						: "[FTS]";
 			const preview =
 				r.content.length > 200 ? r.content.slice(0, 200) + "..." : r.content;
-			const score = (r.score * 100).toFixed(1);
+			const score = r.score.toFixed(4);
 			// Shared provenanceLabel (ADR-0001): NULL is reported as "unknown",
 			// never guessed. Single-sourced in lib/provenance.ts.
 			const provenance = provenanceLabel(r.provenance);
-			return `${score}% ${sourceTag} [${r.table}#${r.id}] | ${provenance}\n${preview}`;
+			return `rrf=${score} ${sourceTag} [${r.table}#${r.id}] | ${provenance}\n${preview}`;
 		})
 		.join("\n\n---\n\n");
 }

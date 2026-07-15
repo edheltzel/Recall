@@ -2544,3 +2544,63 @@ recall_link_global() {
   log_error "  ls -la ~/.bun/bin/recall ~/.bun/bin/recall-mcp"
   return 1
 }
+
+# ─── Embedding model provisioning (#240) ─────────────────────────────────────
+# Recall's semantic tier needs a local Ollama embedding model. Before this,
+# nothing in the install/update lifecycle provisioned it: the default model was
+# swapped (nomic-embed-text/768 → qwen3-embedding:0.6b/1024, #107/#160) and every
+# existing install silently lost semantic search — hybrid search degraded to
+# keyword-only with no FAIL anywhere. See #240.
+#
+# 🔒 Respects the Ed-locked OPTIONAL invariant (src/lib/embedding-marker.ts):
+# embeddings stay optional. No Ollama → informational, never an error, never a
+# non-zero exit. This function reports and repairs; it never gates the install.
+#
+# DRY: the model name is READ FROM src/lib/embeddings.ts, never hardcoded here.
+# Hardcoding it in bash is precisely how the last swap drifted out of sync — a
+# duplicated constant is what created #240 in the first place.
+
+# Echo the embedding model the current build expects. Empty on any failure.
+recall_expected_embedding_model() {
+  bun -e 'import("./src/lib/embeddings.ts").then(m => console.log(m.EMBEDDING_MODEL)).catch(() => process.exit(1))' \
+    2>/dev/null | tr -d '[:space:]'
+}
+
+# Ensure the expected embedding model is present. Best-effort, never fatal.
+recall_provision_embedding_model() {
+  local model
+  model="$(cd "$RECALL_REPO_DIR" && recall_expected_embedding_model)"
+
+  if [[ -z "$model" ]]; then
+    log_warn "Could not determine the expected embedding model — skipping semantic-tier check"
+    return 0
+  fi
+
+  if ! command -v ollama >/dev/null 2>&1; then
+    log_info "Ollama not installed — semantic search stays disabled (optional; keyword search is unaffected)"
+    log_info "  To enable later: install Ollama, then 'ollama pull $model' and 'recall embed backfill'"
+    return 0
+  fi
+
+  if ! curl -sf -m 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+    log_warn "Ollama installed but not running — semantic search is degraded to keyword-only"
+    log_warn "  Start it: 'brew services start ollama' (macOS) or 'ollama serve'"
+    log_warn "  Then:     'ollama pull $model' && 'recall embed backfill' && 'recall embed reindex'"
+    return 0
+  fi
+
+  if ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qxF "$model"; then
+    log_success "Embedding model present: $model"
+    return 0
+  fi
+
+  log_info "Embedding model '$model' missing — pulling it (required for semantic search)..."
+  if ollama pull "$model" >/dev/null 2>&1; then
+    log_success "Pulled embedding model: $model"
+    log_info "  Existing records still need embeddings: 'recall embed backfill' && 'recall embed reindex'"
+  else
+    log_warn "Failed to pull '$model' — semantic search stays degraded to keyword-only"
+    log_warn "  Retry manually: ollama pull $model"
+  fi
+  return 0
+}

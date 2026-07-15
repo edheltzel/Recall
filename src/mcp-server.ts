@@ -81,6 +81,7 @@ import { notMarkedDuplicateSql } from "./lib/dedup.js";
 import {
 	shouldFallbackToHybrid,
 	buildHybridFallbackOutcome,
+	formatHybridResults,
 } from "./lib/search-fallback.js";
 import { provenanceLabel } from "./lib/provenance.js";
 import { detectThreats, summarizeThreats } from "./lib/threat-detect.js";
@@ -345,13 +346,25 @@ export async function hybridSearch(
 		return { results, embeddingsAvailable, semanticBackend };
 	}
 
-	// FTS only fallback
+	// FTS only fallback. Run the single ranked list through RRF so `score` carries
+	// the SAME unit as the fused path above (#240). Raw FTS5 bm25 rank is negative
+	// and unbounded; emitting it into the same `score` field the fused path fills
+	// with RRF made one field mean two incompatible things, and the shared
+	// formatter rendered the mix as nonsense (a real "-1121.0%" was observed).
+	// RRF over one list is just rank-based scoring — same ordering, honest unit.
+	const ftsOnlyFused = reciprocalRankFusion([
+		ftsResults.map((r) => ({
+			id: `${r.table === "loa" ? "loa_entries" : r.table}:${r.id}`,
+		})),
+	]);
 	const ftsOnly = ftsResults
 		.map((r) => ({
 			table: r.table,
 			id: r.id,
 			content: r.content,
-			score: r.rank || 0,
+			score:
+				ftsOnlyFused.get(`${r.table === "loa" ? "loa_entries" : r.table}:${r.id}`) ??
+				0,
 			source: "fts" as const,
 			provenance: r.provenance ?? null,
 		}))
@@ -516,22 +529,10 @@ server.tool(
 				semanticBackend,
 			);
 
-			const formatted = results
-				.map((r) => {
-					const sourceTag =
-						r.source === "both"
-							? "[FTS+VEC]"
-							: r.source === "vec"
-								? "[VEC]"
-								: "[FTS]";
-					const preview =
-						r.content.length > 200
-							? r.content.slice(0, 200) + "..."
-							: r.content;
-					const score = (r.score * 100).toFixed(1);
-					return `${score}% ${sourceTag} [${r.table}#${r.id}] | ${provenanceLabel(r.provenance)}\n${preview}`;
-				})
-				.join("\n\n---\n\n");
+			// Single-sourced display shape (#240): this was a hand-copied duplicate
+			// of formatHybridResults, so the score-unit bug existed in two places
+			// and had to be fixed twice. One definition now.
+			const formatted = formatHybridResults(results);
 
 			return {
 				content: [

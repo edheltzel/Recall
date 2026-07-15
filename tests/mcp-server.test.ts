@@ -457,11 +457,14 @@ describe('hybrid vector-branch provenance (issue #67)', () => {
 // ---------------------------------------------------------------------------
 
 describe('memory_search hybrid fallback (issue #39)', () => {
+  // score is an RRF score, not a confidence (#240). RRF sums 1/(60+rank) per
+  // list, so a rank-1-in-both-lists hit tops out near 0.0328 — 0.83 was never a
+  // value this field could hold.
   const sample: HybridSearchResult = {
     table: 'decisions',
     id: 42,
     content: 'We standardized on bun over npm for all Recall tooling',
-    score: 0.83,
+    score: 0.0328,
     source: 'vec',
     provenance: 'user_authored',
   };
@@ -481,8 +484,8 @@ describe('memory_search hybrid fallback (issue #39)', () => {
     const outcome = buildHybridFallbackOutcome('which package manager', [sample]);
 
     expect(outcome.text).toContain('No exact keyword hits for "which package manager"; showing semantic matches:');
-    // Reuses the memory_hybrid_search display shape: score% [TAG] [table#id] | provenance.
-    expect(outcome.text).toContain('83.0% [VEC] [decisions#42] | provenance: user_authored');
+    // Reuses the memory_hybrid_search display shape: rrf=score [TAG] [table#id] | provenance.
+    expect(outcome.text).toContain('rrf=0.0328 [VEC] [decisions#42] | provenance: user_authored');
     expect(outcome.text).toContain('We standardized on bun over npm');
 
     // Metrics: one honest log line, attributed to the fallback path.
@@ -506,12 +509,27 @@ describe('memory_search hybrid fallback (issue #39)', () => {
       { ...sample, id: 7, source: 'both', provenance: null, content: 'x'.repeat(250) },
     ]);
 
-    expect(formatted).toContain('83.0% [VEC] [decisions#42] | provenance: user_authored');
+    expect(formatted).toContain('rrf=0.0328 [VEC] [decisions#42] | provenance: user_authored');
     // NULL provenance reports as "unknown", never guessed (ADR-0001).
     expect(formatted).toContain('[FTS+VEC] [decisions#7] | provenance: unknown');
     // Long content is truncated to a 200-char preview with an ellipsis.
     expect(formatted).toContain('x'.repeat(200) + '...');
     // Result blocks are separated by the shared divider.
     expect(formatted).toContain('\n\n---\n\n');
+  });
+
+  // Regression (#240): the score field is never rendered as a percentage. It
+  // held raw FTS5 bm25 rank on the FTS-only path — negative and unbounded — and
+  // `(score * 100).toFixed(1) + '%'` printed observed nonsense like "-1121.0%".
+  test('formatHybridResults never renders a score as a percentage', () => {
+    const formatted = formatHybridResults([
+      { ...sample, score: -11.21 },
+      { ...sample, id: 8, score: 0 },
+    ]);
+
+    expect(formatted).not.toContain('%');
+    expect(formatted).not.toContain('-1121.0');
+    expect(formatted).toContain('rrf=-11.2100');
+    expect(formatted).toContain('rrf=0.0000');
   });
 });
