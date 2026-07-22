@@ -76,6 +76,7 @@ describe('recall doctor exit code with a stale marker present', () => {
       env: {
         ...process.env,
         HOME: home,
+        RECALL_HOME: join(home, '.agents', 'Recall'),
         RECALL_DB_PATH: join(home, '.agents', 'Recall', 'recall.db'),
       },
     });

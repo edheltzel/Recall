@@ -212,8 +212,8 @@ export async function applyConsolidation(
 
 // ---------------------------------------------------------------------------
 // Child entrypoint: `bun run consolidate-core.ts` with the plan on stdin.
-// The src CLI spawns this on --execute (CLAUDECODE='' so the nested `claude -p`
-// cascade doesn't recursively fire Stop hooks). Reads { clusters } JSON from
+// The src CLI marks this as nested extraction; each native provider maps that
+// host-neutral signal to any host-specific recursion guard it requires. Reads { clusters } JSON from
 // stdin, runs the real cascade, prints the ConsolidateApplyResult JSON.
 // ---------------------------------------------------------------------------
 

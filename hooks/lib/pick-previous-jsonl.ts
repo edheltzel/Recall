@@ -7,7 +7,7 @@
 
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { encodeProjectDir } from './path-encoding';
+import { encodeProjectDir } from './hosts/claude/path-encoding';
 
 /**
  * Default mtime-guard: a JSONL whose mtime is within this many seconds of

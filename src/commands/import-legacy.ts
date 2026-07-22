@@ -7,8 +7,9 @@ import { getDb } from '../db/connection.js';
 import { createLoaEntry } from '../lib/memory.js';
 import { scrub } from '../lib/write-safety.js';
 import { detectThreats, summarizeThreats } from '../lib/threat-detect.js';
+import { claudePaths } from '../hosts/claude.js';
 
-const DEFAULT_MEMORY_DIR = join(homedir(), '.claude', 'MEMORY');
+const DEFAULT_MEMORY_DIR = claudePaths(homedir()).memory;
 
 interface LegacyExtract {
   date: string;

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pickPreviousJsonl, DEFAULT_MTIME_GUARD_SECONDS } from '../../hooks/lib/pick-previous-jsonl';
-import { encodeProjectDir } from '../../hooks/lib/path-encoding';
+import { encodeProjectDir } from '../../hooks/lib/hosts/claude/path-encoding';
 
 let tmp: string;
 let projectsDir: string;

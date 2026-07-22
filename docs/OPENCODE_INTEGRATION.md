@@ -125,7 +125,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
 import { join } from "path"
 import { homedir } from "os"
 
-const DROP_DIR = join(homedir(), ".claude", "MEMORY", "opencode-sessions")
+const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
+const DROP_DIR = join(RECALL_HOME, "MEMORY", "opencode-sessions")
 const TRACKER_PATH = join(DROP_DIR, ".extracted.json")
 
 // Load persistent dedup tracker from disk
@@ -177,7 +178,7 @@ export const RecallExtract: Plugin = async ({ $ }) => {
 **Why this approach:**
 - `opencode session export` is a **verified, stable CLI command** — not an assumed API
 - `ctx.$` Bun shell is **confirmed in plugin docs** with examples
-- Persistent dedup via JSON file at `~/.claude/MEMORY/opencode-sessions/.extracted.json` — survives plugin restarts
+- Persistent dedup via JSON file at `~/.agents/Recall/MEMORY/opencode-sessions/.extracted.json` — survives plugin restarts
 - Defensive event property access covers all three known shapes: `event.sessionId`, `event.session_id`, `event.properties.sessionId`
 - Drop directory pattern: `RecallBatchExtract.ts` already runs every 30 minutes and can scan this directory
 - No new CLI commands needed — `RecallBatchExtract.ts` reads markdown files the same way it reads JSONL
@@ -360,7 +361,7 @@ Add a `source` column to `sessions` table (the natural place — messages FK to 
 ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code';
 ```
 
-The extraction pipeline tags OpenCode sessions with `source: 'opencode'`. Existing records default to `claude-code`.
+The extraction pipeline tags OpenCode sessions with `source: 'opencode'`. The historical migration preserves `claude-code` on legacy records; fresh host-neutral sessions default to `unknown` when no adapter supplies a source.
 
 **No changes to MCP tools** — they return results from all sources. The `source` field is metadata for provenance, not filtering.
 
@@ -370,7 +371,8 @@ The existing cron job needs one addition: scan the OpenCode drop directory along
 
 ```typescript
 // In RecallBatchExtract.ts — add to the session discovery logic:
-const OPENCODE_DROP_DIR = join(homedir(), ".claude", "MEMORY", "opencode-sessions")
+const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
+const OPENCODE_DROP_DIR = join(RECALL_HOME, "MEMORY", "opencode-sessions")
 
 function findOpenCodeSessions(): string[] {
   if (!existsSync(OPENCODE_DROP_DIR)) return []
@@ -421,7 +423,7 @@ OpenCode prefixes MCP tools with the server name + underscore:
 - `RecallExtract.ts` plugin using `opencode session export` CLI via `$` shell
 - Persistent dedup tracker (`.extracted.json`)
 - Defensive `session.idle` event property access
-- Drop directory at `~/.claude/MEMORY/opencode-sessions/`
+- Drop directory at `~/.agents/Recall/MEMORY/opencode-sessions/`
 - `RecallBatchExtract.ts` updated to scan drop directory
 
 ### Phase 3: Context Injection

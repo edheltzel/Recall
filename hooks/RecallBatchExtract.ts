@@ -33,8 +33,9 @@ import { getDbPath } from './lib/sqlite-writers';
 
 const CLAUDE_DIR = join(process.env.HOME!, '.claude');
 const PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
-const MEMORY_DIR = join(CLAUDE_DIR, 'MEMORY');
-const SESSION_EXTRACT = join(CLAUDE_DIR, 'hooks', 'RecallExtract.ts');
+const RECALL_HOME = process.env.RECALL_HOME || join(process.env.HOME!, '.agents', 'Recall');
+const MEMORY_DIR = join(RECALL_HOME, 'MEMORY');
+const SESSION_EXTRACT = join(RECALL_HOME, 'shared', 'hooks', 'RecallExtract.ts');
 
 // OpenCode drop directory — plugin exports markdown sessions here
 const OPENCODE_DROP_DIR = join(MEMORY_DIR, 'opencode-sessions');

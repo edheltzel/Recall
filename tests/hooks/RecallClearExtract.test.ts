@@ -20,7 +20,7 @@ import {
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
-import { encodeProjectDir } from '../../hooks/lib/path-encoding';
+import { encodeProjectDir } from '../../hooks/lib/hosts/claude/path-encoding';
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const HOOK_SOURCE = join(REPO_ROOT, 'hooks', 'RecallClearExtract.ts');

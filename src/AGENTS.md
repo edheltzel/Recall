@@ -11,7 +11,7 @@ TypeScript source for the `recall` CLI (Commander), the `recall-mcp` MCP server,
 - `index.ts` — CLI entry (Commander)
 - `mcp-server.ts` — MCP server entry (`@modelcontextprotocol/sdk`)
 - `version.ts` — version sourced from `package.json`
-- `commands/` — CLI subcommands · `db/` — connection + schema/FTS5 · `lib/` — core memory, embeddings, import, project utils, lifecycle delegation (`lifecycle.ts` → install.sh/update.sh/uninstall.sh) · `types/` — shared types
+- `commands/` — CLI subcommands · `db/` — connection + schema/FTS5 · `lib/` — host-neutral core memory, embeddings, import, project utils, lifecycle delegation (`lifecycle.ts` → install.sh/update.sh/uninstall.sh) · `hosts/` — native host paths, config schemas, transcript adapters, and native command discovery · `providers/` — external model-provider adapters · `types/` — shared types
 
 Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `src/`) and build output (`dist/`, generated).
 
@@ -21,6 +21,9 @@ Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `
 - Build is tsup → ESM with `--external bun:sqlite`; the build step rewrites the `node` shebang to `bun`.
 - DB lives at `~/.agents/Recall/recall.db` (override `RECALL_DB_PATH`; legacy `MEM_DB_PATH` accepted). WAL mode. FTS5 with sync triggers — keep table defs and triggers in `db/schema.ts` aligned.
 - DB-path resolution is shared with hooks via `hooks/lib/db-path.ts` so CLI and hooks agree — import that resolver, never fork the logic.
+- Recall-owned mutable state and logs resolve through `lib/runtime-paths.ts` (`RECALL_HOME`, default `~/.agents/Recall`) — never place generic runtime state under a native host's config directory.
+- Native host paths, transcript formats, config ownership, command lookup, and authentication assumptions belong under `hosts/`; host-neutral commands and MCP handlers depend on their interfaces rather than branching on host details.
+- External text-generation commands belong behind `providers/text-generation.ts`; callers must not shell a native model CLI directly.
 - All project-path handling goes through `lib/project.ts` (`validateDirPath` injection guard) — never assemble project paths ad hoc.
 - Explicit add paths (`recall add` CLI + `memory_add` MCP) redact secrets at the choke point: `addDecision`/`addLearning`/`addBreadcrumb` in `lib/memory.ts` `scrub()` every free-text field before insert and report redacted kinds via the optional `redactionsOut` arg. A new explicit write path must route through these — never INSERT user free-text directly.
 

@@ -4,6 +4,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runPath } from '../../src/commands/path';
+import { homedir } from 'os';
+import { join } from 'path';
 
 let dbPath: string;
 let originalLog: typeof console.log;
@@ -42,7 +44,7 @@ describe('recall path', () => {
       symlinks: Array<{ name: string }>;
     };
     expect(parsed.db.path).toBe(dbPath);
-    expect(parsed.install_root).toMatch(/\.agents\/Recall$/);
+    expect(parsed.install_root).toBe(process.env.RECALL_HOME || join(homedir(), '.agents', 'Recall'));
     expect(Array.isArray(parsed.symlinks)).toBe(true);
     expect(parsed.symlinks.length).toBeGreaterThan(0);
   });

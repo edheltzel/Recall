@@ -23,6 +23,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { scrub } from '../lib/write-safety.js';
 import { defaultBackupDir, timestampSlug, writeNonClobbering } from '../lib/export.js';
+import { claudePaths } from '../hosts/claude.js';
 
 export interface ScrubArchiveOptions {
   dryRun?: boolean;
@@ -183,8 +184,9 @@ function transcriptSurfaces(sessionsDir: string): Surface[] {
 }
 
 export function runScrubArchive(options: ScrubArchiveOptions = {}): void {
-  const memoryDir = options.memoryDir ?? join(homedir(), '.claude', 'MEMORY');
-  const sessionsDir = options.sessionsDir ?? join(homedir(), '.claude', 'sessions');
+  const nativePaths = claudePaths(homedir());
+  const memoryDir = options.memoryDir ?? nativePaths.memory;
+  const sessionsDir = options.sessionsDir ?? nativePaths.sessions;
   const backupDir = options.backupDir ?? defaultBackupDir();
   const now = options.now ?? new Date();
 

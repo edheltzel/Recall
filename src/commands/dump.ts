@@ -1,33 +1,16 @@
 // recall dump command - Flush current session to DB + capture LoA
 // Core functions are exported for use by the MCP server's memory_dump tool.
 
-import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
-import { join, basename, dirname } from 'path';
-import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
 import { createSession, sessionExists, addMessagesBatch, createLoaEntry } from '../lib/memory.js';
-import { extractProjectFromPath } from '../lib/project.js';
 import { chunked } from '../lib/chunk.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
-import type { Message } from '../types/index.js';
+import { discoverCurrentSession } from '../hosts/session-sources.js';
+import type { ParsedSession, SessionSource } from '../hosts/session-source.js';
 
-// ============ Constants ============
-
-const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
-const OPENCODE_DROP_DIR = join(homedir(), '.claude', 'MEMORY', 'opencode-sessions');
-const PI_DROP_DIR = join(homedir(), '.claude', 'MEMORY', 'pi-sessions');
-// ============ Types ============
-
-export type SessionSource = 'claude' | 'opencode' | 'pi';
-
-export interface ParsedSession {
-  source: SessionSource;
-  sessionId: string;
-  project: string;
-  messages: Omit<Message, 'id'>[];
-  filePath: string;
-}
+export type { ParsedSession, SessionSource } from '../hosts/session-source.js';
+export { parseMarkdownDrop } from '../hosts/markdown-session-source.js';
 
 interface DumpOptions {
   project?: string;
@@ -35,232 +18,8 @@ interface DumpOptions {
   tags?: string;
   limit?: number;
   skipFabric?: boolean;
-}
-
-// ============ Session Finding ============
-
-/**
- * Find the most recently modified JSONL file (Claude Code sessions)
- */
-function findCurrentSessionFile(): string | null {
-  if (!existsSync(CLAUDE_PROJECTS_DIR)) return null;
-
-  let mostRecentFile: string | null = null;
-  let mostRecentTime = 0;
-
-  const projectDirs = readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => d.name);
-
-  for (const projectDir of projectDirs) {
-    const projectPath = join(CLAUDE_PROJECTS_DIR, projectDir);
-    const jsonlFiles = readdirSync(projectPath, { withFileTypes: true })
-      .filter(f => f.isFile() && f.name.endsWith('.jsonl'))
-      .map(f => join(projectPath, f.name));
-
-    for (const file of jsonlFiles) {
-      const stat = statSync(file);
-      if (stat.mtimeMs > mostRecentTime) {
-        mostRecentTime = stat.mtimeMs;
-        mostRecentFile = file;
-      }
-    }
-  }
-
-  return mostRecentFile;
-}
-
-/**
- * Find the most recently modified markdown drop file in a directory
- */
-function findLatestDropFile(dropDir: string): string | null {
-  if (!existsSync(dropDir)) return null;
-
-  let latest: string | null = null;
-  let latestTime = 0;
-
-  for (const f of readdirSync(dropDir)) {
-    if (!f.endsWith('.md') || f.startsWith('.')) continue;
-    const full = join(dropDir, f);
-    const mt = statSync(full).mtimeMs;
-    if (mt > latestTime) {
-      latestTime = mt;
-      latest = full;
-    }
-  }
-
-  return latest;
-}
-
-// ============ Session Parsing ============
-
-/**
- * Parse a Claude Code JSONL session file
- */
-function parseSessionFile(filePath: string): { sessionId: string; project: string; messages: Omit<Message, 'id'>[] } | null {
-  const content = readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n').filter(l => l.trim());
-  if (lines.length === 0) return null;
-
-  const messages: Omit<Message, 'id'>[] = [];
-  let sessionId: string | null = null;
-  let project: string | null = null;
-
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed.type !== 'user' && parsed.type !== 'assistant') continue;
-      if (!sessionId && parsed.sessionId) sessionId = parsed.sessionId;
-
-      if (parsed.message?.content) {
-        let msgContent: string;
-        if (typeof parsed.message.content === 'string') {
-          msgContent = parsed.message.content;
-        } else if (Array.isArray(parsed.message.content)) {
-          msgContent = parsed.message.content
-            .filter((block: any) => block.type === 'text' && block.text)
-            .map((block: any) => block.text)
-            .join('\n');
-        } else {
-          continue;
-        }
-
-        if (msgContent.trim()) {
-          messages.push({
-            session_id: parsed.sessionId || sessionId || 'unknown',
-            timestamp: parsed.timestamp || new Date().toISOString(),
-            role: parsed.type as 'user' | 'assistant',
-            content: msgContent,
-            project: project || undefined
-          });
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  const projectDir = basename(dirname(filePath));
-  project = extractProjectFromPath(projectDir);
-  for (const msg of messages) {
-    msg.project = project;
-  }
-
-  if (!sessionId) sessionId = basename(filePath, '.jsonl');
-
-  return { sessionId, project, messages };
-}
-
-/**
- * Parse a markdown drop file (OpenCode or Pi format) into messages.
- * Supports [ROLE]: content and ## Role heading formats.
- */
-export function parseMarkdownDrop(filePath: string): { sessionId: string; messages: Omit<Message, 'id'>[] } | null {
-  const content = readFileSync(filePath, 'utf-8');
-  if (!content.trim()) return null;
-
-  const sessionId = basename(filePath, '.md');
-  const messages: Omit<Message, 'id'>[] = [];
-
-  // Split on role markers: [USER]: or [ASSISTANT]:, optionally with timestamps
-  const rolePattern = /\[(USER|ASSISTANT)(?:\s+[\d:]+)?\]:\s*/gi;
-  const parts: Array<{ role: 'user' | 'assistant'; startIdx: number }> = [];
-
-  let match: RegExpExecArray | null;
-  while ((match = rolePattern.exec(content)) !== null) {
-    parts.push({
-      role: match[1].toLowerCase() as 'user' | 'assistant',
-      startIdx: match.index + match[0].length
-    });
-  }
-
-  // Fallback: try markdown heading format (## User / ## Assistant)
-  if (parts.length === 0) {
-    const headingPattern = /^##?\s*(User|Assistant|Human)\s*$/gim;
-    while ((match = headingPattern.exec(content)) !== null) {
-      const rawRole = match[1].toLowerCase();
-      parts.push({
-        role: (rawRole === 'human' ? 'user' : rawRole) as 'user' | 'assistant',
-        startIdx: match.index + match[0].length
-      });
-    }
-  }
-
-  if (parts.length === 0) return null;
-
-  const now = new Date().toISOString();
-  for (let i = 0; i < parts.length; i++) {
-    const start = parts[i].startIdx;
-    // End at next role marker (search backward a bit to exclude the marker prefix)
-    const end = i + 1 < parts.length
-      ? content.lastIndexOf('\n', content.indexOf('[', parts[i + 1].startIdx - 80))
-      : content.length;
-    const text = content.slice(start, end > start ? end : content.length).trim();
-
-    if (text.length > 10) {
-      messages.push({
-        session_id: sessionId,
-        timestamp: now,
-        role: parts[i].role,
-        content: text
-      });
-    }
-  }
-
-  return messages.length > 0 ? { sessionId, messages } : null;
-}
-
-/**
- * Find the current session across all supported agent types.
- * Priority: Claude Code JSONL > OpenCode drops > Pi drops
- */
-export function findCurrentSessionAcrossAgents(): ParsedSession | null {
-  // Try Claude Code first (most common)
-  const claudeFile = findCurrentSessionFile();
-  if (claudeFile) {
-    const parsed = parseSessionFile(claudeFile);
-    if (parsed && parsed.messages.length > 0) {
-      return {
-        source: 'claude',
-        sessionId: parsed.sessionId,
-        project: parsed.project,
-        messages: parsed.messages,
-        filePath: claudeFile
-      };
-    }
-  }
-
-  // Try OpenCode drops
-  const openCodeFile = findLatestDropFile(OPENCODE_DROP_DIR);
-  if (openCodeFile) {
-    const parsed = parseMarkdownDrop(openCodeFile);
-    if (parsed && parsed.messages.length > 0) {
-      return {
-        source: 'opencode',
-        sessionId: parsed.sessionId,
-        project: 'opencode',
-        messages: parsed.messages.map(m => ({ ...m, project: 'opencode' })),
-        filePath: openCodeFile
-      };
-    }
-  }
-
-  // Try Pi drops
-  const piFile = findLatestDropFile(PI_DROP_DIR);
-  if (piFile) {
-    const parsed = parseMarkdownDrop(piFile);
-    if (parsed && parsed.messages.length > 0) {
-      return {
-        source: 'pi',
-        sessionId: parsed.sessionId,
-        project: 'pi',
-        messages: parsed.messages.map(m => ({ ...m, project: 'pi' })),
-        filePath: piFile
-      };
-    }
-  }
-
-  return null;
+  /** Test/internal seam; normal CLI and MCP behavior still attempts LoA embedding. */
+  skipEmbed?: boolean;
 }
 
 // ============ Internal Helpers ============
@@ -360,10 +119,10 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   source: SessionSource;
   error?: string;
 }> {
-  const session = options.session || findCurrentSessionAcrossAgents();
+  const session = options.session || discoverCurrentSession();
 
   if (!session) {
-    return { success: false, sessionId: '', messageCount: 0, source: 'claude', error: 'No session files found' };
+    return { success: false, sessionId: '', messageCount: 0, source: 'mcp', error: 'No session input or supported host session files found' };
   }
 
   if (options.project) {
@@ -384,7 +143,8 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     started_at: timestamps[0],
     ended_at: timestamps[timestamps.length - 1],
     project: options.project || session.project,
-    summary: `Dumped: ${title}`
+    summary: `Dumped: ${title}`,
+    source: session.source,
   });
 
   // Raw conversation capture is verbatim (ADR-0001).
@@ -436,7 +196,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     provenance: 'extracted'
   });
 
-  await autoEmbedLoaEntry(loaId, title, fabricExtract);
+  if (!options.skipEmbed) await autoEmbedLoaEntry(loaId, title, fabricExtract);
 
   return {
     success: true,

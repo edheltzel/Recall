@@ -11,12 +11,12 @@ import {
   readInSessionConfig,
   shouldRun,
   sliceTranscript,
-  eventFromHookInput,
   decideInSession,
   runInSessionExtraction,
   sessionIdFromArgs,
   type InSessionConfig,
 } from '../../hooks/lib/insession';
+import { eventFromClaudeHookInput } from '../../hooks/lib/hosts/claude/lifecycle';
 import {
   ensureSession,
   getSessionProgress,
@@ -129,20 +129,20 @@ describe('shouldRun — cadence / floor / budget', () => {
   });
 });
 
-// ─── eventFromHookInput ──────────────────────────────────────────────────────
+// ─── eventFromClaudeHookInput ────────────────────────────────────────────────
 
-describe('eventFromHookInput', () => {
+describe('eventFromClaudeHookInput', () => {
   test('maps the two registered events to the right counter', () => {
     // Mutation — swap the turn/tool mapping → RED.
-    expect(eventFromHookInput({ hook_event_name: 'UserPromptSubmit' })).toBe('turn');
-    expect(eventFromHookInput({ hook_event_name: 'PostToolUse' })).toBe('tool');
+    expect(eventFromClaudeHookInput({ hook_event_name: 'UserPromptSubmit' })).toBe('turn');
+    expect(eventFromClaudeHookInput({ hook_event_name: 'PostToolUse' })).toBe('tool');
   });
 
   test('falls back to payload shape, and rejects unknown events', () => {
-    expect(eventFromHookInput({ prompt: 'hi' })).toBe('turn');
-    expect(eventFromHookInput({ tool_name: 'Bash' })).toBe('tool');
-    expect(eventFromHookInput({ hook_event_name: 'Stop' })).toBeNull();
-    expect(eventFromHookInput({})).toBeNull();
+    expect(eventFromClaudeHookInput({ prompt: 'hi' })).toBe('turn');
+    expect(eventFromClaudeHookInput({ tool_name: 'Bash' })).toBe('tool');
+    expect(eventFromClaudeHookInput({ hook_event_name: 'Stop' })).toBeNull();
+    expect(eventFromClaudeHookInput({})).toBeNull();
   });
 });
 

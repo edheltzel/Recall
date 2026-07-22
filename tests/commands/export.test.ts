@@ -180,9 +180,11 @@ describe('SQL dump', () => {
     runExport({ format: 'sql', output: file, now: NOW });
     const sql = readFileSync(file, 'utf-8');
 
-    // The dump must never contain the display literal 'unknown' — the schema
-    // CHECK constraint would reject it on restore. NULL is the on-disk truth.
-    expect(sql).not.toContain("'unknown'");
+    // Provenance-bearing INSERTs must never contain the display literal
+    // 'unknown' — their CHECK constraints reject it. A session source may
+    // legitimately be 'unknown' when no host adapter supplied one.
+    const provenanceInserts = sql.split('\n').filter(line => line.startsWith('INSERT') && line.includes('"provenance"'));
+    expect(provenanceInserts.every(line => !line.includes("'unknown'"))).toBe(true);
 
     const restored = new Database(':memory:');
     try {

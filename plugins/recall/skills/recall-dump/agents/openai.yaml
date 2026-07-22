@@ -1,0 +1,5 @@
+interface:
+  display_name: "Recall Dump"
+  short_description: "Explicitly save visible conversation messages"
+policy:
+  allow_implicit_invocation: false

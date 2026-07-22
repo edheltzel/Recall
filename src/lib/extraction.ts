@@ -1,9 +1,9 @@
 // Shared extraction helpers used by CLI commands.
 
-import { execSync } from 'child_process';
 import type { Message } from '../types/index.js';
+import { extractWisdomWithFabric, MAX_FABRIC_INPUT_BYTES } from '../providers/fabric.js';
 
-export const MAX_FABRIC_INPUT_BYTES = 50 * 1024 * 1024;
+export { MAX_FABRIC_INPUT_BYTES };
 
 /**
  * Generate a basic extraction-shaped summary when Haiku/Fabric is unavailable.
@@ -45,16 +45,5 @@ export function formatMessagesForExtraction(messages: Array<Pick<Message, 'role'
  * Run Fabric's extract_wisdom pattern with the configured Haiku model.
  */
 export function runFabricExtract(content: string): string {
-  const inputBytes = Buffer.byteLength(content, 'utf-8');
-  if (inputBytes > MAX_FABRIC_INPUT_BYTES) {
-    throw new Error(`Input too large for Fabric (${(inputBytes / 1024 / 1024).toFixed(1)}MB > 50MB limit). Use --limit to reduce message count.`);
-  }
-
-  const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
-    input: content,
-    encoding: 'utf-8',
-    maxBuffer: MAX_FABRIC_INPUT_BYTES,
-    timeout: 600000
-  });
-  return result.trim();
+  return extractWisdomWithFabric(content);
 }

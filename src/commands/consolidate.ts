@@ -26,6 +26,7 @@ import {
   type ConsolidateTable,
 } from '../lib/consolidate.js';
 import { DEFAULT_AGE_CUTOFF_DAYS, DEFAULT_IMPORTANCE_THRESHOLD } from '../lib/aging.js';
+import { getRecallHome } from '../lib/runtime-paths.js';
 
 export interface ConsolidateOptions {
   execute?: boolean;
@@ -102,7 +103,7 @@ function resolveBunPath(): string {
 
 /** Default apply: spawn the installed hook-side engine and return its JSON. */
 function spawnConsolidateChild(plan: ConsolidatePlan): Promise<ConsolidateApplyResult> {
-  const script = join(process.env.HOME || '', '.claude', 'hooks', 'lib', 'consolidate-core.ts');
+  const script = join(getRecallHome(), 'shared', 'hooks', 'lib', 'consolidate-core.ts');
   if (!existsSync(script)) {
     return Promise.resolve({
       written: 0, demoted: 0, redactions: [], skipped: [],
@@ -111,14 +112,12 @@ function spawnConsolidateChild(plan: ConsolidatePlan): Promise<ConsolidateApplyR
   }
   const payload = JSON.stringify({ clusters: plan.clusters });
   try {
-    // CLAUDECODE='' so the child's nested `claude -p` cascade doesn't recursively
-    // fire Stop hooks (same guard as RecallClearExtract / RecallInSession).
     const out = execSync(`${resolveBunPath()} run ${script}`, {
       input: payload,
       encoding: 'utf-8',
       timeout: 180000,
       maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, CLAUDECODE: '' },
+      env: { ...process.env, RECALL_NESTED_EXTRACTION: '1' },
     });
     return Promise.resolve(JSON.parse(out) as ConsolidateApplyResult);
   } catch (err: any) {

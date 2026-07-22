@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, writeFileSync, copyFileSync, renameSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { claudePaths } from '../hosts/claude.js';
 import { createInterface, type Interface } from 'readline';
 import { detectProject } from '../lib/project.js';
 
@@ -168,7 +169,7 @@ export function resolveOutputPath(
   const envPath = env.RECALL_IDENTITY_PATH;
   if (envPath && envPath.trim()) return envPath.trim();
   if (options.project) return join(process.cwd(), '.atlas-recall', 'identity.md');
-  return join(homedir(), '.claude', 'MEMORY', 'identity.md');
+  return join(claudePaths(homedir()).memory, 'identity.md');
 }
 
 // ───────────────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   cwd TEXT,
   git_branch TEXT,
   model TEXT,
-  source TEXT DEFAULT 'claude-code'
+  source TEXT DEFAULT 'unknown'
 );
 
 -- Messages table: conversation turns (user/assistant)

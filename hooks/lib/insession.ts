@@ -33,6 +33,9 @@ import type { DualWriteResult } from './extraction-parsers';
 import { detectCorrection } from './correction-detector';
 import { scrub } from './write-safety';
 import { writeLearningsBatch } from './sqlite-writers';
+import type { EventKind } from './events';
+
+export type { EventKind } from './events';
 
 // ─── Config (design §3.5 — env vars, no config file) ────────────────────────
 
@@ -217,31 +220,6 @@ export function shouldRun(p: CadenceCounters, c: InSessionConfig): boolean {
   const floorMet = p.turns_seen >= c.minTurns;
   const underBudget = p.runs_this_session < c.maxRuns;
   return cadenceMet && floorMet && underBudget;
-}
-
-// ─── Event mapping ───────────────────────────────────────────────────────────
-
-export type EventKind = 'turn' | 'tool';
-
-interface HookEventInput {
-  hook_event_name?: string;
-  prompt?: unknown;
-  tool_name?: unknown;
-}
-
-/**
- * Map a Claude Code hook payload to a counter kind: UserPromptSubmit → 'turn'
- * (incrementTurns), PostToolUse → 'tool' (incrementTools). Falls back to the
- * event-specific fields (prompt / tool_name) if hook_event_name is absent.
- * Returns null for anything else (the hook then exits without touching the DB).
- */
-export function eventFromHookInput(input: HookEventInput): EventKind | null {
-  const name = input.hook_event_name;
-  if (name === 'UserPromptSubmit') return 'turn';
-  if (name === 'PostToolUse') return 'tool';
-  if (typeof input.prompt === 'string') return 'turn';
-  if (typeof input.tool_name === 'string') return 'tool';
-  return null;
 }
 
 // ─── Window slice (design §3.2) ──────────────────────────────────────────────

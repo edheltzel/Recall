@@ -15,6 +15,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { probeMcpEnv, resolveProbeResult } from '../../src/commands/doctor';
+import type { McpConfigTarget } from '../../src/hosts/types';
 
 const RESOLVED = '/custom/recall/recall.db';
 
@@ -52,8 +53,17 @@ function readEntry(): Record<string, unknown> {
   return cfg.mcpServers['recall-memory'];
 }
 
+function target(path: string): McpConfigTarget {
+  return {
+    host: 'claude',
+    path,
+    envPath: ['mcpServers', 'recall-memory', 'env'],
+    format: 'json',
+  };
+}
+
 function probe() {
-  return probeMcpEnv({ configPaths: [configPath], resolvedDbPath: RESOLVED });
+  return probeMcpEnv({ targets: [target(configPath)], resolvedDbPath: RESOLVED });
 }
 
 // repair() backs files up under the real home (Bun's homedir() ignores $HOME),
@@ -152,7 +162,7 @@ describe('probeMcpEnv', () => {
 
   test('no config files exist → INFO (no crash)', () => {
     const { result, repair } = probeMcpEnv({
-      configPaths: [join(tempDir, 'nope.json'), join(tempDir, 'also-nope.json')],
+      targets: [target(join(tempDir, 'nope.json')), target(join(tempDir, 'also-nope.json'))],
       resolvedDbPath: RESOLVED,
     });
     expect(result.status).toBe('INFO');
@@ -204,7 +214,7 @@ describe('probeMcpEnv', () => {
 
     chmodSync(roDir, 0o500); // creating the temp sibling inside this dir fails (EACCES)
     try {
-      const { result, repair } = probeMcpEnv({ configPaths: [okPath, roPath], resolvedDbPath: RESOLVED });
+      const { result, repair } = probeMcpEnv({ targets: [target(okPath), target(roPath)], resolvedDbPath: RESOLVED });
       expect(result.status).toBe('WARN');
       const fixed = repair!(); // must not throw despite the read-only owner
       expect(fixed.status).toBe('FAIL');
@@ -248,7 +258,7 @@ describe('probeMcpEnv', () => {
       { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } }, null, 2));
     symlinkSync(realPath, linkPath);
 
-    const fixed = probeMcpEnv({ configPaths: [linkPath], resolvedDbPath: RESOLVED }).repair!();
+    const fixed = probeMcpEnv({ targets: [target(linkPath)], resolvedDbPath: RESOLVED }).repair!();
     expect(fixed.status).toBe('PASS');
     expect(lstatSync(linkPath).isSymbolicLink()).toBe(true); // link not clobbered into a regular file
     expect(JSON.parse(readFileSync(realPath, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
@@ -263,7 +273,7 @@ describe('probeMcpEnv', () => {
       { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } }, null, 2));
     writeFileSync(badPath, '{ not valid json ');
 
-    const { result } = probeMcpEnv({ configPaths: [validPath, badPath], resolvedDbPath: RESOLVED });
+    const { result } = probeMcpEnv({ targets: [target(validPath), target(badPath)], resolvedDbPath: RESOLVED });
     expect(result.status).toBe('WARN'); // stale valid owner
     expect(result.message).toContain(badPath); // malformed sibling surfaced, not dropped
   });

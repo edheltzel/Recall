@@ -1,10 +1,10 @@
 // recall loa command - Library of Alexandria capture
 
-import { execSync } from 'child_process';
 import { createLoaEntry, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages } from '../lib/memory.js';
 import { detectProject } from '../lib/project.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { getDb } from '../db/connection.js';
+import { formatMessagesForExtraction, runFabricExtract } from '../lib/extraction.js';
 
 interface LoaOptions {
   continues?: number;
@@ -13,9 +13,6 @@ interface LoaOptions {
   limit?: number;
   since?: string; // ISO timestamp to start from
 }
-
-// Maximum input size for Fabric (50MB) - larger sessions should be split
-const MAX_FABRIC_INPUT_BYTES = 50 * 1024 * 1024;
 
 /**
  * Auto-embed a new LoA entry for semantic search (Phase 3)
@@ -46,44 +43,6 @@ async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: strin
   }
 }
 
-/**
- * Run Fabric extract_wisdom pattern on content
- * MANDATORY - no LoA entry without Fabric processing
- * FIX #4: Increased buffer to 50MB, added input size validation
- */
-function runFabricExtract(content: string): string {
-  // Check input size before attempting
-  const inputBytes = Buffer.byteLength(content, 'utf-8');
-  if (inputBytes > MAX_FABRIC_INPUT_BYTES) {
-    throw new Error(`Input too large for Fabric (${(inputBytes / 1024 / 1024).toFixed(1)}MB > 50MB limit). Use --limit to reduce message count.`);
-  }
-
-  try {
-    // Pass content to fabric via stdin
-    // Use streaming for faster response, haiku for speed
-    const result = execSync('fabric --pattern extract_wisdom --stream -m claude-haiku-4-5', {
-      input: content,
-      encoding: 'utf-8',
-      maxBuffer: MAX_FABRIC_INPUT_BYTES, // 50MB buffer
-      timeout: 600000 // 10 minute timeout for large sessions
-    });
-    return result.trim();
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    throw new Error(`Fabric extract_wisdom failed: ${error}`);
-  }
-}
-
-/**
- * Format messages for Fabric input
- */
-function formatMessagesForFabric(messages: Array<{ role: string; content: string; timestamp: string }>): string {
-  return messages.map(m => {
-    const time = m.timestamp.split('T')[1]?.slice(0, 5) || '';
-    return `[${m.role.toUpperCase()} ${time}]\n${m.content}`;
-  }).join('\n\n---\n\n');
-}
-
 export async function runLoa(title: string, options: LoaOptions): Promise<void> {
   const project = options.project || detectProject();
 
@@ -103,7 +62,7 @@ export async function runLoa(title: string, options: LoaOptions): Promise<void> 
   console.log(`Processing ${messages.length} messages through Fabric extract_wisdom...`);
 
   // Format messages for Fabric
-  const fabricInput = formatMessagesForFabric(messages);
+  const fabricInput = formatMessagesForExtraction(messages);
 
   // Run Fabric (MANDATORY)
   let fabricExtract: string;

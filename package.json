@@ -31,6 +31,8 @@
     "dev": "tsup src/index.ts src/mcp-server.ts --format esm --watch --external bun:sqlite",
     "test": "bun test",
     "lint": "tsc --noEmit -p tsconfig.lint.json",
+    "build:codex-plugin": "bun run scripts/build-codex-plugin.ts",
+    "test:e2e:codex-plugin": "bun run build && bun run scripts/e2e-codex-plugin.ts",
     "check:version": "bun run scripts/check-version.ts",
     "prepublishOnly": "bun run build"
   },

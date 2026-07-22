@@ -36,7 +36,7 @@ Pi stores conversation history as a tree JSONL (branching structure from edits a
 
 1. **Linearize**: Read the tree JSONL and walk the active branch (most recent path from root to leaf)
 2. **Convert**: Render the active-branch messages as markdown (user/assistant turns)
-3. **Drop**: Write the markdown file to `~/.claude/MEMORY/pi-sessions/<sessionId>.md`
+3. **Drop**: Write the markdown file to `~/.agents/Recall/MEMORY/pi-sessions/<sessionId>.md`
 4. **Extract**: The existing `RecallBatchExtract.ts` cron job scans the drop directory every 30 minutes and processes new files via Claude Haiku
 
 This reuses the RecallBatchExtract infrastructure without modification — it already handles markdown input from the OpenCode drop dir.
@@ -45,7 +45,7 @@ The extraction logic lives in `~/.pi/agent/extensions/RecallExtract.ts`, which h
 
 ### Deduplication
 
-A JSON tracker at `~/.claude/MEMORY/pi-sessions/.extraction_tracker.json` records processed session IDs. It persists across extension restarts to avoid re-extracting sessions.
+A JSON tracker at `~/.agents/Recall/MEMORY/pi-sessions/.extraction_tracker.json` records processed session IDs. It persists across extension restarts to avoid re-extracting sessions.
 
 ## Memory Injection
 
@@ -78,7 +78,7 @@ If `recall` is unavailable or times out (5s limit), the hook skips silently.
 | `~/.pi/agent/mcp.json` | MCP server registration |
 | `~/.pi/agent/Recall_GUIDE.md` | Agent guide (installed from `FOR_PI.md` with Pi-specific tool names) |
 | `~/.pi/agent/AGENTS.md` | Syntax-free pointer to the installed Recall guide and live MCP schemas |
-| `~/.claude/MEMORY/pi-sessions/` | Drop directory for extracted session markdown |
+| `~/.agents/Recall/MEMORY/pi-sessions/` | Drop directory for extracted session markdown |
 | `~/.agents/Recall/recall.db` | Shared SQLite DB (same as Claude Code and OpenCode) |
 
 ## Tool Name Mapping

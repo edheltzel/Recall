@@ -33,7 +33,7 @@
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
-import { encodeProjectDir } from './lib/path-encoding';
+import { encodeProjectDir } from './lib/hosts/claude/path-encoding';
 import { resolveDbPath as getDbPath } from './lib/db-path';
 
 // ─── Path resolution (call-time, not load-time) ─────────────────────

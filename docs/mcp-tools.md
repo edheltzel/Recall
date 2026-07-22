@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-All 8 tools available when Claude Code connects to the Recall MCP server (`recall-memory`).
+All 9 tools available to any MCP client connected to the Recall MCP server (`recall-memory`).
 
 ---
 
@@ -155,7 +155,7 @@ loa_show({ id: 1 })
 
 ## memory_dump
 
-Flush the current conversation session into SQLite. Extracts messages, decisions, and learnings from the session transcript and persists them to the database. Use when the user says `/dump`.
+Persist an explicitly supplied conversation session into SQLite. Claude's native adapter can discover its current transcript; other hosts must supply visible messages instead of relying on an assumed private transcript format.
 
 **Parameters**
 
@@ -163,13 +163,26 @@ Flush the current conversation session into SQLite. Extracts messages, decisions
 |------|------|----------|---------|-------------|
 | title | string | yes | — | Descriptive title for this session dump |
 | project | string | no | — | Override the auto-detected project name |
+| session_id | string | no | generated | Stable session identifier supplied by the host |
+| source | string | no | `mcp` | Host source: `claude`, `opencode`, `pi`, `codex`, or `mcp` |
+| messages | array | no | — | Explicit `{ role, content, timestamp? }` messages. Required when the host has no native transcript adapter. |
 | skip_fabric | boolean | no | true | Skip Fabric processing (faster; uses a basic summary instead of `extract_wisdom`) |
 
 **Returns:** Summary of records imported: message count, decisions, learnings, and breadcrumbs extracted from the session.
 
 ```js
-memory_dump({ title: "Auth middleware refactor — JWT validation approach", project: "my-app" })
+memory_dump({
+  title: "Auth middleware refactor — JWT validation approach",
+  project: "my-app",
+  source: "codex",
+  messages: [
+    { role: "user", content: "Refactor the auth middleware" },
+    { role: "assistant", content: "Implemented JWT validation" }
+  ]
+})
 ```
+
+`memory_dump` is an explicit operation, not lifecycle auto-capture. MCP has no portable event contract for session stop, session start, or pre-compaction.
 
 ---
 

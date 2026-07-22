@@ -72,7 +72,7 @@ describe('schema v3 migration', () => {
     // Insert with default source
     db.prepare('INSERT INTO sessions (session_id, project) VALUES (?, ?)').run('fresh-1', 'test');
     const row = db.prepare('SELECT source FROM sessions WHERE session_id = ?').get('fresh-1') as any;
-    expect(row.source).toBe('claude-code');
+    expect(row.source).toBe('unknown');
 
     // Insert with opencode source
     db.prepare('INSERT INTO sessions (session_id, project, source) VALUES (?, ?, ?)').run('fresh-2', 'test', 'opencode');

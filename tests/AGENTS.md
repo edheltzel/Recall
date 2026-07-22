@@ -8,7 +8,7 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 
 ## Ownership
 
-`tests/**` mirroring the source areas — `commands/`, `db/`, `hooks/`, `lib/`, `integration/`, `benchmarks/`, `install/` — plus `fixtures/` (static fixtures, incl. extraction samples) and the shared harness `helpers/setup.ts`. Also `mcp-server.test.ts`, `version.test.ts`.
+`tests/**` mirroring the source areas — `commands/`, `db/`, `hooks/`, `hosts/`, `lib/`, `plugins/`, `integration/`, `benchmarks/`, `install/` — plus `fixtures/` (static fixtures, incl. extraction samples) and the shared harness `helpers/setup.ts`. Also `mcp-server.test.ts`, `version.test.ts`.
 
 ## Local Contracts
 
@@ -16,10 +16,12 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 - Test files are `tests/**/*.test.ts`.
 - Reuse `fixtures/` rather than inlining large fixtures; use `helpers/setup.ts` for harness setup.
 - `install/` tests exercise `install.sh` / `update.sh` / `uninstall.sh` — keep them current when those scripts change.
+- Any end-to-end test that can open SQLite must set its own disposable `RECALL_DB_PATH` and `RECALL_HOME`, state those paths before writes, and prove the production database was not changed.
 
 ## Work Guidance
 
 - Mirror the source layout: a test for `src/commands/foo.ts` goes in `tests/commands/`; a hook test in `tests/hooks/`.
+- `scripts/e2e-codex-plugin.ts` owns the isolated current-CLI verification for the native Codex marketplace, plugin install, and all nine MCP tools.
 
 ## Verification
 

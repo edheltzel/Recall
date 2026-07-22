@@ -29,11 +29,11 @@ import {
   readInSessionConfig,
   readCorrectionsConfig,
   handleCorrection,
-  eventFromHookInput,
   decideInSession,
   runInSessionExtraction,
   sessionIdFromArgs,
 } from './lib/insession';
+import { eventFromClaudeHookInput } from './lib/hosts/claude/lifecycle';
 import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extract-model';
 import { resolveDbPath } from './lib/db-path';
 
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const event = eventFromHookInput(input);
+  const event = eventFromClaudeHookInput(input);
   if (!event) process.exit(0);
 
   const convPath = input.transcript_path;

@@ -1,0 +1,29 @@
+{
+  "name": "recall",
+  "version": "0.9.4",
+  "description": "Persistent SQLite memory and retrieval tools for Codex",
+  "author": {
+    "name": "edheltzel",
+    "url": "https://github.com/edheltzel"
+  },
+  "homepage": "https://github.com/edheltzel/Recall#readme",
+  "repository": "https://github.com/edheltzel/Recall",
+  "license": "MIT",
+  "keywords": ["memory", "sqlite", "mcp", "coding-agents"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Recall",
+    "shortDescription": "Persistent memory for Codex sessions",
+    "longDescription": "Search, add, recall, and explicitly dump durable coding-agent memory through Recall's nine MCP tools and workflow skills.",
+    "developerName": "edheltzel",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/edheltzel/Recall",
+    "defaultPrompt": [
+      "Search Recall before asking me to repeat project context.",
+      "Save this decision to Recall with its reasoning."
+    ],
+    "brandColor": "#6B5CE7"
+  },
+  "mcpServers": "./.mcp.json"
+}

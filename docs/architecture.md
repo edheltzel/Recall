@@ -57,11 +57,27 @@ Project-local L0 override: `./.atlas-recall/identity.md` takes precedence over
 the global `~/.claude/MEMORY/identity.md`. `RECALL_IDENTITY_PATH` overrides
 both.
 
+## Host Boundaries
+
+Host-neutral CLI and MCP logic lives outside `src/hosts/`.
+
+Native host adapters own config shapes, paths, transcript parsing, and native command discovery under `src/hosts/`.
+
+Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extraction cascade depends only on the `ExtractionProvider` interface.
+
+Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agents/Recall`) instead of a host configuration directory.
+
+Codex is distributed as the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`.
+
+Its `.mcp.json` registers `recall-memory`, and `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical `agent-skills/` sources.
+
+MCP covers the nine query/write operations but does not define transcript lifecycle events; see [Codex Integration](CODEX_INTEGRATION.md).
+
 ## Database Tables
 
 | Table | Purpose | FTS5 Indexed |
 |-------|---------|:---:|
-| sessions | Claude Code session metadata (ID, timestamps, project, branch) | No |
+| sessions | Cross-host session metadata (ID, timestamps, project, branch, source) | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) column | Yes |
 | loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) column | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
@@ -155,7 +171,7 @@ graph TD
     D --> E{Size > 120K chars?}
     E -->|Yes| F[Chunk + Meta-Extract]
     E -->|No| G[Single Extraction]
-    F --> H[Send to Claude Haiku]
+    F --> H[Run native extraction provider]
     G --> H
     H --> I{Quality Gate}
     I -->|Pass| J[Store to Memory Files]
@@ -174,7 +190,7 @@ graph TD
 
 The hook self-spawns in background so the session exits immediately (non-blocking).
 
-If Haiku is unavailable, falls back to a local Ollama model (configurable via `RECALL_OLLAMA_MODEL`).
+The current Claude lifecycle adapter tries Claude Haiku first and falls back to a local Ollama model (configurable via `RECALL_OLLAMA_MODEL`).
 
 ## Technical Details
 

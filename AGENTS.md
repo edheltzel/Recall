@@ -26,6 +26,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
 - `agent-skills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills` — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
+- `plugins/` — native host plugin bundles; Codex packages MCP plus generated host-adapted skills in `plugins/recall/`
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
@@ -174,5 +175,13 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`benchmarks/AGENTS.md`](benchmarks/AGENTS.md) — wake-up context-efficiency benchmark harness
 - [`docs/AGENTS.md`](docs/AGENTS.md) — user-facing published docs, ADRs, agent skill docs (never plans/specs)
 - [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
+- [`plugins/AGENTS.md`](plugins/AGENTS.md) — native host plugin manifests, MCP registration, and generated adapters
 
 Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh`; platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
