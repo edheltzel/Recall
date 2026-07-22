@@ -164,7 +164,7 @@ print_summary() {
   echo "  • Recall-generated ## MEMORY section in ~/.claude/CLAUDE.md (external sections stay)"
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
-  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + extension symlinks + Recall-generated AGENTS.md MEMORY section + skills"
+  [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
   [[ "$SKIP_OMP" != "true" ]] && echo "  • omp agent skills (~/.omp/agent/skills/)"
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
@@ -492,6 +492,17 @@ remove_opencode() {
 
 remove_pi() {
   local config="$PI_CONFIG_DIR/mcp.json"
+
+  # Recall is a local Pi package for extensions + skills. The MCP adapter is a
+  # separate shared Pi package and may serve other servers, so leave it alone.
+  if command -v pi >/dev/null 2>&1; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would run: PI_CODING_AGENT_DIR=$PI_CONFIG_DIR pi remove $RECALL_REPO_DIR --no-approve"
+    else
+      PI_CODING_AGENT_DIR="$PI_CONFIG_DIR" pi remove "$RECALL_REPO_DIR" --no-approve >/dev/null 2>&1 || true
+      log_success "Removed Recall's Pi package registration"
+    fi
+  fi
 
   if [[ -f "$config" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then

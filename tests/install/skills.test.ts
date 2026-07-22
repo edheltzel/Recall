@@ -1,8 +1,8 @@
 // Agent Skills (agent-skills/<name>/SKILL.md) are the single command surface
 // (#228 — the old /Recall:* slash commands are gone): canonical copy under
-// $RECALL_SHARED_SKILLS_DIR/<name>/, per-file symlinks into each detected
-// platform's skills directory (~/.claude/skills, ~/.pi/agent/skills,
-// ~/.omp/agent/skills).
+// $RECALL_SHARED_SKILLS_DIR/<name>/, per-file symlinks into Claude Code and
+// omp. Pi discovers the canonical sources through the root package manifest;
+// that native-package contract is covered by tests/pi-integration.test.ts.
 //
 // Install-side tests drive lib/install-lib.sh directly against a
 // tmpdir-scoped HOME/CLAUDE_DIR/RECALL_DIR/RECALL_REPO_DIR, mirroring
@@ -38,7 +38,6 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
   let claudeDir: string;
   let recallDir: string;
   let fakeRepo: string;
-  let piConfigDir: string;
   let ompConfigDir: string;
   let driverSeq = 0;
 
@@ -47,7 +46,6 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     claudeDir = join(tempRoot, '.claude');
     recallDir = join(tempRoot, '.agents', 'Recall');
     fakeRepo = join(tempRoot, 'repo');
-    piConfigDir = join(tempRoot, '.pi', 'agent');
     ompConfigDir = join(tempRoot, '.omp', 'agent');
 
     mkdirSync(claudeDir, { recursive: true });
@@ -76,7 +74,6 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
       `export CLAUDE_DIR="${claudeDir}"`,
       `export RECALL_DIR="${recallDir}"`,
       `export RECALL_REPO_DIR="${fakeRepo}"`,
-      `export PI_CONFIG_DIR="${piConfigDir}"`,
       `export OMP_CONFIG_DIR="${ompConfigDir}"`,
       'export NO_COLOR=1',
       `source "${INSTALL_LIB}"`,
@@ -108,16 +105,6 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     const r2 = runDriver(['recall_install_claude_skills']);
     expect(r2.status).toBe(0);
     expect(existsSync(join(claudeDir, 'skills', 'recall-doctor', 'SKILL.md'))).toBe(true);
-  });
-
-  test('recall_install_pi_skills symlinks into $PI_CONFIG_DIR/skills, not $CLAUDE_DIR/skills', () => {
-    const r = runDriver(['recall_install_pi_skills']);
-    expect(r.status).toBe(0);
-
-    const piTarget = join(piConfigDir, 'skills', 'recall-doctor', 'SKILL.md');
-    expect(existsSync(piTarget)).toBe(true);
-    expect(lstatSync(piTarget).isSymbolicLink()).toBe(true);
-    expect(existsSync(join(claudeDir, 'skills'))).toBe(false);
   });
 
   test('recall_install_omp_platform symlinks into $OMP_CONFIG_DIR/skills', () => {

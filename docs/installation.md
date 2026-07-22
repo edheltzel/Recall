@@ -269,7 +269,7 @@ cd /path/to/Recall
 - The `## MEMORY` section in `~/.claude/CLAUDE.md` only if Recall generated it (current ownership marker or a normalized exact match of the complete legacy-generated body); unmarked customized/externally owned sections and the rest of `CLAUDE.md` are preserved; a marked section remains Recall-owned even if its body was edited
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
 - OpenCode MCP entry + plugins + agent (unless `--skip-opencode`)
-- Pi MCP entry + extensions + Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); unmarked customized/external Pi sections survive, while marked sections remain Recall-owned (unless `--skip-pi`)
+- Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
 ### What is preserved (default)

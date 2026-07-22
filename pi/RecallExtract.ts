@@ -5,13 +5,12 @@
 // This extension linearizes the active branch into flat markdown, then drops it into
 // Recall's canonical MEMORY/pi-sessions/ directory for RecallBatchExtract to pick up.
 //
-// VERIFIED APIs:
-//   - pi.on("session_shutdown", handler) — fires on exit (Ctrl+C, Ctrl+D, SIGTERM)
-//   - handler receives (_event, ctx)
-//   - ctx.sessionManager access patterns are UNVERIFIED — fallback scans sessions dir
+// VERIFIED AGAINST PI 0.81.1:
+//   - pi.on("session_shutdown", handler) — fires before quit/reload/new/resume/fork
+//   - ctx.sessionManager.getSessionFile() — returns the active JSONL or undefined
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "fs"
-import { join } from "path"
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
+import { basename, join } from "path"
 import { homedir } from "os"
 
 /**
@@ -38,26 +37,23 @@ function extractTextFromContent(content: any): string {
   return ""
 }
 
-const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
-const DROP_DIR = join(RECALL_HOME, "MEMORY", "pi-sessions")
-const TRACKER_PATH = join(DROP_DIR, ".extraction_tracker.json")
 const MIN_MESSAGE_LENGTH = 10
 const MAX_MESSAGE_LENGTH = 4000
 const MIN_SESSION_LENGTH = 500
 
-function loadTracker(): Set<string> {
+function loadTracker(trackerPath: string): Set<string> {
   try {
-    if (existsSync(TRACKER_PATH)) {
-      const data = JSON.parse(readFileSync(TRACKER_PATH, "utf-8"))
+    if (existsSync(trackerPath)) {
+      const data = JSON.parse(readFileSync(trackerPath, "utf-8"))
       return new Set(Array.isArray(data) ? data : [])
     }
   } catch {}
   return new Set()
 }
 
-function saveTracker(tracker: Set<string>): void {
+function saveTracker(trackerPath: string, tracker: Set<string>): void {
   try {
-    writeFileSync(TRACKER_PATH, JSON.stringify([...tracker]), "utf-8")
+    writeFileSync(trackerPath, JSON.stringify([...tracker]), "utf-8")
   } catch {}
 }
 
@@ -102,34 +98,15 @@ export function linearizeSession(jsonlPath: string): string {
 }
 
 export default function (pi: any) {
-  mkdirSync(DROP_DIR, { recursive: true })
-  const tracker = loadTracker()
+  const recallHome = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
+  const dropDir = join(recallHome, "MEMORY", "pi-sessions")
+  const trackerPath = join(dropDir, ".extraction_tracker.json")
+  mkdirSync(dropDir, { recursive: true })
+  const tracker = loadTracker(trackerPath)
 
   pi.on("session_shutdown", (_event: any, ctx: any) => {
     try {
-      // Get session file path — try ctx.sessionManager first, fallback to scanning
-      let sessionPath = ctx?.sessionManager?.currentSessionPath
-        || ctx?.sessionManager?.currentSession?.path
-
-      // Fallback: scan Pi's sessions directory for most recently modified .jsonl
-      if (!sessionPath || !existsSync(sessionPath)) {
-        const piSessionsDir = join(homedir(), ".pi", "agent", "sessions")
-        if (existsSync(piSessionsDir)) {
-          let latest = { path: "", mtime: 0 }
-          for (const dir of readdirSync(piSessionsDir)) {
-            const subdir = join(piSessionsDir, dir)
-            try {
-              for (const f of readdirSync(subdir)) {
-                if (!f.endsWith(".jsonl")) continue
-                const full = join(subdir, f)
-                const mt = statSync(full).mtimeMs
-                if (mt > latest.mtime) latest = { path: full, mtime: mt }
-              }
-            } catch {}
-          }
-          if (latest.path) sessionPath = latest.path
-        }
-      }
+      const sessionPath = ctx?.sessionManager?.getSessionFile?.()
 
       if (!sessionPath || !existsSync(sessionPath)) return
       if (tracker.has(sessionPath)) return
@@ -137,11 +114,10 @@ export default function (pi: any) {
       const markdown = linearizeSession(sessionPath)
       if (markdown.length < MIN_SESSION_LENGTH) return // Skip trivial sessions
 
+      const fileName = basename(sessionPath).replace(/\.jsonl$/, ".md") || "session.md"
+      writeFileSync(join(dropDir, fileName), markdown, "utf-8")
       tracker.add(sessionPath)
-      saveTracker(tracker)
-
-      const fileName = sessionPath.split("/").pop()?.replace(".jsonl", ".md") || "session.md"
-      writeFileSync(join(DROP_DIR, fileName), markdown, "utf-8")
+      saveTracker(trackerPath, tracker)
     } catch {
       // Non-fatal — don't crash Pi on extraction failure
     }

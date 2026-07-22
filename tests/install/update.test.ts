@@ -304,8 +304,8 @@ describe('update.sh', () => {
         recall_configure_opencode_mcp()  { echo "CALL:recall_configure_opencode_mcp"; }
         recall_install_opencode_plugins(){ echo "CALL:recall_install_opencode_plugins"; }
         recall_install_pi_adapter()      { echo "CALL:recall_install_pi_adapter"; }
+        recall_install_pi_package()      { echo "CALL:recall_install_pi_package"; }
         recall_configure_pi_mcp()        { echo "CALL:recall_configure_pi_mcp"; }
-        recall_install_pi_extensions()   { echo "CALL:recall_install_pi_extensions"; }
         recall_install_pi_guide()        { echo "CALL:recall_install_pi_guide"; }
         recall_install_opencode_platform() { echo "CALL:recall_install_opencode_platform"; }
         recall_install_pi_platform()     { echo "CALL:recall_install_pi_platform"; }
@@ -355,20 +355,20 @@ describe('update.sh', () => {
       expect(ok).toBe(true);
     });
 
-    test('Pi: invokes all 4 install functions when PI_DETECTED=true', () => {
+    test('Pi: invokes its canonical separate-surface installer when PI_DETECTED=true', () => {
       const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'true' });
       expect(r.status).toBe(0);
-      // Original install.sh order (lib/install-lib.sh:1750-1854):
+      // Canonical order:
       //   recall_install_pi_adapter
+      //   recall_install_pi_package
       //   recall_configure_pi_mcp
-      //   recall_install_pi_extensions
       //   recall_install_pi_guide
       const ok =
         r.stdout.includes('CALL:recall_install_pi_platform') ||
         (
           r.stdout.includes('CALL:recall_install_pi_adapter') &&
+          r.stdout.includes('CALL:recall_install_pi_package') &&
           r.stdout.includes('CALL:recall_configure_pi_mcp') &&
-          r.stdout.includes('CALL:recall_install_pi_extensions') &&
           r.stdout.includes('CALL:recall_install_pi_guide')
         );
       expect(ok).toBe(true);

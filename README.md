@@ -320,7 +320,7 @@ Recall is built around two integration surfaces: **MCP** (memory search and add,
 | Agent                                                         | MCP |                      Lifecycle hooks                       | Status                                |
 | ------------------------------------------------------------- | :-: | :--------------------------------------------------------: | ------------------------------------- |
 | [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation; native plugin ships skills + MCP |
-| [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — `recall-compaction` + `recall-extract` extensions | In progress                           |
+| [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — native package with memory-injection + shutdown-capture extensions | Package + separate MCP adapter/config |
 | [**OpenCode**](https://opencode.ai/)                          | ✅  |             ⚠ Alpha — `recall-extract` plugin              | In progress                           |
 | [**Codex CLI**](https://github.com/openai/codex)              | ✅  |               — native plugin, explicit dump only          | MCP + skills available                |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                             —                              | Coming soon                           |
@@ -342,6 +342,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [Agent Skills](docs/agent-skills.md)       | `recall-*` skills for Claude Code, Pi, and omp                            |
 | [Codex Integration](docs/CODEX_INTEGRATION.md) | Native plugin install, MCP coverage, and lifecycle limits             |
 | [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Native plugin install, plugin/installer ownership split, migration    |
+| [Pi Integration](docs/PI_INTEGRATION.md)   | Native package, separate MCP setup, lifecycle coverage, and host limits  |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
 | [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |
