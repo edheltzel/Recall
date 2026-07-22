@@ -1,0 +1,16 @@
+{
+  "name": "recall-marketplace",
+  "owner": {
+    "name": "edheltzel"
+  },
+  "description": "Persistent memory for AI coding agents",
+  "plugins": [
+    {
+      "name": "recall",
+      "source": "./plugins/recall-claude",
+      "description": "Persistent SQLite memory and retrieval tools for Claude Code",
+      "category": "productivity",
+      "tags": ["memory", "sqlite", "mcp"]
+    }
+  ]
+}

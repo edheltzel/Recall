@@ -34,7 +34,9 @@
     "build:codex-plugin": "bun run scripts/build-codex-plugin.ts",
     "test:e2e:codex-plugin": "bun run build && bun run scripts/e2e-codex-plugin.ts",
     "check:version": "bun run scripts/check-version.ts",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "build:claude-plugin": "bun run scripts/build-claude-plugin.ts",
+    "test:e2e:claude-plugin": "bun run build && bun run scripts/e2e-claude-plugin.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",

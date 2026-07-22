@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "recall",
+  "displayName": "Recall",
+  "version": "0.9.4",
+  "description": "Persistent SQLite memory and retrieval tools for Claude Code",
+  "author": {
+    "name": "edheltzel",
+    "url": "https://github.com/edheltzel"
+  },
+  "homepage": "https://github.com/edheltzel/Recall#readme",
+  "repository": "https://github.com/edheltzel/Recall",
+  "license": "MIT",
+  "keywords": ["memory", "sqlite", "mcp", "coding-agents"],
+  "mcpServers": "./.mcp.json"
+}
