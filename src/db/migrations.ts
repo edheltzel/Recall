@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { FTS_SCHEMA } from './schema';
+import { claudePaths } from '../hosts/claude.js';
 
 export type Migration = (db: Database) => void;
 
@@ -67,7 +68,7 @@ export const MIGRATIONS: Migration[] = [
   (db) => {
     if (skipLegacyDataMigrations()) return;
 
-    const memoryDir = join(homedir(), '.claude', 'MEMORY');
+    const memoryDir = claudePaths(homedir()).memory;
 
     const trackerPath = join(memoryDir, '.extraction_tracker.json');
     const sessionPath = join(memoryDir, 'SESSION_INDEX.json');

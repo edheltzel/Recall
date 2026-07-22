@@ -3,7 +3,7 @@
 //
 // Pi sessions use tree-structured JSONL (id/parentId) unlike Claude Code's linear format.
 // This extension linearizes the active branch into flat markdown, then drops it into
-// ~/.claude/MEMORY/pi-sessions/ for RecallBatchExtract to pick up.
+// Recall's canonical MEMORY/pi-sessions/ directory for RecallBatchExtract to pick up.
 //
 // VERIFIED APIs:
 //   - pi.on("session_shutdown", handler) — fires on exit (Ctrl+C, Ctrl+D, SIGTERM)
@@ -38,7 +38,8 @@ function extractTextFromContent(content: any): string {
   return ""
 }
 
-const DROP_DIR = join(homedir(), ".claude", "MEMORY", "pi-sessions")
+const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
+const DROP_DIR = join(RECALL_HOME, "MEMORY", "pi-sessions")
 const TRACKER_PATH = join(DROP_DIR, ".extraction_tracker.json")
 const MIN_MESSAGE_LENGTH = 10
 const MAX_MESSAGE_LENGTH = 4000

@@ -50,7 +50,7 @@ export function createSession(session: Omit<Session, 'id'>): number {
     $cwd: session.cwd || null,
     $git_branch: session.git_branch || null,
     $model: session.model || null,
-    $source: session.source || 'claude-code'
+    $source: session.source || 'unknown'
   });
   return result.lastInsertRowid as number;
 }

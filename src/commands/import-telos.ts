@@ -4,9 +4,11 @@ import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSy
 import { join, basename } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
+import { claudePaths } from '../hosts/claude.js';
 
-const TELOS_DIR = join(homedir(), '.claude', 'skills', 'PAI', 'USER', 'TELOS');
-const TELOS_MTIME_PATH = join(homedir(), '.claude', 'MEMORY', '.telos_last_import');
+const CLAUDE_PATHS = claudePaths(homedir());
+const TELOS_DIR = join(CLAUDE_PATHS.skills, 'PAI', 'USER', 'TELOS');
+const TELOS_MTIME_PATH = join(CLAUDE_PATHS.memory, '.telos_last_import');
 
 // Map filenames to telos types (schema CHECK constraint)
 const TYPE_MAP: Record<string, string> = {
@@ -97,7 +99,7 @@ function getLastImportTime(): number {
  * Save the current import timestamp
  */
 function saveImportTime(): void {
-  mkdirSync(join(homedir(), '.claude', 'MEMORY'), { recursive: true });
+  mkdirSync(CLAUDE_PATHS.memory, { recursive: true });
   writeFileSync(TELOS_MTIME_PATH, Date.now().toString());
 }
 

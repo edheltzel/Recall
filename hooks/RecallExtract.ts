@@ -32,7 +32,7 @@ import { join } from 'path';
 import { spawn } from 'child_process';
 import { shouldSkipExtraction } from './lib/extraction-quality';
 import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extract-model';
-import { encodeProjectDir } from './lib/path-encoding';
+import { encodeProjectDir } from './lib/hosts/claude/path-encoding';
 import {
   wasAlreadyExtracted as trackerWasAlreadyExtracted,
   markAsExtracted as trackerMarkAsExtracted,

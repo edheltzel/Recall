@@ -62,6 +62,7 @@ describe('Sessions', () => {
     expect(session!.session_id).toBe(sessionId);
     expect(session!.project).toBe('test-project');
     expect(session!.model).toBe('claude-opus-4-6');
+    expect(session!.source).toBe('unknown');
   });
 
   test('sessionExists returns true for existing session, false for non-existing', () => {

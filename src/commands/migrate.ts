@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, statSync, copyFileSync, renameSync, readFileSync
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
+import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
 
 export interface MigrateOptions {
   to: string;
@@ -49,25 +50,12 @@ function isSidecar(suffix: string): suffix is '-wal' | '-shm' {
   return suffix === '-wal' || suffix === '-shm';
 }
 
-interface ConfigTarget {
-  path: string;
-  // Path within the parsed JSON to the env object that needs RECALL_DB_PATH.
-  // Strings are property keys, all-or-nothing — if any segment is missing
-  // (or the recall-memory entry is absent), the writer skips silently.
-  envPath: string[];
-}
-
-function detectConfigs(): ConfigTarget[] {
+function detectConfigs(): McpConfigTarget[] {
   const home = homedir();
-  return [
-    { path: join(home, '.claude.json'),                                envPath: ['mcpServers', 'recall-memory', 'env'] },
-    { path: join(home, '.claude', 'settings.json'),                    envPath: ['mcpServers', 'recall-memory', 'env'] },
-    { path: join(home, '.config', 'opencode', 'opencode.json'),        envPath: ['mcp', 'recall-memory', 'environment'] },
-    { path: join(home, '.pi', 'agent', 'mcp.json'),                    envPath: ['mcpServers', 'recall-memory', 'environment'] },
-  ];
+  return configurableHosts.flatMap(host => host.mcpConfigTargets(home));
 }
 
-function patchConfigEnv(target: ConfigTarget, newDbPath: string, dryRun: boolean): { changed: boolean; reason?: string } {
+function patchConfigEnv(target: McpConfigTarget, newDbPath: string, dryRun: boolean): { changed: boolean; reason?: string } {
   if (!existsSync(target.path)) return { changed: false, reason: 'not present' };
   let raw: string;
   try {
@@ -75,10 +63,9 @@ function patchConfigEnv(target: ConfigTarget, newDbPath: string, dryRun: boolean
   } catch (e) {
     return { changed: false, reason: `read error: ${(e as Error).message}` };
   }
-  // opencode.json may contain JSONC — strip comments before parsing.
-  const stripped = raw
-    .replace(/\/\/.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const stripped = target.format === 'jsonc'
+    ? raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    : raw;
   let cfg: any;
   try {
     cfg = JSON.parse(stripped);
@@ -219,7 +206,10 @@ export function runMigrate(opts: MigrateOptions): void {
 
   console.log('');
   console.log('Migration complete.');
-  console.log('Restart Claude Code / OpenCode / Pi so their MCP servers reload with the new path.');
+  const configuredHosts = [...new Set(targets.filter(t => existsSync(t.path)).map(t => t.host))];
+  if (configuredHosts.length > 0) {
+    console.log(`Restart ${configuredHosts.join(' / ')} so their MCP servers reload with the new path.`);
+  }
 
   // Hint: if MEM_DB_PATH is still set in the shell, warn the user that it'd
   // be ignored on next session since RECALL_DB_PATH takes precedence.

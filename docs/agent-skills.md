@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-Recall ships its command surface as [Agent Skills](https://agentskills.io) — one `SKILL.md` per skill, installed identically to every supported host: Claude Code (`~/.claude/skills/`), Pi (`~/.pi/agent/skills/`), and omp (`~/.omp/agent/skills/`). In Claude Code, invoke them as `/recall-<name>`; the model can also trigger most of them itself when the conversation calls for it.
+Recall ships its command surface as [Agent Skills](https://agentskills.io) — one canonical `SKILL.md` per skill for Claude Code (`~/.claude/skills/`), Pi (`~/.pi/agent/skills/`), and omp (`~/.omp/agent/skills/`). Codex receives generated native adapters in `plugins/recall/skills/`; byte-identical skill text is not treated as behavioral equivalence across hosts. In Claude Code, invoke skills as `/recall-<name>`; the model can also trigger most of them itself when the conversation calls for it.
 
 > **Migrating from `/Recall:*` slash commands?** The old namespaced slash commands were retired in favor of these skills (issue #228) — same bodies, one namespace across all hosts. `install.sh` / `update.sh` remove the stale `~/.claude/commands/Recall/` symlinks automatically. See [Upgrading](upgrading.md).
 
@@ -19,7 +19,7 @@ What it does:
 2. Creates a curated LoA entry with Fabric extract_wisdom analysis
 3. Makes everything immediately searchable
 
-This skill is user-invoked only (`disable-model-invocation: true`) — dumping a session is always your call, never the model's.
+This skill is user-invoked only — dumping a session is always your call, never the model's. Claude uses `disable-model-invocation: true`; the generated Codex adapter uses `agents/openai.yaml` with `allow_implicit_invocation: false`.
 
 ### recall-search
 
@@ -94,5 +94,7 @@ Browse and view Library of Alexandria entries.
 ## Installation
 
 Skill canonicals live under `~/.agents/Recall/shared/skills/<name>/`; per-file symlinks are created in each host's skills directory during setup. Source files are in `agent-skills/` in the Recall repository.
+
+The Codex plugin adapters are generated with `bun run build:codex-plugin` and packaged with the native plugin bundle documented in [Codex Integration](CODEX_INTEGRATION.md).
 
 If skills are missing after an update, re-run `./install.sh` to relink them.

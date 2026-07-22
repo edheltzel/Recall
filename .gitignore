@@ -18,6 +18,11 @@ dist/
 .claude/worktrees
 .maestro/
 .agents/
+!.agents/
+.agents/*
+!.agents/plugins/
+.agents/plugins/*
+!.agents/plugins/marketplace.json
 .pi-subagents/
 .pi/*
 !.pi/APPEND_SYSTEM.md

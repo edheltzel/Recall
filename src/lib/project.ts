@@ -66,20 +66,3 @@ export function detectProject(cwd?: string): string | undefined {
   // Fall back to PWD basename
   return basename(dir);
 }
-
-/**
- * Extract project name from an encoded path like "-home-user-Projects-my-app"
- */
-export function extractProjectFromPath(path: string): string {
-  // Handle Claude Code's path format: -home-pi-Projects-foo-bar
-  const parts = path.split('-');
-
-  // Find "Projects" and take everything after
-  const projectsIdx = parts.findIndex(p => p.toLowerCase() === 'projects');
-  if (projectsIdx !== -1 && projectsIdx < parts.length - 1) {
-    return parts.slice(projectsIdx + 1).join('-');
-  }
-
-  // Otherwise just use the last part
-  return parts[parts.length - 1] || path;
-}

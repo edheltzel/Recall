@@ -89,15 +89,30 @@ RECALL_HOOK_FILES=(
 )
 
 RECALL_HOOK_LIB_FILES=(
+  "$CLAUDE_DIR/hooks/lib/consolidate-core.ts"
+  "$CLAUDE_DIR/hooks/lib/correction-detector.ts"
+  "$CLAUDE_DIR/hooks/lib/events.ts"
+  "$CLAUDE_DIR/hooks/lib/extract-core.ts"
+  "$CLAUDE_DIR/hooks/lib/extract-model.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-lock.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-migration.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-quality.ts"
+  "$CLAUDE_DIR/hooks/lib/extraction-provider.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-semaphore.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-tracker.ts"
+  "$CLAUDE_DIR/hooks/lib/insession.ts"
   "$CLAUDE_DIR/hooks/lib/pid-utils.ts"
   "$CLAUDE_DIR/hooks/lib/db-path.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
   "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
+  "$CLAUDE_DIR/hooks/lib/session-progress.ts"
+  "$CLAUDE_DIR/hooks/lib/threat-detect.ts"
+  "$CLAUDE_DIR/hooks/lib/write-safety.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/index.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/claude/extraction-provider.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/claude/lifecycle.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/claude/path-encoding.ts"
+  # Legacy pre-host-boundary install path.
   "$CLAUDE_DIR/hooks/lib/path-encoding.ts"
   "$CLAUDE_DIR/hooks/lib/pick-previous-jsonl.ts"
 )
@@ -320,6 +335,11 @@ remove_hook_files() {
   done
   log_success "Removed $removed Recall hook file(s)/symlink(s) (surgical — non-Recall hooks/lib untouched)"
 
+  for f in "$CLAUDE_DIR/hooks/lib/hosts/claude" "$CLAUDE_DIR/hooks/lib/hosts"; do
+    if [[ -d "$f" ]] && [[ -z "$(ls -A "$f" 2>/dev/null)" ]]; then
+      run rmdir "$f"
+    fi
+  done
   if [[ -d "$CLAUDE_DIR/hooks/lib" ]] && [[ -z "$(ls -A "$CLAUDE_DIR/hooks/lib" 2>/dev/null)" ]]; then
     run rmdir "$CLAUDE_DIR/hooks/lib"
   fi
