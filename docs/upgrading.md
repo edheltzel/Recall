@@ -56,6 +56,9 @@ cd /path/to/Recall
    unmarked customized/external sections are preserved, while marked sections
    remain Recall-owned. A Recall-specific `~/.claude/rules/memory.md` leaves
    `CLAUDE.md` unchanged.
+   For Pi, refresh means re-registering the native Recall package and separately
+   converging `pi-mcp-adapter`, `mcp.json`, and the guide; it does not create a
+   cross-host bundle.
    `extract_prompt.md` gets a drift check — if you edited it, the new version
    lands at `extract_prompt.md.new` and your edits are preserved.
 7. Forces re-registration of all four hooks (RecallExtract,

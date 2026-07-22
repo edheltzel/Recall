@@ -1,27 +1,23 @@
 // pi/RecallPreCompact.ts
 // Pi extension: injects Recall memory into system prompt before every agent turn.
 //
-// VERIFIED APIs:
+// VERIFIED AGAINST PI 0.81.1:
 //   - pi.on("before_agent_start", handler) — fires before every agent turn
 //   - handler receives (event, ctx) where event.systemPrompt is current prompt
 //   - Returning { systemPrompt: "..." } replaces it for that turn only
-//   - execFileSync for recall CLI — standard Node/Bun API
-
-import { execFileSync } from "child_process"
+//   - async handlers and pi.exec(command, args, { timeout }) are supported
 
 export default function (pi: any) {
-  pi.on("before_agent_start", (event: any, ctx: any) => {
+  pi.on("before_agent_start", async (event: any, ctx: any) => {
     try {
       const cwd = ctx?.cwd || ""
       const projectName = cwd.split("/").pop() || ""
       if (!projectName) return
 
-      // execFileSync blocks the event loop, but the 5-second timeout caps the
-      // worst-case delay. Pi's before_agent_start hook must return synchronously,
-      // so async execFile is not viable here without Pi's explicit async support.
-      const context = execFileSync("recall", [
+      const result = await pi.exec("recall", [
         "search", projectName, "--limit", "5"
-      ], { encoding: "utf-8", timeout: 5000 })
+      ], { signal: ctx?.signal, timeout: 5000 })
+      const context = result.code === 0 ? result.stdout : ""
 
       if (context.trim()) {
         return {

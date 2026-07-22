@@ -23,6 +23,14 @@
     "README.md",
     "LICENSE"
   ],
+  "pi": {
+    "extensions": [
+      "./pi/*.ts"
+    ],
+    "skills": [
+      "./agent-skills/*/SKILL.md"
+    ]
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -33,6 +41,7 @@
     "lint": "tsc --noEmit -p tsconfig.lint.json",
     "build:codex-plugin": "bun run scripts/build-codex-plugin.ts",
     "test:e2e:codex-plugin": "bun run build && bun run scripts/e2e-codex-plugin.ts",
+    "test:e2e:pi-integration": "bun run build && bun run scripts/e2e-pi-integration.ts",
     "check:version": "bun run scripts/check-version.ts",
     "prepublishOnly": "bun run build",
     "build:claude-plugin": "bun run scripts/build-claude-plugin.ts",
@@ -67,7 +76,8 @@
     "ai-memory",
     "sqlite",
     "fts5",
-    "mcp"
+    "mcp",
+    "pi-package"
   ],
   "author": "edheltzel",
   "license": "MIT",

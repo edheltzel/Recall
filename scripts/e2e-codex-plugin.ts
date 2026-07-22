@@ -2,11 +2,12 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { assertMetadataUnchanged, assertSafeTestDb, metadata, stringEnv } from './lib/e2e-isolation';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
@@ -16,23 +17,6 @@ const testRecallHome = join(tempRoot, 'recall-home');
 const testCodexHome = join(tempRoot, 'codex-home');
 const testHome = join(tempRoot, 'home');
 const testBin = join(tempRoot, 'bin');
-
-interface FileMetadata {
-  exists: boolean;
-  size?: number;
-  mtimeMs?: number;
-  ino?: number;
-}
-
-function metadata(path: string): FileMetadata {
-  if (!existsSync(path)) return { exists: false };
-  const stat = statSync(path);
-  return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
-}
-
-function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
-}
 
 function runCodex(args: string[], env: Record<string, string>): string {
   const result = spawnSync('codex', args, { cwd: repoRoot, env, encoding: 'utf-8' });
@@ -56,9 +40,7 @@ async function main(): Promise<void> {
   mkdirSync(testHome, { recursive: true });
   mkdirSync(testBin, { recursive: true });
 
-  if (testDb === productionDb || testDb.startsWith(dirname(productionDb) + '/')) {
-    throw new Error(`unsafe test database path: ${testDb}`);
-  }
+  assertSafeTestDb(testDb, productionDb);
 
   const env = stringEnv({
     ...process.env,
@@ -189,10 +171,7 @@ async function main(): Promise<void> {
     await client.close();
   }
 
-  const productionAfter = metadata(productionDb);
-  if (JSON.stringify(productionAfter) !== JSON.stringify(productionBefore)) {
-    throw new Error(`production DB metadata changed: before=${JSON.stringify(productionBefore)} after=${JSON.stringify(productionAfter)}`);
-  }
+  assertMetadataUnchanged(productionDb, productionBefore);
   console.log('isolation.production_db_unchanged=true');
   console.log('e2e.status=PASS');
 }

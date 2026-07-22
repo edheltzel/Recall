@@ -4,9 +4,10 @@
 
 ## File Layout
 
-Canonical Recall files live under `~/.agents/Recall/`. Platform homes
-(`~/.claude/`, `~/.config/opencode/`, `~/.pi/agent/`) contain per-file
-symlinks back to those canonicals.
+Canonical Recall runtime files live under `~/.agents/Recall/`. Claude Code and
+OpenCode platform homes contain per-file symlinks back to those canonicals.
+Pi instead records Recall's source as a native package and keeps its separately
+installed MCP adapter/configuration under `~/.pi/agent/`.
 
 ```
 ~/.agents/Recall/                       # Recall install root (canonical files)
@@ -24,8 +25,7 @@ symlinks back to those canonicals.
 │   ├── plugins/                        # OpenCode plugin canonicals
 │   └── Recall_GUIDE.md                 # Guide for OpenCode
 ├── pi/
-│   ├── extensions/                     # Pi extension canonicals
-│   └── Recall_GUIDE.md                 # Guide for Pi
+│   └── Recall_GUIDE.md                 # Canonical guide linked into Pi home
 ├── MEMORY/                             # Migrated user-authored MEMORY files
 │   ├── identity.md                     # L0 identity (user-authored via recall onboard)
 │   └── DISTILLED.md                    # All extracted session summaries (full archive)
@@ -72,6 +72,12 @@ Codex is distributed as the native plugin in `plugins/recall/`, discovered throu
 Its `.mcp.json` registers `recall-memory`, and `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical `agent-skills/` sources.
 
 MCP covers the nine query/write operations but does not define transcript lifecycle events; see [Codex Integration](CODEX_INTEGRATION.md).
+
+Claude Code can install the native plugin in `plugins/recall-claude/` for skills + MCP while the lifecycle installer continues to own hooks and reconciles legacy duplicate surfaces; see [Claude Integration](CLAUDE_INTEGRATION.md).
+
+Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`.
+
+Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
 ## Database Tables
 
@@ -245,6 +251,7 @@ Sourced by all three scripts. Key functions:
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
 | `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `agent-skills/*/SKILL.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits); removes legacy `/Recall:*` slash-command symlinks |
+| `recall_install_pi_platform` | Coordinates Pi's separate native package, `pi-mcp-adapter`, owned `mcp.json` entry, guide, and legacy-shadow cleanup; safe to re-run |
 | `recall_append_memory_section` | Shared Claude/Pi append path: completes an unterminated final line, inserts one blank separator, then writes the generated pointer |
 | `recall_memory_section_mutate` / `recall_configure_claude_md` | Shared Claude/Pi ownership classifier plus Claude bootstrap entry point. Marked sections and normalized exact legacy-generated bodies are refreshed on install/update and removable on uninstall; unmarked customized/external sections survive. Remove the marker before taking external ownership. A Recall-specific `~/.claude/rules/memory.md` takes precedence during install/update and leaves `CLAUDE.md` unchanged |
 
@@ -258,7 +265,7 @@ BACKUP_BASE="$CLAUDE_DIR/backups/recall"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
-PI_CONFIG_DIR="$HOME/.pi/agent"
+PI_CONFIG_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 ```
 
 All use `: "${VAR:=default}"` so an override set *before* `source`

@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { linearizeSession } from '../pi/RecallExtract';
+import registerRecallExtract, { linearizeSession } from '../pi/RecallExtract';
+import registerRecallInjection from '../pi/RecallPreCompact';
 
 // ─── Tree JSONL Linearization ───
 
@@ -111,6 +112,72 @@ describe('tree JSONL linearization', () => {
   });
 });
 
+// ─── Live Pi lifecycle contracts ───
+
+describe('Pi extension lifecycle contracts', () => {
+  let tempDir: string;
+  let previousRecallHome: string | undefined;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'recall-pi-lifecycle-'));
+    previousRecallHome = process.env.RECALL_HOME;
+    process.env.RECALL_HOME = join(tempDir, 'recall-home');
+  });
+
+  afterEach(() => {
+    if (previousRecallHome === undefined) delete process.env.RECALL_HOME;
+    else process.env.RECALL_HOME = previousRecallHome;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('session_shutdown captures the path from sessionManager.getSessionFile()', () => {
+    const sessionPath = join(tempDir, 'pi-session.jsonl');
+    const entries = [
+      { id: '1', parentId: null, type: 'message', message: { role: 'user', content: `Plan the Recall Pi package. ${'x'.repeat(300)}` } },
+      { id: '2', parentId: '1', type: 'message', message: { role: 'assistant', content: `Use Pi packages for extensions and skills only. ${'y'.repeat(300)}` } },
+    ];
+    writeFileSync(sessionPath, entries.map(entry => JSON.stringify(entry)).join('\n'));
+
+    let shutdown: ((event: unknown, ctx: unknown) => void) | undefined;
+    registerRecallExtract({
+      on(event: string, handler: (event: unknown, ctx: unknown) => void) {
+        if (event === 'session_shutdown') shutdown = handler;
+      },
+    });
+    expect(shutdown).toBeDefined();
+
+    shutdown?.({}, { sessionManager: { getSessionFile: () => sessionPath } });
+
+    const drop = join(process.env.RECALL_HOME!, 'MEMORY', 'pi-sessions', 'pi-session.md');
+    expect(readFileSync(drop, 'utf-8')).toContain('Recall Pi package');
+  });
+
+  test('before_agent_start uses Pi exec and returns a chained system prompt', async () => {
+    let beforeStart: ((event: any, ctx: any) => Promise<any>) | undefined;
+    const calls: unknown[][] = [];
+    registerRecallInjection({
+      on(event: string, handler: (event: any, ctx: any) => Promise<any>) {
+        if (event === 'before_agent_start') beforeStart = handler;
+      },
+      async exec(...args: unknown[]) {
+        calls.push(args);
+        return { code: 0, stdout: 'Prior Pi packaging decision', stderr: '', killed: false };
+      },
+    });
+    expect(beforeStart).toBeDefined();
+
+    const result = await beforeStart?.(
+      { systemPrompt: 'Base prompt' },
+      { cwd: '/work/Recall', signal: undefined },
+    );
+
+    expect(calls[0]?.[0]).toBe('recall');
+    expect(calls[0]?.[1]).toEqual(['search', 'Recall', '--limit', '5']);
+    expect(result.systemPrompt).toContain('Base prompt');
+    expect(result.systemPrompt).toContain('Prior Pi packaging decision');
+  });
+});
+
 // ─── RecallBatchExtract Pi Session Scanning ───
 
 describe('RecallBatchExtract Pi session scanning', () => {
@@ -205,13 +272,66 @@ describe('installer Pi integration', () => {
     expect(content).toContain('lifecycle');
   });
 
-  test('install.sh copies Pi extensions', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+  test('package manifest exposes extensions and all nine skills, but not MCP', () => {
+    const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+    expect(packageJson.keywords).toContain('pi-package');
+    expect(packageJson.pi).toEqual({
+      extensions: ['./pi/*.ts'],
+      skills: ['./agent-skills/*/SKILL.md'],
+    });
+    expect(packageJson.pi.mcp).toBeUndefined();
+  });
+
+  test('install.sh registers the native Pi package and removes legacy resource shadows', () => {
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
-    const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
-    expect(content).toContain('install_pi_extensions');
+    const content = readFileSync(libPath, 'utf-8');
+    expect(content).toContain('recall_install_pi_package');
+    expect(content).toContain('recall_remove_legacy_pi_resources');
     expect(content).toContain('RecallExtract.ts');
     expect(content).toContain('RecallPreCompact.ts');
+    expect(content).not.toContain('recall_install_pi_extensions');
+    expect(content).not.toContain('recall_install_pi_skills');
+  });
+
+  test('legacy cleanup backs up customized Pi resources instead of deleting them', () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'recall-pi-legacy-cleanup-'));
+    const fakeHome = join(sandbox, 'home');
+    const piHome = join(fakeHome, '.pi', 'agent');
+    const backupDir = join(sandbox, 'backup');
+    const customExtension = join(piHome, 'extensions', 'RecallExtract.ts');
+    const customSkill = join(piHome, 'skills', 'recall-add', 'SKILL.md');
+    mkdirSync(join(piHome, 'extensions'), { recursive: true });
+    mkdirSync(join(piHome, 'skills', 'recall-add'), { recursive: true });
+    writeFileSync(customExtension, '// user-customized extension\n');
+    writeFileSync(customSkill, '# user-customized skill\n');
+
+    try {
+      execFileSync('bash', [
+        '-c',
+        'source "$1"; recall_remove_legacy_pi_resources',
+        '_',
+        join(__dirname, '..', 'lib', 'install-lib.sh'),
+      ], {
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          PI_CONFIG_DIR: piHome,
+          RECALL_DIR: join(fakeHome, '.agents', 'Recall'),
+          RECALL_REPO_DIR: join(__dirname, '..'),
+          BACKUP_DIR: backupDir,
+          NO_COLOR: '1',
+        },
+      });
+
+      expect(existsSync(customExtension)).toBe(false);
+      expect(existsSync(customSkill)).toBe(false);
+      expect(readFileSync(join(backupDir, 'collisions', '.pi', 'agent', 'extensions', 'RecallExtract.ts'), 'utf-8'))
+        .toContain('user-customized extension');
+      expect(readFileSync(join(backupDir, 'collisions', '.pi', 'agent', 'skills', 'recall-add', 'SKILL.md'), 'utf-8'))
+        .toContain('user-customized skill');
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 
   // update.sh's refresh path propagating the Pi guide (recall_install_pi_guide
@@ -299,6 +419,20 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
     });
   }
 
+  test('creates mcp.json and its parent container on a fresh install', () => {
+    expect(existsSync(mcpJsonPath)).toBe(false);
+
+    runConfigure();
+
+    const config = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
+    expect(config.mcpServers['recall-memory']).toMatchObject({
+      args: [],
+      lifecycle: 'lazy',
+      directTools: true,
+      env: { RECALL_DB_PATH: join(sandboxDir, 'fake-recall.db') },
+    });
+  });
+
   test('preserves inline // comments, non-Recall MCP entries, and JSON5 trailing commas', () => {
     const userConfig = [
       '{',
@@ -308,14 +442,14 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
       '      "command": "/old/recall-mcp",',
       '      "args": [],',
       '      "lifecycle": "lazy",',
-      '      "environment": { "RECALL_DB_PATH": "/old/db" }',
+      '      "env": { "RECALL_DB_PATH": "/old/db" }',
       '    },',
       '    // GitHub MCP — critical for Pi workflows, hand-tuned',
       '    "github": {',
       '      "command": "gh-mcp",',
       '      "args": ["--scope=repo"],',
       '      "lifecycle": "lazy",',
-      '      "environment": { "GITHUB_TOKEN": "ghp_xxx" },',
+      '      "env": { "GITHUB_TOKEN": "ghp_xxx" },',
       '    },',
       '  },',
       '}',
@@ -378,6 +512,24 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
     expect(after).toContain('"recall-memory"');
     expect(after).toContain('fake-recall.db');
   });
+
+  test('preserves an explicit user directTools preference while defaulting fresh installs on', () => {
+    writeFileSync(mcpJsonPath, JSON.stringify({
+      mcpServers: {
+        'recall-memory': {
+          command: '/old/recall-mcp',
+          directTools: false,
+          env: { RECALL_DB_PATH: '/old/db' },
+        },
+      },
+    }, null, 2));
+
+    runConfigure();
+
+    const config = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
+    expect(config.mcpServers['recall-memory'].directTools).toBe(false);
+    expect(config.mcpServers['recall-memory'].env.RECALL_DB_PATH).toContain('fake-recall.db');
+  });
 });
 
 // ─── MCP config hardening RED — V-1, V-3, V-4 (recall_configure_pi_mcp) ───
@@ -390,8 +542,8 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
 //
 //   V-1  Malformed JSON → non-zero exit AND file byte-identical.
 //   V-3  User custom keys on the recall-memory entry (myExtraKey,
-//        environment.MY_CUSTOM_VAR) survive a refresh while
-//        environment.RECALL_DB_PATH is updated.
+//        env.MY_CUSTOM_VAR) survive a refresh while env.RECALL_DB_PATH is
+//        updated.
 //   V-4  The mcpServers container present but a non-object
 //        ("mcpServers": "disabled") → non-zero exit AND file unchanged.
 describe('recall_configure_pi_mcp hardening (V-1, V-3, V-4) [RED]', () => {
@@ -449,13 +601,13 @@ describe('recall_configure_pi_mcp hardening (V-1, V-3, V-4) [RED]', () => {
       '      "args": [],',
       '      "lifecycle": "lazy",',
       '      "myExtraKey": "bar",',
-      '      "environment": { "RECALL_DB_PATH": "/old/db", "MY_CUSTOM_VAR": "foo" }',
+      '      "env": { "RECALL_DB_PATH": "/old/db", "MY_CUSTOM_VAR": "foo" }',
       '    },',
       '    "github": {',
       '      "command": "gh-mcp",',
       '      "args": ["--scope=repo"],',
       '      "lifecycle": "lazy",',
-      '      "environment": { "GITHUB_TOKEN": "ghp_xxx" }',
+      '      "env": { "GITHUB_TOKEN": "ghp_xxx" }',
       '    }',
       '  }',
       '}',
@@ -470,7 +622,7 @@ describe('recall_configure_pi_mcp hardening (V-1, V-3, V-4) [RED]', () => {
 
     // Custom key directly on the recall-memory entry must survive.
     expect(after).toMatch(/"myExtraKey":\s*"bar"/);
-    // Custom env var nested under recall-memory.environment must survive.
+    // Custom env var nested under recall-memory.env must survive.
     expect(after).toMatch(/"MY_CUSTOM_VAR":\s*"foo"/);
     // RECALL_DB_PATH must be updated to the new path (the point of a refresh).
     expect(after).toContain('fake-recall.db');
