@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
@@ -27,6 +27,51 @@ export function claudePaths(home: string): ClaudePaths {
     guide: join(root, 'Recall_GUIDE.md'),
     settings: join(root, 'settings.json'),
     legacySettings: join(home, '.claude.json'),
+  };
+}
+
+/**
+ * Marketplace-qualified id Claude Code keys the native plugin under. Claude namespaces
+ * plugin components, so the bundle's MCP server registers as `plugin:recall:recall-memory`
+ * and never collides with a lifecycle-installed user-scope `recall-memory`. The two simply
+ * coexist, which is why install/update reconcile them instead of relying on an override.
+ *
+ * `lib/install-lib.sh` carries the same id for the bash lifecycle; keep them in step.
+ */
+export const CLAUDE_PLUGIN_ID = 'recall@recall-marketplace';
+
+export interface ClaudePluginState {
+  installed: boolean;
+  /** Installed and not disabled in settings — i.e. actually contributing skills and MCP. */
+  active: boolean;
+  version: string | null;
+}
+
+function readJson(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read Claude's own plugin state files; never shells out to the CLI. */
+export function claudePluginState(home: string): ClaudePluginState {
+  const paths = claudePaths(home);
+  const installedPlugins = readJson(join(paths.root, 'plugins', 'installed_plugins.json'));
+  const entries = (installedPlugins?.plugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
+  const record = Array.isArray(entries) ? (entries[0] as Record<string, unknown> | undefined) : undefined;
+  if (!record) return { installed: false, active: false, version: null };
+
+  const enabledPlugins = readJson(paths.settings)?.enabledPlugins as Record<string, unknown> | undefined;
+  return {
+    installed: true,
+    active: enabledPlugins?.[CLAUDE_PLUGIN_ID] !== false,
+    version: typeof record.version === 'string' ? record.version : null,
   };
 }
 

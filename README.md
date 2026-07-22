@@ -92,6 +92,8 @@ Restart your agent (Claude Code, Pi, or OpenCode) to load the MCP server and hoo
 
 Codex uses its native plugin marketplace instead of the lifecycle installer; see [Codex Integration](docs/CODEX_INTEGRATION.md).
 
+Claude Code can additionally install Recall as a native plugin, which takes over the nine `recall-*` skills and the `recall-memory` MCP server while the installer keeps owning the lifecycle hooks. Existing installs need one reconciliation step — see [Claude Integration](docs/CLAUDE_INTEGRATION.md).
+
 ### First run: set your identity
 
 Recall's tiered RecallStart injects a small identity file at the top
@@ -305,6 +307,7 @@ If you're an AI agent reading this repository:
 | What you need                                                  | Where to find it                     |
 | -------------------------------------------------------------- | ------------------------------------ |
 | **Using Recall from Claude Code** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](FOR_CLAUDE.md)     |
+| **Installing the Claude Code plugin**                          | [`docs/CLAUDE_INTEGRATION.md`](docs/CLAUDE_INTEGRATION.md) |
 | **Using Recall from OpenCode**                                 | [`FOR_OPENCODE.md`](FOR_OPENCODE.md) |
 | **Using Recall from Pi**                                       | [`FOR_PI.md`](FOR_PI.md)             |
 | **Using Recall from Codex**                                    | [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) |
@@ -316,7 +319,7 @@ Recall is built around two integration surfaces: **MCP** (memory search and add,
 
 | Agent                                                         | MCP |                      Lifecycle hooks                       | Status                                |
 | ------------------------------------------------------------- | :-: | :--------------------------------------------------------: | ------------------------------------- |
-| [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation |
+| [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation; native plugin ships skills + MCP |
 | [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — `recall-compaction` + `recall-extract` extensions | In progress                           |
 | [**OpenCode**](https://opencode.ai/)                          | ✅  |             ⚠ Alpha — `recall-extract` plugin              | In progress                           |
 | [**Codex CLI**](https://github.com/openai/codex)              | ✅  |               — native plugin, explicit dump only          | MCP + skills available                |
@@ -338,6 +341,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | Codebase Map (local)                       | Interactive visual map at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html` — generated from the codegraph index, not committed (`.agents/` is gitignored) |
 | [Agent Skills](docs/agent-skills.md)       | `recall-*` skills for Claude Code, Pi, and omp                            |
 | [Codex Integration](docs/CODEX_INTEGRATION.md) | Native plugin install, MCP coverage, and lifecycle limits             |
+| [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Native plugin install, plugin/installer ownership split, migration    |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
 | [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |
