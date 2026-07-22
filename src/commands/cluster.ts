@@ -2,7 +2,8 @@
 
 import { getDb } from '../db/connection.js';
 import { blobToEmbedding, cosineSimilarity } from '../lib/embeddings.js';
-import { execSync } from 'child_process';
+import { claudeCliTextGenerationProvider } from '../providers/claude-cli.js';
+import type { TextGenerationProvider } from '../providers/text-generation.js';
 
 interface ClusterOptions {
   execute?: boolean;
@@ -69,7 +70,10 @@ function findClusters(learnings: LearningWithEmbedding[], threshold: number): Cl
   return clusters;
 }
 
-function synthesizeProcedure(cluster: Cluster): { title: string; steps: string; trigger: string } | null {
+function synthesizeProcedure(
+  cluster: Cluster,
+  provider: TextGenerationProvider = claudeCliTextGenerationProvider,
+): { title: string; steps: string; trigger: string } | null {
   const learningsText = cluster.members.map((l, i) =>
     `Learning ${i + 1}: Problem: ${l.problem}\nSolution: ${l.solution || 'N/A'}`
   ).join('\n\n');
@@ -94,12 +98,8 @@ STEPS:
 ...`;
 
   try {
-    // Uses claude CLI with piped input — same pattern as RecallExtract.ts
-    // Input is generated from DB content, not user-supplied shell arguments
-    const result = execSync(
-      `echo ${JSON.stringify(prompt)} | claude -p --model claude-haiku-4-5-20251001 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 30000 }
-    ).trim();
+    const result = provider.generate(prompt);
+    if (!result) return null;
 
     const titleMatch = result.match(/TITLE:\s*(.+)/);
     const triggerMatch = result.match(/TRIGGER:\s*(.+)/);

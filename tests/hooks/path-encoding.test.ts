@@ -4,7 +4,7 @@
 // ".config/..."), and iCloud paths with spaces/tildes/unicode.
 
 import { describe, test, expect } from 'bun:test';
-import { encodeProjectDir } from '../../hooks/lib/path-encoding';
+import { encodeProjectDir } from '../../hooks/lib/hosts/claude/path-encoding';
 
 describe('encodeProjectDir', () => {
   test('plain path', () => {

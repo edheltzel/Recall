@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 
 // RECALL - MCP Server
-// Exposes memory as first-class tools for Claude Code
+// Exposes memory as first-class tools to any MCP-compatible host.
 
 import { appendFileSync, existsSync as fsExistsSync, mkdirSync } from "fs";
+import { randomUUID } from "crypto";
 import { join } from "path";
-import { homedir } from "os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VERSION } from "./version.js";
+import { getRecallLogDir } from "./lib/runtime-paths.js";
 
 /**
  * Memory usage logging for metrics and enforcement tracking
  * Logs: timestamp, tool, query, results_count, project
  */
-const LOG_DIR = join(homedir(), ".claude", "logs");
+const LOG_DIR = getRecallLogDir();
 const MEMORY_LOG = join(LOG_DIR, "memory-usage.jsonl");
 
 function logMemoryUsage(
@@ -896,7 +897,7 @@ server.tool(
 // Tool: memory_dump - Dump current session to SQLite
 server.tool(
 	"memory_dump",
-	"Dump the current conversation session into SQLite for immediate searchability. Works across Claude Code, OpenCode, and Pi. Use when the user says /dump or you need to persist the current session mid-conversation. Messages are immediately searchable via memory_search after dumping.",
+	"Dump a conversation session into SQLite for immediate searchability. Pass messages for host-portable capture. If messages are omitted, Recall attempts legacy native-session discovery for Claude Code, OpenCode, or Pi; MCP does not provide lifecycle auto-capture by itself.",
 	{
 		title: z
 			.string()
@@ -906,6 +907,23 @@ server.tool(
 			.string()
 			.optional()
 			.describe("Override project name"),
+		session_id: z
+			.string()
+			.optional()
+			.describe("Stable caller session ID. Generated when messages are supplied and this is omitted."),
+		source: z
+			.enum(["claude", "opencode", "pi", "codex", "mcp"])
+			.default("mcp")
+			.describe("Host/source label for caller-supplied messages."),
+		messages: z
+			.array(z.object({
+				role: z.enum(["user", "assistant", "system"]),
+				content: z.string().min(1),
+				timestamp: z.string().optional(),
+			}))
+			.min(1)
+			.optional()
+			.describe("Explicit visible conversation messages. Required for portable dump on hosts without a supported transcript adapter."),
 		skip_fabric: z
 			.boolean()
 			.default(true)
@@ -913,13 +931,29 @@ server.tool(
 				"Skip Fabric extract_wisdom (faster, uses basic summary). Default: true for speed.",
 			),
 	},
-	async ({ title, project, skip_fabric }) => {
+	async ({ title, project, session_id, source, messages, skip_fabric }) => {
 		try {
 			const { coreDump } = await import("./commands/dump.js");
+			const now = new Date().toISOString();
+			const sessionId = session_id || `mcp-${randomUUID()}`;
+			const session = messages ? {
+				source,
+				sessionId,
+				project: project || source,
+				filePath: `mcp://${source}/${sessionId}`,
+				messages: messages.map(message => ({
+					session_id: sessionId,
+					timestamp: message.timestamp || now,
+					role: message.role,
+					content: message.content,
+					project: project || source,
+				})),
+			} : undefined;
 
 			const result = await coreDump(title, {
 				project,
 				skipFabric: skip_fabric,
+				session,
 			});
 
 			// Log memory usage

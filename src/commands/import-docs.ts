@@ -5,8 +5,9 @@ import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
 import { getDb } from '../db/connection.js';
+import { claudePaths } from '../hosts/claude.js';
 
-const RECALL_BASE_DIR = process.env.RECALL_BASE_DIR || join(homedir(), '.claude');
+const RECALL_BASE_DIR = process.env.RECALL_BASE_DIR || claudePaths(homedir()).root;
 
 interface DocFile {
   path: string;

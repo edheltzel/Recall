@@ -1701,15 +1701,17 @@ _recall_copy_hook_files() {
 
   if [[ -d "$src_dir/lib" ]]; then
     mkdir -p "$hooks_dir/lib"
-    local libfile
-    for libfile in "$src_dir/lib/"*.ts; do
-      [[ -f "$libfile" ]] || continue
-      local base
-      base="$(basename "$libfile")"
-      recall_copy_canonical "$libfile" "$RECALL_SHARED_HOOKS_LIB_DIR/$base"
-      recall_link "$hooks_dir/lib/$base" "$RECALL_SHARED_HOOKS_LIB_DIR/$base"
-    done
-    log_success "Installed hooks/lib/ ($(ls -1 "$RECALL_SHARED_HOOKS_LIB_DIR" 2>/dev/null | wc -l | tr -d ' ') files)"
+    local libfile relative canonical installed count=0
+    while IFS= read -r libfile; do
+      relative="${libfile#"$src_dir/lib/"}"
+      canonical="$RECALL_SHARED_HOOKS_LIB_DIR/$relative"
+      installed="$hooks_dir/lib/$relative"
+      mkdir -p "$(dirname "$canonical")" "$(dirname "$installed")"
+      recall_copy_canonical "$libfile" "$canonical"
+      recall_link "$installed" "$canonical"
+      count=$((count + 1))
+    done < <(find "$src_dir/lib" -type f -name '*.ts' -print | sort)
+    log_success "Installed hooks/lib/ ($count files)"
   fi
 
   local memory_dir="$CLAUDE_DIR/MEMORY"

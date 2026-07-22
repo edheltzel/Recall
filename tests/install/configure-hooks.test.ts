@@ -62,6 +62,8 @@ describe('install.sh configure_hooks()', () => {
     // install.sh does `cp hooks/lib/*.ts` which would fail if the glob expands
     // to nothing. Mirror the real repo layout by dropping one stub shared lib.
     writeFileSync(join(fakeRepo, 'hooks', 'lib', 'stub.ts'), '// stub');
+    mkdirSync(join(fakeRepo, 'hooks', 'lib', 'hosts', 'claude'), { recursive: true });
+    writeFileSync(join(fakeRepo, 'hooks', 'lib', 'hosts', 'claude', 'provider.ts'), '// nested stub');
   });
 
   afterEach(() => {
@@ -234,5 +236,10 @@ describe('install.sh configure_hooks()', () => {
     // Resolve tempRoot too: macOS canonicalizes /var -> /private/var in realpath.
     const resolved = realpathSync(join(claudeDir, 'hooks', 'RecallExtract.ts'));
     expect(resolved.startsWith(realpathSync(tempRoot))).toBe(true);
+
+    const nestedCanonical = join(canonicalDir, 'lib', 'hosts', 'claude', 'provider.ts');
+    expect(readFileSync(nestedCanonical, 'utf-8')).toBe('// nested stub');
+    expect(realpathSync(join(claudeDir, 'hooks', 'lib', 'hosts', 'claude', 'provider.ts')))
+      .toBe(realpathSync(nestedCanonical));
   });
 });

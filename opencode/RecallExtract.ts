@@ -14,7 +14,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
 import { join } from "path"
 import { homedir } from "os"
 
-const DROP_DIR = join(homedir(), ".claude", "MEMORY", "opencode-sessions")
+const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
+const DROP_DIR = join(RECALL_HOME, "MEMORY", "opencode-sessions")
 const TRACKER_PATH = join(DROP_DIR, ".extracted.json")
 
 /** Load persistent dedup tracker from disk */
