@@ -6,11 +6,12 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { assertMetadataUnchanged, assertSafeTestDb, metadata, stringEnv } from './lib/e2e-isolation';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
@@ -21,23 +22,6 @@ const testRecallHome = join(tempRoot, 'recall-home');
 const testHome = join(tempRoot, 'home');
 const testClaudeHome = join(testHome, '.claude');
 const testBin = join(tempRoot, 'bin');
-
-interface FileMetadata {
-  exists: boolean;
-  size?: number;
-  mtimeMs?: number;
-  ino?: number;
-}
-
-function metadata(path: string): FileMetadata {
-  if (!existsSync(path)) return { exists: false };
-  const stat = statSync(path);
-  return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
-}
-
-function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
-}
 
 function runClaude(args: string[], env: Record<string, string>): string {
   const result = spawnSync('claude', args, { cwd: repoRoot, env, encoding: 'utf-8' });
@@ -77,9 +61,7 @@ async function main(): Promise<void> {
 
   for (const dir of [testRecallHome, testHome, testClaudeHome, testBin]) mkdirSync(dir, { recursive: true });
 
-  if (testDb === productionDb || testDb.startsWith(dirname(productionDb) + '/')) {
-    throw new Error(`unsafe test database path: ${testDb}`);
-  }
+  assertSafeTestDb(testDb, productionDb);
   if (testClaudeHome.startsWith(productionClaudeHome)) {
     throw new Error(`unsafe test Claude home: ${testClaudeHome}`);
   }
@@ -299,10 +281,7 @@ async function main(): Promise<void> {
     await client.close();
   }
 
-  const productionAfter = metadata(productionDb);
-  if (JSON.stringify(productionAfter) !== JSON.stringify(productionBefore)) {
-    throw new Error(`production DB metadata changed: before=${JSON.stringify(productionBefore)} after=${JSON.stringify(productionAfter)}`);
-  }
+  assertMetadataUnchanged(productionDb, productionBefore);
   const productionClaudeAfter = metadata(join(productionClaudeHome, 'settings.json'));
   if (JSON.stringify(productionClaudeAfter) !== JSON.stringify(productionClaudeBefore)) {
     throw new Error(`production Claude settings changed: before=${JSON.stringify(productionClaudeBefore)} after=${JSON.stringify(productionClaudeAfter)}`);

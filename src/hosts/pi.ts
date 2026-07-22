@@ -24,7 +24,7 @@ export const piHost: NativeHostAdapter = {
     return [{
       host: 'pi',
       path: paths.mcpSettings,
-      envPath: ['mcpServers', 'recall-memory', 'environment'],
+      envPath: ['mcpServers', 'recall-memory', 'env'],
       format: 'json',
     }];
   },

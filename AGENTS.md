@@ -25,12 +25,12 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `hooks/` — self-contained lifecycle hooks + cron jobs (never import from `src/`)
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
-- `agent-skills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills` — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
+- `agent-skills/` — canonical Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills` and `~/.omp/agent/skills`, discovered by Pi through the root package manifest, and generated into native host plugin payloads — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
 - `plugins/` — native host plugin bundles, one per host: Codex in `plugins/recall/`, Claude Code in `plugins/recall-claude/`, each packaging MCP plus its own skill payload
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
-- `pi/` — Pi host integration (extensions / hooks)
+- `pi/` — Pi package extensions for native lifecycle capture and memory injection
 - `scripts/` — dev / CI helper scripts (version check, e2e)
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`)
 - `assets/` — README banner + VHS demo tapes / gifs
@@ -115,7 +115,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Runtime**: Bun (not Node). Uses `bun:sqlite` directly. Shebangs are `#!/usr/bin/env bun`.
 - **Build**: tsup produces ESM. Build script replaces node shebang with bun shebang.
 - **Database**: SQLite at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`; legacy `MEM_DB_PATH` still accepted). WAL mode. FTS5 full-text search with sync triggers.
-- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `shared/skills/`, `opencode/plugins/`, `pi/extensions/`, `MEMORY/`, `backups/`). Platform homes (`~/.claude/hooks/`, `~/.config/pencode/plugins/`, `~/.pi/agent/extensions/`) receive **per-file symlinks** back to canonicals. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
+- **Install layout**: Canonical files live under `~/.agents/Recall/` (`shared/hooks/`, `shared/skills/`, `opencode/plugins/`, `MEMORY/`, `backups/`). Claude lifecycle hooks and OpenCode integration receive **per-file symlinks** back to canonicals; when the optional Claude plugin is active, it owns skills + MCP and the installer reconciles the legacy duplicates. Pi loads `pi/*.ts` and the canonical Agent Skills from the root package's native `package.json#pi` manifest; its MCP adapter and `mcp.json` registration remain separate because Pi packages have no MCP resource. The collision rule in `lib/install-lib.sh:recall_link` backs up any existing user file before replacing it with a symlink.
 - **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
 - **Hook registration**: `Stop`, `SessionStart`, `PreCompact` events in `~/.claude/settings.json` under `hooks.*`.
 - **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.
@@ -131,7 +131,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
-- **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so uninstall removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
+- **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills` and `~/.omp/agent/skills`; Pi discovers it through the root native package manifest). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so legacy/uninstall cleanup removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
 - **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
 - **Cut a release**: See `docs/releasing.md` for the tag → GitHub release flow.
 

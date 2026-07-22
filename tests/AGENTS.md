@@ -23,6 +23,7 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 - Mirror the source layout: a test for `src/commands/foo.ts` goes in `tests/commands/`; a hook test in `tests/hooks/`.
 - `scripts/e2e-codex-plugin.ts` owns the isolated current-CLI verification for the native Codex marketplace, plugin install, and all nine MCP tools.
 - `scripts/e2e-claude-plugin.ts` does the same for Claude, and additionally seeds a legacy lifecycle install to prove the migration removes the duplicate skill symlinks and MCP registration idempotently. It must isolate the Claude home too (`HOME` + `CLAUDE_DIR`), not just the database, and assert both were left unchanged.
+- `scripts/e2e-pi-integration.ts` owns the isolated current-CLI verification for Pi's separate package, MCP adapter/config, lifecycle capture, and all nine skills/tools.
 
 ## Verification
 

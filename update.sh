@@ -333,7 +333,7 @@ step_migrate() {
 step_refresh_runtime() {
   log_info "Refreshing runtime files (canonical + symlinks)..."
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would: write canonicals to $RECALL_DIR and per-file symlinks into platform homes"
+    echo "  [dry-run] would: write canonicals to $RECALL_DIR, refresh host links, and refresh native package registrations"
     echo "  [dry-run] would: migrate Recall-owned Claude/Pi MEMORY bootstraps and refresh all detected platform guides, prompts, and skills"
     return
   fi

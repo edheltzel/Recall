@@ -34,8 +34,9 @@ fi
 : "${CLAUDE_DIR:=$HOME/.claude}"
 
 # Recall install root — canonical home for hooks, commands, guides, the DB,
-# and backups. Platform homes (~/.claude/, ~/.config/opencode/, ~/.pi/agent/)
-# receive per-file symlinks back here. Override via $RECALL_DIR to relocate.
+# and backups. Claude/OpenCode homes receive per-file symlinks back here; Pi's
+# extensions + skills load through its native package manifest. Override via
+# $RECALL_DIR to relocate.
 : "${RECALL_DIR:=$HOME/.agents/Recall}"
 : "${RECALL_SHARED_DIR:=$RECALL_DIR/shared}"
 : "${RECALL_SHARED_HOOKS_DIR:=$RECALL_SHARED_DIR/hooks}"
@@ -46,7 +47,6 @@ fi
 : "${RECALL_OPENCODE_ROOT:=$RECALL_DIR/opencode}"
 : "${RECALL_OPENCODE_PLUGINS_DIR:=$RECALL_OPENCODE_ROOT/plugins}"
 : "${RECALL_PI_ROOT:=$RECALL_DIR/pi}"
-: "${RECALL_PI_EXTENSIONS_DIR:=$RECALL_PI_ROOT/extensions}"
 : "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
 
 # Completion sentinel — written at install start, removed only after the
@@ -95,7 +95,7 @@ fi
 
 # Platform configuration
 : "${OPENCODE_CONFIG_DIR:=${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
-: "${PI_CONFIG_DIR:=$HOME/.pi/agent}"
+: "${PI_CONFIG_DIR:=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
 # omp is skills-only (no MCP/hooks integration exists for it yet) — its
 # config dir is used solely as the target for `~/.omp/agent/skills`.
 : "${OMP_CONFIG_DIR:=$HOME/.omp/agent}"
@@ -987,10 +987,10 @@ recall_do_restore() {
 
 # ── Install root + symlink helpers ───────────────────────────────────────────
 #
-# Recall stores canonical files under $RECALL_DIR. Each platform home
-# (~/.claude/, ~/.config/opencode/, ~/.pi/agent/) receives PER-FILE symlinks
-# back to the canonical files — never directory-level symlinks — so a platform
-# directory can mix Recall-owned symlinks with files owned by other tools.
+# Recall stores canonical runtime files under $RECALL_DIR. Claude/OpenCode
+# homes receive PER-FILE symlinks back to those files; Pi receives only its
+# guide link because native package discovery reads extensions + skills from
+# the Recall package itself.
 #
 # Functions:
 #   recall_create_install_root         — mkdir the full $RECALL_DIR tree
@@ -1009,7 +1009,6 @@ recall_create_install_root() {
     "$RECALL_SHARED_HOOKS_LIB_DIR" \
     "$RECALL_SHARED_SKILLS_DIR" \
     "$RECALL_OPENCODE_PLUGINS_DIR" \
-    "$RECALL_PI_EXTENSIONS_DIR" \
     "$RECALL_MEMORY_DIR" \
     "$BACKUP_BASE"
 }
@@ -1048,7 +1047,7 @@ recall_copy_canonical() {
   cp "$src" "$dest"
 }
 
-# Move a regular file (or foreign symlink) at TARGET into the backup tree
+# Move a regular file, directory, or foreign symlink at TARGET into the backup tree
 # preserving its relative path under $HOME, so we never lose user edits.
 # Used by the collision rule before replacing an existing target with a
 # Recall-managed symlink.
@@ -1369,14 +1368,6 @@ recall_install_claude_skills() {
     return 0
   fi
   _recall_link_skills_to "$CLAUDE_DIR/skills"
-}
-
-# Pi skills — canonicals are already refreshed by whichever caller ran
-# recall_install_claude_skills / recall_copy_runtime_files first; this only
-# adds the Pi-side symlinks. Called from recall_install_pi_platform.
-recall_install_pi_skills() {
-  _recall_copy_skill_files
-  _recall_link_skills_to "$PI_CONFIG_DIR/skills"
 }
 
 # omp integration is skills-only today — no MCP registration, hooks, or guide
@@ -2216,7 +2207,7 @@ Read and follow the canonical Recall guide at \`$CLAUDE_DIR/Recall_GUIDE.md\`. U
 
 # ── Shared MCP config writer ─────────────────────────────────────────────────
 #
-# _recall_jsonc_merge_mcp_entry FILE PARENT_KEY VALUE_JSON
+# _recall_jsonc_merge_mcp_entry FILE PARENT_KEY VALUE_JSON [PRESERVE_KEYS]
 #
 # Single hardened JSONC merge used by every platform's MCP registration
 # (OpenCode's opencode.json under "mcp", Pi's mcp.json under "mcpServers").
@@ -2228,7 +2219,9 @@ Read and follow the canonical Recall guide at \`$CLAUDE_DIR/Recall_GUIDE.md\`. U
 #   FILE        absolute path to the config file
 #   PARENT_KEY  container key for MCP servers ("mcp" or "mcpServers")
 #   VALUE_JSON  JSON object of the owned fields for the recall-memory entry;
-#               its `environment` (if any) is deep-merged over the existing one
+#               its `environment` or `env` (if any) is deep-merged over the existing one
+#   PRESERVE_KEYS  optional comma-separated entry keys whose existing explicit
+#                  values win over VALUE_JSON defaults
 #
 # Hardening invariants (architect/RedTeam V-1, V-3, V-4):
 #   V-1  Unparseable input → exit non-zero BEFORE any write (file untouched).
@@ -2236,13 +2229,14 @@ Read and follow the canonical Recall guide at \`$CLAUDE_DIR/Recall_GUIDE.md\`. U
 #        names); every other key on the entry and every other env var survive.
 #   V-4  PARENT_KEY present but not a plain object → refuse, file unchanged.
 _recall_jsonc_merge_mcp_entry() {
-  CONFIG_PATH="$1" PARENT_KEY="$2" ENTRY_JSON="$3" REPO_DIR="$RECALL_REPO_DIR" \
+  CONFIG_PATH="$1" PARENT_KEY="$2" ENTRY_JSON="$3" PRESERVE_KEYS="${4:-}" REPO_DIR="$RECALL_REPO_DIR" \
     bun -e '
       const fs = require("fs");
       const path = require("path");
       const { parse, modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
       const file = process.env.CONFIG_PATH;
       const parentKey = process.env.PARENT_KEY;
+      const preserveKeys = new Set((process.env.PRESERVE_KEYS || "").split(",").filter(Boolean));
       const name = path.basename(file);
       const entry = JSON.parse(process.env.ENTRY_JSON);
 
@@ -2282,13 +2276,22 @@ _recall_jsonc_merge_mcp_entry() {
       const container = existing[parentKey] || {};
       const prevRaw = container["recall-memory"];
       const prev = (prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)) ? prevRaw : {};
-      const prevEnv = (prev.environment && typeof prev.environment === "object" && !Array.isArray(prev.environment)) ? prev.environment : {};
-      const newEnv = (entry.environment && typeof entry.environment === "object" && !Array.isArray(entry.environment)) ? entry.environment : {};
       const mergedEntry = {
         ...prev,
-        ...entry,
-        environment: { ...prevEnv, ...newEnv }
+        ...entry
       };
+      for (const key of preserveKeys) {
+        if (Object.prototype.hasOwnProperty.call(prev, key)) mergedEntry[key] = prev[key];
+      }
+      // Claude/OpenCode use `environment`; pi-mcp-adapter uses `env`.
+      // Deep-merge whichever owned field the caller supplied so custom sibling
+      // variables survive without inventing one normalized cross-host schema.
+      for (const envKey of ["environment", "env"]) {
+        if (!Object.prototype.hasOwnProperty.call(entry, envKey)) continue;
+        const prevEnv = (prev[envKey] && typeof prev[envKey] === "object" && !Array.isArray(prev[envKey])) ? prev[envKey] : {};
+        const newEnv = (entry[envKey] && typeof entry[envKey] === "object" && !Array.isArray(entry[envKey])) ? entry[envKey] : {};
+        mergedEntry[envKey] = { ...prevEnv, ...newEnv };
+      }
 
       // In-place edit via jsonc-parser modify/applyEdits: only the
       // recall-memory entry'"'"'s value slot is rewritten. Surrounding bytes
@@ -2296,10 +2299,21 @@ _recall_jsonc_merge_mcp_entry() {
       // top-of-file leading comments) survive byte-for-byte. The Cycle 1
       // preservation tests in tests/{opencode,pi}-integration.test.ts pin
       // this contract.
-      const edits = modify(text, [parentKey, "recall-memory"], mergedEntry, {
+      const hasContainer = Object.prototype.hasOwnProperty.call(existing, parentKey);
+      const editPath = hasContainer ? [parentKey, "recall-memory"] : [parentKey];
+      const editValue = hasContainer ? mergedEntry : { "recall-memory": mergedEntry };
+      const edits = modify(text, editPath, editValue, {
         formattingOptions: { tabSize: 2, insertSpaces: true }
       });
       const newText = applyEdits(text, edits);
+
+      // jsonc-parser cannot materialize a missing intermediate object when
+      // asked to edit [parentKey, child]. Create the parent explicitly above,
+      // then reject any no-op so a fresh install can never print false success.
+      if (!hasContainer && (edits.length === 0 || newText === text)) {
+        console.error("recall: failed to construct " + name + " — merge produced no edit");
+        process.exit(1);
+      }
 
       // V-8: a write failure (read-only file/dir, ENOSPC) must surface as a
       // non-zero exit. `bun -e` swallows an uncaught synchronous writeFileSync
@@ -2409,12 +2423,99 @@ recall_install_opencode_platform() {
 
 recall_install_pi_adapter() {
   log_info "Ensuring pi-mcp-adapter is installed..."
-  if pi install npm:pi-mcp-adapter 2>/dev/null; then
+  if PI_CODING_AGENT_DIR="$PI_CONFIG_DIR" pi install npm:pi-mcp-adapter --no-approve 2>/dev/null; then
     log_success "pi-mcp-adapter ready"
-  else
-    log_warn "Could not install pi-mcp-adapter automatically"
-    log_warn "Install manually: pi install npm:pi-mcp-adapter"
+    return 0
   fi
+
+  # Preserve an existing working adapter when a reinstall cannot reach npm.
+  # A fresh install without the adapter is incomplete and must fail loudly.
+  if PI_CODING_AGENT_DIR="$PI_CONFIG_DIR" PI_OFFLINE=1 pi list --no-approve 2>/dev/null \
+    | grep -Fq 'npm:pi-mcp-adapter'; then
+    log_warn "Could not refresh pi-mcp-adapter; preserving the installed copy"
+    return 0
+  fi
+
+  log_error "Could not install pi-mcp-adapter; Pi has no native MCP client"
+  log_error "Retry when npm is reachable: PI_CODING_AGENT_DIR=\"$PI_CONFIG_DIR\" pi install npm:pi-mcp-adapter"
+  return 1
+}
+
+# Remove Recall resources installed by the pre-package integration only after
+# Pi has accepted the native Recall package. Keeping both would make Pi discover
+# each extension and skill twice. Recall-managed symlinks can be discarded;
+# drifted files and foreign links are moved into the install backup first.
+recall_remove_legacy_pi_resources() {
+  local ext_dir="$PI_CONFIG_DIR/extensions"
+  local ext target
+  for ext in RecallExtract.ts RecallPreCompact.ts; do
+    target="$ext_dir/$ext"
+    if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$RECALL_DIR"/* ]]; then
+      rm -f "$target"
+      log_info "Removed legacy Pi extension symlink: $target"
+    elif [[ -e "$target" || -L "$target" ]]; then
+      _recall_backup_collision "$target"
+      log_warn "Backed up legacy Pi extension before enabling the package: $target"
+    fi
+  done
+  rmdir "$ext_dir" 2>/dev/null || true
+
+  local skills_src="$RECALL_REPO_DIR/agent-skills"
+  local skill_src skill_name skill_dir child
+  if [[ -d "$skills_src" ]]; then
+    for skill_src in "$skills_src"/*/; do
+      [[ -d "$skill_src" ]] || continue
+      skill_name="$(basename "$skill_src")"
+      skill_dir="$PI_CONFIG_DIR/skills/$skill_name"
+      [[ -d "$skill_dir" || -L "$skill_dir" ]] || continue
+
+      if [[ -L "$skill_dir" ]]; then
+        if [[ "$(readlink "$skill_dir")" == "$RECALL_DIR"/* ]]; then
+          rm -f "$skill_dir"
+          log_info "Removed legacy Pi skill symlink: $skill_dir"
+        else
+          _recall_backup_collision "$skill_dir"
+          log_warn "Backed up legacy Pi skill link before enabling the package: $skill_dir"
+        fi
+        continue
+      fi
+
+      for child in "$skill_dir"/*; do
+        [[ -e "$child" || -L "$child" ]] || continue
+        if [[ -L "$child" ]] && [[ "$(readlink "$child")" == "$RECALL_DIR"/* ]]; then
+          rm -f "$child"
+        fi
+      done
+      if rmdir "$skill_dir" 2>/dev/null; then
+        log_info "Removed legacy Pi skill links: $skill_name"
+      else
+        _recall_backup_collision "$skill_dir"
+        log_warn "Backed up customized legacy Pi skill before enabling the package: $skill_dir"
+      fi
+    done
+  fi
+  rmdir "$PI_CONFIG_DIR/skills" 2>/dev/null || true
+}
+
+# Pi packages can own extensions and skills, but not MCP servers. Register the
+# root Recall package for those two native resources; the adapter and mcp.json
+# remain deliberately separate steps in recall_install_pi_platform.
+recall_install_pi_package() {
+  log_info "Installing Recall's native Pi extension + skill package..."
+  if ! PI_CODING_AGENT_DIR="$PI_CONFIG_DIR" pi install "$RECALL_REPO_DIR" --no-approve 2>/dev/null; then
+    log_error "Pi rejected the Recall package at $RECALL_REPO_DIR"
+    return 1
+  fi
+
+  local package_list
+  if ! package_list="$(PI_CODING_AGENT_DIR="$PI_CONFIG_DIR" PI_OFFLINE=1 pi list --no-approve 2>/dev/null)" \
+    || ! grep -Fq "$RECALL_REPO_DIR" <<<"$package_list"; then
+    log_error "Pi did not retain Recall's package registration at $RECALL_REPO_DIR"
+    return 1
+  fi
+
+  recall_remove_legacy_pi_resources
+  log_success "Recall Pi package ready (extensions + skills)"
 }
 
 recall_configure_pi_mcp() {
@@ -2435,32 +2536,16 @@ recall_configure_pi_mcp() {
       command: process.env.MEM_MCP_PATH,
       args: [],
       lifecycle: "lazy",
-      environment: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
+      directTools: true,
+      env: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
     }))')"
 
-  if _recall_jsonc_merge_mcp_entry "$config" "mcpServers" "$entry_json"; then
+  if _recall_jsonc_merge_mcp_entry "$config" "mcpServers" "$entry_json" "directTools"; then
     log_success "Registered recall-memory in Pi mcp.json"
   else
     log_error "Failed to register recall-memory in Pi mcp.json (existing config is invalid or unsupported — left unchanged)"
     return 1
   fi
-}
-
-recall_install_pi_extensions() {
-  local ext_dir="$PI_CONFIG_DIR/extensions"
-  local src_dir="$RECALL_REPO_DIR/pi"
-
-  recall_create_install_root
-  mkdir -p "$ext_dir"
-
-  local ext
-  for ext in RecallExtract.ts RecallPreCompact.ts; do
-    if [[ -f "$src_dir/$ext" ]]; then
-      recall_copy_canonical "$src_dir/$ext" "$RECALL_PI_EXTENSIONS_DIR/$ext"
-      recall_link "$ext_dir/$ext" "$RECALL_PI_EXTENSIONS_DIR/$ext"
-      log_success "Installed $ext Pi extension"
-    fi
-  done
 }
 
 recall_install_pi_guide() {
@@ -2474,10 +2559,11 @@ recall_install_pi_guide() {
   fi
 
   local agents_md="$PI_CONFIG_DIR/AGENTS.md"
+  local pi_guide_display="${PI_CONFIG_DIR/#$HOME/\~}/Recall_GUIDE.md"
   local memory_section="## MEMORY
 <!-- RECALL_MANAGED_MEMORY -->
 
-Read and follow the canonical Recall guide at \`~/.pi/agent/Recall_GUIDE.md\`. Use the live \`recall-memory\` MCP schemas as the source of truth for tool call shapes."
+Read and follow the canonical Recall guide at \`$pi_guide_display\`. Use the live \`recall-memory\` MCP schemas as the source of truth for tool call shapes."
 
   if [[ -f "$agents_md" ]] && grep -q "^## MEMORY" "$agents_md"; then
     if recall_memory_section_mutate "$agents_md" pi migrate "$memory_section"; then
@@ -2497,17 +2583,15 @@ Read and follow the canonical Recall guide at \`~/.pi/agent/Recall_GUIDE.md\`. U
   log_success "Added MEMORY section to AGENTS.md"
 }
 
-# Canonical Pi platform install entry point — composes the five Pi surfaces
-# (adapter package, MCP config, extensions, guide, skills) in the order
-# install.sh has always used. Same scope caveats as
-# recall_install_opencode_platform above: closes within-platform drift, not
-# broader gap classes.
+# Canonical Pi platform install entry point. There is intentionally no single
+# bundle spanning these surfaces: Pi's package owns extensions + skills, the
+# third-party adapter owns MCP client behavior, Recall owns mcp.json, and the
+# guide remains a separately linked context file.
 recall_install_pi_platform() {
   recall_install_pi_adapter
+  recall_install_pi_package
   recall_configure_pi_mcp
-  recall_install_pi_extensions
   recall_install_pi_guide
-  recall_install_pi_skills
 }
 
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────

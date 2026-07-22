@@ -223,7 +223,7 @@ do_install() {
   fi
 
   if [[ "$PI_DETECTED" == "true" ]]; then
-    _step "Pi" "Configuring Pi integration"
+    _step "Pi" "Configuring Pi package and MCP integration"
     recall_install_pi_platform
   fi
 
@@ -291,7 +291,7 @@ do_install() {
   echo "Platforms configured:"
   [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && echo "  ✓ Claude Code (MCP + hooks + CLAUDE.md)"
   [[ "$OPENCODE_DETECTED" == "true" ]] && echo "  ✓ OpenCode (MCP + plugins + agent)"
-  [[ "$PI_DETECTED" == "true" ]] && echo "  ✓ Pi (MCP via adapter + extensions + AGENTS.md)"
+  [[ "$PI_DETECTED" == "true" ]] && echo "  ✓ Pi (native package + separate MCP adapter/config + AGENTS.md)"
   echo ""
   echo "Next steps:"
   local step=1
@@ -304,7 +304,7 @@ do_install() {
     step=$((step + 1))
   fi
   if [[ "$PI_DETECTED" == "true" ]]; then
-    echo "  $step. Restart Pi to load MCP adapter and extensions"
+    echo "  $step. Restart Pi to load the Recall package and MCP adapter"
     step=$((step + 1))
   fi
   echo "  $step. Test: recall stats"

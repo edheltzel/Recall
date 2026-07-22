@@ -32,7 +32,7 @@ The `recall update` / `recall uninstall` / `recall install` subcommands simply f
 
 ## Fresh install
 
-Recall installs to a canonical root at `~/.agents/Recall/` and symlinks into each detected agent's home (Claude Code, OpenCode, Pi). Pick the on-ramp that matches how you got Recall:
+Recall installs runtime state under `~/.agents/Recall/`, links host-owned files where appropriate, and registers native host packages where available. On Pi, one Recall command coordinates a native package plus the separately discovered MCP adapter/configuration. Pick the on-ramp that matches how you got Recall:
 
 - **npm (recommended):** `bun install -g recall-memory` puts the `recall` / `recall-mcp` binaries on your PATH, then `recall install` runs the canonical setup — MCP registration, hooks, agent skills, guides — for every detected agent. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
 - **npx (one-shot):** `npx --package=recall-memory recall install` — same canonical setup, no global install. Bun must still be on PATH.

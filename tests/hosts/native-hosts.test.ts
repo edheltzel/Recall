@@ -15,6 +15,9 @@ describe('native host boundaries', () => {
     expect(targets.find(target => target.host === 'opencode')?.envPath).toEqual([
       'mcp', 'recall-memory', 'environment',
     ]);
+    expect(targets.find(target => target.host === 'pi')?.envPath).toEqual([
+      'mcpServers', 'recall-memory', 'env',
+    ]);
     expect(claudePaths('/test-home').projects).toBe('/test-home/.claude/projects');
   });
 
