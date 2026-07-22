@@ -26,7 +26,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
 - `agent-skills/` — Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills` — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
-- `plugins/` — native host plugin bundles; Codex packages MCP plus generated host-adapted skills in `plugins/recall/`
+- `plugins/` — native host plugin bundles, one per host: Codex in `plugins/recall/`, Claude Code in `plugins/recall-claude/`, each packaging MCP plus its own skill payload
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
@@ -131,7 +131,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
-- **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so uninstall removes it.
+- **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills`, `~/.pi/agent/skills`, `~/.omp/agent/skills`). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so uninstall removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
 - **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
 - **Cut a release**: See `docs/releasing.md` for the tag → GitHub release flow.
 
@@ -175,7 +175,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`benchmarks/AGENTS.md`](benchmarks/AGENTS.md) — wake-up context-efficiency benchmark harness
 - [`docs/AGENTS.md`](docs/AGENTS.md) — user-facing published docs, ADRs, agent skill docs (never plans/specs)
 - [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
-- [`plugins/AGENTS.md`](plugins/AGENTS.md) — native host plugin manifests, MCP registration, and generated adapters
+- [`plugins/AGENTS.md`](plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 
 Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh`; platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
 

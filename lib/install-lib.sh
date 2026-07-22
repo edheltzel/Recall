@@ -1249,11 +1249,125 @@ _recall_link_skills_to() {
   done
 }
 
+# ── Claude Code native plugin ────────────────────────────────────────────────
+#
+# Claude Code can install Recall as a native plugin (docs/CLAUDE_INTEGRATION.md).
+# The plugin ships the same nine skills and registers recall-memory from its own
+# bundle. Claude NAMESPACES plugin components: the plugin's server appears as
+# `plugin:recall:recall-memory` and does not override a user-scope `recall-memory`.
+# Both therefore load at once — the session pays for a duplicated skill surface and
+# two servers exposing the same nine tools. So whenever the plugin is active the
+# lifecycle scripts hand it ownership of the Claude skill surface and MCP entry.
+#
+# Hooks stay lifecycle-owned: plugin hooks MERGE with settings.json hooks rather
+# than replacing them, so shipping them in the bundle would double every capture.
+#
+# `src/hosts/claude.ts` carries the same plugin id for the TypeScript side.
+: "${RECALL_CLAUDE_PLUGIN_ID:=recall@recall-marketplace}"
+
+# True when Claude has the Recall plugin installed AND not disabled. Reads Claude's
+# own state files rather than shelling out to the claude CLI, which may be absent
+# and must not be spawned mid-install.
+recall_claude_plugin_active() {
+  local installed="$CLAUDE_DIR/plugins/installed_plugins.json"
+  [[ -f "$installed" ]] || return 1
+  command -v bun &>/dev/null || return 1
+  INSTALLED_FILE="$installed" SETTINGS_FILE="$CLAUDE_DIR/settings.json" \
+    PLUGIN_ID="$RECALL_CLAUDE_PLUGIN_ID" bun -e '
+    const fs = require("fs");
+    const read = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf-8")); } catch { return null; } };
+    const entry = read(process.env.INSTALLED_FILE)?.plugins?.[process.env.PLUGIN_ID];
+    if (!Array.isArray(entry) || entry.length === 0) process.exit(1);
+    const enabled = read(process.env.SETTINGS_FILE)?.enabledPlugins?.[process.env.PLUGIN_ID];
+    process.exit(enabled === false ? 1 : 0);
+  ' 2>/dev/null
+}
+
+# Remove ONLY Recall-owned skill symlinks under ~/.claude/skills — links whose
+# target resolves into $RECALL_SHARED_SKILLS_DIR. Real files, user-authored
+# skills, and links owned by other tools are never touched, and a skill
+# directory is removed only when it is already empty. Idempotent.
+_recall_unlink_claude_skill_links() {
+  local skills_root="$CLAUDE_DIR/skills"
+  [[ -d "$skills_root" ]] || return 0
+  [[ -d "$RECALL_SHARED_SKILLS_DIR" ]] || return 0
+
+  local skill_dir skill_name installed_dir f target removed=0
+  for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
+    [[ -d "$skill_dir" ]] || continue
+    skill_name="$(basename "$skill_dir")"
+    installed_dir="$skills_root/$skill_name"
+    [[ -d "$installed_dir" ]] || continue
+    for f in "$installed_dir"/*; do
+      [[ -L "$f" ]] || continue
+      target="$(readlink "$f")"
+      case "$target" in
+        "$RECALL_SHARED_SKILLS_DIR"/*) rm -f "$f" && removed=$((removed + 1)) ;;
+      esac
+    done
+    rmdir "$installed_dir" 2>/dev/null || true
+  done
+
+  if [[ $removed -gt 0 ]]; then
+    log_success "Removed $removed legacy skill symlink(s) — the Claude plugin now owns the recall-* surface"
+  fi
+}
+
+# Drop the user-scope recall-memory registration in favour of the plugin's, but
+# ONLY when both resolve to the same database. The plugin's bundled .mcp.json
+# carries no env block, so a registration pinned to a non-default RECALL_DB_PATH
+# must survive — removing it would silently repoint memory at the default file
+# and the user's history would look empty. Returns 0 when the legacy entry is
+# gone (or was never there), 1 when it was deliberately kept.
+_recall_unregister_legacy_claude_mcp() {
+  local default_db="$RECALL_DIR/recall.db"
+  local f
+
+  for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
+    [[ -f "$f" ]] || continue
+    grep -q "recall-memory" "$f" || continue
+    if CFG_FILE="$f" DEFAULT_DB="$default_db" bun -e '
+      const fs = require("fs");
+      const file = process.env.CFG_FILE;
+      let cfg;
+      try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { process.exit(1); }
+      const entry = cfg?.mcpServers?.["recall-memory"];
+      if (!entry) process.exit(0);
+      const pinned = entry.env?.RECALL_DB_PATH ?? entry.env?.MEM_DB_PATH;
+      if (pinned && pinned !== process.env.DEFAULT_DB) process.exit(1);
+      delete cfg.mcpServers["recall-memory"];
+      if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
+      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+    ' 2>/dev/null; then
+      log_success "Removed duplicate recall-memory registration from $(basename "$f") — the plugin provides it"
+    else
+      log_warn "Kept recall-memory in $(basename "$f"): it pins a custom RECALL_DB_PATH the plugin cannot carry"
+      log_warn "  Both surfaces stay registered. To collapse them, export RECALL_DB_PATH where you launch"
+      log_warn "  Claude, confirm the plugin server resolves it, then run: claude mcp remove recall-memory -s user"
+    fi
+  done
+
+  # Success means no user-scope registration is left to duplicate the plugin's —
+  # re-scanned rather than tracked in the loop, so a kept entry in either file wins.
+  for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
+    [[ -f "$f" ]] || continue
+    if grep -q "recall-memory" "$f"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Claude Code skills — core platform, installed unconditionally regardless of
 # CLAUDE_CODE_DETECTED. Skills are the single command surface (#228); the old
-# /Recall:* slash commands are gone.
+# /Recall:* slash commands are gone. Canonicals are always refreshed (Pi, omp,
+# and doctor read them); only the ~/.claude/skills links are conditional.
 recall_install_claude_skills() {
   _recall_copy_skill_files
+  if recall_claude_plugin_active; then
+    _recall_unlink_claude_skill_links
+    return 0
+  fi
   _recall_link_skills_to "$CLAUDE_DIR/skills"
 }
 
@@ -1324,8 +1438,10 @@ recall_verify_install() {
   fi
 
   # Agent Skills — derived from the canonical dir so we adapt to whatever
-  # skills ship in this release.
-  if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]]; then
+  # skills ship in this release. Skipped when the native plugin owns the surface:
+  # the ~/.claude/skills links are removed on purpose there, so probing them
+  # would fail a correctly converged install.
+  if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]] && ! recall_claude_plugin_active; then
     local skill_dir skill_name skillfile base
     for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
       [[ -d "$skill_dir" ]] || continue
@@ -1565,6 +1681,18 @@ recall_auto_migrate() {
 # ── MCP registration ─────────────────────────────────────────────────────────
 
 recall_configure_mcp() {
+  # The native plugin registers recall-memory from its own bundle. Claude
+  # namespaces it, so a surviving user-scope entry is a duplicate rather than an
+  # override — clear it instead of re-adding one. When the legacy entry pins a
+  # custom database it is kept on purpose, and configuration continues below so
+  # that entry stays healthy.
+  if recall_claude_plugin_active; then
+    if _recall_unregister_legacy_claude_mcp; then
+      log_success "recall-memory MCP provided by the Claude plugin"
+      return 0
+    fi
+  fi
+
   local mem_mcp_path bun_path
   mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"

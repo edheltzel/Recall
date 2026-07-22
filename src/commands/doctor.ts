@@ -1,14 +1,14 @@
 // recall doctor — health check for all memory subsystems
 
 import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync, renameSync, realpathSync } from 'fs';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { homedir } from 'os';
 import { getDb, getDbPath } from '../db/connection.js';
 import { checkAllFts } from '../lib/repair.js';
 import { VERSION } from '../version.js';
-import { claudeMcpConfigTargets, claudePaths, inspectClaudeCli } from '../hosts/claude.js';
+import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
 import { getRecallHome } from '../lib/runtime-paths.js';
 
@@ -504,12 +504,19 @@ function buildSymlinkProbes(): SymlinkProbe[] {
   // recall_copy_canonical but never reached recall_link); covering it here
   // lets `recall doctor --fix` repair without reinstall. (The former slash
   // commands migrated to these skills — #228.)
-  for (const { name, file } of listSkillCanonicalFiles(root)) {
-    probes.push({
-      label: `agent skill: ${name}/${file}`,
-      target: join(claude.skills, name, file),
-      canonical: join(root, 'shared', 'skills', name, file),
-    });
+  //
+  // Skipped once the native plugin is active: it ships the same nine skills from
+  // its own cache, and install/update deliberately remove the ~/.claude/skills
+  // symlinks so the surface isn't listed twice. Probing them then would report a
+  // converged install as broken.
+  if (!claudePluginState(home).active) {
+    for (const { name, file } of listSkillCanonicalFiles(root)) {
+      probes.push({
+        label: `agent skill: ${name}/${file}`,
+        target: join(claude.skills, name, file),
+        canonical: join(root, 'shared', 'skills', name, file),
+      });
+    }
   }
 
   return probes;
@@ -535,6 +542,54 @@ export function probeSkillSurface(root: string): CheckResult {
     };
   }
   return { label, status: 'PASS', message: `${count} agent skill file(s) present` };
+}
+
+// Native Claude plugin (see docs/CLAUDE_INTEGRATION.md). Claude namespaces plugin
+// components, so an active plugin and a legacy lifecycle install do not collide —
+// they coexist, and the user silently pays for both: nine skills listed twice and
+// two recall-memory MCP servers exposing the same nine tools. install.sh/update.sh
+// reconcile that; this check reports the un-reconciled state and how to clear it.
+// Exported + path-injected for unit testing, mirroring probeSkillSurface.
+export function probeClaudePlugin(home: string, root: string): CheckResult {
+  const label = 'Claude native plugin';
+  const state = claudePluginState(home);
+  if (!state.installed) {
+    return { label, status: 'INFO', message: `Not installed — lifecycle install owns skills and MCP (${CLAUDE_PLUGIN_ID})` };
+  }
+  if (!state.active) {
+    return { label, status: 'INFO', message: 'Installed but disabled — lifecycle install owns skills and MCP' };
+  }
+
+  const skillsDir = claudePaths(home).skills;
+  const leftoverSkills = [...new Set(listSkillCanonicalFiles(root).map(entry => entry.name))]
+    .filter(name => existsSync(join(skillsDir, name)));
+  const leftoverMcp = claudeMcpConfigTargets(home)
+    .filter(target => {
+      if (!existsSync(target.path)) return false;
+      try {
+        const cfg: unknown = JSON.parse(readFileSync(target.path, 'utf-8'));
+        return !!(cfg as { mcpServers?: Record<string, unknown> })?.mcpServers?.['recall-memory'];
+      } catch {
+        return false;
+      }
+    })
+    .map(target => basename(target.path));
+
+  const duplicates: string[] = [];
+  if (leftoverSkills.length) duplicates.push(`${leftoverSkills.length} skill(s) also in ~/.claude/skills`);
+  if (leftoverMcp.length) duplicates.push(`recall-memory also registered in ${leftoverMcp.join(', ')}`);
+  if (duplicates.length) {
+    return {
+      label,
+      status: 'WARN',
+      message: `Plugin active${state.version ? ` (v${state.version})` : ''} alongside the legacy install — ${duplicates.join('; ')}. Run ./update.sh to reconcile`,
+    };
+  }
+  return {
+    label,
+    status: 'PASS',
+    message: `Active${state.version ? ` (v${state.version})` : ''} and sole owner of the recall-* skills and recall-memory MCP`,
+  };
 }
 
 function hashFile(path: string): string | null {
@@ -924,6 +979,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // when zero skill canonicals exist, so add an explicit WARN for a blanked
   // command surface — the sole command surface since #228.
   results.push(probeSkillSurface(getRecallHome()));
+  results.push(probeClaudePlugin(homedir(), getRecallHome()));
 
   // MCP env health (issue #28): the recall-memory registration must carry
   // env.RECALL_DB_PATH matching the resolved DB path, or the MCP server can
