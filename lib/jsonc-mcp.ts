@@ -4,7 +4,7 @@
 // Recall package ships lib/ but not node_modules/, so installer/uninstaller
 // config repair cannot require the repository's jsonc-parser installation.
 
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 
 type JsonObject = Record<string, unknown>;
 type Property = { key: string; keyStart: number; value: Node };
@@ -159,7 +159,7 @@ function insertProperty(text: string, object: Node, key: string, value: unknown)
 }
 
 function merge(file: string, parentKey: string, entry: JsonObject, preserveKeys: string[]): void {
-  let text = readFileSync(file, 'utf8');
+  let text = existsSync(file) ? readFileSync(file, 'utf8') : '{}';
   if (text.trim() === '') text = '{}';
   const root = parse(text);
   if (!isObject(root.value)) throw new Error('root is not an object');
