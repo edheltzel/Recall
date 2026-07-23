@@ -22,6 +22,7 @@ import { homedir, tmpdir } from 'os';
 import { spawn, spawnSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { Database } from 'bun:sqlite';
 import { assertMetadataUnchanged, assertSafeTestDb, metadata, stringEnv } from './lib/e2e-isolation';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -170,12 +171,21 @@ function spawnExtraction(markdownPath: string): Promise<{ status: number | null;
 
 async function searchEventually(query: string): Promise<string> {
   let last = '';
-  for (let attempt = 0; attempt < 10; attempt++) {
-    last = run('bun', ['run', 'src/index.ts', 'search', query], env);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    last = run('bun', ['run', 'src/index.ts', 'search', query, '--table', 'loa'], env);
     if (last.includes('Found ') && !last.includes('No results found.')) return last;
-    await Bun.sleep(200);
+    await Bun.sleep(500);
   }
   return last;
+}
+
+function loaEvidence(): string {
+  const db = new Database(testDb, { readonly: true });
+  try {
+    return JSON.stringify(db.query('SELECT id, title, fabric_extract FROM loa_entries ORDER BY id').all());
+  } finally {
+    db.close();
+  }
 }
 
 let env: Record<string, string>;
@@ -288,7 +298,7 @@ async function main(): Promise<void> {
   assert(batch.includes('SUCCESS: Extracted and tracked'), `batch extraction did not track its records\n${batch}`);
   for (const query of [marker, `${marker}_RETRY`, ...concurrentMarkers]) {
     const search = await searchEventually(query);
-    assert(search.includes('Found ') && !search.includes('No results found.'), `Recall search could not find ${query}\n${search}`);
+    assert(search.includes('Found ') && !search.includes('No results found.'), `Recall search could not find ${query}\n${search}\nLoA evidence: ${loaEvidence()}`);
   }
 
   const uninstall = spawnSync('bash', [join(repoRoot, 'uninstall.sh'), '--no-confirm', '--skip-pi', '--skip-omp'], {
@@ -314,5 +324,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } finally {
-  rmSync(tempRoot, { recursive: true, force: true });
+  if (process.env.RECALL_E2E_KEEP === '1') console.error(`e2e.temp_root=${tempRoot}`);
+  else rmSync(tempRoot, { recursive: true, force: true });
 }
