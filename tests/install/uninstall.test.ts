@@ -86,6 +86,34 @@ function runUninstallIncludingPi(
   };
 }
 
+function runUninstallIncludingOpenCode(
+  claudeDir: string,
+  backupBase: string,
+  opencodeConfigDir: string,
+): RunResult {
+  const result = spawnSync(
+    'bash',
+    [UNINSTALL, '--no-confirm', '--skip-pi'],
+    {
+      encoding: 'utf-8',
+      cwd: REPO,
+      env: {
+        ...process.env,
+        CLAUDE_DIR: claudeDir,
+        BACKUP_BASE: backupBase,
+        OPENCODE_CONFIG_DIR: opencodeConfigDir,
+        HOME: claudeDir,
+        RECALL_SKIP_BUN_UNLINK: 'true',
+      },
+    },
+  );
+  return {
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    status: result.status ?? 1,
+  };
+}
+
 describe('uninstall.sh', () => {
   let tempRoot: string;
   let claudeDir: string;
@@ -457,5 +485,48 @@ Preserve this.
       mcpServers?: Record<string, unknown>;
     };
     expect(s.mcpServers?.['recall-memory']).toBeDefined();
+  });
+
+  test('OpenCode uninstall preserves JSONC comments and unrelated MCP entries', () => {
+    const opencodeConfigDir = join(tempRoot, 'opencode');
+    mkdirSync(opencodeConfigDir, { recursive: true });
+    const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
+    const original = `{
+  // Keep this user comment.
+  "mcp": {
+    "recall-memory": {
+      "type": "local",
+      "command": ["bun", "run", "/tmp/recall-mcp"]
+    },
+    "other-server": {
+      "type": "remote",
+      "url": "https://example.test/mcp",
+    },
+  },
+}
+`;
+    writeFileSync(opencodeConfig, original);
+
+    const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
+
+    expect(result.status).toBe(0);
+    const after = readFileSync(opencodeConfig, 'utf-8');
+    expect(after).toContain('// Keep this user comment.');
+    expect(after).toContain('other-server');
+    expect(after).toContain('https://example.test/mcp');
+    expect(after).not.toContain('recall-memory');
+  });
+
+  test('OpenCode uninstall rejects malformed config without writing', () => {
+    const opencodeConfigDir = join(tempRoot, 'opencode-malformed');
+    mkdirSync(opencodeConfigDir, { recursive: true });
+    const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
+    const original = '{ "mcp": { "recall-memory": { } }';
+    writeFileSync(opencodeConfig, original);
+
+    const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(original);
   });
 });

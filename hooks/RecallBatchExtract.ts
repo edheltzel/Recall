@@ -22,7 +22,7 @@
 
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { Database } from 'bun:sqlite';
 import {
   getAllTrackerRecords,
@@ -312,17 +312,22 @@ function extractFile(convPath: string, cwd: string): boolean {
   const flag = isMarkdown ? '--reextract-md' : '--reextract';
 
   try {
-    const result = execSync(
-      `${BUN_PATH} run ${SESSION_EXTRACT} ${flag} "${convPath}" "${cwd}" 2>&1`,
+    const result = spawnSync(
+      BUN_PATH,
+      ['run', SESSION_EXTRACT, flag, convPath, cwd],
       {
         encoding: 'utf-8',
         timeout: 120000, // 2 minute timeout per extraction
         maxBuffer: 10 * 1024 * 1024,
-        env: { ...process.env }
-      }
+        env: { ...process.env },
+      },
     );
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.error || result.status !== 0) {
+      throw result.error ?? new Error(`RecallExtract exited with status ${result.status}`);
+    }
     // Check if quality gate failed
-    if (result.includes('QUALITY GATE FAILED') || result.includes('All extraction methods failed')) {
+    if (output.includes('QUALITY GATE FAILED') || output.includes('All extraction methods failed') || output.includes('Extraction failed')) {
       log(`  QUALITY GATE FAILED or extraction failed for ${convPath}`);
       return false;
     }

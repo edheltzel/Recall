@@ -40,6 +40,9 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: OpenCode integration e2e
+        run: bun run test:e2e:opencode
+
   ubuntu-smoke:
     name: Ubuntu compatibility smoke
     runs-on: ubuntu-latest

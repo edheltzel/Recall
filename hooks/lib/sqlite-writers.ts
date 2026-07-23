@@ -18,6 +18,9 @@ export const getDbPath = resolveDbPath;
 function openDb(dbPath: string): Database {
   const db = new Database(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
+  // Concurrent Claude/OpenCode extraction writers must wait for a peer's
+  // short transaction instead of turning a transient lock into record loss.
+  db.exec('PRAGMA busy_timeout = 5000');
   return db;
 }
 

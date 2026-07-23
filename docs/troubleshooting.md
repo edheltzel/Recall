@@ -119,6 +119,18 @@ symlinks resolve to readable files after linking — so a silent
 
 Extraction hooks fire on the `Stop` event. If the hook isn't registered in `settings.json`, re-run `./install.sh`.
 
+### "OpenCode sessions are not being captured"
+
+1. Verify the host and runtime: `opencode --version` and `bun --version`.
+2. Verify the host export contract: `opencode export <session-id>` should print JSON.
+3. Check the installed plugin and config: `ls ~/.config/opencode/plugins/RecallExtract.ts` and inspect `opencode.json` for `mcp.recall-memory`.
+4. Check the drop directory: `ls ~/.agents/Recall/MEMORY/opencode-sessions/`.
+5. Run the batch extractor manually with `bun run ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts --dry-run`.
+
+The plugin tracks a session only after a successful JSON export and markdown
+write. Export failures are reported to stderr and retried on a later idle event;
+they do not silently become successful extraction records.
+
 ### "Search returns nothing, but the data is there"
 
 `recall show` / `recall recent` find records that `recall search` never

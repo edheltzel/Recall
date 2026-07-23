@@ -140,10 +140,14 @@ OpenCode first.
 
 A Recall plugin (`RecallExtract.ts`) runs inside OpenCode:
 
-1. Hooks into the `session.idle` event (fires when the agent finishes responding)
-2. Exports the session as markdown via `opencode session export`
-3. Drops the file into `~/.claude/MEMORY/opencode-sessions/`
-4. A batch extraction cron job processes these files into structured memory
+1. Handles OpenCode's `event` hook and filters `session.idle` at `event.properties.sessionID`
+2. Runs `opencode export <session-id>` and normalizes its JSON `{ info, messages }` response to markdown
+3. Drops the file into `$RECALL_HOME/MEMORY/opencode-sessions/`
+4. A batch extraction job quality-gates these files into the shared SQLite database
+
+The plugin records a session only after the export and drop write succeed, so
+failed exports remain retryable. OpenCode must be available on `PATH`, and the
+plugin runtime requires Bun. Verify both with `opencode --version` and `bun --version`.
 
 ## Database Location
 

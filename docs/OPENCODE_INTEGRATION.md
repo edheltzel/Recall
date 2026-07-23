@@ -1,7 +1,8 @@
 # Recall + OpenCode Integration Architecture
 
 > Design document for extending Recall to work with OpenCode alongside Claude Code.
-> **v2 — Revised after red team validation. All APIs verified against official docs.**
+> **v3 — Phase 4 verified against OpenCode 1.18.4.** The current event and
+> export contract is pinned by `scripts/e2e-opencode.ts`.
 
 ## Executive Summary
 
@@ -44,9 +45,9 @@ The entire integration is **three thin adapter layers**:
   │ Extraction:            │     │                             │
   │  hooks/RecallExtract  │     │ Extraction:                 │
   │  (.ts, Stop hook)      │     │  plugins/RecallExtract.ts  │
-  │  reads JSONL transcript│     │  session.idle hook →        │
-  │                        │     │  `opencode session export`  │
-  │ Instructions:          │     │  → drop dir for RecallBatchExtract│
+  │  reads JSONL transcript│     │  `event` hook →             │
+  │                        │     │  `opencode export` JSON     │
+  │ Instructions:          │     │  → markdown drop for batch    │
   │  FOR_CLAUDE.md         │     │                             │
   │  → ~/.claude/          │     │ Instructions:               │
   │    Recall_GUIDE.md     │     │  FOR_OPENCODE.md            │
@@ -79,7 +80,7 @@ atlas-recall/
 │   ├── FOR_OPENCODE.md           # NEW — guide for OpenCode agents
 │   └── OPENCODE_INTEGRATION.md   # THIS FILE
 ├── install.sh                    # MODIFIED — detect + register for both platforms
-└── package.json                  # MODIFIED — add @opencode-ai/plugin dev dep
+└── package.json                  # MODIFIED — adds isolated OpenCode e2e script
 ```
 
 ## Component Details
@@ -111,88 +112,29 @@ The installer writes this to `~/.config/opencode/opencode.json`:
 
 ### 2. Session Extraction Plugin (`opencode/RecallExtract.ts`)
 
-**Strategy:** Use `opencode session export` CLI (verified, stable) via the `$` Bun shell (verified in plugin context). Drop the exported markdown into a well-known directory. The existing `RecallBatchExtract.ts` cron job picks it up — zero new CLI commands needed.
+**Current strategy:** The plugin uses OpenCode's current `event` hook, filters
+`session.idle`, runs `opencode export <session-id>` for JSON, normalizes the
+full `{ info, messages }` response to markdown, and only records the session
+after the drop write succeeds. `RecallBatchExtract.ts` then owns extraction
+quality, SQLite dual-write, and searchable retrieval.
 
-```typescript
-// opencode/RecallExtract.ts
-// Recall session extraction plugin for OpenCode
-//
-// Hooks into session.idle to export completed sessions as markdown,
-// dropping them into a directory that RecallBatchExtract.ts monitors.
-
-import type { Plugin } from "@opencode-ai/plugin"
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
-import { join } from "path"
-import { homedir } from "os"
-
-const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
-const DROP_DIR = join(RECALL_HOME, "MEMORY", "opencode-sessions")
-const TRACKER_PATH = join(DROP_DIR, ".extracted.json")
-
-// Load persistent dedup tracker from disk
-function loadTracker(): Set<string> {
-  try {
-    if (existsSync(TRACKER_PATH)) {
-      const data = JSON.parse(readFileSync(TRACKER_PATH, "utf-8"))
-      return new Set(Array.isArray(data) ? data : [])
-    }
-  } catch { /* corrupt tracker — start fresh */ }
-  return new Set()
-}
-
-function saveTracker(tracker: Set<string>): void {
-  writeFileSync(TRACKER_PATH, JSON.stringify([...tracker]))
-}
-
-export const RecallExtract: Plugin = async ({ $ }) => {
-  mkdirSync(DROP_DIR, { recursive: true })
-  const tracker = loadTracker()
-
-  return {
-    "session.idle": async (event) => {
-      // Defensive session ID extraction — handle all known event shapes
-      const sessionId =
-        (event as any).sessionId ||
-        (event as any).session_id ||
-        (event as any)?.properties?.sessionId
-
-      if (!sessionId || tracker.has(sessionId)) return
-      tracker.add(sessionId)
-      saveTracker(tracker)
-
-      const outFile = join(DROP_DIR, `${sessionId}.md`)
-
-      try {
-        // Use verified CLI: `opencode session export <id> -f markdown -o <path>`
-        await $`opencode session export ${sessionId} -f markdown -o ${outFile}`
-      } catch (err) {
-        // Export failed — remove from tracker so it can retry next idle
-        tracker.delete(sessionId)
-        saveTracker(tracker)
-      }
-    }
-  }
-}
-```
+Implementation details and regression coverage live in
+[`opencode/RecallExtract.ts`](../opencode/RecallExtract.ts) and
+[`tests/opencode-integration.test.ts`](../tests/opencode-integration.test.ts).
 
 **Why this approach:**
-- `opencode session export` is a **verified, stable CLI command** — not an assumed API
+- `opencode export` is the **verified current CLI command** — not an assumed API
 - `ctx.$` Bun shell is **confirmed in plugin docs** with examples
 - Persistent dedup via JSON file at `~/.agents/Recall/MEMORY/opencode-sessions/.extracted.json` — survives plugin restarts
-- Defensive event property access covers all three known shapes: `event.sessionId`, `event.session_id`, `event.properties.sessionId`
+- The current payload is `event.properties.sessionID`; defensive fallbacks keep older property spellings harmless
 - Drop directory pattern: `RecallBatchExtract.ts` already runs every 30 minutes and can scan this directory
 - No new CLI commands needed — `RecallBatchExtract.ts` reads markdown files the same way it reads JSONL
 
-**Fallback:** If `session.idle` fires too frequently (every response), add a debounce:
-```typescript
-const debounceTimers = new Map<string, Timer>()
-
-"session.idle": async (event) => {
-  const id = /* extract sessionId */
-  if (debounceTimers.has(id)) clearTimeout(debounceTimers.get(id))
-  debounceTimers.set(id, setTimeout(() => { /* do export */ }, 60_000))
-}
-```
+**Runtime observation:** The isolated Phase 4 e2e invokes the current
+`session.idle` event contract and verifies the full export path. The adapter
+deduplicates by session ID and prevents overlapping exports; add time-based
+debouncing only if future runtime evidence shows repeated idle events for one
+session.
 
 ### 3. Compaction Context Injection (`opencode/RecallPreCompact.ts`)
 
@@ -268,7 +210,7 @@ recall-memory_context_for_agent to prepare relevant memory context.
 Equivalent to `FOR_CLAUDE.md` but with:
 - OpenCode-specific tool name prefixes (`recall-memory_*`)
 - `@agent` delegation syntax instead of Claude Code's Task tool
-- Reference to `opencode session export` for manual session capture
+- Reference to `opencode export <session-id>` for manual session capture
 
 ### 6. Installer Changes
 
@@ -293,37 +235,11 @@ register_opencode_mcp() {
   local resolved_db_path
   resolved_db_path="$(eval echo "$RECALL_DB_PATH_DEFAULT")"  # Resolve ~ to absolute
 
-  # Use bun -e for safe JSON merge. Strip comments before parsing for JSONC safety.
+  # Use bun -e with jsonc-parser for a surgical JSONC-safe merge.
   local mem_mcp_path
   mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
 
-  INSTALL_MCP_PATH="$mem_mcp_path" \
-  DB_PATH_ABS="$resolved_db_path" \
-  CONFIG_PATH="$config" \
-  bun -e '
-    const fs = require("fs");
-    const path = process.env.CONFIG_PATH;
-
-    // JSONC-safe: strip // and /* */ comments before parsing
-    let raw = "{}";
-    if (fs.existsSync(path)) {
-      raw = fs.readFileSync(path, "utf-8")
-        .replace(/\/\/.*$/gm, "")
-        .replace(/\/\*[\s\S]*?\*\//g, "");
-    }
-
-    const existing = JSON.parse(raw);
-    existing.mcp = existing.mcp || {};
-    existing.mcp["recall-memory"] = {
-      type: "local",
-      command: ["bun", "run", process.env.INSTALL_MCP_PATH],
-      enabled: true,
-      environment: {
-        RECALL_DB_PATH: process.env.DB_PATH_ABS
-      }
-    };
-    fs.writeFileSync(path, JSON.stringify(existing, null, 2));
-  '
+  recall_configure_opencode_mcp
 }
 
 # Plugin installation for OpenCode
@@ -347,10 +263,10 @@ install_opencode_guide() {
 }
 ```
 
-**Changes from v1:**
-- Absolute path for `RECALL_DB_PATH` — resolved via `eval echo` at install time
-- JSONC-safe parsing — strips `//` and `/* */` comments before `JSON.parse`
-- Environment variables passed to `bun -e` via env (no shell interpolation in JS)
+The live installer delegates to `lib/install-lib.sh`'s shared
+`_recall_jsonc_merge_mcp_entry` helper. It preserves comments, trailing commas,
+sibling MCP entries, and custom Recall entry fields; malformed or unwritable
+configs fail before writing. Uninstall uses the matching surgical removal helper.
 
 ## Database Schema Change
 
@@ -420,7 +336,7 @@ OpenCode prefixes MCP tools with the server name + underscore:
 - `source` column migration (schema v3)
 
 ### Phase 2: Extraction Plugin
-- `RecallExtract.ts` plugin using `opencode session export` CLI via `$` shell
+- `RecallExtract.ts` plugin using the `opencode export` JSON CLI via `$` shell
 - Persistent dedup tracker (`.extracted.json`)
 - Defensive `session.idle` event property access
 - Drop directory at `~/.agents/Recall/MEMORY/opencode-sessions/`
@@ -431,30 +347,35 @@ OpenCode prefixes MCP tools with the server name + underscore:
 - Pushes to `output.context[]` array
 - 5s timeout on `recall` CLI calls
 
-### Phase 4: Testing + Polish
-- End-to-end test: OpenCode session → export → drop dir → RecallBatchExtract → search → retrieval
-- Concurrent access testing (both platforms running simultaneously)
-- Installer rollback/restore for OpenCode configs
-- Verify `session.idle` firing frequency in real usage
+### Phase 4: Testing + Polish — complete
+- Isolated e2e: OpenCode session → JSON export → markdown drop → RecallBatchExtract → search
+- Concurrent Claude/OpenCode-style writers against one disposable WAL database
+- Installer/update idempotence plus JSONC-preserving OpenCode uninstall rollback
+- Runtime verification of the current `session.idle` payload, JSON export, and Bun availability
 
 ## Red Team Findings (v1 → v2 Changes)
 
 | Flaw | Severity | Fix Applied |
 |------|----------|-------------|
-| `client.session.messages()` not on plugin client | BLOCKER | Replaced with `opencode session export` CLI |
+| `client.session.messages()` not on plugin client | BLOCKER | Replaced with `opencode export` JSON CLI |
 | In-memory Set dedup | HIGH | Persistent JSON file at `.extracted.json` |
-| `session.idle` wrong property name | MEDIUM-HIGH | Defensive access: 3 property paths |
+| `session.idle` wrong property name | MEDIUM-HIGH | Current `event` hook reads `properties.sessionID`; legacy spellings remain defensive fallbacks |
 | Compacting return type fabricated | MEDIUM | Corrected to `output.context.push()` |
 | Tilde in RECALL_DB_PATH | MEDIUM | Absolute path resolved at install |
 | `recall import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + RecallBatchExtract |
 | Bun not guaranteed | LOW-MEDIUM | Documented as requirement (same as Claude Code) |
-| JSONC parsing | LOW | Comment stripping before `JSON.parse` |
+| JSONC parsing | LOW | `jsonc-parser` surgical merge/removal preserves comments and refuses malformed writes |
 
-## Open Questions (Reduced)
+## Phase 4 Evidence
 
-1. **Does `session.idle` fire per-response or per-session-idle?** Test empirically; debounce fallback ready
-2. **Does `opencode session export -f markdown` include full conversation text?** Likely yes (markdown format is described as full export), but verify
-3. **Bun availability** — if user has OpenCode but not Bun, installer should check and error with install instructions
+1. OpenCode 1.18.4 emits `session.idle` through the `event` hook with
+   `properties.sessionID`; the e2e invokes that exact payload and verifies the
+   resulting markdown drop.
+2. `opencode export <session-id>` is the supported JSON export command. Recall
+   owns JSON-to-markdown normalization because the CLI does not expose the old
+   `-f markdown -o` session-export interface.
+3. The e2e provisions Bun/OpenCode in disposable HOME and XDG config/data/state/
+   cache roots, and fails if production DB metadata changes.
 
 ## Non-Goals
 

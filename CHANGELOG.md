@@ -12,6 +12,23 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+### Added
+
+- **OpenCode Phase 4 validation** — an isolated end-to-end harness provisions
+  OpenCode 1.18.4, verifies the current `session.idle` event and JSON export
+  contract, exercises export retry, concurrent WAL writers, installer/update
+  idempotence, JSONC-preserving uninstall, and searchable Recall retrieval.
+
+### Changed
+
+- OpenCode session capture now uses `opencode export <session-id>` JSON and
+  normalizes the complete `{ info, messages }` response to markdown. Failed
+  exports and tracker writes remain visible and retryable; batch extraction uses
+  argument-safe child-process execution and cannot treat failure output as success.
+- OpenCode uninstall removes only Recall's MCP entry through the shared JSONC
+  parser, preserving unrelated user configuration and leaving malformed files
+  untouched.
+
 ## [0.9.4] — 2026-07-15 — "the tier that wasn't there"
 
 Patch release: every change restores behavior that was already promised and

@@ -42,6 +42,7 @@
     "build:codex-plugin": "bun run scripts/build-codex-plugin.ts",
     "test:e2e:codex-plugin": "bun run build && bun run scripts/e2e-codex-plugin.ts",
     "test:e2e:pi-integration": "bun run build && bun run scripts/e2e-pi-integration.ts",
+    "test:e2e:opencode": "bun run build && bun run scripts/e2e-opencode.ts",
     "check:version": "bun run scripts/check-version.ts",
     "prepublishOnly": "bun run build",
     "build:claude-plugin": "bun run scripts/build-claude-plugin.ts",

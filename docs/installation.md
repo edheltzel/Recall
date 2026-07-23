@@ -65,6 +65,14 @@ npm install -g @anthropic-ai/claude-code
 
 Verify: `claude --version` — [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code)
 
+### OpenCode (Optional)
+
+If OpenCode is installed, Recall registers its MCP entry and native plugins.
+The integration requires the supported `opencode` CLI and Bun on `PATH`; the
+plugin uses `opencode export <session-id>` (JSON) and converts the result into a
+markdown drop for the shared batch extractor. Verify with `opencode --version`.
+Use `./install.sh --skip-opencode` when OpenCode should remain untouched.
+
 ---
 
 ### Fabric (Optional — recommended)

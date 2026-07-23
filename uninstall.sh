@@ -435,20 +435,12 @@ remove_opencode() {
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would remove recall-memory from $config"
     else
-      CONFIG_PATH="$config" bun -e '
-        const fs = require("fs");
-        const path = process.env.CONFIG_PATH;
-        let raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-        const cfg = JSON.parse(raw);
-        if (cfg.mcp && cfg.mcp["recall-memory"]) {
-          delete cfg.mcp["recall-memory"];
-          if (Object.keys(cfg.mcp).length === 0) delete cfg.mcp;
-        }
-        fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
-      '
-      log_success "Removed recall-memory from $config"
+      if _recall_jsonc_remove_mcp_entry "$config" "mcp"; then
+        log_success "Removed recall-memory from $config"
+      else
+        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported — left unchanged)"
+        return 1
+      fi
     fi
   fi
 

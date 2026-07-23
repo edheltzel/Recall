@@ -9,6 +9,58 @@ import { CREATE_TABLES } from '../src/db/schema';
 // v2→v3 migration SQL (inlined — formerly exported from schema.ts, now in migrations.ts)
 const MIGRATE_V2_TO_V3 = "ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code'";
 import { linearizeSession } from '../pi/RecallExtract';
+import { exportSession, renderSessionExport, sessionIdFromEvent } from '../opencode/RecallExtract';
+
+// ─── OpenCode Runtime Contract Tests ───
+
+describe('OpenCode runtime contract', () => {
+  test('reads the current event hook sessionID and ignores other events', () => {
+    expect(sessionIdFromEvent({ type: 'session.idle', properties: { sessionID: 'current-1' } })).toBe('current-1');
+    expect(sessionIdFromEvent({ type: 'session.idle', properties: { sessionId: 'legacy-1' } })).toBe('legacy-1');
+    expect(sessionIdFromEvent({ type: 'session.updated', properties: { sessionID: 'wrong-event' } })).toBeNull();
+    expect(sessionIdFromEvent({ session_id: 'legacy-payload' })).toBe('legacy-payload');
+  });
+
+  test('renders the current JSON export with all readable conversation parts', () => {
+    const raw = JSON.stringify({
+      info: { id: 'session-1', title: 'Export contract' },
+      messages: [
+        { info: { role: 'user' }, parts: [{ type: 'text', text: 'Keep the complete user request.' }] },
+        { info: { role: 'assistant' }, parts: [
+          { type: 'text', text: 'Keep the complete assistant response.' },
+          { type: 'tool', state: { status: 'completed', title: 'read', output: 'tool output remains visible' } },
+        ] },
+      ],
+    });
+
+    const markdown = renderSessionExport(raw, 'fallback');
+    expect(markdown).toContain('# OpenCode Session: Export contract');
+    expect(markdown).toContain('## user');
+    expect(markdown).toContain('Keep the complete user request.');
+    expect(markdown).toContain('Keep the complete assistant response.');
+    expect(markdown).toContain('tool output remains visible');
+  });
+
+  test('rejects an export with no readable message content', () => {
+    expect(() => renderSessionExport(JSON.stringify({ info: { id: 'empty' }, messages: [] }), 'empty'))
+      .toThrow('no readable message content');
+  });
+
+  test('runs the supported JSON export command and normalizes its output', async () => {
+    const calls: string[] = [];
+    const shell = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      calls.push(strings.raw.reduce((command, part, index) => `${command}${part}${values[index] ?? ''}`, ''));
+      return JSON.stringify({
+        info: { id: 'session-2', title: 'Shell export' },
+        messages: [{ info: { role: 'user' }, parts: [{ type: 'text', text: 'Exported through the shell seam.' }] }],
+      });
+    };
+
+    const markdown = await exportSession(shell as never, 'session-2');
+    expect(calls).toEqual(['opencode export session-2']);
+    expect(markdown).toContain('Exported through the shell seam.');
+  });
+});
 
 // ─── Schema v3 Migration Tests ───
 
