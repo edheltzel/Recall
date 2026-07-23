@@ -168,6 +168,16 @@ function spawnExtraction(markdownPath: string): Promise<{ status: number | null;
   });
 }
 
+async function searchEventually(query: string): Promise<string> {
+  let last = '';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    last = run('bun', ['run', 'src/index.ts', 'search', query], env);
+    if (last.includes('Found ') && !last.includes('No results found.')) return last;
+    await Bun.sleep(200);
+  }
+  return last;
+}
+
 let env: Record<string, string>;
 
 async function main(): Promise<void> {
@@ -271,13 +281,13 @@ async function main(): Promise<void> {
   const concurrent = await Promise.all(concurrentPaths.map(spawnExtraction));
   for (const [index, result] of concurrent.entries()) {
     assert(result.status === 0, `concurrent extraction ${index} exited ${result.status}\n${result.output}`);
-    assert(result.output.includes('successful') && !result.output.includes('QUALITY GATE FAILED') && !result.output.includes('All extraction methods failed'), `concurrent extraction ${index} did not pass its quality gate\n${result.output}`);
+    assert(result.output.includes('successful') && !/failed|error/i.test(result.output) && !result.output.includes('QUALITY GATE FAILED') && !result.output.includes('All extraction methods failed'), `concurrent extraction ${index} did not pass its quality gate\n${result.output}`);
   }
 
   const batch = run('bun', ['run', join(testRecallHome, 'shared', 'hooks', 'RecallBatchExtract.ts'), '--all'], env, 240_000);
   assert(batch.includes('SUCCESS: Extracted and tracked'), `batch extraction did not track its records\n${batch}`);
   for (const query of [marker, `${marker}_RETRY`, ...concurrentMarkers]) {
-    const search = run('bun', ['run', 'src/index.ts', 'search', query], env);
+    const search = await searchEventually(query);
     assert(search.includes('Found ') && !search.includes('No results found.'), `Recall search could not find ${query}\n${search}`);
   }
 
