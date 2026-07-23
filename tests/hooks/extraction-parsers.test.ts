@@ -32,6 +32,24 @@ We migrated the Stop hook to write to SQLite.
 ## SESSION CONTEXT
 A surgical migration of the Stop hook to use SQLite-native helpers.`;
 
+// A later in-session window of the SAME session, with different content, so
+// every row must still persist alongside the first slice's rows.
+const SECOND_SLICE_FIXTURE = `## ONE SENTENCE SUMMARY
+A later window covering the installer half of the session.
+
+## MAIN IDEAS
+- Lifecycle scripts share lib/install-lib.sh and nothing else
+- JSONC edits run through a dependency-free helper
+
+## DECISIONS MADE
+- Drop the jsonc-parser runtime dependency (confidence: HIGH)
+
+## ERRORS FIXED
+- Trailing comma on insert: rebuilt the JSONC edit offsets
+
+## SESSION CONTEXT
+The installer half of the same session.`;
+
 let dbPath: string;
 
 beforeEach(() => {
@@ -134,5 +152,87 @@ describe('dualWriteToSqlite', () => {
     });
     expect(result.failures._db).toBe('not writable or locked');
     expect(result.sessions).toBe(0);
+  });
+});
+
+// The Stop hook marks a conversation extracted only AFTER its markdown archive
+// writes, and a partial SQLite failure marks it failed + retryable, so the same
+// extraction can reach dualWriteToSqlite more than once. These lock the
+// insert-if-absent guard in sqlite-writers.ts.
+describe('dualWriteToSqlite retry idempotency', () => {
+  const ctx = {
+    sessionId: 'sess-retry',
+    sessionLabel: 'demo-session',
+    project: 'atlas-recall',
+    timestamp: '2026-05-17',
+    conversationPath: '/tmp/conv.jsonl',
+    topics: ['migration', 'sqlite'],
+    summary: 'one sentence summary',
+    extracted: FABRIC_FIXTURE,
+  };
+
+  function rowCounts() {
+    const db = openRead();
+    const count = (t: string) =>
+      (db.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as any).c as number;
+    const counts = {
+      decisions: count('decisions'),
+      learnings: count('learnings'),
+      breadcrumbs: count('breadcrumbs'),
+      loa: count('loa_entries'),
+    };
+    db.close();
+    return counts;
+  }
+
+  test('re-running an already-persisted extraction does not duplicate rows', () => {
+    dualWriteToSqlite(dbPath, ctx);
+    const afterFirst = rowCounts();
+
+    // Archive write crashed before markAsExtracted → the whole pipeline reruns.
+    const second = dualWriteToSqlite(dbPath, ctx);
+
+    expect(Object.keys(second.failures)).toEqual([]);
+    expect(second.decisions).toBe(0);
+    expect(second.learnings).toBe(0);
+    expect(second.breadcrumbs).toBe(0);
+    expect(rowCounts()).toEqual(afterFirst);
+    expect(afterFirst).toEqual({ decisions: 3, learnings: 2, breadcrumbs: 3, loa: 1 });
+  });
+
+  test('retry after a partial failure repairs the failed table without duplicating the rest', () => {
+    const blocker = openRead();
+    blocker.exec(
+      `CREATE TRIGGER block_decisions BEFORE INSERT ON decisions
+       BEGIN SELECT RAISE(ABORT, 'decisions writer down'); END`
+    );
+    blocker.close();
+
+    const first = dualWriteToSqlite(dbPath, ctx);
+    expect(first.failures.decisions).toBeDefined();
+    expect(first.loa).toBe(1);
+    expect(rowCounts()).toEqual({ decisions: 0, learnings: 2, breadcrumbs: 3, loa: 1 });
+
+    const unblocker = openRead();
+    unblocker.exec('DROP TRIGGER block_decisions');
+    unblocker.close();
+
+    const second = dualWriteToSqlite(dbPath, ctx);
+
+    expect(Object.keys(second.failures)).toEqual([]);
+    expect(second.decisions).toBe(3);
+    expect(rowCounts()).toEqual({ decisions: 3, learnings: 2, breadcrumbs: 3, loa: 1 });
+  });
+
+  test('a different slice of the same session still persists (in-session windows)', () => {
+    dualWriteToSqlite(dbPath, ctx);
+    const second = dualWriteToSqlite(dbPath, { ...ctx, extracted: SECOND_SLICE_FIXTURE });
+
+    expect(Object.keys(second.failures)).toEqual([]);
+    expect(second.decisions).toBe(1);
+    expect(second.breadcrumbs).toBe(2);
+    expect(second.learnings).toBe(1);
+    expect(second.loa).toBe(1);
+    expect(rowCounts()).toEqual({ decisions: 4, learnings: 3, breadcrumbs: 5, loa: 2 });
   });
 });

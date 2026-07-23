@@ -15,7 +15,11 @@ import {
   writeExtractionSession,
   writeLearningsBatch,
   writeLoaEntryFromExtraction,
+  type WriteOptions,
 } from './sqlite-writers';
+
+/** This seam is replayed on retry: every plain-INSERT writer skips rows it already wrote. */
+const RETRY_SAFE: WriteOptions = { skipDuplicates: true };
 
 export interface DualWriteContext {
   sessionId: string;
@@ -139,6 +143,11 @@ export function parseErrorPatternItems(extracted: string): ExtractionErrorInput[
  * Dual-write extracted content into SQLite. Every section is wrapped in its
  * own try/catch — a failure on one writer must not block the others, and the
  * whole function must not throw.
+ *
+ * The plain-INSERT writers run with `skipDuplicates` because this seam is
+ * replayed: the Stop hook marks a conversation extracted only after its markdown
+ * archive writes, and a partial SQLite failure marks it failed + retryable. See
+ * the RETRY IDEMPOTENCY note in sqlite-writers.ts.
  */
 export function dualWriteToSqlite(
   dbPath: string,
@@ -174,13 +183,21 @@ export function dualWriteToSqlite(
   }
 
   try {
-    result.decisions = writeDecisionsBatch(dbPath, parseDecisionItems(ctx.extracted, ctx));
+    result.decisions = writeDecisionsBatch(
+      dbPath,
+      parseDecisionItems(ctx.extracted, ctx),
+      RETRY_SAFE
+    );
   } catch (e: any) {
     result.failures.decisions = e?.message || String(e);
   }
 
   try {
-    result.learnings = writeLearningsBatch(dbPath, parseLearningItems(ctx.extracted, ctx));
+    result.learnings = writeLearningsBatch(
+      dbPath,
+      parseLearningItems(ctx.extracted, ctx),
+      RETRY_SAFE
+    );
   } catch (e: any) {
     result.failures.learnings = e?.message || String(e);
   }
@@ -188,7 +205,8 @@ export function dualWriteToSqlite(
   try {
     result.breadcrumbs = writeBreadcrumbsBatch(
       dbPath,
-      parseBreadcrumbItems(ctx.extracted, ctx)
+      parseBreadcrumbItems(ctx.extracted, ctx),
+      RETRY_SAFE
     );
   } catch (e: any) {
     result.failures.breadcrumbs = e?.message || String(e);
@@ -201,15 +219,19 @@ export function dualWriteToSqlite(
   }
 
   try {
-    const loaId = writeLoaEntryFromExtraction(dbPath, {
-      title: `${ctx.sessionLabel} — ${ctx.timestamp}`,
-      description: ctx.summary,
-      fabricExtract: ctx.extracted,
-      sessionId: ctx.sessionId,
-      project: ctx.project,
-      tags: ctx.topics.join(','),
-      messageCount: ctx.messageCount ?? null,
-    });
+    const loaId = writeLoaEntryFromExtraction(
+      dbPath,
+      {
+        title: `${ctx.sessionLabel} — ${ctx.timestamp}`,
+        description: ctx.summary,
+        fabricExtract: ctx.extracted,
+        sessionId: ctx.sessionId,
+        project: ctx.project,
+        tags: ctx.topics.join(','),
+        messageCount: ctx.messageCount ?? null,
+      },
+      RETRY_SAFE
+    );
     result.loa = loaId ? 1 : 0;
   } catch (e: any) {
     result.failures.loa = e?.message || String(e);
