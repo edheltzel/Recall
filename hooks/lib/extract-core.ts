@@ -130,6 +130,9 @@ export async function runExtractCore(
     return {
       outcome: 'persistence_failed',
       quality,
+      extracted,
+      topics,
+      summary,
       redactions,
       threats,
       dualWrite,

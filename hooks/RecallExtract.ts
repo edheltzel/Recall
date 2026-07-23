@@ -614,14 +614,14 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
       markAsFailed(convHash, `quality gate failed: ${core.quality?.reason}`);
       return;
     }
-    if (core.outcome === 'persistence_failed') {
+    const persistenceFailed = core.outcome === 'persistence_failed';
+    if (persistenceFailed) {
       const failures = JSON.stringify(core.dualWrite?.failures ?? {});
       console.error(`[FabricExtract] SQLite write failed: ${failures}`);
       logExtract(`FAILURE: SQLite write failed: ${failures}`);
-      markAsFailed(convHash, `SQLite write failed: ${failures}`);
-      return;
+    } else {
+      logExtract("QUALITY GATE PASSED: extraction contains required sections");
     }
-    logExtract("QUALITY GATE PASSED: extraction contains required sections");
 
     // Scrub the extracted text BEFORE it reaches any on-disk archive writer
     // (#132): the SQLite path already scrubs inside runExtractCore, but the
@@ -684,6 +684,11 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
     appendErrors(extracted, sessionLabel, timestamp);
 
     // 6. Mark as extracted (dedup)
+    if (persistenceFailed) {
+      const failures = JSON.stringify(core.dualWrite?.failures ?? {});
+      markAsFailed(convHash, `SQLite write failed: ${failures}`);
+      return;
+    }
     markAsExtracted(convHash);
 
     logExtract(`SUCCESS: All memory files updated for session=${sessionLabel}`);
@@ -775,14 +780,14 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
       markAsFailed(convHash, `quality gate failed (markdown): ${core.quality?.reason}`);
       return;
     }
-    if (core.outcome === 'persistence_failed') {
+    const persistenceFailed = core.outcome === 'persistence_failed';
+    if (persistenceFailed) {
       const failures = JSON.stringify(core.dualWrite?.failures ?? {});
       console.error(`[FabricExtract] SQLite write failed (markdown): ${failures}`);
       logExtract(`FAILURE (markdown): SQLite write failed: ${failures}`);
-      markAsFailed(convHash, `SQLite write failed (markdown): ${failures}`);
-      return;
+    } else {
+      logExtract("QUALITY GATE PASSED (markdown)");
     }
-    logExtract("QUALITY GATE PASSED (markdown)");
 
     // Scrub the extracted text BEFORE it reaches any on-disk archive writer
     // (#132) — same single markdown-write seam as the Stop path. Redacts
@@ -821,6 +826,11 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
     appendErrors(extracted, sessionLabel, timestamp);
 
     // 5. Mark as extracted
+    if (persistenceFailed) {
+      const failures = JSON.stringify(core.dualWrite?.failures ?? {});
+      markAsFailed(convHash, `SQLite write failed (markdown): ${failures}`);
+      return;
+    }
     markAsExtracted(convHash);
 
     logExtract(`SUCCESS (markdown): All memory files updated for ${sessionLabel} (${sessionId})`);
