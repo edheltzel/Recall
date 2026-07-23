@@ -34,7 +34,7 @@ import {
 } from './extraction-parsers';
 
 /** Why a core run did not produce a SQLite write. */
-export type ExtractOutcome = 'extracted' | 'extraction_failed' | 'quality_failed';
+export type ExtractOutcome = 'extracted' | 'extraction_failed' | 'quality_failed' | 'persistence_failed';
 
 /** Injected RecallExtract-resident behavior the lib core can't import directly. */
 export interface ExtractCoreDeps {
@@ -64,7 +64,7 @@ export interface ExtractCoreResult {
   redactions?: string[];
   /** #156 injection/exfil flag findings across persisted fields (surfaced only; persisted text is unchanged). */
   threats?: ThreatFinding[];
-  /** Present only when outcome === 'extracted'. */
+  /** Present when the quality-passed write attempt reached SQLite. */
   dualWrite?: DualWriteResult;
 }
 
@@ -73,10 +73,11 @@ export interface ExtractCoreResult {
  *
  * Returns early (no SQLite write) when the model produces nothing
  * ('extraction_failed') or the quality gate rejects the output
- * ('quality_failed'); the caller decides how to log / mark those. On success the
- * SQLite dual-write has already happened (with scrubbed text) and `dualWrite`
- * carries the per-table counts; `extracted`/`topics`/`summary` are the RAW values
- * for the caller's legacy markdown side-effects.
+ * ('quality_failed'). A failed SQLite write is reported as 'persistence_failed'
+ * with its failure details so callers cannot mark an empty extraction complete.
+ * On success the SQLite dual-write has already happened (with scrubbed text) and
+ * `dualWrite` carries the per-table counts; `extracted`/`topics`/`summary` are
+ * the RAW values for the caller's legacy markdown side-effects.
  */
 export async function runExtractCore(
   dbPath: string,
@@ -124,6 +125,16 @@ export async function runExtractCore(
     summary: scrubbedSummary.text,
     topics: scrubbedTopics.map((r) => r.text),
   });
+
+  if (Object.keys(dualWrite.failures).length > 0) {
+    return {
+      outcome: 'persistence_failed',
+      quality,
+      redactions,
+      threats,
+      dualWrite,
+    };
+  }
 
   return {
     outcome: 'extracted',

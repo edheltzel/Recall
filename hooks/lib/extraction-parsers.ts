@@ -155,7 +155,7 @@ export function dualWriteToSqlite(
   };
 
   if (!ensureDbWritable(dbPath)) {
-    result.failures._db = 'not writable';
+    result.failures._db = 'not writable or locked';
     return result;
   }
 

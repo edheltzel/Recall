@@ -19,6 +19,7 @@ import {
   hasExtractionTracker,
   recordSuccess,
   recordFailure,
+  isExtractionFailureOutput,
   type Tracker,
 } from '../../hooks/RecallBatchExtract';
 import {
@@ -153,6 +154,17 @@ describe('findCandidates — SQLite tracker integration', () => {
     expect(row2!.failed_at).not.toBeNull();
     expect(row2!.retry_after).not.toBeNull();
     expect(row2!.error).toBe('simulated');
+  });
+});
+
+describe('batch extraction result classification', () => {
+  test('recognizes lowercase markdown extraction failures as retryable', () => {
+    expect(isExtractionFailureOutput('[FabricExtract] Markdown extraction failed: provider unavailable')).toBe(true);
+    expect(isExtractionFailureOutput('[FabricExtract] QUALITY GATE PASSED (markdown)')).toBe(false);
+  });
+
+  test('does not classify SQLite persistence failure as extraction success', () => {
+    expect(isExtractionFailureOutput('[FabricExtract] SQLite write failed: {"sessions":"database is locked"}')).toBe(true);
   });
 });
 

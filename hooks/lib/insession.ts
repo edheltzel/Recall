@@ -380,7 +380,8 @@ export type ExtractionOutcome =
   | 'no_transcript'
   | 'empty_slice'
   | 'extraction_failed'
-  | 'quality_failed';
+  | 'quality_failed'
+  | 'persistence_failed';
 
 export interface ExtractionResult {
   ran: boolean;
@@ -463,10 +464,10 @@ export async function runInSessionExtraction(
       };
     }
 
-    // extraction_failed | quality_failed — consume the window but keep the cursor
+    // extraction_failed | quality_failed | persistence_failed — consume the window but keep the cursor
     // so the same slice (plus new content) is retried next time. No data loss.
     resetWindow(dbPath, params.sessionId);
-    return { ran: false, outcome: core.outcome };
+    return { ran: false, outcome: core.outcome, dualWrite: core.dualWrite };
   } finally {
     childReleaseLock(dbPath, params.convPath, deps.pid);
   }
