@@ -132,7 +132,7 @@ describe('dualWriteToSqlite', () => {
       conversationPath: 'x', topics: [], summary: 'x',
       extracted: FABRIC_FIXTURE,
     });
-    expect(result.failures._db).toBe('not writable');
+    expect(result.failures._db).toBe('not writable or locked');
     expect(result.sessions).toBe(0);
   });
 });
