@@ -387,8 +387,8 @@ describe('Pi extraction tracker (dedup)', () => {
 // comments, JSON5 trailing commas, and reformatting sibling MCP entries.
 //
 // Now satisfied by `_recall_jsonc_merge_mcp_entry` (lib/install-lib.sh): reads
-// via jsonc-parser's tokenizer (so `//` inside string values is safe — A7),
-// writes via modify+applyEdits so the only bytes touched are the recall-memory
+// via the bundled JSONC parser (so `//` inside string values is safe — A7),
+// writes only the targeted recall-memory entry so surrounding bytes are kept
 // entry value slot.
 describe('recall_configure_pi_mcp preserves user customizations', () => {
   let sandboxDir: string;
@@ -460,14 +460,14 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
     runConfigure();
     const after = readFileSync(mcpJsonPath, 'utf-8');
 
-    // 1. Inline // comments must survive (jsonc-parser tokenizer + modify+applyEdits preserve them).
+    // 1. Inline // comments must survive the bundled JSONC edit.
     expect(after).toContain('// User-managed Pi MCP configuration — DO NOT REWRITE');
     expect(after).toContain('// GitHub MCP — critical for Pi workflows, hand-tuned');
 
     // 2. Non-Recall MCP entry must survive (modify only edits the recall-memory slot).
     expect(after).toMatch(/"github":\s*\{[\s\S]*?"command":\s*"gh-mcp"[\s\S]*?"--scope=repo"[\s\S]*?"GITHUB_TOKEN":\s*"ghp_xxx"/);
 
-    // 3. JSON5 trailing comma must survive (allowTrailingCommas on read, modify preserves on write).
+    // 3. JSON5 trailing comma must survive the bundled JSONC edit.
     expect(after).toMatch(/"ghp_xxx"\s*\}\s*,/);
 
     // 4. recall-memory entry must reflect the NEW path. Proves the function ran.
@@ -480,7 +480,7 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
   // regex to strip `//` line comments before JSON.parse; that regex was not
   // string-aware and corrupted https:// URLs, making the helper falsely refuse
   // perfectly valid pi/mcp.json. The merged-tip implementation uses
-  // jsonc-parser's tokenizer (string-aware), and this test locks that in.
+  // The bundled parser is string-aware, and this test locks that in.
   test('A7: preserves https:// URLs and other `//` substrings inside string values', () => {
     const userConfig = [
       '{',

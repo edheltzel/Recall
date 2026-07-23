@@ -114,6 +114,39 @@ function runUninstallIncludingOpenCode(
   };
 }
 
+function runUninstallAll(
+  claudeDir: string,
+  backupBase: string,
+  opencodeConfigDir: string,
+  piConfigDir: string,
+  unlinkMarker: string,
+  fakeBin: string,
+): RunResult {
+  const result = spawnSync(
+    'bash',
+    [UNINSTALL, '--no-confirm', '--skip-omp'],
+    {
+      encoding: 'utf-8',
+      cwd: REPO,
+      env: {
+        ...process.env,
+        CLAUDE_DIR: claudeDir,
+        BACKUP_BASE: backupBase,
+        OPENCODE_CONFIG_DIR: opencodeConfigDir,
+        PI_CONFIG_DIR: piConfigDir,
+        HOME: claudeDir,
+        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        RECALL_TEST_UNLINK: unlinkMarker,
+      },
+    },
+  );
+  return {
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    status: result.status ?? 1,
+  };
+}
+
 describe('uninstall.sh', () => {
   let tempRoot: string;
   let claudeDir: string;
@@ -526,7 +559,36 @@ Preserve this.
 
     const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
 
-    expect(result.status).not.toBe(0);
+    expect(result.status).toBe(0);
     expect(readFileSync(opencodeConfig, 'utf-8')).toBe(original);
+  });
+
+  test('malformed OpenCode JSONC does not abort the remaining uninstall', () => {
+    const opencodeConfigDir = join(tempRoot, 'opencode-malformed-continuation');
+    const piConfigDir = join(tempRoot, 'pi');
+    const fakeBin = join(tempRoot, 'bin');
+    const unlinkMarker = join(tempRoot, 'bun-unlink-called');
+    mkdirSync(opencodeConfigDir, { recursive: true });
+    mkdirSync(piConfigDir, { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+
+    const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
+    const malformed = '{ "mcp": { "recall-memory": { } }';
+    writeFileSync(opencodeConfig, malformed);
+    const piConfig = join(piConfigDir, 'mcp.json');
+    writeFileSync(piConfig, JSON.stringify({ mcpServers: { 'recall-memory': { command: 'recall-mcp' } } }));
+    writeFileSync(
+      join(fakeBin, 'bun'),
+      '#!/bin/sh\nif [ "$1" = unlink ]; then touch "$RECALL_TEST_UNLINK"; exit 0; fi\nexec /opt/homebrew/bin/bun "$@"\n',
+      { mode: 0o755 },
+    );
+
+    const result = runUninstallAll(claudeDir, backupBase, opencodeConfigDir, piConfigDir, unlinkMarker, fakeBin);
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(malformed);
+    expect(JSON.parse(readFileSync(piConfig, 'utf-8')).mcpServers).toBeUndefined();
+    expect(existsSync(unlinkMarker)).toBe(true);
+    expect(result.stdout).toContain('Uninstall Complete');
   });
 });
