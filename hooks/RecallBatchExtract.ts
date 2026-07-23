@@ -75,7 +75,7 @@ export interface TrackerEntry {
 export type Tracker = Record<string, TrackerEntry>;
 
 export function isExtractionFailureOutput(output: string): boolean {
-  return /quality gate failed|all extraction methods failed|extraction failed|sqlite write failed|persistence failed/i.test(output);
+  return /quality gate failed|all extraction methods failed|\[FabricExtract\] (?:markdown )?extraction failed|sqlite write failed|persistence failed/i.test(output);
 }
 
 // Parse args (top-level so main() and re-entrant tests share)

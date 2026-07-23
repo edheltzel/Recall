@@ -28,7 +28,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `agent-skills/` — canonical Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills` and `~/.omp/agent/skills`, discovered by Pi through the root package manifest, and generated into native host plugin payloads — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
 - `plugins/` — native host plugin bundles, one per host: Codex in `plugins/recall/`, Claude Code in `plugins/recall-claude/`, each packaging MCP plus its own skill payload
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
-- `lib/` — shared bash for the install / update / uninstall lifecycle scripts
+- `lib/` — shared bash for the install / update / uninstall lifecycle scripts, plus the dependency-free `jsonc-mcp.ts` runtime helper they shell out to for JSONC config edits
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
 - `pi/` — Pi package extensions for native lifecycle capture and memory injection
 - `scripts/` — dev / CI helper scripts (version check, e2e)
@@ -177,7 +177,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
 - [`plugins/AGENTS.md`](plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 
-Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh`; platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
+Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh` and `lib/jsonc-mcp.ts`; platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
 
 ## Maintaining this file
 
