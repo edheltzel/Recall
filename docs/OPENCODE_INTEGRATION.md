@@ -235,7 +235,7 @@ register_opencode_mcp() {
   local resolved_db_path
   resolved_db_path="$(eval echo "$RECALL_DB_PATH_DEFAULT")"  # Resolve ~ to absolute
 
-  # Use bun -e with jsonc-parser for a surgical JSONC-safe merge.
+  # Use the bundled dependency-free JSONC helper for a surgical merge.
   local mem_mcp_path
   mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
 
@@ -264,9 +264,11 @@ install_opencode_guide() {
 ```
 
 The live installer delegates to `lib/install-lib.sh`'s shared
-`_recall_jsonc_merge_mcp_entry` helper. It preserves comments, trailing commas,
-sibling MCP entries, and custom Recall entry fields; malformed or unwritable
-configs fail before writing. Uninstall uses the matching surgical removal helper.
+`_recall_jsonc_merge_mcp_entry` helper and the bundled dependency-free
+`lib/jsonc-mcp.ts` parser. It preserves comments, trailing commas, sibling MCP
+entries, and custom Recall entry fields; malformed or unwritable configs fail
+before writing. Uninstall uses the matching surgical removal helper, leaves a
+malformed OpenCode config unchanged, and continues the remaining integrations.
 
 ## Database Schema Change
 
@@ -364,13 +366,14 @@ OpenCode prefixes MCP tools with the server name + underscore:
 | Tilde in RECALL_DB_PATH | MEDIUM | Absolute path resolved at install |
 | `recall import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + RecallBatchExtract |
 | Bun not guaranteed | LOW-MEDIUM | Documented as requirement (same as Claude Code) |
-| JSONC parsing | LOW | `jsonc-parser` surgical merge/removal preserves comments and refuses malformed writes |
+| JSONC parsing | LOW | Bundled dependency-free parser performs surgical merge/removal, preserves comments, and refuses malformed writes |
 
 ## Phase 4 Evidence
 
 1. OpenCode 1.18.4 emits `session.idle` through the `event` hook with
-   `properties.sessionID`; the e2e invokes that exact payload and verifies the
-   resulting markdown drop.
+   `properties.sessionID`; the e2e verifies the plugin factory exposes the real
+   `event` boundary, rejects the obsolete `session.idle` key, invokes that exact
+   payload, and verifies the resulting markdown drop.
 2. `opencode export <session-id>` is the supported JSON export command. Recall
    owns JSON-to-markdown normalization because the CLI does not expose the old
    `-f markdown -o` session-export interface.

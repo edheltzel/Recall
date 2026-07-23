@@ -261,6 +261,8 @@ async function main(): Promise<void> {
   const plugin = await pluginModule.RecallExtract({
     $: async (_strings: TemplateStringsArray, ...values: unknown[]) => runOpenCode(['export', String(values[0])], env),
   } as never);
+  assert(typeof plugin.event === 'function', 'Recall OpenCode plugin did not expose the real event hook boundary');
+  assert(!('session.idle' in plugin), 'Recall OpenCode plugin exposed the obsolete session.idle hook instead of event');
   await plugin.event?.({ event: { type: 'session.idle', properties: { sessionID: sessionId } } });
 
   const dropDir = join(testRecallHome, 'MEMORY', 'opencode-sessions');
