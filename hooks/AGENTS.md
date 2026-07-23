@@ -25,6 +25,7 @@ Installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/sh
 - Generic hook helpers depend on `lib/events.ts`, `lib/extraction-provider.ts`, and the native-provider registry in `lib/hosts/`; native payloads, path encoding, commands, auth, and recursion guards stay in a host adapter.
 - Documented DRY exception: small utilities (e.g. bun-path resolution) are intentionally duplicated inside `RecallExtract.ts` / `RecallBatchExtract.ts` so they never reach into `src/`. Do not "DRY this up."
 - DB-path resolution is centralized in `lib/db-path.ts` — the CLI and every hook agree through it.
+- Extraction dual-write is REPLAYED (archive crash or partial SQLite failure both leave the conversation retryable), so `dualWriteToSqlite` passes `skipDuplicates` to the plain-INSERT writers in `lib/sqlite-writers.ts`: a row already present for the same session, keyed on (session_id, content), is skipped. Content-scoped, never session-scoped: in-session windows write many different rows under one session_id. The flag is opt-in: the correction writer must keep recording repeated identical corrections.
 - Shebang `#!/usr/bin/env bun`. No build step — editing the canonical file updates the live symlink.
 - Hook registration (`Stop`, `SessionStart`, `PreCompact`, `PostToolUse`, `UserPromptSubmit`) lives in `~/.claude/settings.json`; the installer wires it.
 
