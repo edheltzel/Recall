@@ -40,7 +40,7 @@ const opencodeFixture = join(tempRoot, 'session.json');
 const sessionId = 'ses_recall_phase4';
 const retrySessionId = 'ses_recall_phase4_retry';
 const marker = 'OPENCODE_PHASE4_SEARCHABLE_MARKER';
-const concurrentMarkers = ['OPENCODE_PHASE4_CONCURRENT_A', 'OPENCODE_PHASE4_CONCURRENT_B'];
+const concurrentMarkers = ['OPENCODEPHASE4CONCURRENTA', 'OPENCODEPHASE4CONCURRENTB'];
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
