@@ -309,7 +309,7 @@ async function main(): Promise<void> {
   console.log('opencode.concurrent_wal_writers=verified');
   console.log('opencode.installer_jsonc_rollback=verified');
   console.log('isolation.production_db_opened=false');
-} 
+}
 
 try {
   await main();
