@@ -10,7 +10,8 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -171,6 +172,57 @@ describe('batch extraction result classification', () => {
     expect(isExtractionFailureOutput('[FabricExtract] Claude CLI extraction failed: spawn claude ENOENT')).toBe(false);
     expect(isExtractionFailureOutput('[FabricExtract] Ollama extraction failed: fetch failed')).toBe(false);
     expect(isExtractionFailureOutput('[FabricExtract] All extraction methods failed, no extraction')).toBe(true);
+  });
+});
+
+// The run loop only counts a drop file as extracted when recordSuccess actually
+// persisted the tracker row. Driven end-to-end through the script (the counters
+// live in main()), with a stub RecallExtract standing in for a clean extraction.
+describe('batch extraction success accounting', () => {
+  function stageBatchRun(): { home: string; recallHome: string; drop: string } {
+    const home = join(tmp, 'home');
+    const recallHome = join(tmp, 'recall-home');
+    mkdirSync(join(home, '.claude', 'projects'), { recursive: true });
+    mkdirSync(join(recallHome, 'shared', 'hooks'), { recursive: true });
+    mkdirSync(join(recallHome, 'MEMORY', 'opencode-sessions'), { recursive: true });
+    writeFileSync(join(recallHome, 'shared', 'hooks', 'RecallExtract.ts'), 'process.exit(0);\n');
+    const drop = join(recallHome, 'MEMORY', 'opencode-sessions', 'ses_accounting.md');
+    writeFileSync(drop, `# OpenCode session\n\n${'Batch accounting fixture. '.repeat(200)}`);
+    return { home, recallHome, drop };
+  }
+
+  function runBatchScript(home: string, recallHome: string): string {
+    const result = spawnSync(
+      'bun',
+      ['run', join(import.meta.dir, '..', '..', 'hooks', 'RecallBatchExtract.ts'), '--all'],
+      {
+        encoding: 'utf-8',
+        env: { ...process.env, HOME: home, RECALL_HOME: recallHome, RECALL_DB_PATH: dbPath },
+      },
+    );
+    return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  }
+
+  test('counts a clean extraction whose tracker row persisted as extracted', () => {
+    initTrackerDb();
+    const { home, recallHome, drop } = stageBatchRun();
+
+    const output = runBatchScript(home, recallHome);
+
+    expect(output).toContain('SUCCESS: Extracted and tracked');
+    expect(output).toContain('1 extracted, 0 failed');
+    expect(getExtractionRecord(dbPath, drop)!.extracted_at).not.toBeNull();
+  });
+
+  test('does not count an extraction as extracted when the tracker write fails', () => {
+    initEmptyDb(); // no extraction_tracker table — every tracker write throws
+    const { home, recallHome } = stageBatchRun();
+
+    const output = runBatchScript(home, recallHome);
+
+    expect(output).toContain('FAILED: Extraction completed but tracking failed');
+    expect(output).not.toContain('SUCCESS: Extracted and tracked');
+    expect(output).toContain('0 extracted, 1 failed');
   });
 });
 
