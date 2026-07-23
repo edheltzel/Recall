@@ -140,6 +140,33 @@ describe('runExtractCore — dual-write parity', () => {
     expect(result.summary).toBe('We migrated the Stop hook to write to SQLite.');
     expect(result.topics).toEqual(['migration', 'sqlite']);
   });
+
+  test('surfaces a failed SQLite persistence as non-success', async () => {
+    const result = await runExtractCore('/path/that/does/not/exist.db', 'raw', BASE_CTX, {
+      extract: async () => CLEAN_FIXTURE,
+      deriveMeta,
+    });
+
+    expect(result.outcome).toBe('persistence_failed');
+    expect(result.dualWrite?.failures._db).toBe('not writable or locked');
+  });
+
+  test('surfaces a WAL database lock instead of reporting an empty success', async () => {
+    const busyPath = join('/tmp', `recall-busy-${process.pid}.db`);
+    const blocker = new Database(busyPath);
+    blocker.exec('PRAGMA journal_mode = DELETE; CREATE TABLE lock_probe (id INTEGER); BEGIN EXCLUSIVE');
+    try {
+      const result = await runExtractCore(busyPath, 'raw', BASE_CTX, {
+        extract: async () => CLEAN_FIXTURE,
+        deriveMeta,
+      });
+      expect(result.outcome).toBe('persistence_failed');
+      expect(result.dualWrite?.failures._db).toContain('locked');
+    } finally {
+      blocker.exec('ROLLBACK');
+      blocker.close();
+    }
+  });
 });
 
 describe('runExtractCore — scrub is active on every persisted field', () => {

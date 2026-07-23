@@ -614,6 +614,13 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
       markAsFailed(convHash, `quality gate failed: ${core.quality?.reason}`);
       return;
     }
+    if (core.outcome === 'persistence_failed') {
+      const failures = JSON.stringify(core.dualWrite?.failures ?? {});
+      console.error(`[FabricExtract] SQLite write failed: ${failures}`);
+      logExtract(`FAILURE: SQLite write failed: ${failures}`);
+      markAsFailed(convHash, `SQLite write failed: ${failures}`);
+      return;
+    }
     logExtract("QUALITY GATE PASSED: extraction contains required sections");
 
     // Scrub the extracted text BEFORE it reaches any on-disk archive writer
@@ -766,6 +773,13 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
       console.error(`[FabricExtract] QUALITY GATE FAILED: ${core.quality?.reason}.`);
       logExtract(`QUALITY GATE FAILED (markdown): ${core.quality?.reason}`);
       markAsFailed(convHash, `quality gate failed (markdown): ${core.quality?.reason}`);
+      return;
+    }
+    if (core.outcome === 'persistence_failed') {
+      const failures = JSON.stringify(core.dualWrite?.failures ?? {});
+      console.error(`[FabricExtract] SQLite write failed (markdown): ${failures}`);
+      logExtract(`FAILURE (markdown): SQLite write failed: ${failures}`);
+      markAsFailed(convHash, `SQLite write failed (markdown): ${failures}`);
       return;
     }
     logExtract("QUALITY GATE PASSED (markdown)");

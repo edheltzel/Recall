@@ -74,6 +74,10 @@ export interface TrackerEntry {
 
 export type Tracker = Record<string, TrackerEntry>;
 
+export function isExtractionFailureOutput(output: string): boolean {
+  return /quality gate failed|all extraction methods failed|extraction failed|sqlite write failed|persistence failed/i.test(output);
+}
+
 // Parse args (top-level so main() and re-entrant tests share)
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -327,7 +331,7 @@ function extractFile(convPath: string, cwd: string): boolean {
       throw result.error ?? new Error(`RecallExtract exited with status ${result.status}`);
     }
     // Check if quality gate failed
-    if (output.includes('QUALITY GATE FAILED') || output.includes('All extraction methods failed') || output.includes('Extraction failed')) {
+    if (isExtractionFailureOutput(output)) {
       log(`  QUALITY GATE FAILED or extraction failed for ${convPath}`);
       return false;
     }
@@ -336,7 +340,7 @@ function extractFile(convPath: string, cwd: string): boolean {
     // execSync throws on non-zero exit, but RecallExtract exits 0 even on failure
     // Check stderr/stdout for quality gate failure
     const output = err.stdout || err.stderr || err.message || '';
-    if (output.includes('QUALITY GATE FAILED') || output.includes('All extraction methods failed')) {
+    if (isExtractionFailureOutput(output)) {
       log(`  QUALITY GATE FAILED for ${convPath}`);
       return false;
     }
@@ -392,12 +396,17 @@ async function main() {
     const success = extractFile(candidate.path, cwd);
 
     if (success) {
-      extracted++;
       // RecallExtract's own markAsExtracted already updates the tracker.
       // Belt-and-suspenders: stamp it again here so dedup stays consistent
       // even if the child process exited before reaching its own writer.
-      recordSuccess(dbPath, candidate.path, candidate.size);
-      log(`  SUCCESS: Extracted and tracked`);
+      if (recordSuccess(dbPath, candidate.path, candidate.size)) {
+        extracted++;
+        log(`  SUCCESS: Extracted and tracked`);
+      } else {
+        failed++;
+        recordFailure(dbPath, candidate.path, candidate.size, 'RecallBatchExtract: tracker write failure');
+        log(`  FAILED: Extraction completed but tracking failed; will retry after 24h cooldown`);
+      }
     } else {
       failed++;
       recordFailure(dbPath, candidate.path, candidate.size, 'RecallBatchExtract: quality gate or runtime failure');
