@@ -6,6 +6,25 @@
 // All functions take dbPath as the first parameter for testability.
 // Every write is wrapped at the call site in try/catch — failures must not
 // block the legacy file path or cause the extraction to be marked failed.
+//
+// RETRY IDEMPOTENCY (`skipDuplicates`): the Stop hook only marks a conversation
+// extracted AFTER its markdown archive writes, and a partial SQLite failure now
+// marks it failed + retryable, so the same extraction can reach these writers
+// more than once. The four plain-INSERT writers below therefore accept an opt-in
+// `skipDuplicates` that drops a row already present for the same session, keyed
+// on (session_id, content). Content-scoped, NOT session-scoped: in-session
+// extraction (insession.ts) writes many DIFFERENT rows under one session_id
+// across successive transcript slices, so anything that replaced or deleted by
+// session_id would destroy earlier windows. A partially-failed dual-write still
+// repairs on retry: the writer that landed skips, the writer that threw inserts.
+//
+// Opt-in, not default, because only the extraction dual-write is replayed:
+// insession.ts's correction writer legitimately records the same correction text
+// twice in one session (tests/hooks/corrections.test.ts) and must not dedup.
+//
+// TRADEOFF: the decision dedup key is the decision text alone, so two slices
+// yielding the same decision at different confidence collapse to the first one
+// written. Accepted: not duplicating beats upgrading confidence.
 
 import { Database } from 'bun:sqlite';
 import { existsSync } from 'fs';
@@ -14,6 +33,11 @@ import { resolveDbPath } from './db-path';
 // Re-export under the historical name so existing consumers (RecallExtract,
 // RecallBatchExtract, RecallClearExtract) don't need to change their imports.
 export const getDbPath = resolveDbPath;
+
+export interface WriteOptions {
+  /** Skip a row already persisted for this session (extraction-retry replay). */
+  skipDuplicates?: boolean;
+}
 
 function openDb(dbPath: string): Database {
   const db = new Database(dbPath);
@@ -112,7 +136,11 @@ export interface DecisionInput {
   importance?: number;
 }
 
-export function writeDecisionsBatch(dbPath: string, items: DecisionInput[]): number {
+export function writeDecisionsBatch(
+  dbPath: string,
+  items: DecisionInput[],
+  opts: WriteOptions = {}
+): number {
   if (items.length === 0) return 0;
   const db = openDb(dbPath);
   try {
@@ -125,9 +153,13 @@ export function writeDecisionsBatch(dbPath: string, items: DecisionInput[]): num
       : `INSERT INTO decisions (session_id, category, project, decision, status, importance${provenance.col})
          VALUES (?, ?, ?, ?, 'active', ?${provenance.val})`;
     const stmt = db.prepare(sql);
+    const alreadyWritten = opts.skipDuplicates
+      ? db.prepare('SELECT 1 FROM decisions WHERE session_id IS ? AND decision = ? LIMIT 1')
+      : null;
     const insertMany = db.transaction((batch: DecisionInput[]) => {
       let n = 0;
       for (const it of batch) {
+        if (alreadyWritten?.get(it.sessionId ?? null, it.decision)) continue;
         const importance = clampImportance(it.importance, 5);
         if (hasConfidence) {
           stmt.run(
@@ -173,7 +205,11 @@ export interface LearningInput {
   confidence?: 'high' | 'medium' | 'low';
 }
 
-export function writeLearningsBatch(dbPath: string, items: LearningInput[]): number {
+export function writeLearningsBatch(
+  dbPath: string,
+  items: LearningInput[],
+  opts: WriteOptions = {}
+): number {
   if (items.length === 0) return 0;
   const db = openDb(dbPath);
   try {
@@ -186,9 +222,15 @@ export function writeLearningsBatch(dbPath: string, items: LearningInput[]): num
       : `INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, importance${provenance.col})
          VALUES (?, ?, ?, ?, ?, ?, ?, ?${provenance.val})`;
     const stmt = db.prepare(sql);
+    const alreadyWritten = opts.skipDuplicates
+      ? db.prepare(
+          'SELECT 1 FROM learnings WHERE session_id IS ? AND problem = ? AND solution IS ? LIMIT 1'
+        )
+      : null;
     const insertMany = db.transaction((batch: LearningInput[]) => {
       let n = 0;
       for (const it of batch) {
+        if (alreadyWritten?.get(it.sessionId ?? null, it.problem, it.solution ?? null)) continue;
         const importance = clampImportance(it.importance, 5);
         if (hasConfidence) {
           stmt.run(
@@ -237,7 +279,11 @@ export interface BreadcrumbInput {
   expiresAt?: string | null;
 }
 
-export function writeBreadcrumbsBatch(dbPath: string, items: BreadcrumbInput[]): number {
+export function writeBreadcrumbsBatch(
+  dbPath: string,
+  items: BreadcrumbInput[],
+  opts: WriteOptions = {}
+): number {
   if (items.length === 0) return 0;
   const db = openDb(dbPath);
   try {
@@ -247,9 +293,13 @@ export function writeBreadcrumbsBatch(dbPath: string, items: BreadcrumbInput[]):
       `INSERT INTO breadcrumbs (session_id, content, category, project, importance, expires_at${provenance.col})
        VALUES (?, ?, ?, ?, ?, ?${provenance.val})`
     );
+    const alreadyWritten = opts.skipDuplicates
+      ? db.prepare('SELECT 1 FROM breadcrumbs WHERE session_id IS ? AND content = ? LIMIT 1')
+      : null;
     const insertMany = db.transaction((batch: BreadcrumbInput[]) => {
       let n = 0;
       for (const it of batch) {
+        if (alreadyWritten?.get(it.sessionId ?? null, it.content)) continue;
         stmt.run(
           it.sessionId ?? null,
           it.content,
@@ -283,10 +333,22 @@ export interface LoaInput {
   importance?: number;
 }
 
-export function writeLoaEntryFromExtraction(dbPath: string, entry: LoaInput): number {
+export function writeLoaEntryFromExtraction(
+  dbPath: string,
+  entry: LoaInput,
+  opts: WriteOptions = {}
+): number {
   const db = openDb(dbPath);
   try {
     if (!tableExists(db, 'loa_entries')) return 0;
+    // Retry of an already-persisted extraction: return the existing id rather
+    // than inserting a second copy of the same fabric extract.
+    if (opts.skipDuplicates) {
+      const existing = db
+        .prepare('SELECT id FROM loa_entries WHERE session_id IS ? AND fabric_extract = ? LIMIT 1')
+        .get(entry.sessionId ?? null, entry.fabricExtract) as { id: number } | undefined;
+      if (existing) return existing.id;
+    }
     // LoA importance is floored at 5 (curated tier guardrail).
     const importance = Math.max(5, clampImportance(entry.importance, 8));
     const provenance = provenanceFragment(db, 'loa_entries');
