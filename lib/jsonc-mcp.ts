@@ -147,13 +147,14 @@ function formatted(value: unknown, indent: string): string {
 
 function insertProperty(text: string, object: Node, key: string, value: unknown): string {
   const close = object.end - 1;
-  const beforeClose = text.slice(object.start + 1, close);
-  const lastSignificant = beforeClose.replace(/(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*$/g, '').slice(-1);
+  const lastProperty = object.properties?.at(-1);
+  const afterLastValue = lastProperty ? text.slice(lastProperty.value.end, close) : '';
+  const hasTrailingComma = /,\s*(?:(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*)*$/.test(afterLastValue);
   const keyIndent = object.properties?.[0]
     ? lineIndent(text, object.properties[0].keyStart)
     : lineIndent(text, object.start) + '  ';
   const objectIndent = lineIndent(text, object.start);
-  const separator = object.properties?.length && lastSignificant !== ',' ? ',' : '';
+  const separator = object.properties?.length && !hasTrailingComma ? ',' : '';
   const insertion = `${separator}\n${keyIndent}"${key}": ${formatted(value, keyIndent)}\n${objectIndent}`;
   return apply(text, close, close, insertion);
 }
