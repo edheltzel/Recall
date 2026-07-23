@@ -276,7 +276,7 @@ cd /path/to/Recall
 - `~/.claude/hooks/lib/{extraction-*,pid-utils}.ts` — only Recall-owned files, never the whole `hooks/lib/` directory
 - The `## MEMORY` section in `~/.claude/CLAUDE.md` only if Recall generated it (current ownership marker or a normalized exact match of the complete legacy-generated body); unmarked customized/externally owned sections and the rest of `CLAUDE.md` are preserved; a marked section remains Recall-owned even if its body was edited
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
-- OpenCode MCP entry + plugins + agent (unless `--skip-opencode`)
+- OpenCode MCP entry + plugins + agent + guide (unless `--skip-opencode`). An `opencode.json` that Recall cannot parse is reported and left untouched; the plugins, agent, and guide are still removed and the rest of the uninstall continues
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
