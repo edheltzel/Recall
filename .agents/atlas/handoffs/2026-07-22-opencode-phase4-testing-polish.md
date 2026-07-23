@@ -26,8 +26,11 @@ The remaining phase work is real disposable runtime validation, failure/retry ob
 ## Completion evidence required
 
 - Actual OpenCode 1.18.4 runtime/export evidence from the disposable e2e.
-- Passing focused e2e, concurrency, installer, lint, and shell syntax validation;
-  full-suite and package/integration validation remain the final ship gate.
+- Passing focused e2e, concurrency, installer, lint, shell syntax, and package/
+  integration validation. The full suite reached 1,266 pass / 1 fail: the
+  unchanged `tests/hooks/RecallExtract-archive-scrub.test.ts` Claude JSONL case
+  expects a missing LoA transcript and reproduces in isolation on this base;
+  it is outside OpenCode Phase 4 scope and is called out in the PR.
 - Updated OpenCode documentation and focused Unreleased changelog entry.
 - Direct PR to `main` with #243 and #165 linked accurately.
 
