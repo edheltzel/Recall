@@ -2229,104 +2229,9 @@ Read and follow the canonical Recall guide at \`$CLAUDE_DIR/Recall_GUIDE.md\`. U
 #        names); every other key on the entry and every other env var survive.
 #   V-4  PARENT_KEY present but not a plain object → refuse, file unchanged.
 _recall_jsonc_merge_mcp_entry() {
-  CONFIG_PATH="$1" PARENT_KEY="$2" ENTRY_JSON="$3" PRESERVE_KEYS="${4:-}" REPO_DIR="$RECALL_REPO_DIR" \
-    bun -e '
-      const fs = require("fs");
-      const path = require("path");
-      const { parse, modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
-      const file = process.env.CONFIG_PATH;
-      const parentKey = process.env.PARENT_KEY;
-      const preserveKeys = new Set((process.env.PRESERVE_KEYS || "").split(",").filter(Boolean));
-      const name = path.basename(file);
-      const entry = JSON.parse(process.env.ENTRY_JSON);
+  bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" merge "$1" "$2" "$3" "${4:-}"
+  return $?
 
-      // Read once. Empty file is treated as {} so first-time installs work.
-      // We keep the original text for modify/applyEdits so surrounding bytes
-      // (// comments, /* */ blocks, JSON5 trailing commas, sibling MCP
-      // entries) survive byte-for-byte on the write path.
-      let text = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "{}";
-      if (text.trim() === "") text = "{}";
-
-      // V-1: refuse on unparseable input instead of throwing-then-reporting
-      // success. We exit non-zero BEFORE any write, so the file is untouched.
-      // Uses jsonc-parser so // line comments, /* */ block comments, and
-      // JSON5 trailing commas are tolerated (allowTrailingCommas). The earlier
-      // regex stripper corrupted `//` inside string values (e.g. https:// URLs
-      // in sibling MCP entries) — A7 — and is replaced by a real tokenizer.
-      const errors = [];
-      const existing = parse(text, errors, { allowTrailingComma: true });
-      if (errors.length > 0 || existing === undefined || existing === null || typeof existing !== "object" || Array.isArray(existing)) {
-        console.error("recall: refusing to modify " + name + " — existing file is not valid JSON/JSONC");
-        process.exit(1);
-      }
-
-      // V-4: the container exists but is not a plain object (e.g.
-      // "mcp": "disabled"). Refuse rather than silently rewrite.
-      if (Object.prototype.hasOwnProperty.call(existing, parentKey)) {
-        const container = existing[parentKey];
-        if (container === null || typeof container !== "object" || Array.isArray(container)) {
-          console.error("recall: refusing to modify " + name + " — \"" + parentKey + "\" exists but is not an object");
-          process.exit(1);
-        }
-      }
-
-      // V-3: deep-merge. We own only the keys named in ENTRY_JSON and the env
-      // vars it lists; every other key the user set on the entry — and every
-      // other environment var — survives a refresh.
-      const container = existing[parentKey] || {};
-      const prevRaw = container["recall-memory"];
-      const prev = (prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)) ? prevRaw : {};
-      const mergedEntry = {
-        ...prev,
-        ...entry
-      };
-      for (const key of preserveKeys) {
-        if (Object.prototype.hasOwnProperty.call(prev, key)) mergedEntry[key] = prev[key];
-      }
-      // Claude/OpenCode use `environment`; pi-mcp-adapter uses `env`.
-      // Deep-merge whichever owned field the caller supplied so custom sibling
-      // variables survive without inventing one normalized cross-host schema.
-      for (const envKey of ["environment", "env"]) {
-        if (!Object.prototype.hasOwnProperty.call(entry, envKey)) continue;
-        const prevEnv = (prev[envKey] && typeof prev[envKey] === "object" && !Array.isArray(prev[envKey])) ? prev[envKey] : {};
-        const newEnv = (entry[envKey] && typeof entry[envKey] === "object" && !Array.isArray(entry[envKey])) ? entry[envKey] : {};
-        mergedEntry[envKey] = { ...prevEnv, ...newEnv };
-      }
-
-      // In-place edit via jsonc-parser modify/applyEdits: only the
-      // recall-memory entry'"'"'s value slot is rewritten. Surrounding bytes
-      // (comments, JSON5 trailing commas, sibling MCP entry formatting,
-      // top-of-file leading comments) survive byte-for-byte. The Cycle 1
-      // preservation tests in tests/{opencode,pi}-integration.test.ts pin
-      // this contract.
-      const hasContainer = Object.prototype.hasOwnProperty.call(existing, parentKey);
-      const editPath = hasContainer ? [parentKey, "recall-memory"] : [parentKey];
-      const editValue = hasContainer ? mergedEntry : { "recall-memory": mergedEntry };
-      const edits = modify(text, editPath, editValue, {
-        formattingOptions: { tabSize: 2, insertSpaces: true }
-      });
-      const newText = applyEdits(text, edits);
-
-      // jsonc-parser cannot materialize a missing intermediate object when
-      // asked to edit [parentKey, child]. Create the parent explicitly above,
-      // then reject any no-op so a fresh install can never print false success.
-      if (!hasContainer && (edits.length === 0 || newText === text)) {
-        console.error("recall: failed to construct " + name + " — merge produced no edit");
-        process.exit(1);
-      }
-
-      // V-8: a write failure (read-only file/dir, ENOSPC) must surface as a
-      // non-zero exit. `bun -e` swallows an uncaught synchronous writeFileSync
-      // EACCES (exits 0, prints nothing), so without this guard the caller
-      // would print "✓ Registered" while the file was never modified — a silent
-      // failure. Catch explicitly and exit non-zero, like the V-1 parse guard.
-      try {
-        fs.writeFileSync(file, newText);
-      } catch (e) {
-        console.error("recall: failed to write " + name + " — " + e.message);
-        process.exit(1);
-      }
-    '
 }
 
 # _recall_jsonc_remove_mcp_entry FILE PARENT_KEY
@@ -2336,42 +2241,9 @@ _recall_jsonc_merge_mcp_entry() {
 # input is a hard failure before any write so uninstall cannot claim success
 # after damaging or ignoring a user config.
 _recall_jsonc_remove_mcp_entry() {
-  CONFIG_PATH="$1" PARENT_KEY="$2" REPO_DIR="$RECALL_REPO_DIR" \
-    bun -e '
-      const fs = require("fs");
-      const { parse, modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
-      const file = process.env.CONFIG_PATH;
-      const parentKey = process.env.PARENT_KEY;
-      const text = fs.readFileSync(file, "utf-8");
-      const errors = [];
-      const existing = parse(text, errors, { allowTrailingComma: true });
+  bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" remove "$1" "$2"
+  return $?
 
-      if (errors.length > 0 || existing === undefined || existing === null || typeof existing !== "object" || Array.isArray(existing)) {
-        console.error("recall: refusing to modify " + file + " — existing file is not valid JSON/JSONC");
-        process.exit(1);
-      }
-
-      const container = existing[parentKey];
-      if (container === undefined) process.exit(0);
-      if (container === null || typeof container !== "object" || Array.isArray(container)) {
-        console.error(`recall: refusing to modify ${file} — "${parentKey}" exists but is not an object`);
-        process.exit(1);
-      }
-      if (!Object.prototype.hasOwnProperty.call(container, "recall-memory")) process.exit(0);
-
-      const edits = modify(text, [parentKey, "recall-memory"], undefined, {
-        formattingOptions: { tabSize: 2, insertSpaces: true }
-      });
-      const newText = applyEdits(text, edits);
-      if (newText === text) process.exit(0);
-
-      try {
-        fs.writeFileSync(file, newText);
-      } catch (e) {
-        console.error("recall: failed to write " + file + " — " + e.message);
-        process.exit(1);
-      }
-    '
 }
 
 # ── OpenCode ─────────────────────────────────────────────────────────────────

@@ -430,6 +430,7 @@ run_bun_unlink() {
 
 remove_opencode() {
   local config="$OPENCODE_CONFIG_DIR/opencode.json"
+  local config_failed=false
 
   if [[ -f "$config" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -439,7 +440,7 @@ remove_opencode() {
         log_success "Removed recall-memory from $config"
       else
         log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported — left unchanged)"
-        return 1
+        config_failed=true
       fi
     fi
   fi
@@ -478,6 +479,8 @@ remove_opencode() {
     run rm -f "$guide"
     log_success "Removed $guide"
   fi
+
+  [[ "$config_failed" == "true" ]] && return 1
 }
 
 # ── Pi removal ───────────────────────────────────────────────────────────────
@@ -679,7 +682,9 @@ main() {
 
   if [[ "$SKIP_OPENCODE" != "true" ]]; then
     log_info "Removing OpenCode integration..."
-    remove_opencode
+    if ! remove_opencode; then
+      log_warn "OpenCode config was left unchanged; continuing uninstall"
+    fi
     echo ""
   fi
 
