@@ -480,7 +480,10 @@ remove_opencode() {
     log_success "Removed $guide"
   fi
 
-  [[ "$config_failed" == "true" ]] && return 1
+  if [[ "$config_failed" == "true" ]]; then
+    return 1
+  fi
+  return 0
 }
 
 # ── Pi removal ───────────────────────────────────────────────────────────────

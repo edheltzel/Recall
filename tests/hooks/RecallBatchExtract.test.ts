@@ -166,6 +166,12 @@ describe('batch extraction result classification', () => {
   test('does not classify SQLite persistence failure as extraction success', () => {
     expect(isExtractionFailureOutput('[FabricExtract] SQLite write failed: {"sessions":"database is locked"}')).toBe(true);
   });
+
+  test('does not classify a non-fatal provider cascade fallback as a failure', () => {
+    expect(isExtractionFailureOutput('[FabricExtract] Claude CLI extraction failed: spawn claude ENOENT')).toBe(false);
+    expect(isExtractionFailureOutput('[FabricExtract] Ollama extraction failed: fetch failed')).toBe(false);
+    expect(isExtractionFailureOutput('[FabricExtract] All extraction methods failed, no extraction')).toBe(true);
+  });
 });
 
 describe('Graceful degrade when extraction_tracker is missing', () => {

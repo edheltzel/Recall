@@ -13,6 +13,8 @@ type Node = {
   end: number;
   value: unknown;
   properties?: Property[];
+  contentEnd?: number;
+  trailingComma?: boolean;
 };
 
 class JsoncParser {
@@ -64,6 +66,8 @@ class JsoncParser {
     const start = this.index++;
     const properties: Property[] = [];
     const value: JsonObject = {};
+    let contentEnd = this.index;
+    let trailingComma = false;
     this.skipSpaceAndComments();
     while (this.text[this.index] !== '}') {
       const keyNode = this.string();
@@ -72,16 +76,20 @@ class JsoncParser {
       const child = this.value();
       properties.push({ key: keyNode.value as string, keyStart: keyNode.start, value: child });
       value[keyNode.value as string] = child.value;
+      contentEnd = child.end;
+      trailingComma = false;
       this.skipSpaceAndComments();
       if (this.text[this.index] === ',') {
         this.index++;
+        contentEnd = this.index;
+        trailingComma = true;
         this.skipSpaceAndComments();
         continue;
       }
       if (this.text[this.index] !== '}') throw new Error(`expected comma at ${this.index}`);
     }
     this.index++;
-    return { start, end: this.index, value, properties };
+    return { start, end: this.index, value, properties, contentEnd, trailingComma };
   }
 
   private array(): Node {
@@ -147,16 +155,15 @@ function formatted(value: unknown, indent: string): string {
 
 function insertProperty(text: string, object: Node, key: string, value: unknown): string {
   const close = object.end - 1;
-  const lastProperty = object.properties?.at(-1);
-  const afterLastValue = lastProperty ? text.slice(lastProperty.value.end, close) : '';
-  const hasTrailingComma = /,\s*(?:(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*)*$/.test(afterLastValue);
+  const anchor = object.contentEnd ?? close;
   const keyIndent = object.properties?.[0]
     ? lineIndent(text, object.properties[0].keyStart)
     : lineIndent(text, object.start) + '  ';
   const objectIndent = lineIndent(text, object.start);
-  const separator = object.properties?.length && !hasTrailingComma ? ',' : '';
-  const insertion = `${separator}\n${keyIndent}"${key}": ${formatted(value, keyIndent)}\n${objectIndent}`;
-  return apply(text, close, close, insertion);
+  const separator = object.properties?.length && !object.trailingComma ? ',' : '';
+  const closing = text.slice(anchor, close).includes('\n') ? '' : `\n${objectIndent}`;
+  const insertion = `${separator}\n${keyIndent}"${key}": ${formatted(value, keyIndent)}${closing}`;
+  return apply(text, anchor, anchor, insertion);
 }
 
 function merge(file: string, parentKey: string, entry: JsonObject, preserveKeys: string[]): void {
