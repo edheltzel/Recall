@@ -2254,8 +2254,8 @@ _recall_jsonc_merge_mcp_entry() {
       // regex stripper corrupted `//` inside string values (e.g. https:// URLs
       // in sibling MCP entries) — A7 — and is replaced by a real tokenizer.
       const errors = [];
-      const existing = parse(text, errors, { allowTrailingCommas: true });
-      if (existing === undefined || existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+      const existing = parse(text, errors, { allowTrailingComma: true });
+      if (errors.length > 0 || existing === undefined || existing === null || typeof existing !== "object" || Array.isArray(existing)) {
         console.error("recall: refusing to modify " + name + " — existing file is not valid JSON/JSONC");
         process.exit(1);
       }
@@ -2324,6 +2324,51 @@ _recall_jsonc_merge_mcp_entry() {
         fs.writeFileSync(file, newText);
       } catch (e) {
         console.error("recall: failed to write " + name + " — " + e.message);
+        process.exit(1);
+      }
+    '
+}
+
+# _recall_jsonc_remove_mcp_entry FILE PARENT_KEY
+#
+# Remove only Recall's MCP entry while preserving JSONC comments, trailing
+# commas, sibling entries, and the rest of the user's formatting. Invalid
+# input is a hard failure before any write so uninstall cannot claim success
+# after damaging or ignoring a user config.
+_recall_jsonc_remove_mcp_entry() {
+  CONFIG_PATH="$1" PARENT_KEY="$2" REPO_DIR="$RECALL_REPO_DIR" \
+    bun -e '
+      const fs = require("fs");
+      const { parse, modify, applyEdits } = require(process.env.REPO_DIR + "/node_modules/jsonc-parser");
+      const file = process.env.CONFIG_PATH;
+      const parentKey = process.env.PARENT_KEY;
+      const text = fs.readFileSync(file, "utf-8");
+      const errors = [];
+      const existing = parse(text, errors, { allowTrailingComma: true });
+
+      if (errors.length > 0 || existing === undefined || existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+        console.error("recall: refusing to modify " + file + " — existing file is not valid JSON/JSONC");
+        process.exit(1);
+      }
+
+      const container = existing[parentKey];
+      if (container === undefined) process.exit(0);
+      if (container === null || typeof container !== "object" || Array.isArray(container)) {
+        console.error(`recall: refusing to modify ${file} — "${parentKey}" exists but is not an object`);
+        process.exit(1);
+      }
+      if (!Object.prototype.hasOwnProperty.call(container, "recall-memory")) process.exit(0);
+
+      const edits = modify(text, [parentKey, "recall-memory"], undefined, {
+        formattingOptions: { tabSize: 2, insertSpaces: true }
+      });
+      const newText = applyEdits(text, edits);
+      if (newText === text) process.exit(0);
+
+      try {
+        fs.writeFileSync(file, newText);
+      } catch (e) {
+        console.error("recall: failed to write " + file + " — " + e.message);
         process.exit(1);
       }
     '
