@@ -548,6 +548,7 @@ Preserve this.
     expect(after).toContain('other-server');
     expect(after).toContain('https://example.test/mcp');
     expect(after).not.toContain('recall-memory');
+    expect(`${result.stdout}${result.stderr}`).not.toContain('left unchanged');
   });
 
   test('OpenCode uninstall rejects malformed config without writing', () => {
@@ -579,7 +580,7 @@ Preserve this.
     writeFileSync(piConfig, JSON.stringify({ mcpServers: { 'recall-memory': { command: 'recall-mcp' } } }));
     writeFileSync(
       join(fakeBin, 'bun'),
-      '#!/bin/sh\nif [ "$1" = unlink ]; then touch "$RECALL_TEST_UNLINK"; exit 0; fi\nexec /opt/homebrew/bin/bun "$@"\n',
+      `#!/bin/sh\nif [ "$1" = unlink ]; then touch "$RECALL_TEST_UNLINK"; exit 0; fi\nexec ${process.execPath} "$@"\n`,
       { mode: 0o755 },
     );
 

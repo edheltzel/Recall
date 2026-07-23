@@ -9,7 +9,8 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runExtractCore, type ExtractCoreContext } from '../../hooks/lib/extract-core';
@@ -151,8 +152,9 @@ describe('runExtractCore — dual-write parity', () => {
     expect(result.dualWrite?.failures._db).toBe('not writable or locked');
   });
 
-  test('surfaces a WAL database lock instead of reporting an empty success', async () => {
-    const busyPath = join('/tmp', `recall-busy-${process.pid}.db`);
+  test('surfaces an exclusively locked database instead of reporting an empty success', async () => {
+    const busyDir = mkdtempSync(join(tmpdir(), 'recall-busy-'));
+    const busyPath = join(busyDir, 'busy.db');
     const blocker = new Database(busyPath);
     blocker.exec('PRAGMA journal_mode = DELETE; CREATE TABLE lock_probe (id INTEGER); BEGIN EXCLUSIVE');
     try {
@@ -165,6 +167,7 @@ describe('runExtractCore — dual-write parity', () => {
     } finally {
       blocker.exec('ROLLBACK');
       blocker.close();
+      rmSync(busyDir, { recursive: true, force: true });
     }
   });
 });

@@ -707,6 +707,38 @@ describe('recall_configure_opencode_mcp preserves user customizations', () => {
     expect(after).toContain('"recall-memory"');
     expect(after).toContain('fake-recall.db');
   });
+
+  test('adds a missing "mcp" key without a dangling comma or blank line', () => {
+    const userConfig = [
+      '{',
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  "theme": "dark"',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(opencodeJsonPath, userConfig);
+
+    runConfigure();
+    const after = readFileSync(opencodeJsonPath, 'utf-8');
+
+    expect(after).toContain('"theme": "dark",\n  "mcp": {');
+    expect(after).not.toMatch(/^\s*,\s*$/m);
+    expect(after).not.toMatch(/\n[ \t]*\n/);
+    expect(after).toContain('fake-recall.db');
+  });
+
+  test('adds "mcp" to a config whose last property already has a trailing comma', () => {
+    const userConfig = ['{', '  "theme": "dark",', '}', ''].join('\n');
+    writeFileSync(opencodeJsonPath, userConfig);
+
+    runConfigure();
+    const after = readFileSync(opencodeJsonPath, 'utf-8');
+
+    expect(after).toContain('"theme": "dark",\n  "mcp": {');
+    expect(after).not.toMatch(/,\s*,/);
+    expect(after).not.toMatch(/\n[ \t]*\n/);
+    expect(after).toContain('fake-recall.db');
+  });
 });
 
 // ─── MCP config hardening RED — V-1, V-3, V-4 (recall_configure_opencode_mcp) ───
