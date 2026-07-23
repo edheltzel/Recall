@@ -67,6 +67,12 @@ cd /path/to/Recall
    leave hooks missing.
 8. Verifies via `recall --version` and `recall stats`.
 
+The OpenCode integration now follows the current OpenCode 1.18.x contract:
+restart OpenCode after an update so its plugin reloads, then verify
+`opencode --version` and `opencode export <session-id>`. Recall normalizes the
+JSON export; the retired `opencode session export -f markdown -o ...` form is
+not used.
+
 ### Update flags
 
 | Flag | Purpose |
