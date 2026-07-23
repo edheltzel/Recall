@@ -1,8 +1,8 @@
 # Recall OpenCode Phase 4: Testing + Polish
 
-Status: In Progress
+Status: Complete — implementation branch ready for PR
 
-Authority: `docs/OPENCODE_INTEGRATION.md:412-464`, promoted scout report, and captain ship instructions.
+Authority: `docs/OPENCODE_INTEGRATION.md:354-408`, promoted scout report, and captain ship instructions.
 
 ## Goal
 
@@ -34,10 +34,24 @@ Do not implement semantic #240/#241/#226 work, Codex lifecycle capture, a broad 
 3. Add concurrency and installer rollback coverage, fixing only exposed OpenCode seams.
 4. Update docs/changelog, run all checks, commit focused slices, and open a direct PR to `main`.
 
+## Delivered
+
+- `scripts/e2e-opencode.ts` provisions OpenCode 1.18.4 in disposable HOME/XDG
+  roots and proves event → JSON export → markdown drop → batch extraction →
+  searchable Recall retrieval.
+- The adapter now uses the current `event`/`properties.sessionID` contract,
+  normalizes full export JSON, retries failed exports, and reports tracker/write
+  failures.
+- Batch extraction uses argument-safe child processes and inspects stderr so
+  caught failures cannot masquerade as success.
+- OpenCode install/update/uninstall coverage preserves JSONC and unrelated MCP
+  entries; malformed configs remain byte-identical and fail nonzero.
+- Documentation and `[Unreleased]` changelog entries describe the current
+  runtime contract and operational checks.
+
 ## Dependencies and references
 
 - #243: worktree lifecycle/config failures and failed-write status contract.
 - #165: fresh worktree dependency provisioning.
 - #124: existing atomic config-write overlap; do not duplicate it without a test-proven need.
 - #236, #237, #238, and #174 remain separate follow-ups.
-
