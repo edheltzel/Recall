@@ -18,6 +18,8 @@ The remaining phase work is real disposable runtime validation, failure/retry ob
   disposable runtime e2e, concurrent WAL coverage, and package entry point.
 - `a6e18a4` makes OpenCode uninstall JSONC-safe and adds valid/malformed config
   rollback tests.
+- `a28d544` makes hook SQLite writers wait on short WAL peer transactions and
+  proves concurrent record preservation in the isolated e2e.
 - `b4e3abd` updates OpenCode integration, installation, upgrade, troubleshooting,
   and changelog documentation.
 
