@@ -371,14 +371,11 @@ describe('installer', () => {
     const installPath = join(__dirname, '..', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
-    // Was: hand-rolled comment-stripping regex pair. That approach silently
-    // destroyed user `//` comments and crashed on JSON5 trailing commas
-    // (red team 2026-05-28). Replaced with jsonc-parser's modify() + applyEdits()
-    // which splices only the recall-memory entry and preserves surrounding
-    // bytes byte-for-byte.
-    expect(content).toContain('jsonc-parser');
-    expect(content).toContain('modify');
-    expect(content).toContain('applyEdits');
+    // The dependency-free bundled helper parses comments/trailing commas and
+    // splices only the recall-memory entry. Packaged installs have no repo
+    // node_modules tree, so the shell library must not require jsonc-parser.
+    expect(content).toContain('jsonc-mcp.ts');
+    expect(content).not.toContain('/node_modules/jsonc-parser');
   });
 
   // update.sh's refresh path propagating the OpenCode guide + agent prompt
@@ -596,8 +593,8 @@ describe('Installer: Pi Detection and MCP Config', () => {
 // recall_link's collision-backup rule.
 //
 // Now satisfied by `_recall_jsonc_merge_mcp_entry` (lib/install-lib.sh): reads
-// via jsonc-parser's tokenizer (so `//` inside string values like https:// URLs
-// is safe — A7), writes via modify+applyEdits so the only bytes touched are
+// via the bundled JSONC parser (so `//` inside string values like https:// URLs
+// is safe — A7), writes only the targeted entry so surrounding bytes are kept
 // the recall-memory entry value slot.
 describe('recall_configure_opencode_mcp preserves user customizations', () => {
   let sandboxDir: string;
@@ -655,14 +652,14 @@ describe('recall_configure_opencode_mcp preserves user customizations', () => {
     runConfigure();
     const after = readFileSync(opencodeJsonPath, 'utf-8');
 
-    // 1. Inline // comments must survive (jsonc-parser tokenizer + modify+applyEdits preserve them).
+    // 1. Inline // comments must survive the bundled JSONC edit.
     expect(after).toContain('// User-managed MCP configuration — DO NOT REWRITE');
     expect(after).toContain('// GitHub MCP — critical for repo work, hand-tuned');
 
     // 2. Non-Recall MCP entry must survive byte-for-byte (modify only edits the recall-memory slot).
     expect(after).toMatch(/"github":\s*\{[\s\S]*?"command":\s*\[\s*"gh-mcp"\s*\][\s\S]*?"GITHUB_TOKEN":\s*"ghp_xxx"/);
 
-    // 3. JSON5 trailing comma must survive (allowTrailingCommas on read, modify preserves on write).
+    // 3. JSON5 trailing comma must survive the bundled JSONC edit.
     expect(after).toMatch(/"ghp_xxx"\s*\}\s*,/);
 
     // 4. recall-memory entry must reflect the NEW path (sandbox fake-recall.db),
@@ -676,7 +673,7 @@ describe('recall_configure_opencode_mcp preserves user customizations', () => {
   // regex to strip `//` line comments before JSON.parse; that regex was not
   // string-aware and corrupted https:// URLs, making the helper falsely refuse
   // perfectly valid opencode.json. The merged-tip implementation uses
-  // jsonc-parser's tokenizer (string-aware), and this test locks that in.
+  // The bundled parser is string-aware, and this test locks that in.
   test('A7: preserves https:// URLs and other `//` substrings inside string values', () => {
     const userConfig = [
       '{',
