@@ -183,7 +183,12 @@ export function writeDecisionsBatch(
       }
       return n;
     });
-    return insertMany(items);
+    // IMMEDIATE, not the default DEFERRED: these batches read (the
+    // skipDuplicates probe) before they insert, and SQLite fails a
+    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
+    // busy_timeout. Taking the write lock up front is what makes the peer wait
+    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    return insertMany.immediate(items);
   } finally {
     db.close();
   }
@@ -260,7 +265,12 @@ export function writeLearningsBatch(
       }
       return n;
     });
-    return insertMany(items);
+    // IMMEDIATE, not the default DEFERRED: these batches read (the
+    // skipDuplicates probe) before they insert, and SQLite fails a
+    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
+    // busy_timeout. Taking the write lock up front is what makes the peer wait
+    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    return insertMany.immediate(items);
   } finally {
     db.close();
   }
@@ -312,7 +322,12 @@ export function writeBreadcrumbsBatch(
       }
       return n;
     });
-    return insertMany(items);
+    // IMMEDIATE, not the default DEFERRED: these batches read (the
+    // skipDuplicates probe) before they insert, and SQLite fails a
+    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
+    // busy_timeout. Taking the write lock up front is what makes the peer wait
+    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    return insertMany.immediate(items);
   } finally {
     db.close();
   }
@@ -416,7 +431,12 @@ export function writeExtractionErrors(dbPath: string, items: ExtractionErrorInpu
       }
       return n;
     });
-    return insertMany(items);
+    // IMMEDIATE, not the default DEFERRED: these batches read (the
+    // skipDuplicates probe) before they insert, and SQLite fails a
+    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
+    // busy_timeout. Taking the write lock up front is what makes the peer wait
+    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    return insertMany.immediate(items);
   } finally {
     db.close();
   }
