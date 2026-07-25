@@ -101,8 +101,11 @@ All three acceptance items met:
 - `opencode/RecallPreCompact.ts` compaction injection is unit-tested only; no
   test drives a real OpenCode compaction. Stated in the README row and in
   `docs/OPENCODE_INTEGRATION.md`.
-- One full-suite run failed once and was not reproduced in five subsequent runs;
-  the output was truncated so the test was not identified. Not diagnosed.
+- One full-suite run reported a single failure once. It did not reproduce in
+  five subsequent full-suite runs, and the output had been truncated so the test
+  was never named. It is **not in the files this branch touches**: 15 targeted
+  runs of `sqlite-writers-concurrency`, `restore`, and `opencode-integration`
+  were clean. Pre-existing and undiagnosed; worth a separate issue if it recurs.
 - Out of scope and untouched: installation reconciliation, the semantic
   #240/#241/#226 wave, release/version bump, #236/#237/#238/#174, #165.
 
