@@ -359,17 +359,11 @@ All paths are **resolved to absolute** at install time. No tilde in stored confi
 
 ## Tool Name Mapping
 
-OpenCode prefixes MCP tools with the server name + underscore:
+OpenCode connects to the same MCP server as every other host and prefixes each tool with
+the server name plus an underscore: `memory_search` becomes `recall-memory_memory_search`.
 
-| Claude Code | OpenCode | Same Tool |
-|-------------|----------|-----------|
-| `memory_search` | `recall-memory_memory_search` | Yes — includes `table` hard filters and `bias_type` soft boosts |
-| `memory_hybrid_search` | `recall-memory_memory_hybrid_search` | Yes |
-| `memory_recall` | `recall-memory_memory_recall` | Yes |
-| `memory_add` | `recall-memory_memory_add` | Yes |
-| `context_for_agent` | `recall-memory_context_for_agent` | Yes |
-| `memory_stats` | `recall-memory_memory_stats` | Yes |
-| `loa_show` | `recall-memory_loa_show` | Yes |
+Apply that one rule to any tool in [`mcp-tools.md`](mcp-tools.md), which documents all
+nine with their parameters and return shapes.
 
 ## Implementation Phases
 
