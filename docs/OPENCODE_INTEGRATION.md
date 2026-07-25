@@ -1,8 +1,11 @@
 # Recall + OpenCode Integration Architecture
 
 > Design document for extending Recall to work with OpenCode alongside Claude Code.
-> **v3 — Phase 4 verified against OpenCode 1.18.4.** The current event and
-> export contract is pinned by `scripts/e2e-opencode.ts`.
+> **v4 — Phase 4 verified against a live OpenCode 1.18.5 server.** The event
+> contract, the measured `session.idle` frequency, and plugin discovery are
+> pinned by `scripts/e2e-opencode-runtime.ts`; the extraction pipeline is pinned
+> by `scripts/e2e-opencode.ts`. See [Phase 4 Evidence](#phase-4-evidence) for
+> which script proves what.
 
 ## Executive Summary
 
@@ -23,7 +26,7 @@ The entire integration is **three thin adapter layers**:
 │  ┌─────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
 │  │  recall.db   │  │  MCP Server      │  │  CLI (recall)         │  │
 │  │  (SQLite)    │←─│  (recall-memory)  │  │  search/add/stats  │  │
-│  │  FTS5 + Vec  │  │  7 tools, stdio  │  │  import/export     │  │
+│  │  FTS5 + Vec  │  │  9 tools, stdio  │  │  import/export     │  │
 │  └──────┬───────┘  └────────┬─────────┘  └────────────────────┘  │
 │         │                   │                                     │
 │         │     ┌─────────────┴──────────────┐                     │
@@ -74,13 +77,19 @@ atlas-recall/
 ├── opencode/                     # NEW — OpenCode adapter
 │   ├── RecallExtract.ts         # Plugin: session extraction via CLI export
 │   ├── RecallPreCompact.ts      # Plugin: context injection during compaction
+│   ├── lib/session-export.ts     # Shared helpers — nested so OpenCode does not
+│   │                             #   glob them as plugin factories
 │   └── recall-memory.md          # Agent: memory-aware agent definition
 ├── docs/
 │   ├── FOR_CLAUDE.md             # EXISTING — guide for Claude Code agents
 │   ├── FOR_OPENCODE.md           # NEW — guide for OpenCode agents
 │   └── OPENCODE_INTEGRATION.md   # THIS FILE
+├── scripts/
+│   ├── e2e-opencode.ts           # Pipeline e2e (export → drop → extract → search)
+│   ├── e2e-opencode-runtime.ts   # Live-server e2e (discovery, idle frequency)
+│   └── lib/opencode-runtime.ts   # Shared CLI pin, stub provider, event stream
 ├── install.sh                    # MODIFIED — detect + register for both platforms
-└── package.json                  # MODIFIED — adds isolated OpenCode e2e script
+└── package.json                  # MODIFIED — adds the isolated OpenCode e2e scripts
 ```
 
 ## Component Details
@@ -125,16 +134,45 @@ Implementation details and regression coverage live in
 **Why this approach:**
 - `opencode export` is the **verified current CLI command** — not an assumed API
 - `ctx.$` Bun shell is **confirmed in plugin docs** with examples
-- Persistent dedup via JSON file at `~/.agents/Recall/MEMORY/opencode-sessions/.extracted.json` — survives plugin restarts
+- Persistent dedup via JSON file at `~/.agents/Recall/MEMORY/opencode-sessions/.extracted.json` — survives plugin restarts. It maps session ID to a digest of the markdown last written, so a grown session re-exports and an unchanged one does not
 - The current payload is `event.properties.sessionID`; defensive fallbacks keep older property spellings harmless
 - Drop directory pattern: `RecallBatchExtract.ts` already runs every 30 minutes and can scan this directory
 - No new CLI commands needed — `RecallBatchExtract.ts` reads markdown files the same way it reads JSONL
 
-**Runtime observation:** The isolated Phase 4 e2e invokes the current
-`session.idle` event contract and verifies the full export path. The adapter
-deduplicates by session ID and prevents overlapping exports; add time-based
-debouncing only if future runtime evidence shows repeated idle events for one
-session.
+**Measured runtime contract (OpenCode 1.18.5).** `session.idle` fires **once per
+assistant turn**, not once per session. Measured by
+`scripts/e2e-opencode-runtime.ts` against a live server: three turns of one
+session produced exactly three `session.idle` events (delta 1 per turn), counted
+from OpenCode's own `GET /event` stream inside a single long-lived process so
+the number cannot be an artifact of process teardown.
+
+That number drives the adapter's design, so it is asserted, not just recorded —
+the runtime e2e fails if the frequency ever changes.
+
+Two consequences:
+
+- **Debouncing would be the wrong remedy.** Earlier drafts of this document
+  hedged toward adding it. Because idle marks the end of each turn rather than
+  the end of the session, the adapter must RE-export on later idles; suppressing
+  them freezes the drop on turn 1 and silently discards the rest of the
+  conversation. That was a real defect: a three-turn session left a 154-byte drop
+  holding only the first turn.
+- **The tracker records a content digest**, not "this session is finished". A
+  grown session overwrites its earlier, shorter drop; an unchanged one costs no
+  write. `RecallBatchExtract` already re-extracts a drop that grows, so the
+  fuller transcript reaches memory without new machinery.
+
+**Plugin module contract.** OpenCode calls **every export** of a top-level
+`plugins/*.ts` as a plugin factory. A plugin entry point must therefore export
+nothing but its factory — shared helpers live in `opencode/lib/session-export.ts`,
+which OpenCode does not glob. When the helpers sat beside the factory, OpenCode
+called `exportSession()` with its plugin context and logged
+`failed to load plugin ... "Object is not a function"` on every launch.
+
+**PATH requirement.** The plugin shells out to `opencode export <id>`, so the
+`opencode` CLI must be resolvable by name from the environment OpenCode runs in.
+If it is not, the export fails and the drop is never written; the failure is
+reported on stderr and retried on the next idle.
 
 ### 3. Compaction Context Injection (`opencode/RecallPreCompact.ts`)
 
@@ -339,7 +377,7 @@ OpenCode prefixes MCP tools with the server name + underscore:
 
 ### Phase 2: Extraction Plugin
 - `RecallExtract.ts` plugin using the `opencode export` JSON CLI via `$` shell
-- Persistent dedup tracker (`.extracted.json`)
+- Persistent dedup tracker (`.extracted.json`, session ID → content digest)
 - Defensive `session.idle` event property access
 - Drop directory at `~/.agents/Recall/MEMORY/opencode-sessions/`
 - `RecallBatchExtract.ts` updated to scan drop directory
@@ -351,9 +389,12 @@ OpenCode prefixes MCP tools with the server name + underscore:
 
 ### Phase 4: Testing + Polish — complete
 - Isolated e2e: OpenCode session → JSON export → markdown drop → RecallBatchExtract → search
-- Concurrent Claude/OpenCode-style writers against one disposable WAL database
-- Installer/update idempotence plus JSONC-preserving OpenCode uninstall rollback
-- Runtime verification of the current `session.idle` payload, JSON export, and Bun availability
+- Concurrent Claude and OpenCode writers against one disposable WAL database
+- Installer/update idempotence, JSONC-preserving OpenCode uninstall, and the
+  documented `install.sh restore` rollback plus collision-backup preservation
+- Live-server verification: plugin discovery from the installed path, zero
+  plugin load errors, the `session.idle` payload, and the measured one-idle-per
+  -turn frequency
 
 ## Red Team Findings (v1 → v2 Changes)
 
@@ -370,15 +411,46 @@ OpenCode prefixes MCP tools with the server name + underscore:
 
 ## Phase 4 Evidence
 
-1. OpenCode 1.18.4 emits `session.idle` through the `event` hook with
-   `properties.sessionID`; the e2e verifies the plugin factory exposes the real
-   `event` boundary, rejects the obsolete `session.idle` key, invokes that exact
-   payload, and verifies the resulting markdown drop.
-2. `opencode export <session-id>` is the supported JSON export command. Recall
-   owns JSON-to-markdown normalization because the CLI does not expose the old
-   `-f markdown -o` session-export interface.
-3. The e2e provisions Bun/OpenCode in disposable HOME and XDG config/data/state/
-   cache roots, and fails if production DB metadata changes.
+Two scripts cover this, and they prove different things. Read the distinction
+before citing either as evidence.
+
+`scripts/e2e-opencode.ts` — **pipeline.** Imports the adapter directly and
+supplies its own `$` and event payload. It proves Recall's handler ACCEPTS
+`{type:'session.idle', properties:{sessionID}}` and that export -> drop ->
+`RecallBatchExtract` -> search works, plus export-failure retry, concurrent WAL
+writers, and installer/uninstall JSONC rollback. It does NOT prove OpenCode
+emits that payload, and it cannot detect a plugin OpenCode never loads.
+
+`scripts/e2e-opencode-runtime.ts` — **runtime.** Drives a live `opencode serve`
+and closes exactly those gaps:
+
+1. **Discovery.** Installs via the real `recall_install_opencode_platform`, then
+   observes OpenCode load the plugin from that path (the factory's drop
+   directory appears under a `RECALL_HOME` only this server knows) and asserts
+   zero `failed to load plugin` errors.
+2. **Emission and frequency.** Counts `session.idle` from OpenCode's own
+   `GET /event` stream across three turns of one session in one long-lived
+   process: 3 events, 1.00 per assistant turn, payload `properties.sessionID`.
+3. **Completeness.** Asserts the drop carries every turn, and that
+   `opencode export <session-id>` returns the whole conversation.
+
+`opencode export <session-id>` is the supported JSON export command; Recall owns
+JSON-to-markdown normalization because the CLI does not expose the old
+`-f markdown -o` session-export interface.
+
+Both scripts run in disposable HOME / XDG config, data, state, cache /
+`RECALL_HOME` / database roots and fail if production DB metadata changes. The
+runtime script serves the model from a local OpenAI-compatible stub: the subject
+under test is OpenCode's session lifecycle, so a hosted model would only add
+flakiness. The pinned version lives once, in
+`scripts/lib/opencode-runtime.ts`.
+
+### Not yet verified at runtime
+
+`opencode/RecallPreCompact.ts` (compaction context injection) is covered only by
+unit tests of its `(input, output)` contract. No test drives a real OpenCode
+compaction, so its runtime behaviour is unproven — the README roadmap says so
+rather than implying otherwise.
 
 ## Non-Goals
 

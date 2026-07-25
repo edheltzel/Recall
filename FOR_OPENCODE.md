@@ -145,6 +145,11 @@ A Recall plugin (`RecallExtract.ts`) runs inside OpenCode:
 3. Drops the file into `$RECALL_HOME/MEMORY/opencode-sessions/`
 4. A batch extraction job quality-gates these files into the shared SQLite database
 
+`session.idle` fires once per assistant turn (measured against OpenCode 1.18.5),
+so the drop is rewritten as the conversation grows and always reflects the whole
+session rather than only its first turn. An unchanged session costs no write —
+the plugin compares a digest of what it last wrote.
+
 The plugin records a session only after the export and drop write succeed, so
 failed exports remain retryable. OpenCode must be available on `PATH`, and the
 plugin runtime requires Bun. Verify both with `opencode --version` and `bun --version`.

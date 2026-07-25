@@ -321,7 +321,7 @@ Recall is built around two integration surfaces: **MCP** (memory search and add,
 | ------------------------------------------------------------- | :-: | :--------------------------------------------------------: | ------------------------------------- |
 | [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation; native plugin ships skills + MCP |
 | [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — native package with memory-injection + shutdown-capture extensions | Package + separate MCP adapter/config |
-| [**OpenCode**](https://opencode.ai/)                          | ✅  |             ⚠ Alpha — `recall-extract` plugin              | In progress                           |
+| [**OpenCode**](https://opencode.ai/)                          | ✅  | ⚠ Beta — `recall-extract` plugin; `session.idle` capture verified against a live OpenCode 1.18.5 server | Capture runtime-verified; compaction injection not yet |
 | [**Codex CLI**](https://github.com/openai/codex)              | ✅  |               — native plugin, explicit dump only          | MCP + skills available                |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                             —                              | Coming soon                           |
 
