@@ -24,6 +24,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { Database } from 'bun:sqlite';
 import { assertMetadataUnchanged, assertSafeTestDb, metadata, stringEnv } from './lib/e2e-isolation';
+import { OPENCODE_PINNED_VERSION, openCodeCommand } from './lib/opencode-runtime';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
@@ -62,13 +63,8 @@ function run(command: string, args: string[], env: Record<string, string>, timeo
   return output;
 }
 
-function openCodeArgs(args: string[]): { command: string; args: string[] } {
-  if (process.env.OPENCODE_BIN) return { command: process.env.OPENCODE_BIN, args };
-  return { command: 'bunx', args: ['--yes', '--package', 'opencode-ai@1.18.4', 'opencode', ...args] };
-}
-
 function runOpenCode(args: string[], env: Record<string, string>): string {
-  const command = openCodeArgs(args);
+  const command = openCodeCommand(args);
   const result = spawnSync(command.command, command.args, {
     cwd: repoRoot,
     env,
@@ -83,7 +79,7 @@ function runOpenCode(args: string[], env: Record<string, string>): string {
 }
 
 function runOpenCodeCombined(args: string[], env: Record<string, string>): string {
-  const command = openCodeArgs(args);
+  const command = openCodeCommand(args);
   return run(command.command, command.args, env, 180_000);
 }
 
@@ -146,7 +142,7 @@ function writeOpenCodeImportFixture(id: string, uniqueMarker: string): void {
       projectID: 'proj_recall_phase4',
       directory: repoRoot,
       title: `Recall Phase 4 ${id}`,
-      version: '1.18.4',
+      version: OPENCODE_PINNED_VERSION,
       time: { created: now, updated: now },
     },
     messages: [baseMessage(id, longText, now)],
@@ -226,7 +222,7 @@ async function main(): Promise<void> {
   console.log('isolation.production_db_opened=false');
 
   const version = runOpenCode(['--version'], env).trim();
-  assert(version === '1.18.4', `unexpected OpenCode version: ${version}`);
+  assert(version === OPENCODE_PINNED_VERSION, `unexpected OpenCode version: ${version} (pinned ${OPENCODE_PINNED_VERSION})`);
   const paths = runOpenCodeCombined(['debug', 'paths'], env);
   for (const expected of [xdgConfig, xdgData, xdgState, xdgCache]) {
     assert(paths.includes(expected), `OpenCode path was not isolated under ${expected}\n${paths}`);
