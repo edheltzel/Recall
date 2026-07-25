@@ -24,6 +24,7 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 - `scripts/e2e-codex-plugin.ts` owns the isolated current-CLI verification for the native Codex marketplace, plugin install, and all nine MCP tools.
 - `scripts/e2e-claude-plugin.ts` does the same for Claude, and additionally seeds a legacy lifecycle install to prove the migration removes the duplicate skill symlinks and MCP registration idempotently. It must isolate the Claude home too (`HOME` + `CLAUDE_DIR`), not just the database, and assert both were left unchanged.
 - `scripts/e2e-pi-integration.ts` owns the isolated current-CLI verification for Pi's separate package, MCP adapter/config, lifecycle capture, and all nine skills/tools.
+- OpenCode is split across two scripts on purpose. `scripts/e2e-opencode.ts` owns the pipeline (export → drop → `RecallBatchExtract` → search, plus retry, concurrent writers, installer/uninstall JSONC); it imports the adapter and supplies its own `$` and event payload, so it can never prove what the host actually does. `scripts/e2e-opencode-runtime.ts` owns the live-server contract — plugin discovery from the installed path, zero plugin load errors, OpenCode's own `session.idle` emission and frequency, and multi-turn drop completeness. Put host-behaviour claims in the runtime script; a claim the pipeline script cannot support does not belong in it.
 
 ## Verification
 
