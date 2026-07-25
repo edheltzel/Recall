@@ -9,9 +9,36 @@ import { CREATE_TABLES } from '../src/db/schema';
 // v2→v3 migration SQL (inlined — formerly exported from schema.ts, now in migrations.ts)
 const MIGRATE_V2_TO_V3 = "ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code'";
 import { linearizeSession } from '../pi/RecallExtract';
-import { exportSession, renderSessionExport, sessionIdFromEvent } from '../opencode/RecallExtract';
+// Helpers live in opencode/lib/ because OpenCode calls every export of a
+// top-level plugin module as a plugin factory — see that file's header.
+import { exportSession, renderSessionExport, sessionIdFromEvent } from '../opencode/lib/session-export';
 
 // ─── OpenCode Runtime Contract Tests ───
+
+describe('OpenCode plugin module contract', () => {
+  // OpenCode globs plugins/*.ts and invokes EVERY export of each match as a
+  // plugin factory. A stray helper export made OpenCode log
+  // `failed to load plugin ... "Object is not a function"` on every launch,
+  // because exportSession() was called with the plugin context as its shell.
+  // Keep plugin entry points to exactly one exported factory.
+  const pluginEntries = ['RecallExtract', 'RecallPreCompact'];
+
+  for (const entry of pluginEntries) {
+    test(`${entry}.ts exports only its plugin factory`, async () => {
+      const mod = await import(`../opencode/${entry}.ts`);
+      const exported = Object.keys(mod).filter(key => key !== 'default');
+
+      expect(exported).toHaveLength(1);
+      expect(typeof mod[exported[0]]).toBe('function');
+    });
+  }
+
+  test('shared helpers are nested under opencode/lib so OpenCode does not glob them', () => {
+    expect(existsSync(join(import.meta.dir, '..', 'opencode', 'lib', 'session-export.ts'))).toBe(true);
+    expect(readdirSync(join(import.meta.dir, '..', 'opencode')).filter(f => f.endsWith('.ts')).sort())
+      .toEqual(['RecallExtract.ts', 'RecallPreCompact.ts']);
+  });
+});
 
 describe('OpenCode runtime contract', () => {
   test('reads the current event hook sessionID and ignores other events', () => {

@@ -2294,6 +2294,20 @@ recall_install_opencode_plugins() {
       log_success "Installed $plugin plugin"
     fi
   done
+
+  # Shared helpers the plugins import at runtime. They MUST land in a
+  # subdirectory: OpenCode globs plugins/*.ts and calls every export of each
+  # match as a plugin factory, so a helper module sitting beside the plugins
+  # would make OpenCode log a plugin-load error on every launch.
+  mkdir -p "$plugin_dir/lib"
+  local helper
+  for helper in session-export.ts; do
+    if [[ -f "$src_dir/lib/$helper" ]]; then
+      recall_copy_canonical "$src_dir/lib/$helper" "$RECALL_OPENCODE_PLUGINS_DIR/lib/$helper"
+      recall_link "$plugin_dir/lib/$helper" "$RECALL_OPENCODE_PLUGINS_DIR/lib/$helper"
+      log_success "Installed OpenCode plugin helper: $helper"
+    fi
+  done
 }
 
 recall_install_opencode_agent() {
