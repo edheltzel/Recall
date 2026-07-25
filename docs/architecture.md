@@ -23,6 +23,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   └── Recall_GUIDE.md                 # Guide for Claude Code
 ├── opencode/
 │   ├── plugins/                        # OpenCode plugin canonicals
+│   │   └── lib/                        # Plugin helpers (.ts)
 │   └── Recall_GUIDE.md                 # Guide for OpenCode
 ├── pi/
 │   └── Recall_GUIDE.md                 # Canonical guide linked into Pi home
