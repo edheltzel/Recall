@@ -101,16 +101,33 @@ All three acceptance items met:
 - `opencode/RecallPreCompact.ts` compaction injection is unit-tested only; no
   test drives a real OpenCode compaction. Stated in the README row and in
   `docs/OPENCODE_INTEGRATION.md`.
-- One full-suite run reported a single failure once. It did not reproduce in
-  five subsequent full-suite runs, and the output had been truncated so the test
-  was never named. Targeted reruns of `sqlite-writers-concurrency`, `restore`,
-  and `opencode-integration` were clean, but targeted runs cannot clear a
-  timing-sensitive failure on a loaded runner, so they are **not** evidence that
-  the flake lives outside this branch — the branch's own files remain suspects.
-  What was removed instead is the one assertion that could have produced it: the
-  concurrency test no longer asserts a wall-clock floor, only a happens-before
-  against a stamp the peer prints while it still holds the lock. Undiagnosed;
-  worth a separate issue if it recurs.
+- The full-suite failure that went unidentified is diagnosed. It was never one
+  flake but two, both of them tests inheriting host state rather than anything
+  hanging: `bun test --timeout 30000` is 1298 pass / 0 fail, and every affected
+  test passes in isolation.
+  - **Fixed here.** The three Pi-path tests in `tests/install/uninstall.test.ts`
+    let `remove_pi` reach the host's real `pi`, and `pi remove` costs ~10s on a
+    machine that actually has Pi installed - while on CI, where `pi` is absent,
+    it never runs at all. That is the entire 1s -> 12s spread, and the exact
+    three tests that failed the last pre-fix run. They now shadow `pi` with a
+    no-op stub on `PATH`, the way the file already stubs `bun unlink`; nothing
+    asserted on that call, so no coverage is lost. Now a stable 0.7-1.0s each.
+  - **Left to [#251](https://github.com/edheltzel/Recall/issues/251).** Both of
+    its named files still trip the 5s **default** on a cold network, and they
+    need different fixes: the `packFileList()` `beforeAll` in
+    `tests/install/npm-pack.test.ts` runs `npm pack --dry-run` with no timeout
+    argument, while the sibling `beforeAll` 18 lines above already carries an
+    explicit `180_000` for exactly this reason; `update.sh > --check prints
+    current + latest` in `tests/install/update.test.ts` is a plain `test` that
+    reaches the GitHub release API. Deliberately not taken here. A full suite is
+    1298 pass / 0 fail whenever these two happen not to trip, so a single green
+    run is not evidence #251 is closed.
+  Neither is this branch. An interleaved A/B of `uninstall.test.ts` against the
+  base commit's `uninstall.sh` + `lib/install-lib.sh` reproduced the outlier on
+  base, and 15 targeted runs of `sqlite-writers-concurrency`, `restore`, and
+  `opencode-integration` were clean. The concurrency test was hardened anyway -
+  it no longer asserts a wall-clock floor, only a happens-before against a stamp
+  the peer prints while it still holds the lock.
 - Out of scope and untouched: installation reconciliation, the semantic
   #240/#241/#226 wave, release/version bump, #236/#237/#238/#174, #165.
 

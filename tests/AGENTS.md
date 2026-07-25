@@ -19,6 +19,7 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 - Any end-to-end test that can open SQLite must set its own disposable `RECALL_DB_PATH` and `RECALL_HOME`, state those paths before writes, and prove the production database was not changed.
 - **A test that claims to exercise concurrency must contend across PROCESSES.** The SQLite writers are synchronous, so `Promise.all` over two of them just runs them back to back and passes on code that loses records. Model contention on `peerHoldingWriteLock` in `hooks/sqlite-writers-concurrency.test.ts`, and prove the new test fails against the unfixed code before trusting it.
 - Assert ordering, not elapsed wall-clock. A `toBeGreaterThan(<ms>)` floor is a flake on a loaded runner; have the peer stamp a timestamp while it still holds the resource and assert a happens-before against that.
+- A test that shells out to a lifecycle script must shadow every host CLI that script may invoke (`pi`, `bun unlink`, `npm`) with a stub on `PATH`. Otherwise the test inherits whatever the developer has installed — `pi remove` costs ~10s on a machine with Pi, and nothing at all on CI, so the same test is fast, slow, or over bun's 5s default depending on the host. See `stubPiOnPath` in `install/uninstall.test.ts`. Give any hook that must run a genuinely slow command (`bun run build`, `npm pack`) an explicit timeout argument instead of the 5s default.
 
 ## Work Guidance
 
