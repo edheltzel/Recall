@@ -43,6 +43,36 @@ jobs:
       - name: OpenCode integration e2e
         run: bun run test:e2e:opencode
 
+  worktree:
+    name: Worktree baseline
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # AGENTS.md mandates that workers run in an isolated git worktree, so a
+      # worktree is the DEFAULT environment for automated work — not an edge
+      # case. Ten lifecycle/config tests once failed there while passing in a
+      # normal checkout (#243), which trains agents to read a red suite as
+      # normal. This leg makes worktree-hostility fail loudly instead.
+      #
+      # A fresh worktree has no node_modules (#165), so dependencies are
+      # installed inside it rather than inherited from the primary checkout.
+      - name: Run the suite inside a git worktree
+        run: |
+          set -euo pipefail
+          git worktree add ../recall-worktree HEAD
+          cd ../recall-worktree
+          test ! -d node_modules
+          bun install --frozen-lockfile
+          bun run lint
+          bun test
+
   ubuntu-smoke:
     name: Ubuntu compatibility smoke
     runs-on: ubuntu-latest
