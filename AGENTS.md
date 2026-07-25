@@ -176,8 +176,9 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`docs/AGENTS.md`](docs/AGENTS.md) — user-facing published docs, ADRs, agent skill docs (never plans/specs)
 - [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
 - [`plugins/AGENTS.md`](plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
+- [`opencode/AGENTS.md`](opencode/AGENTS.md) — OpenCode adapter plugins, their shared helpers, and the runtime contract they must satisfy
 
-Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh` and `lib/jsonc-mcp.ts`; platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
+Owned at root (no child doc): lifecycle scripts (`install.sh`, `update.sh`, `uninstall.sh`) + their shared `lib/install-lib.sh` and `lib/jsonc-mcp.ts`; `scripts/` (dev/CI helpers + the per-host isolated e2e harnesses); platform guides (`FOR_CLAUDE.md`, `FOR_OPENCODE.md`, `FOR_PI.md`); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
 
 ## Maintaining this file
 

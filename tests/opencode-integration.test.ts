@@ -9,9 +9,36 @@ import { CREATE_TABLES } from '../src/db/schema';
 // v2→v3 migration SQL (inlined — formerly exported from schema.ts, now in migrations.ts)
 const MIGRATE_V2_TO_V3 = "ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code'";
 import { linearizeSession } from '../pi/RecallExtract';
-import { exportSession, renderSessionExport, sessionIdFromEvent } from '../opencode/RecallExtract';
+// Helpers live in opencode/lib/ because OpenCode calls every export of a
+// top-level plugin module as a plugin factory — see that file's header.
+import { exportSession, renderSessionExport, sessionIdFromEvent } from '../opencode/lib/session-export';
 
 // ─── OpenCode Runtime Contract Tests ───
+
+describe('OpenCode plugin module contract', () => {
+  // OpenCode globs plugins/*.ts and invokes EVERY export of each match as a
+  // plugin factory. A stray helper export made OpenCode log
+  // `failed to load plugin ... "Object is not a function"` on every launch,
+  // because exportSession() was called with the plugin context as its shell.
+  // Keep plugin entry points to exactly one exported factory.
+  const pluginEntries = ['RecallExtract', 'RecallPreCompact'];
+
+  for (const entry of pluginEntries) {
+    test(`${entry}.ts exports only its plugin factory`, async () => {
+      const mod = await import(`../opencode/${entry}.ts`);
+      const exported = Object.keys(mod).filter(key => key !== 'default');
+
+      expect(exported).toHaveLength(1);
+      expect(typeof mod[exported[0]]).toBe('function');
+    });
+  }
+
+  test('shared helpers are nested under opencode/lib so OpenCode does not glob them', () => {
+    expect(existsSync(join(import.meta.dir, '..', 'opencode', 'lib', 'session-export.ts'))).toBe(true);
+    expect(readdirSync(join(import.meta.dir, '..', 'opencode')).filter(f => f.endsWith('.ts')).sort())
+      .toEqual(['RecallExtract.ts', 'RecallPreCompact.ts']);
+  });
+});
 
 describe('OpenCode runtime contract', () => {
   test('reads the current event hook sessionID and ignores other events', () => {
@@ -272,46 +299,127 @@ Here's a basic example with multiple routes and a shared layout component that p
 
 describe('extraction tracker (dedup)', () => {
   let tempDir: string;
+  let dropDir: string;
+  let trackerPath: string;
+  let cacheBuster = 0;
+
+  // `session.idle` fires once per assistant turn (measured against OpenCode
+  // 1.18.5), so these tests drive the real plugin factory rather than
+  // re-implementing tracker logic inline: a suppressed second idle is exactly
+  // the data-loss bug this suite has to catch.
+  async function loadPlugin(exports: Record<string, string>, onExport?: (id: string) => void) {
+    process.env.RECALL_HOME = tempDir;
+    const mod = await import(`../opencode/RecallExtract.ts?tracker=${++cacheBuster}`);
+    return mod.RecallExtract({
+      $: async (_s: TemplateStringsArray, ...values: unknown[]) => {
+        const id = String(values[0]);
+        onExport?.(id);
+        const body = exports[id];
+        if (body === undefined) throw new Error(`no export configured for ${id}`);
+        return body;
+      },
+    });
+  }
+
+  function exportJson(id: string, turns: string[]): string {
+    return JSON.stringify({
+      info: { id, title: `Session ${id}` },
+      messages: turns.map(text => ({ info: { role: 'user' }, parts: [{ type: 'text', text }] })),
+    });
+  }
+
+  const idle = (sessionID: string) => ({ event: { type: 'session.idle', properties: { sessionID } } });
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'recall-tracker-'));
+    dropDir = join(tempDir, 'MEMORY', 'opencode-sessions');
+    trackerPath = join(dropDir, '.extracted.json');
   });
 
   afterEach(() => {
+    delete process.env.RECALL_HOME;
     if (tempDir && existsSync(tempDir)) {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
-  test('tracker persists to JSON file', () => {
-    const trackerPath = join(tempDir, '.extracted.json');
-    const tracker = new Set(['session-1', 'session-2']);
+  test('a later idle event re-exports a grown session instead of freezing turn 1', async () => {
+    const exports = { 'ses-grow': exportJson('ses-grow', ['TURN_ONE_MARKER']) };
+    const plugin = await loadPlugin(exports);
 
-    // Save
-    writeFileSync(trackerPath, JSON.stringify([...tracker]));
+    await plugin.event(idle('ses-grow'));
+    const afterFirst = readFileSync(join(dropDir, 'ses-grow.md'), 'utf-8');
+    expect(afterFirst).toContain('TURN_ONE_MARKER');
+    expect(afterFirst).not.toContain('TURN_TWO_MARKER');
 
-    // Load
-    const loaded = JSON.parse(readFileSync(trackerPath, 'utf-8'));
-    const restoredSet = new Set(Array.isArray(loaded) ? loaded : []);
+    // second assistant turn — the session now exports two messages
+    exports['ses-grow'] = exportJson('ses-grow', ['TURN_ONE_MARKER', 'TURN_TWO_MARKER']);
+    await plugin.event(idle('ses-grow'));
 
-    expect(restoredSet.has('session-1')).toBe(true);
-    expect(restoredSet.has('session-2')).toBe(true);
-    expect(restoredSet.has('session-3')).toBe(false);
+    const afterSecond = readFileSync(join(dropDir, 'ses-grow.md'), 'utf-8');
+    expect(afterSecond).toContain('TURN_ONE_MARKER');
+    expect(afterSecond).toContain('TURN_TWO_MARKER');
   });
 
-  test('corrupt tracker file falls back to empty set', () => {
-    const trackerPath = join(tempDir, '.extracted.json');
+  test('an unchanged session is not rewritten on a repeat idle event', async () => {
+    const exports = { 'ses-same': exportJson('ses-same', ['ONLY_MARKER']) };
+    let exportCount = 0;
+    const plugin = await loadPlugin(exports, () => { exportCount++; });
+
+    await plugin.event(idle('ses-same'));
+    const firstWrite = readFileSync(join(dropDir, 'ses-same.md'), 'utf-8');
+    const firstTracker = readFileSync(trackerPath, 'utf-8');
+
+    await plugin.event(idle('ses-same'));
+
+    expect(exportCount).toBe(2); // still asks OpenCode — that is how it learns nothing changed
+    expect(readFileSync(join(dropDir, 'ses-same.md'), 'utf-8')).toBe(firstWrite);
+    expect(readFileSync(trackerPath, 'utf-8')).toBe(firstTracker);
+  });
+
+  test('tracker persists a content digest per session, not a bare id list', async () => {
+    const plugin = await loadPlugin({ 'ses-shape': exportJson('ses-shape', ['SHAPE_MARKER']) });
+    await plugin.event(idle('ses-shape'));
+
+    const saved = JSON.parse(readFileSync(trackerPath, 'utf-8'));
+    expect(Array.isArray(saved)).toBe(false);
+    expect(typeof saved['ses-shape']).toBe('string');
+    expect(saved['ses-shape'].length).toBeGreaterThan(0);
+  });
+
+  test('a legacy array tracker still re-exports the session once and migrates', async () => {
+    mkdirSync(dropDir, { recursive: true });
+    writeFileSync(trackerPath, JSON.stringify(['ses-legacy']));
+
+    const plugin = await loadPlugin({ 'ses-legacy': exportJson('ses-legacy', ['LEGACY_MARKER']) });
+    await plugin.event(idle('ses-legacy'));
+
+    expect(readFileSync(join(dropDir, 'ses-legacy.md'), 'utf-8')).toContain('LEGACY_MARKER');
+    const saved = JSON.parse(readFileSync(trackerPath, 'utf-8'));
+    expect(Array.isArray(saved)).toBe(false);
+    expect(typeof saved['ses-legacy']).toBe('string');
+  });
+
+  test('corrupt tracker file falls back to empty state and still exports', async () => {
+    mkdirSync(dropDir, { recursive: true });
     writeFileSync(trackerPath, 'not valid json!!!');
 
-    let tracker: Set<string>;
-    try {
-      const data = JSON.parse(readFileSync(trackerPath, 'utf-8'));
-      tracker = new Set(Array.isArray(data) ? data : []);
-    } catch {
-      tracker = new Set();
-    }
+    const plugin = await loadPlugin({ 'ses-corrupt': exportJson('ses-corrupt', ['CORRUPT_MARKER']) });
+    await plugin.event(idle('ses-corrupt'));
 
-    expect(tracker.size).toBe(0);
+    expect(readFileSync(join(dropDir, 'ses-corrupt.md'), 'utf-8')).toContain('CORRUPT_MARKER');
+  });
+
+  test('a failed export writes no drop and stays retryable on the next idle', async () => {
+    const exports: Record<string, string> = {};
+    const plugin = await loadPlugin(exports);
+
+    await plugin.event(idle('ses-retry')); // no export configured -> throws
+    expect(existsSync(join(dropDir, 'ses-retry.md'))).toBe(false);
+
+    exports['ses-retry'] = exportJson('ses-retry', ['RETRY_MARKER']);
+    await plugin.event(idle('ses-retry'));
+    expect(readFileSync(join(dropDir, 'ses-retry.md'), 'utf-8')).toContain('RETRY_MARKER');
   });
 });
 

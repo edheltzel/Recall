@@ -15,9 +15,46 @@ note in the 0.9.0 entry.
 ### Added
 
 - **OpenCode Phase 4 validation** — an isolated end-to-end harness provisions
-  OpenCode 1.18.4, verifies the current `session.idle` event and JSON export
+  OpenCode 1.18.5, verifies the current `session.idle` event and JSON export
   contract, exercises export retry, concurrent WAL writers, installer/update
   idempotence, JSONC-preserving uninstall, and searchable Recall retrieval.
+- **OpenCode live-server verification** (`bun run test:e2e:opencode:runtime`) —
+  drives a real `opencode serve`, proving what the pipeline e2e structurally
+  cannot: that OpenCode loads Recall's plugin from the path the installer writes,
+  that it loads with zero plugin errors, and that OpenCode itself emits
+  `session.idle`. **Measured: `session.idle` fires once per assistant turn**
+  (three turns produced three events, OpenCode 1.18.5), counted from OpenCode's
+  own event stream in one long-lived process. The frequency is asserted, so a
+  runtime change fails the suite instead of silently invalidating the design.
+- **Installer rollback coverage** — the documented `./install.sh restore` path
+  had no tests. Restoring the latest snapshot, restoring a specific timestamp,
+  the pre-restore snapshot, and non-zero exits for unknown/absent backups are now
+  covered, along with the collision backup that preserves a user's hand-edited
+  file before Recall symlinks over it. Restore's default-No confirm means it is a
+  deliberate no-op in non-interactive contexts; that is now asserted rather than
+  surprising.
+- **CI runs the suite inside a git worktree** — the environment `AGENTS.md`
+  mandates for workers, so worktree-hostility fails loudly instead of training
+  agents to accept a red baseline (#243).
+
+### Fixed
+
+- **OpenCode multi-turn sessions no longer lose every turn after the first.**
+  Because `session.idle` fires per turn, the adapter's permanent dedup tracker
+  let the first idle win and discarded the rest: a real three-turn session left a
+  154-byte drop holding only turn 1. The tracker now records a content digest per
+  session, so a grown session overwrites its earlier, shorter drop.
+- **OpenCode no longer logs a plugin load error on every launch.** OpenCode calls
+  every export of a top-level `plugins/*.ts` as a plugin factory, so the
+  extraction plugin's exported test helpers were invoked with the plugin context
+  and failed with `Object is not a function`. Helpers moved to
+  `opencode/lib/session-export.ts`, which OpenCode does not glob.
+- **Concurrent Claude and OpenCode extraction no longer loses records.** The batch
+  writers probe for duplicates before inserting, and SQLite fails that
+  read-to-write upgrade inside a DEFERRED transaction with `SQLITE_BUSY`
+  immediately — never consulting the `busy_timeout` the code relied on. Measured
+  1ms hard failure versus the full timeout honoured once the write lock is taken
+  up front; the transactions are now `IMMEDIATE`.
 
 ### Changed
 

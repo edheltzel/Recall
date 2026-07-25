@@ -18,7 +18,7 @@ All coding agents forget when a session ends. Recall doesn't — it extracts, in
 
 Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. No phone-home. No vendor lock-in.
 
-> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and Alpha for [OpenCode](https://opencode.ai/) (MCP works; lifecycle extensions are early). [Codex CLI](https://github.com/openai/codex) uses a native plugin for MCP and skills; lifecycle auto-capture is not yet supported. [Gemini CLI](https://github.com/google-gemini/gemini-cli) remains on the roadmap. See [Roadmap](#roadmap).
+> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and Beta for [OpenCode](https://opencode.ai/) (capture is verified against a live server; compaction injection is not). [Codex CLI](https://github.com/openai/codex) uses a native plugin for MCP and skills; lifecycle auto-capture is not yet supported. [Gemini CLI](https://github.com/google-gemini/gemini-cli) remains on the roadmap. See [Roadmap](#roadmap).
 
 ---
 
@@ -321,7 +321,7 @@ Recall is built around two integration surfaces: **MCP** (memory search and add,
 | ------------------------------------------------------------- | :-: | :--------------------------------------------------------: | ------------------------------------- |
 | [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation; native plugin ships skills + MCP |
 | [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — native package with memory-injection + shutdown-capture extensions | Package + separate MCP adapter/config |
-| [**OpenCode**](https://opencode.ai/)                          | ✅  |             ⚠ Alpha — `recall-extract` plugin              | In progress                           |
+| [**OpenCode**](https://opencode.ai/)                          | ✅  | ⚠ Beta — `recall-extract` plugin; `session.idle` capture verified against a live OpenCode 1.18.5 server | Capture runtime-verified; compaction injection not yet |
 | [**Codex CLI**](https://github.com/openai/codex)              | ✅  |               — native plugin, explicit dump only          | MCP + skills available                |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                             —                              | Coming soon                           |
 
