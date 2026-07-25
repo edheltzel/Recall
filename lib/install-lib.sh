@@ -46,6 +46,11 @@ fi
 : "${RECALL_CLAUDE_COMMANDS_DIR:=$RECALL_CLAUDE_ROOT/commands/Recall}"
 : "${RECALL_OPENCODE_ROOT:=$RECALL_DIR/opencode}"
 : "${RECALL_OPENCODE_PLUGINS_DIR:=$RECALL_OPENCODE_ROOT/plugins}"
+# Single source of truth for what Recall owns under $OPENCODE_CONFIG_DIR/plugins.
+# uninstall.sh sources this file, so both the install and the uninstall loops
+# read the same names — adding a plugin or helper here is the only edit needed.
+RECALL_OPENCODE_PLUGINS=(RecallExtract.ts RecallPreCompact.ts)
+RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${RECALL_PI_ROOT:=$RECALL_DIR/pi}"
 : "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
 
@@ -2287,7 +2292,7 @@ recall_install_opencode_plugins() {
   mkdir -p "$plugin_dir"
 
   local plugin
-  for plugin in RecallExtract.ts RecallPreCompact.ts; do
+  for plugin in "${RECALL_OPENCODE_PLUGINS[@]}"; do
     if [[ -f "$src_dir/$plugin" ]]; then
       recall_copy_canonical "$src_dir/$plugin" "$RECALL_OPENCODE_PLUGINS_DIR/$plugin"
       recall_link "$plugin_dir/$plugin" "$RECALL_OPENCODE_PLUGINS_DIR/$plugin"
@@ -2301,7 +2306,7 @@ recall_install_opencode_plugins() {
   # would make OpenCode log a plugin-load error on every launch.
   mkdir -p "$plugin_dir/lib"
   local helper
-  for helper in session-export.ts; do
+  for helper in "${RECALL_OPENCODE_PLUGIN_HELPERS[@]}"; do
     if [[ -f "$src_dir/lib/$helper" ]]; then
       recall_copy_canonical "$src_dir/lib/$helper" "$RECALL_OPENCODE_PLUGINS_DIR/lib/$helper"
       recall_link "$plugin_dir/lib/$helper" "$RECALL_OPENCODE_PLUGINS_DIR/lib/$helper"

@@ -103,9 +103,14 @@ All three acceptance items met:
   `docs/OPENCODE_INTEGRATION.md`.
 - One full-suite run reported a single failure once. It did not reproduce in
   five subsequent full-suite runs, and the output had been truncated so the test
-  was never named. It is **not in the files this branch touches**: 15 targeted
-  runs of `sqlite-writers-concurrency`, `restore`, and `opencode-integration`
-  were clean. Pre-existing and undiagnosed; worth a separate issue if it recurs.
+  was never named. Targeted reruns of `sqlite-writers-concurrency`, `restore`,
+  and `opencode-integration` were clean, but targeted runs cannot clear a
+  timing-sensitive failure on a loaded runner, so they are **not** evidence that
+  the flake lives outside this branch — the branch's own files remain suspects.
+  What was removed instead is the one assertion that could have produced it: the
+  concurrency test no longer asserts a wall-clock floor, only a happens-before
+  against a stamp the peer prints while it still holds the lock. Undiagnosed;
+  worth a separate issue if it recurs.
 - Out of scope and untouched: installation reconciliation, the semantic
   #240/#241/#226 wave, release/version bump, #236/#237/#238/#174, #165.
 

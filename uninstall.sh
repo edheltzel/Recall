@@ -450,7 +450,7 @@ remove_opencode() {
   local guide="$OPENCODE_CONFIG_DIR/Recall_GUIDE.md"
 
   local p
-  for p in RecallExtract.ts RecallPreCompact.ts; do
+  for p in "${RECALL_OPENCODE_PLUGINS[@]}"; do
     local pf="$plugin_dir/$p"
     if [[ -L "$pf" ]]; then
       if [[ "$DRY_RUN" == "true" ]]; then
@@ -467,7 +467,7 @@ remove_opencode() {
 
   # Shared plugin helpers live under plugins/lib (see recall_install_opencode_plugins).
   local helper
-  for helper in session-export.ts; do
+  for helper in "${RECALL_OPENCODE_PLUGIN_HELPERS[@]}"; do
     local hf="$plugin_dir/lib/$helper"
     if [[ -L "$hf" ]]; then
       if [[ "$DRY_RUN" == "true" ]]; then

@@ -15,7 +15,7 @@ note in the 0.9.0 entry.
 ### Added
 
 - **OpenCode Phase 4 validation** — an isolated end-to-end harness provisions
-  OpenCode 1.18.4, verifies the current `session.idle` event and JSON export
+  OpenCode 1.18.5, verifies the current `session.idle` event and JSON export
   contract, exercises export retry, concurrent WAL writers, installer/update
   idempotence, JSONC-preserving uninstall, and searchable Recall retrieval.
 - **OpenCode live-server verification** (`bun run test:e2e:opencode:runtime`) —

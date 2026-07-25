@@ -66,10 +66,12 @@ export function writeOpenCodeShim(binDir: string): void {
  * lifecycle and event emission, not a model's output, so the reply only has to
  * be well-formed and deterministic. Echoing the prompt lets a test assert that
  * a specific turn reached the transcript.
+ *
+ * Binds an ephemeral port and reports the one the OS assigned.
  */
-export function startStubProvider(port: number): { stop: () => void; baseURL: string } {
+export function startStubProvider(): { stop: () => void; baseURL: string; port: number } {
   const server = Bun.serve({
-    port,
+    port: 0,
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname.endsWith('/models')) {
@@ -114,7 +116,21 @@ export function startStubProvider(port: number): { stop: () => void; baseURL: st
       return new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
     },
   });
-  return { stop: () => server.stop(true), baseURL: `http://127.0.0.1:${port}/v1` };
+  return { stop: () => server.stop(true), baseURL: `http://127.0.0.1:${server.port}/v1`, port: server.port };
+}
+
+/**
+ * Reserve a port the OS says is free, for a process that cannot report back.
+ *
+ * `opencode serve --port 0` gives no parseable way to learn what it picked, so
+ * the harness has to pick for it. Binding and immediately releasing leaves a
+ * small race, which still beats a hardcoded port that fails opaquely.
+ */
+export function reserveEphemeralPort(): number {
+  const probe = Bun.serve({ port: 0, fetch: () => new Response('probe') });
+  const { port } = probe;
+  probe.stop(true);
+  return port;
 }
 
 /** The OpenCode config block that points every turn at the local stub provider. */

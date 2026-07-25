@@ -160,7 +160,13 @@ Two consequences:
 - **The tracker records a content digest**, not "this session is finished". A
   grown session overwrites its earlier, shorter drop; an unchanged one costs no
   write. `RecallBatchExtract` already re-extracts a drop that grows, so the
-  fuller transcript reaches memory without new machinery.
+  fuller transcript reaches memory without new machinery — but only once it
+  grows past `GROWTH_THRESHOLD = 0.5` (`hooks/RecallBatchExtract.ts`): a drop
+  extracted at size S is not re-extracted until it exceeds 1.5 × S, so the tail
+  of a long session can sit in the drop file without reaching the database. The
+  drop itself does hold every turn; it is the drop-to-SQLite step that is
+  threshold-gated. Tracked in
+  [#250](https://github.com/edheltzel/Recall/issues/250).
 
 **Plugin module contract.** OpenCode calls **every export** of a top-level
 `plugins/*.ts` as a plugin factory. A plugin entry point must therefore export

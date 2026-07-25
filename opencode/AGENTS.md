@@ -28,8 +28,10 @@ Installed as per-file symlinks into `$OPENCODE_CONFIG_DIR/plugins/` (and
   `tests/opencode-integration.test.ts` enforces this.
 - **Shared helpers live in `lib/`.** OpenCode does not glob subdirectories, so a
   nested module is importable without being mistaken for a plugin. Anything
-  added here must also be installed (see `recall_install_opencode_plugins`) and
-  removed on uninstall, or the plugin's import breaks at runtime.
+  added here must be named in `RECALL_OPENCODE_PLUGIN_HELPERS` (plugins go in
+  `RECALL_OPENCODE_PLUGINS`) in `lib/install-lib.sh`, or the plugin's import
+  breaks at runtime. Those two arrays are the single source of truth: install
+  and uninstall both loop over them, so one edit covers both.
 - **`session.idle` fires once per assistant turn**, not once per session
   (measured against OpenCode 1.18.5). The adapter must therefore RE-export on
   later idles; suppressing them freezes the drop on turn 1 and silently discards

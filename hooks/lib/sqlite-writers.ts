@@ -39,6 +39,15 @@ export interface WriteOptions {
   skipDuplicates?: boolean;
 }
 
+// TRANSACTION MODE: every explicit transaction in this file commits through
+// `.immediate(...)`, never the default DEFERRED. A DEFERRED transaction that
+// reads before it writes fails the read-to-write upgrade with SQLITE_BUSY
+// *instantly*, never consulting `busy_timeout` — so with two hosts extracting
+// into the shared WAL database, the `skipDuplicates` probe turned a peer's
+// short transaction into a lost record. Taking the write lock up front is what
+// makes the peer wait honoured: measured 1ms hard failure deferred, versus the
+// full timeout being honoured immediate.
+// Regression: tests/hooks/sqlite-writers-concurrency.test.ts.
 function openDb(dbPath: string): Database {
   const db = new Database(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
@@ -183,11 +192,8 @@ export function writeDecisionsBatch(
       }
       return n;
     });
-    // IMMEDIATE, not the default DEFERRED: these batches read (the
-    // skipDuplicates probe) before they insert, and SQLite fails a
-    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
-    // busy_timeout. Taking the write lock up front is what makes the peer wait
-    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    // Reads (the skipDuplicates probe) before it inserts — see the transaction
+    // mode note above openDb.
     return insertMany.immediate(items);
   } finally {
     db.close();
@@ -265,11 +271,8 @@ export function writeLearningsBatch(
       }
       return n;
     });
-    // IMMEDIATE, not the default DEFERRED: these batches read (the
-    // skipDuplicates probe) before they insert, and SQLite fails a
-    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
-    // busy_timeout. Taking the write lock up front is what makes the peer wait
-    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    // Reads (the skipDuplicates probe) before it inserts — see the transaction
+    // mode note above openDb.
     return insertMany.immediate(items);
   } finally {
     db.close();
@@ -322,11 +325,8 @@ export function writeBreadcrumbsBatch(
       }
       return n;
     });
-    // IMMEDIATE, not the default DEFERRED: these batches read (the
-    // skipDuplicates probe) before they insert, and SQLite fails a
-    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
-    // busy_timeout. Taking the write lock up front is what makes the peer wait
-    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    // Reads (the skipDuplicates probe) before it inserts — see the transaction
+    // mode note above openDb.
     return insertMany.immediate(items);
   } finally {
     db.close();
@@ -431,11 +431,8 @@ export function writeExtractionErrors(dbPath: string, items: ExtractionErrorInpu
       }
       return n;
     });
-    // IMMEDIATE, not the default DEFERRED: these batches read (the
-    // skipDuplicates probe) before they insert, and SQLite fails a
-    // read-to-write upgrade with SQLITE_BUSY *instantly*, ignoring
-    // busy_timeout. Taking the write lock up front is what makes the peer wait
-    // honoured — measured 1ms hard failure deferred vs ~500ms of waiting here.
+    // No probe here — this upsert opens with a write, so busy_timeout already
+    // applied. Immediate anyway, per the transaction mode note above openDb.
     return insertMany.immediate(items);
   } finally {
     db.close();

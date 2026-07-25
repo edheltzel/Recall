@@ -34,6 +34,7 @@ import { assertMetadataUnchanged, assertSafeTestDb, metadata, stringEnv } from '
 import {
   OPENCODE_PINNED_VERSION,
   collectEvents,
+  reserveEphemeralPort,
   runOpenCode,
   startStubProvider,
   stubProviderConfig,
@@ -54,8 +55,6 @@ const project = join(tempRoot, 'project');
 const testBin = join(tempRoot, 'bin');
 const opencodeConfigDir = join(xdgConfig, 'opencode');
 
-const STUB_PORT = 47611;
-const SERVER_PORT = 47612;
 const TURN_MARKERS = ['RUNTIMETURNALPHA', 'RUNTIMETURNBRAVO', 'RUNTIMETURNCHARLIE'];
 /** Generous: an idle can trail the POST response slightly. */
 const IDLE_SETTLE_MS = 6_000;
@@ -147,22 +146,27 @@ async function main(): Promise<void> {
   console.log(`opencode.installed_helper=${installedHelper}`);
 
   // Point OpenCode's model at the local stub, preserving the installer's MCP block.
-  stub = startStubProvider(STUB_PORT);
+  stub = startStubProvider();
+  console.log(`stub.port=${stub.port}`);
   const configPath = join(opencodeConfigDir, 'opencode.json');
   const installedConfig = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
   writeFileSync(configPath, JSON.stringify({ ...installedConfig, ...stubProviderConfig(stub.baseURL) }, null, 2));
 
-  const base = `http://127.0.0.1:${SERVER_PORT}`;
+  const serverPort = reserveEphemeralPort();
+  console.log(`opencode.serve_port=${serverPort}`);
+  const base = `http://127.0.0.1:${serverPort}`;
   let serverLog = '';
   // --print-logs is required for plugin load failures to reach stderr, which is
   // how this script proves the plugins loaded cleanly rather than merely ran.
-  const serveArgs = ['serve', '--port', String(SERVER_PORT), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'DEBUG'];
+  const serveArgs = ['serve', '--port', String(serverPort), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'DEBUG'];
+  // Detached: `bunx` is only a wrapper, so the server it launches is reachable
+  // for teardown only as a process group.
   server = spawn(
     process.env.OPENCODE_BIN ?? 'bunx',
     process.env.OPENCODE_BIN
       ? serveArgs
       : ['--yes', '--package', `opencode-ai@${OPENCODE_PINNED_VERSION}`, 'opencode', ...serveArgs],
-    { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] },
+    { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true },
   );
   server.stdout?.on('data', chunk => { serverLog += chunk; });
   server.stderr?.on('data', chunk => { serverLog += chunk; });
@@ -276,12 +280,24 @@ async function main(): Promise<void> {
   console.log(`opencode.runtime_contract=verified against ${version}`);
 }
 
-try {
-  await main();
-} finally {
+function teardown(): void {
   stream?.stop();
-  server?.kill('SIGKILL');
+  if (server?.pid !== undefined) {
+    // Negative pid targets the process group; ESRCH means it already exited.
+    try { process.kill(-server.pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
   stub?.stop();
   if (process.env.RECALL_E2E_KEEP === '1') console.error(`e2e.temp_root=${tempRoot}`);
   else rmSync(tempRoot, { recursive: true, force: true });
+}
+
+// A detached child has no controlling terminal, so Ctrl-C reaches only this
+// script — the group has to be reaped explicitly on signal, not just on return.
+process.on('SIGINT', () => { teardown(); process.exit(130); });
+process.on('SIGTERM', () => { teardown(); process.exit(143); });
+
+try {
+  await main();
+} finally {
+  teardown();
 }

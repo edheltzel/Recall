@@ -21,7 +21,7 @@
 //   - opencode export <id> — current JSON export command; Recall normalizes it
 
 import type { Plugin } from "@opencode-ai/plugin"
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "fs"
 import { createHash } from "crypto"
 import { join } from "path"
 import { homedir } from "os"
@@ -62,9 +62,24 @@ function loadTracker(): Map<string, string> {
   return new Map()
 }
 
+/**
+ * Write via a temp file in the same directory and rename onto the target.
+ *
+ * `RecallBatchExtract` reads this directory from a SEPARATE process on a cron,
+ * and idle fires every turn, so a truncate-then-write would expose a torn read
+ * for the whole life of every session. The temp suffix is deliberately not
+ * `.md`: `findMarkdownSessions` only picks up `*.md`, so a partial file is
+ * never a candidate, and a leftover one after a crash is inert.
+ */
+function writeAtomic(path: string, contents: string): void {
+  const temp = `${path}.tmp`
+  writeFileSync(temp, contents)
+  renameSync(temp, path)
+}
+
 /** Save dedup tracker to disk */
 function saveTracker(tracker: Map<string, string>): void {
-  writeFileSync(TRACKER_PATH, JSON.stringify(Object.fromEntries(tracker)) + "\n")
+  writeAtomic(TRACKER_PATH, JSON.stringify(Object.fromEntries(tracker)) + "\n")
 }
 
 /** Digest used to tell "same transcript again" from "the session grew". */
@@ -92,7 +107,7 @@ export const RecallExtract: Plugin = async ({ $ }) => {
         const signature = digest(markdown)
         if (tracker.get(sessionId) === signature) return
         const outFile = join(DROP_DIR, `${sessionId}.md`)
-        writeFileSync(outFile, markdown)
+        writeAtomic(outFile, markdown)
         tracker.set(sessionId, signature)
         saveTracker(tracker)
       } catch (error) {
