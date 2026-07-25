@@ -1,6 +1,6 @@
 # Recall OpenCode Phase 4 — Runtime Verification Handoff
 
-Status: In progress
+Status: Complete — branch `fm/recall-opencode-phase4-o1` ready for PR
 
 Phase: OpenCode integration — Phase 4 acceptance verification (real runtime)
 
@@ -57,20 +57,54 @@ the measurement exposed, #243 characterisation, and reconciling
 Out of scope (unchanged from #248): installation reconciliation, the semantic
 #240/#241/#226 wave, release/version bump, and #236/#237/#238/#174.
 
-## Plan
+## Phase 4 acceptance — outcome
 
-1. Handoff (this file).
-2. Fix the tracker so later idles re-export; keep retry-on-failure and
-   `.extracted.json`.
-3. Unit regression at the plugin boundary: repeat idle with new content re-exports.
-4. Committed real-runtime harness: plugin discovery + measured idle frequency +
-   multi-turn drop completeness.
-5. Concurrent **Claude + OpenCode** writers (the existing e2e used two OpenCode
-   writers).
-6. Installer backup/restore round-trip (existing coverage is surgical removal, not
-   restore).
-7. Docs: correct the overclaims, record the measured number, reconcile README.
-8. #243: verify precisely, close or characterise.
+| Item | Outcome |
+|---|---|
+| E2E session → export → drop → extract → search | Passes. `bun run test:e2e:opencode` green against OpenCode 1.18.5. |
+| Concurrent Claude + OpenCode against one store | **Was broken.** Found, fixed, regression-tested (see below). |
+| Installer rollback and restore | `install.sh restore` had zero coverage; now covered, including the collision backup and the non-interactive no-op. |
+| `session.idle` frequency, measured | **1.00 per assistant turn** (3 turns → 3 events, OpenCode 1.18.5). Asserted, not just recorded. |
+
+## Defects found and fixed
+
+1. **Multi-turn data loss** (`opencode/RecallExtract.ts`). Permanent tracker +
+   per-turn idle meant only turn 1 was ever dropped. Reproduced against a real
+   three-turn session: 154-byte drop, 2 of 3 markers lost.
+2. **Plugin load error on every launch.** OpenCode calls every export of a
+   top-level `plugins/*.ts` as a plugin factory; the exported test helpers made
+   it log `failed to load plugin ... "Object is not a function"`. Helpers moved
+   to `opencode/lib/session-export.ts`.
+3. **Concurrent extraction lost records** (`hooks/lib/sqlite-writers.ts`). The
+   duplicate probe made these DEFERRED transactions read-then-write, and SQLite
+   fails that upgrade with `SQLITE_BUSY` instantly, never consulting
+   `busy_timeout`. Measured 1ms hard failure vs the full timeout honoured under
+   `IMMEDIATE`.
+
+Defects 1 and 2 were invisible to the existing e2e by construction: it imports
+the adapter and supplies its own `$` and event payload.
+
+## #243 — closed
+
+All three acceptance items met:
+
+1. Fresh worktree matches a normal checkout — verified in a genuinely fresh
+   worktree: 1298 pass, 0 fail. Requires `bun install` inside it, which is #165's
+   gap, so #165 stays open and the CI job asserts the empty-`node_modules`
+   starting condition rather than hiding it.
+2. `recall_configure_opencode_mcp` and `recall_configure_pi_mcp` both exit 1 on a
+   malformed config and leave it byte-identical.
+3. CI now runs lint plus the full suite inside a git worktree.
+
+## Known gaps, deliberately not closed
+
+- `opencode/RecallPreCompact.ts` compaction injection is unit-tested only; no
+  test drives a real OpenCode compaction. Stated in the README row and in
+  `docs/OPENCODE_INTEGRATION.md`.
+- One full-suite run failed once and was not reproduced in five subsequent runs;
+  the output was truncated so the test was not identified. Not diagnosed.
+- Out of scope and untouched: installation reconciliation, the semantic
+  #240/#241/#226 wave, release/version bump, #236/#237/#238/#174, #165.
 
 ## Holds
 
