@@ -16,11 +16,29 @@ import {
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { legacyClaudeMemorySection, legacyPiMemorySection } from '../fixtures/legacy-memory-sections';
 
 const REPO = process.cwd();
 const UNINSTALL = join(REPO, 'uninstall.sh');
+
+/**
+ * Shadow the host's `pi` with a no-op and return the directory to prepend to
+ * PATH.
+ *
+ * `remove_pi` runs `pi remove ... --no-approve` whenever `pi` is on PATH, so on
+ * a developer machine that actually has Pi installed these tests inherit a real
+ * ~10s package operation and blow past bun's default per-test timeout, while
+ * CI, where `pi` is absent, never runs it at all. Nothing here asserts on that
+ * call (the Pi config edits are done by the script's own `bun -e` block), so
+ * stubbing it keeps the tests hermetic without losing coverage. Same reasoning
+ * as the `bun unlink` stub used further down.
+ */
+function stubPiOnPath(binDir: string): string {
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, 'pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return binDir;
+}
 
 interface RunResult {
   stdout: string;
@@ -75,6 +93,7 @@ function runUninstallIncludingPi(
         BACKUP_BASE: backupBase,
         PI_CONFIG_DIR: piConfigDir,
         HOME: claudeDir,
+        PATH: `${stubPiOnPath(join(dirname(claudeDir), 'stub-bin'))}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -583,6 +602,7 @@ Preserve this.
       `#!/bin/sh\nif [ "$1" = unlink ]; then touch "$RECALL_TEST_UNLINK"; exit 0; fi\nexec ${process.execPath} "$@"\n`,
       { mode: 0o755 },
     );
+    stubPiOnPath(fakeBin);
 
     const result = runUninstallAll(claudeDir, backupBase, opencodeConfigDir, piConfigDir, unlinkMarker, fakeBin);
 

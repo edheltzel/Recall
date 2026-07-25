@@ -46,7 +46,8 @@
     "check:version": "bun run scripts/check-version.ts",
     "prepublishOnly": "bun run build",
     "build:claude-plugin": "bun run scripts/build-claude-plugin.ts",
-    "test:e2e:claude-plugin": "bun run build && bun run scripts/e2e-claude-plugin.ts"
+    "test:e2e:claude-plugin": "bun run build && bun run scripts/e2e-claude-plugin.ts",
+    "test:e2e:opencode:runtime": "bun run build && bun run scripts/e2e-opencode-runtime.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",

@@ -24,6 +24,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { Database } from 'bun:sqlite';
 import { assertMetadataUnchanged, assertSafeTestDb, metadata, stringEnv } from './lib/e2e-isolation';
+import { OPENCODE_PINNED_VERSION, openCodeCommand } from './lib/opencode-runtime';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
@@ -62,13 +63,8 @@ function run(command: string, args: string[], env: Record<string, string>, timeo
   return output;
 }
 
-function openCodeArgs(args: string[]): { command: string; args: string[] } {
-  if (process.env.OPENCODE_BIN) return { command: process.env.OPENCODE_BIN, args };
-  return { command: 'bunx', args: ['--yes', '--package', 'opencode-ai@1.18.4', 'opencode', ...args] };
-}
-
 function runOpenCode(args: string[], env: Record<string, string>): string {
-  const command = openCodeArgs(args);
+  const command = openCodeCommand(args);
   const result = spawnSync(command.command, command.args, {
     cwd: repoRoot,
     env,
@@ -83,7 +79,7 @@ function runOpenCode(args: string[], env: Record<string, string>): string {
 }
 
 function runOpenCodeCombined(args: string[], env: Record<string, string>): string {
-  const command = openCodeArgs(args);
+  const command = openCodeCommand(args);
   return run(command.command, command.args, env, 180_000);
 }
 
@@ -146,7 +142,7 @@ function writeOpenCodeImportFixture(id: string, uniqueMarker: string): void {
       projectID: 'proj_recall_phase4',
       directory: repoRoot,
       title: `Recall Phase 4 ${id}`,
-      version: '1.18.4',
+      version: OPENCODE_PINNED_VERSION,
       time: { created: now, updated: now },
     },
     messages: [baseMessage(id, longText, now)],
@@ -226,7 +222,7 @@ async function main(): Promise<void> {
   console.log('isolation.production_db_opened=false');
 
   const version = runOpenCode(['--version'], env).trim();
-  assert(version === '1.18.4', `unexpected OpenCode version: ${version}`);
+  assert(version === OPENCODE_PINNED_VERSION, `unexpected OpenCode version: ${version} (pinned ${OPENCODE_PINNED_VERSION})`);
   const paths = runOpenCodeCombined(['debug', 'paths'], env);
   for (const expected of [xdgConfig, xdgData, xdgState, xdgCache]) {
     assert(paths.includes(expected), `OpenCode path was not isolated under ${expected}\n${paths}`);
@@ -303,6 +299,15 @@ async function main(): Promise<void> {
     assert(search.includes('Found ') && !search.includes('No results found.'), `Recall search could not find ${query}\n${search}\nLoA evidence: ${loaEvidence()}`);
   }
 
+  // The shared plugin helper lives in a subdirectory Recall created, so
+  // uninstall has to remove its own file without taking a user's file — or the
+  // directory — with it.
+  const pluginsDir = join(opencodeConfigDir, 'plugins');
+  const installedHelper = join(pluginsDir, 'lib', 'session-export.ts');
+  assert(existsSync(installedHelper), `installer did not place the plugin helper at ${installedHelper}`);
+  const userHelper = join(pluginsDir, 'lib', 'user-owned.ts');
+  writeFileSync(userHelper, 'export const UserOwned = 1\n');
+
   const uninstall = spawnSync('bash', [join(repoRoot, 'uninstall.sh'), '--no-confirm', '--skip-pi', '--skip-omp'], {
     cwd: repoRoot,
     env: { ...env, CLAUDE_DIR: join(testHome, '.claude'), BACKUP_BASE: join(tempRoot, 'backups'), RECALL_SKIP_BUN_UNLINK: 'true' },
@@ -313,6 +318,11 @@ async function main(): Promise<void> {
   const afterUninstall = readFileSync(join(opencodeConfigDir, 'opencode.json'), 'utf-8');
   assert(afterUninstall.includes('// User-owned OpenCode settings remain intact.'), 'uninstall removed user JSONC comments');
   assert(afterUninstall.includes('other-server') && !afterUninstall.includes('recall-memory'), 'uninstall did not surgically remove Recall MCP');
+
+  assert(!existsSync(join(pluginsDir, 'RecallExtract.ts')), 'uninstall left the OpenCode plugin behind');
+  assert(!existsSync(installedHelper), 'uninstall left the OpenCode plugin helper behind');
+  assert(existsSync(userHelper), 'uninstall removed a user-owned file from plugins/lib');
+  console.log('opencode.uninstall_preserves_user_plugin_lib=verified');
 
   assertMetadataUnchanged(productionDb, productionBefore);
   console.log(`opencode.version=${version}`);

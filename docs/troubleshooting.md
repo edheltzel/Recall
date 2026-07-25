@@ -123,7 +123,7 @@ Extraction hooks fire on the `Stop` event. If the hook isn't registered in `sett
 
 1. Verify the host and runtime: `opencode --version` and `bun --version`.
 2. Verify the host export contract: `opencode export <session-id>` should print JSON.
-3. Check the installed plugin and config: `ls ~/.config/opencode/plugins/RecallExtract.ts` and inspect `opencode.json` for `mcp.recall-memory`.
+3. Check the installed plugin, its helper, and the config: `ls ~/.config/opencode/plugins/RecallExtract.ts ~/.config/opencode/plugins/lib/session-export.ts` and inspect `opencode.json` for `mcp.recall-memory`. The plugin imports the helper, so an install that predates it fails to load and captures nothing. Re-run `./install.sh` (or `./update.sh`) to place both.
 4. Check the drop directory: `ls ~/.agents/Recall/MEMORY/opencode-sessions/`.
 5. Run the batch extractor manually with `bun run ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts --dry-run`.
 

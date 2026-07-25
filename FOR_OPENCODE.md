@@ -79,6 +79,33 @@ Get database statistics (record counts, database size).
 
 Show a full Library of Alexandria entry with its extracted wisdom.
 
+### recall-memory_memory_dump
+
+Persist a session explicitly, mid-conversation. Automatic extraction already captures
+OpenCode sessions (see [How Extraction Works](#how-extraction-works)), so reach for this
+only when the user asks for an immediate capture.
+
+Always pass the visible `messages` and `source: "opencode"`. With `messages` omitted,
+Recall falls back to native transcript discovery, which checks Claude Code first and so
+dumps the wrong host's session on a machine that has both installed.
+
+```
+recall-memory_memory_dump({
+  title: "Auth middleware refactor",
+  source: "opencode",
+  messages: [{ role: "user", content: "..." }, { role: "assistant", content: "..." }]
+})
+```
+
+### recall-memory_decision_update
+
+Mark a stored decision superseded (a newer decision replaced it) or reverted (it was
+wrong and was rolled back), by ID.
+
+```
+recall-memory_decision_update({ id: 42, action: "supersede" })
+```
+
 ## The CLI
 
 You can also use the `recall` CLI directly via Bash tool:
@@ -133,7 +160,7 @@ OpenCode first.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Context for agents** — Before spawning subagents via `@agent`, call `recall-memory_context_for_agent`
 4. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
-5. **Never store secrets** — `recall-memory_memory_add` persists content verbatim into `recall.db` (and automatic extraction captures session text), and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+5. **Never store secrets** — `recall-memory_memory_add` and `recall-memory_memory_dump` persist content verbatim into `recall.db` (and automatic extraction captures session text), and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 6. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ## How Extraction Works
@@ -144,6 +171,11 @@ A Recall plugin (`RecallExtract.ts`) runs inside OpenCode:
 2. Runs `opencode export <session-id>` and normalizes its JSON `{ info, messages }` response to markdown
 3. Drops the file into `$RECALL_HOME/MEMORY/opencode-sessions/`
 4. A batch extraction job quality-gates these files into the shared SQLite database
+
+`session.idle` fires once per assistant turn (measured against OpenCode 1.18.5),
+so the drop is rewritten as the conversation grows and always reflects the whole
+session rather than only its first turn. An unchanged session costs no write —
+the plugin compares a digest of what it last wrote.
 
 The plugin records a session only after the export and drop write succeed, so
 failed exports remain retryable. OpenCode must be available on `PATH`, and the

@@ -450,7 +450,7 @@ remove_opencode() {
   local guide="$OPENCODE_CONFIG_DIR/Recall_GUIDE.md"
 
   local p
-  for p in RecallExtract.ts RecallPreCompact.ts; do
+  for p in "${RECALL_OPENCODE_PLUGINS[@]}"; do
     local pf="$plugin_dir/$p"
     if [[ -L "$pf" ]]; then
       if [[ "$DRY_RUN" == "true" ]]; then
@@ -464,6 +464,28 @@ remove_opencode() {
       log_success "Removed OpenCode plugin: $p"
     fi
   done
+
+  # Shared plugin helpers live under plugins/lib (see recall_install_opencode_plugins).
+  local helper
+  for helper in "${RECALL_OPENCODE_PLUGIN_HELPERS[@]}"; do
+    local hf="$plugin_dir/lib/$helper"
+    if [[ -L "$hf" ]]; then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [dry-run] would unlink Recall-managed symlink: $hf"
+      else
+        recall_unlink_if_managed "$hf"
+      fi
+      log_success "Removed OpenCode plugin helper symlink: $helper"
+    elif [[ -f "$hf" ]]; then
+      run rm -f "$hf"
+      log_success "Removed OpenCode plugin helper: $helper"
+    fi
+  done
+  # Only remove the helper directory when Recall emptied it — a user file there
+  # is not ours to delete.
+  if [[ -d "$plugin_dir/lib" ]] && [[ -z "$(ls -A "$plugin_dir/lib" 2>/dev/null)" ]]; then
+    run rmdir "$plugin_dir/lib"
+  fi
   if [[ -f "$agent_dir/recall-memory.md" ]]; then
     run rm -f "$agent_dir/recall-memory.md"
     log_success "Removed OpenCode agent: recall-memory.md"
