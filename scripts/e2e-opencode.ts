@@ -299,6 +299,15 @@ async function main(): Promise<void> {
     assert(search.includes('Found ') && !search.includes('No results found.'), `Recall search could not find ${query}\n${search}\nLoA evidence: ${loaEvidence()}`);
   }
 
+  // The shared plugin helper lives in a subdirectory Recall created, so
+  // uninstall has to remove its own file without taking a user's file — or the
+  // directory — with it.
+  const pluginsDir = join(opencodeConfigDir, 'plugins');
+  const installedHelper = join(pluginsDir, 'lib', 'session-export.ts');
+  assert(existsSync(installedHelper), `installer did not place the plugin helper at ${installedHelper}`);
+  const userHelper = join(pluginsDir, 'lib', 'user-owned.ts');
+  writeFileSync(userHelper, 'export const UserOwned = 1\n');
+
   const uninstall = spawnSync('bash', [join(repoRoot, 'uninstall.sh'), '--no-confirm', '--skip-pi', '--skip-omp'], {
     cwd: repoRoot,
     env: { ...env, CLAUDE_DIR: join(testHome, '.claude'), BACKUP_BASE: join(tempRoot, 'backups'), RECALL_SKIP_BUN_UNLINK: 'true' },
@@ -309,6 +318,11 @@ async function main(): Promise<void> {
   const afterUninstall = readFileSync(join(opencodeConfigDir, 'opencode.json'), 'utf-8');
   assert(afterUninstall.includes('// User-owned OpenCode settings remain intact.'), 'uninstall removed user JSONC comments');
   assert(afterUninstall.includes('other-server') && !afterUninstall.includes('recall-memory'), 'uninstall did not surgically remove Recall MCP');
+
+  assert(!existsSync(join(pluginsDir, 'RecallExtract.ts')), 'uninstall left the OpenCode plugin behind');
+  assert(!existsSync(installedHelper), 'uninstall left the OpenCode plugin helper behind');
+  assert(existsSync(userHelper), 'uninstall removed a user-owned file from plugins/lib');
+  console.log('opencode.uninstall_preserves_user_plugin_lib=verified');
 
   assertMetadataUnchanged(productionDb, productionBefore);
   console.log(`opencode.version=${version}`);

@@ -43,6 +43,14 @@ jobs:
       - name: OpenCode integration e2e
         run: bun run test:e2e:opencode
 
+      # The pipeline e2e above supplies its own `$` and event payload, so it
+      # cannot prove OpenCode loads the plugin or emits session.idle. This leg
+      # drives a live server and asserts the measured once-per-turn frequency,
+      # so a runtime change fails CI instead of silently invalidating the
+      # contract recorded in docs/OPENCODE_INTEGRATION.md.
+      - name: OpenCode runtime contract e2e
+        run: bun run test:e2e:opencode:runtime
+
   worktree:
     name: Worktree baseline
     runs-on: macos-latest
