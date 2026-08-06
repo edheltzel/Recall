@@ -4,7 +4,7 @@ Status: Complete — implementation branch ready for PR
 
 Phase: OpenCode integration — Testing + Polish
 
-Source plan: `.agents/atlas/plans/2026-07-22-opencode-phase4-testing-polish.md`
+Source plan: `.agents/atlas/plans/archive/2026-07-22-opencode-phase4-testing-polish.md`
 
 ## Current state
 
