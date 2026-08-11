@@ -7,7 +7,7 @@
 Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected at session start, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
 
 
-> **A SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions where a host lifecycle adapter exists, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. Works across Claude Code, OpenCode, Pi, and Codex from one local database.
+> **A SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions where a host lifecycle adapter exists, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills span Claude Code, OpenCode, Pi, Codex, Grok, and JCode from one local database; lifecycle automation is host-specific.
 
 Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
 
@@ -18,7 +18,7 @@ All coding agents forget when a session ends. Recall doesn't — it extracts, in
 
 Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. No phone-home. No vendor lock-in.
 
-> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and Beta for [OpenCode](https://opencode.ai/) (capture is verified against a live server; compaction injection is not). [Codex CLI](https://github.com/openai/codex) uses a native plugin for MCP and skills; lifecycle auto-capture is not yet supported. [Gemini CLI](https://github.com/google-gemini/gemini-cli) remains on the roadmap. See [Roadmap](#roadmap).
+> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/). [Codex CLI](https://github.com/openai/codex) has native MCP, skills, automatic capture, and session-start injection. [Grok Build CLI](docs/GROK_INTEGRATION.md) has automatic capture but no automatic injection. [JCode](docs/JCODE_INTEGRATION.md) remains MCP and skills only after a bounded live probe. See [Roadmap](#roadmap).
 
 ---
 
@@ -51,7 +51,7 @@ Install once, then forget about it. Recall runs silently in the background:
 Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
 
 - **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server, no API keys for retrieval. Nothing leaves your machine — no telemetry, no phone-home. Optional Ollama for embeddings (also local).
-- **Multi-agent native.** One memory layer across the agents you actually use. Stable on Claude Code today; Pi, OpenCode, and Codex connect through MCP. Memories captured by one agent are searchable from any other agent on the same machine.
+- **Multi-agent native.** One memory layer across the agents you actually use. Claude Code, Pi, OpenCode, Codex, Grok, and JCode can share MCP memory. Automatic capture and injection depend on each host's supported lifecycle surfaces; see the capability matrix below.
 - **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and curated **Library of Alexandria** entries — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
 - **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
 
@@ -88,9 +88,9 @@ recall stats        # Database overview
 recall doctor       # Health check
 ```
 
-Restart your agent (Claude Code, Pi, or OpenCode) to load the MCP server and hooks.
+Restart your agent (Claude Code, Pi, OpenCode, or Grok) to load the installed integration.
 
-Codex uses its native plugin marketplace instead of the lifecycle installer; see [Codex Integration](docs/CODEX_INTEGRATION.md).
+Codex uses its native plugin marketplace for MCP, skills, and lifecycle hooks; see [Codex Integration](docs/CODEX_INTEGRATION.md).
 
 Claude Code can additionally install Recall as a native plugin, which takes over the nine `recall-*` skills and the `recall-memory` MCP server while the installer keeps owning the lifecycle hooks. Existing installs need one reconciliation step — see [Claude Integration](docs/CLAUDE_INTEGRATION.md).
 
@@ -213,7 +213,7 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 
 The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](assets/how-recall-works.excalidraw) — drop it onto [excalidraw.com](https://excalidraw.com) to edit.
 
-### Session Lifecycle
+### Claude Code Session Lifecycle
 
 1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your `~/.claude/MEMORY/identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
 2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`) before falling back to git history. Decisions, learnings, and breadcrumbs are recorded in real-time with `memory_add`.
@@ -243,14 +243,14 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ## What You Get
 
-- **Auto-captured session memory** — extracted incrementally (Stop hook on every turn) via Claude Haiku, with `RecallBatchExtract.ts` cron sweeper as a crash-recovery safety net
+- **Auto-captured session memory** — Claude Code extracts incrementally; Codex and Grok write supported transcript content directly to SQLite; Pi and OpenCode use their documented host adapters
 - **MCP server (`recall-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
 - **Tiered RecallStart (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
 - **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `recall pin` / `recall unpin` / `recall importance backfill`
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
-- **Cross-host ingestion** — OpenCode plugin and Pi extension drop sessions into `~/.agents/Recall/MEMORY/{opencode,pi}-sessions/`; RecallBatchExtract pulls them into the same SQLite DB. One memory layer across agents
+- **Cross-host ingestion** — Codex and Grok lifecycle hooks write immediately through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
 - **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `recall-add` agent skill
@@ -311,19 +311,25 @@ If you're an AI agent reading this repository:
 | **Using Recall from OpenCode**                                 | [`FOR_OPENCODE.md`](FOR_OPENCODE.md) |
 | **Using Recall from Pi**                                       | [`FOR_PI.md`](FOR_PI.md)             |
 | **Using Recall from Codex**                                    | [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) |
+| **Using Recall from Grok**                                     | [`docs/GROK_INTEGRATION.md`](docs/GROK_INTEGRATION.md) |
+| **Using Recall from JCode**                                    | [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md) |
 | **Developing Recall** (build, test, conventions)               | [`CLAUDE.md`](CLAUDE.md)             |
 
 ## Roadmap
 
-Recall is built around two integration surfaces: **MCP** (memory search and add, available from inside the agent) and **lifecycle hooks** (auto-extraction, session-start context injection, pre-compact flushes). Different agents support different surfaces — the table below tracks where each one stands.
+Recall separates **MCP and skills**, **automatic capture**, and **automatic injection**. A host can support one without supporting the others.
 
-| Agent                                                         | MCP |                      Lifecycle hooks                       | Status                                |
-| ------------------------------------------------------------- | :-: | :--------------------------------------------------------: | ------------------------------------- |
-| [**Claude Code**](https://claude.com/claude-code)             | ✅  |            ✅ Stop · SessionStart · PreCompact             | **Stable** — reference implementation; native plugin ships skills + MCP |
-| [**Pi**](https://pi.dev/)                                     | ✅  | ⚠ Beta — native package with memory-injection + shutdown-capture extensions | Package + separate MCP adapter/config |
-| [**OpenCode**](https://opencode.ai/)                          | ✅  | ⚠ Beta — `recall-extract` plugin; `session.idle` capture verified against a live OpenCode 1.18.5 server | Capture runtime-verified; compaction injection not yet |
-| [**Codex CLI**](https://github.com/openai/codex)              | ✅  |               — native plugin, explicit dump only          | MCP + skills available                |
-| [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) |  —  |                             —                              | Coming soon                           |
+| Agent | MCP + skills | Automatic capture | Automatic injection | Status |
+| --- | :---: | :---: | :---: | --- |
+| [**Claude Code**](https://claude.com/claude-code) | ✅ | ✅ Stop and PreCompact extraction | ✅ SessionStart L0/L1 | **Stable** reference implementation |
+| [**Pi**](https://pi.dev/) | ✅ | ⚠ Beta shutdown capture | ⚠ Beta before-agent context | Native package plus separate MCP adapter/config |
+| [**OpenCode**](https://opencode.ai/) | ✅ | ⚠ Beta `session.idle` capture | ❌ Compaction injection not verified | Runtime verified against OpenCode 1.18.5 |
+| [**Codex CLI**](https://github.com/openai/codex) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin, verified against Codex 0.147.0 |
+| [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Capture only, verified against Grok 1.0.0 |
+| [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
+| [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
+
+Unattended lifecycle writes pass the scrub gate from [#50](https://github.com/edheltzel/Recall/issues/50). Agent Skill bodies remain canonical under [#228](https://github.com/edheltzel/Recall/issues/228). Installer-owned files follow surgical ownership from [#236](https://github.com/edheltzel/Recall/issues/236), while broader atomic config-write parity remains tracked in [#124](https://github.com/edheltzel/Recall/issues/124).
 
 **Candidate** — [Cursor](https://cursor.com): both `.cursor/hooks.json` and MCP are first-class; the integration model maps cleanly onto Recall's existing hook architecture. Tracked but not started.
 
@@ -339,10 +345,12 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [MCP Tools](docs/mcp-tools.md)             | Tools available to AI agents                                              |
 | [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
 | Codebase Map (local)                       | Interactive visual map at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html` — generated from the codegraph index, not committed (`.agents/` is gitignored) |
-| [Agent Skills](docs/agent-skills.md)       | `recall-*` skills for Claude Code, Pi, and omp                            |
-| [Codex Integration](docs/CODEX_INTEGRATION.md) | Native plugin install, MCP coverage, and lifecycle limits             |
+| [Agent Skills](docs/agent-skills.md)       | Canonical `recall-*` workflows and host-specific packaging                |
+| [Codex Integration](docs/CODEX_INTEGRATION.md) | Native plugin MCP, skills, automatic capture, and session-start injection |
 | [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Native plugin install, plugin/installer ownership split, migration    |
 | [Pi Integration](docs/PI_INTEGRATION.md)   | Native package, separate MCP setup, lifecycle coverage, and host limits  |
+| [Grok Integration](docs/GROK_INTEGRATION.md) | Installer-owned automatic capture and explicit injection boundary |
+| [JCode Integration](docs/JCODE_INTEGRATION.md) | Live-probe evidence and current MCP/skills-only boundary |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
 | [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |

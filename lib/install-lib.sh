@@ -52,6 +52,8 @@ fi
 RECALL_OPENCODE_PLUGINS=(RecallExtract.ts RecallPreCompact.ts)
 RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${RECALL_PI_ROOT:=$RECALL_DIR/pi}"
+: "${RECALL_GROK_ROOT:=$RECALL_DIR/grok}"
+: "${RECALL_GROK_HOOKS_DIR:=$RECALL_GROK_ROOT/hooks}"
 : "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
 
 # Completion sentinel — written at install start, removed only after the
@@ -101,6 +103,7 @@ fi
 # Platform configuration
 : "${OPENCODE_CONFIG_DIR:=${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
 : "${PI_CONFIG_DIR:=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
+: "${GROK_CONFIG_DIR:=${GROK_HOME:-$HOME/.grok}}"
 # omp is skills-only (no MCP/hooks integration exists for it yet) — its
 # config dir is used solely as the target for `~/.omp/agent/skills`.
 : "${OMP_CONFIG_DIR:=$HOME/.omp/agent}"
@@ -110,6 +113,7 @@ fi
 : "${CLAUDE_CODE_DETECTED:=false}"
 : "${OPENCODE_DETECTED:=false}"
 : "${PI_DETECTED:=false}"
+: "${GROK_DETECTED:=false}"
 : "${OMP_DETECTED:=false}"
 
 # When true, recall_select_platforms / _confirm skip their interactive prompts.
@@ -131,6 +135,7 @@ if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
     "$OPENCODE_CONFIG_DIR/opencode.json"
     "$PI_CONFIG_DIR/mcp.json"
     "$PI_CONFIG_DIR/AGENTS.md"
+    "$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
   )
 fi
 
@@ -692,6 +697,11 @@ recall_detect_platforms() {
     [[ "$quiet" == "--quiet" ]] || log_success "Detected: Pi"
   fi
 
+  if command -v grok &>/dev/null; then
+    GROK_DETECTED=true
+    [[ "$quiet" == "--quiet" ]] || log_success "Detected: Grok"
+  fi
+
   if command -v omp &>/dev/null; then
     OMP_DETECTED=true
     [[ "$quiet" == "--quiet" ]] || log_success "Detected: omp"
@@ -700,8 +710,9 @@ recall_detect_platforms() {
   if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
     && [[ "$OPENCODE_DETECTED" == "false" ]] \
     && [[ "$PI_DETECTED" == "false" ]] \
+    && [[ "$GROK_DETECTED" == "false" ]] \
     && [[ "$OMP_DETECTED" == "false" ]]; then
-    log_warn "No coding agents detected (Claude Code, OpenCode, Pi, omp)"
+    log_warn "No coding agents detected (Claude Code, OpenCode, Pi, Grok, omp)"
     log_info "Recall will install core tools. Configure MCP manually later."
   fi
 }
@@ -720,6 +731,7 @@ recall_select_platforms() {
   [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && options+=("Claude Code")
   [[ "$OPENCODE_DETECTED" == "true" ]] && options+=("OpenCode")
   [[ "$PI_DETECTED" == "true" ]] && options+=("Pi")
+  [[ "$GROK_DETECTED" == "true" ]] && options+=("Grok")
   [[ "$OMP_DETECTED" == "true" ]] && options+=("omp")
 
   if [[ ${#options[@]} -eq 0 ]]; then
@@ -732,16 +744,19 @@ recall_select_platforms() {
   local was_cc="$CLAUDE_CODE_DETECTED"
   local was_oc="$OPENCODE_DETECTED"
   local was_pi="$PI_DETECTED"
+  local was_grok="$GROK_DETECTED"
   local was_omp="$OMP_DETECTED"
   CLAUDE_CODE_DETECTED=false
   OPENCODE_DETECTED=false
   PI_DETECTED=false
+  GROK_DETECTED=false
   OMP_DETECTED=false
   while IFS= read -r line; do
     case "$line" in
       "Claude Code") [[ "$was_cc" == "true" ]] && CLAUDE_CODE_DETECTED=true ;;
       "OpenCode")    [[ "$was_oc" == "true" ]] && OPENCODE_DETECTED=true ;;
       "Pi")          [[ "$was_pi" == "true" ]] && PI_DETECTED=true ;;
+      "Grok")        [[ "$was_grok" == "true" ]] && GROK_DETECTED=true ;;
       "omp")         [[ "$was_omp" == "true" ]] && OMP_DETECTED=true ;;
     esac
   done <<<"$selected"
@@ -749,6 +764,7 @@ recall_select_platforms() {
   if [[ "$CLAUDE_CODE_DETECTED" == "false" ]] \
     && [[ "$OPENCODE_DETECTED" == "false" ]] \
     && [[ "$PI_DETECTED" == "false" ]] \
+    && [[ "$GROK_DETECTED" == "false" ]] \
     && [[ "$OMP_DETECTED" == "false" ]]; then
     log_warn "All agents skipped — Recall will install core tools only."
     log_info "Re-run ./install.sh later to configure agent integrations."
@@ -1014,6 +1030,7 @@ recall_create_install_root() {
     "$RECALL_SHARED_HOOKS_LIB_DIR" \
     "$RECALL_SHARED_SKILLS_DIR" \
     "$RECALL_OPENCODE_PLUGINS_DIR" \
+    "$RECALL_GROK_HOOKS_DIR" \
     "$RECALL_MEMORY_DIR" \
     "$BACKUP_BASE"
 }
@@ -1427,6 +1444,15 @@ recall_verify_install() {
     [[ ! -f "$canonical" ]] && continue
     _check_symlink "$CLAUDE_DIR/hooks/$hook.ts" "$canonical"
   done
+
+  # Grok global lifecycle hook. Grok 1.0.0 headless mode ignores plugin
+  # hooks, so this user-level managed symlink is the supported capture surface.
+  if [[ "$GROK_DETECTED" == "true" ]] \
+    && [[ -f "$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json" ]]; then
+    _check_symlink \
+      "$GROK_CONFIG_DIR/hooks/RecallLifecycle.json" \
+      "$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
+  fi
 
   # Recall_GUIDE.md (Claude)
   if [[ -f "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md" ]]; then
@@ -1845,6 +1871,29 @@ _recall_copy_hook_files() {
     recall_link "$memory_dir/extract_prompt.md" "$RECALL_SHARED_DIR/extract_prompt.md"
     log_success "Installed extraction prompt template"
   fi
+}
+
+# Grok 1.0.0 headless mode discovers user-level hook files but does not
+# compose hooks from installed plugins. Install one Recall-owned global hook
+# file so headless and interactive sessions share the supported hook surface.
+recall_install_grok_platform() {
+  local source="$RECALL_REPO_DIR/hooks/grok/RecallLifecycle.json"
+  local canonical="$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
+  local target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
+
+  if [[ ! -f "$source" ]]; then
+    log_warn "Grok lifecycle hook not found at $source"
+    return 1
+  fi
+  mkdir -p "$RECALL_GROK_HOOKS_DIR" "$GROK_CONFIG_DIR/hooks"
+  recall_copy_canonical "$source" "$canonical"
+  recall_link "$target" "$canonical"
+  log_success "Installed Grok lifecycle capture hook"
+}
+
+recall_uninstall_grok_platform() {
+  local target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
+  recall_unlink_if_managed "$target"
 }
 
 # recall_register_hook <event> <hook_name> <command> [timeout_ms] [matcher]

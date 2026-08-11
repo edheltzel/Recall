@@ -73,6 +73,14 @@ plugin uses `opencode export <session-id>` (JSON) and converts the result into a
 markdown drop for the shared batch extractor. Verify with `opencode --version`.
 Use `./install.sh --skip-opencode` when OpenCode should remain untouched.
 
+### Grok Build CLI (Optional)
+
+If `grok` is installed, Recall adds the managed user-level lifecycle hook documented in [Grok Integration](GROK_INTEGRATION.md). The hook exports completed sessions through the public Grok CLI and writes them immediately to `recall.db`. It does not add automatic session-start injection.
+
+Verify with `grok --version`. Deselect Grok in the interactive installer when it should remain untouched.
+
+Codex uses its native marketplace plugin instead of this installer. JCode currently remains MCP and skills only; see [Codex Integration](CODEX_INTEGRATION.md) and [JCode Integration](JCODE_INTEGRATION.md).
+
 ---
 
 ### Fabric (Optional — recommended)
@@ -136,8 +144,9 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 7. Setup hooks | Copies `RecallExtract.ts` and `RecallBatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
 | 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs agent skills to `~/.claude/skills/recall-*/` (removing any legacy `~/.claude/commands/Recall/` symlinks) |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
+| 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
 
-**After install:** Restart Claude Code to load the MCP server and hooks.
+**After install:** Restart each configured host to load its integration.
 
 ---
 
@@ -278,6 +287,7 @@ cd /path/to/Recall
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
 - OpenCode MCP entry + plugins + the shared plugin helpers Recall installs under `plugins/lib/` + agent + guide (unless `--skip-opencode`). `plugins/lib/` itself is removed only when Recall emptied it, so your own files there survive. An `opencode.json` that Recall cannot parse is reported and left untouched; the plugins, agent, and guide are still removed and the rest of the uninstall continues
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
+- The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
 ### What is preserved (default)
@@ -296,6 +306,7 @@ cd /path/to/Recall
 | `--no-confirm` | Non-interactive (still requires PURGE confirmation for `--purge`) |
 | `--skip-opencode` | Leave OpenCode integration alone |
 | `--skip-pi` | Leave Pi integration alone |
+| `--skip-grok` | Leave Grok lifecycle capture alone |
 | `--help` | Show usage |
 
 Even with `--purge`, `~/.claude/MEMORY/` is preserved — it's user-authored content, not Recall-owned state.

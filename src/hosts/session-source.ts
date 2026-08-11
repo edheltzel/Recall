@@ -1,6 +1,6 @@
 import type { Message } from '../types/index.js';
 
-export type SessionSource = 'claude' | 'opencode' | 'pi' | 'codex' | 'mcp';
+export type SessionSource = 'claude' | 'opencode' | 'pi' | 'codex' | 'grok' | 'jcode' | 'mcp';
 
 export interface ParsedSession {
   source: SessionSource;

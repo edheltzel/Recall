@@ -50,8 +50,8 @@ cd /path/to/Recall
 5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 6. Copies refreshed hooks, shared lib files, agent skills, and
-   `FOR_CLAUDE.md`; refreshes detected host integrations; and runs the shared
-   Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
+   `FOR_CLAUDE.md`; refreshes detected OpenCode, Pi, and Grok integrations; and
+   runs the shared Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
    exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
    unmarked customized/external sections are preserved, while marked sections
    remain Recall-owned. A Recall-specific `~/.claude/rules/memory.md` leaves

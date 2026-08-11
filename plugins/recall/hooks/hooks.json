@@ -1,0 +1,62 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "recall host-hook codex",
+            "timeout": 15,
+            "statusMessage": "Loading Recall context"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "recall host-hook codex",
+            "timeout": 60,
+            "statusMessage": "Capturing session in Recall"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "recall host-hook codex",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "recall host-hook codex",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "recall host-hook codex",
+            "timeout": 60,
+            "statusMessage": "Finalizing Recall capture"
+          }
+        ]
+      }
+    ]
+  }
+}
