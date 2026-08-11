@@ -53,8 +53,11 @@ function getIdentityPath(): string | undefined {
   const home = process.env.HOME || process.env.USERPROFILE || '';
   const projectLocal = join(process.cwd(), '.atlas-recall', 'identity.md');
   if (existsSync(projectLocal)) return projectLocal;
-  const globalPath = join(home, '.claude', 'MEMORY', 'identity.md');
-  if (existsSync(globalPath)) return globalPath;
+  const recallHome = process.env.RECALL_HOME || join(home, '.agents', 'Recall');
+  const canonicalPath = join(recallHome, 'MEMORY', 'identity.md');
+  if (existsSync(canonicalPath)) return canonicalPath;
+  const legacyClaudePath = join(home, '.claude', 'MEMORY', 'identity.md');
+  if (existsSync(legacyClaudePath)) return legacyClaudePath;
   return undefined;
 }
 
@@ -315,7 +318,7 @@ export function gatherContext(): string {
 
   // Empty-state hint
   if (!l0 && l1Rows.length === 0) {
-    sections.push('_No memory yet. Drop `identity.md` into `~/.claude/MEMORY/` or this project\'s `.atlas-recall/` to seed L0._');
+    sections.push('_No memory yet. Drop `identity.md` into `~/.agents/Recall/MEMORY/` or this project\'s `.atlas-recall/` to seed L0._');
     sections.push('_Record during this session with `memory_add`; search existing knowledge with `memory_search` or `memory_hybrid_search`._');
     sections.push('');
   }

@@ -58,6 +58,7 @@ describe('npm package: files whitelist', () => {
   test('bundles the runtime assets install.sh / install-lib.sh read', () => {
     expect(hasUnder('dist/')).toBe(true);
     expect(hasUnder('hooks/lib/')).toBe(true); // hooks need their lib/ subtree
+    expect(has('hooks/grok/RecallLifecycle.json')).toBe(true);
     expect(hasUnder('agent-skills/')).toBe(true);
     expect(hasUnder('opencode/')).toBe(true);
     expect(hasUnder('pi/')).toBe(true);

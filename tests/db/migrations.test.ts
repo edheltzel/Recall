@@ -444,7 +444,7 @@ describe('source-lineage column migration (12 to 13)', () => {
     // Mutation guard: dropping the 12 → 13 entry shrinks MIGRATIONS.length to
     // 12, so user_version would land at 12 and the column would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(17);
+    expect(MIGRATIONS.length).toBe(18);
     const cols = (db.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
     expect(cols).toContain('source_ids');
   });
@@ -528,7 +528,7 @@ describe('access-tracking columns migration (13 to 14)', () => {
     // Mutation guard: dropping the 13 → 14 entry shrinks MIGRATIONS.length to 13,
     // so user_version would land at 13 and the columns would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(17);
+    expect(MIGRATIONS.length).toBe(18);
     for (const table of ACCESS_TABLES) {
       const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => c.name);
       expect(cols).toContain('access_count');
@@ -628,7 +628,7 @@ describe('FTS trigger scoping migration (14 to 15)', () => {
     // Mutation guard: dropping the 14 → 15 entry shrinks MIGRATIONS.length to 14,
     // so user_version would land at 14 with the triggers still bare → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(17);
+    expect(MIGRATIONS.length).toBe(18);
     for (const name of MEMORY_AU_TRIGGERS) {
       const sql = triggerSql(db, name);
       expect(sql).not.toBeNull();
@@ -759,12 +759,12 @@ describe('code-KG rollback migration (16 to 17)', () => {
     END;
   `;
 
-  test('fresh DB has no code_* objects and lands at version 17', () => {
+  test('fresh DB has no code_* objects and lands at the latest version', () => {
     applyMigrations(db);
     // Mutation guard: dropping the 16 → 17 entry shrinks MIGRATIONS.length to 16,
     // so user_version lands at 16 → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(17);
+    expect(MIGRATIONS.length).toBe(18);
 
     for (const table of KG_TABLES) {
       const tbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table) as any;
@@ -799,8 +799,8 @@ describe('code-KG rollback migration (16 to 17)', () => {
 
       const result = applyMigrations(legacyDb);
       expect(result.from).toBe(16);
-      expect(result.to).toBe(17);
-      expect(getMigrationVersion(legacyDb)).toBe(17);
+      expect(result.to).toBe(18);
+      expect(getMigrationVersion(legacyDb)).toBe(18);
 
       // All four objects + triggers dropped.
       for (const table of KG_TABLES) {
@@ -829,18 +829,39 @@ describe('code-KG rollback migration (16 to 17)', () => {
 
       const result = applyMigrations(legacyDb);
       expect(result.from).toBe(16);
-      expect(getMigrationVersion(legacyDb)).toBe(17);
+      expect(getMigrationVersion(legacyDb)).toBe(18);
     } finally {
       legacyDb.close();
       rmSync(legacyDir, { recursive: true, force: true });
     }
   });
 
-  test('idempotent: re-running after 17 applies nothing', () => {
+  test('idempotent: re-running after the latest migration applies nothing', () => {
     applyMigrations(db);
     const result = applyMigrations(db);
     expect(result.applied).toBe(0);
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
+  });
+});
+
+describe('host lifecycle ingest migration (17 to 18)', () => {
+  test('upgrade path creates watermark and message-key tables', () => {
+    db.exec('DROP TABLE host_ingest_messages; DROP TABLE host_ingest_state;');
+    db.prepare('PRAGMA user_version = 17').run();
+
+    const result = applyMigrations(db);
+    expect(result.from).toBe(17);
+    expect(result.to).toBe(18);
+
+    const stateColumns = (db.prepare('PRAGMA table_info(host_ingest_state)').all() as any[])
+      .map(column => column.name);
+    expect(stateColumns).toContain('transcript_digest');
+    expect(stateColumns).toContain('finalized_at');
+
+    const keyColumns = (db.prepare('PRAGMA table_info(host_ingest_messages)').all() as any[])
+      .map(column => column.name);
+    expect(keyColumns).toContain('message_key');
+    expect(keyColumns).toContain('message_id');
   });
 });
 
@@ -856,7 +877,8 @@ describe('MIGRATIONS array', () => {
     // 14 → 15: scope FTS AFTER UPDATE triggers to indexed columns (issue #153)
     // 15 → 16: native code knowledge graph schema (epic #196, issue #197) — tombstoned
     // 16 → 17: roll back the native code knowledge graph (issue #214)
-    expect(MIGRATIONS.length).toBe(17);
+    // 17 to 18: host lifecycle ingest watermarks and message keys
+    expect(MIGRATIONS.length).toBe(18);
   });
 
   test('all entries are functions', () => {

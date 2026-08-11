@@ -13,6 +13,7 @@
 #   ./uninstall.sh --no-confirm     # non-interactive; prints what was removed
 #   ./uninstall.sh --skip-opencode  # leave OpenCode integration alone
 #   ./uninstall.sh --skip-pi        # leave Pi integration alone
+#   ./uninstall.sh --skip-grok      # leave Grok lifecycle capture alone
 #   ./uninstall.sh --skip-omp       # leave omp integration alone
 #   ./uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
 #   ./uninstall.sh --help           # show this help
@@ -36,6 +37,7 @@ PURGE=false
 NO_CONFIRM=false
 SKIP_OPENCODE=false
 SKIP_PI=false
+SKIP_GROK=false
 SKIP_OMP=false
 
 while [[ $# -gt 0 ]]; do
@@ -45,6 +47,7 @@ while [[ $# -gt 0 ]]; do
   --no-confirm) NO_CONFIRM=true ;;
   --skip-opencode) SKIP_OPENCODE=true ;;
   --skip-pi) SKIP_PI=true ;;
+  --skip-grok) SKIP_GROK=true ;;
   --skip-omp) SKIP_OMP=true ;;
   --no-gum) export RECALL_NO_GUM=1 ;;
   --help | -h)
@@ -151,6 +154,7 @@ print_summary() {
   [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy ~/.agents/Recall/ tree, including the DB)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
+  [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
   [[ "$SKIP_OMP" == "true" ]] && echo "Skipping: omp"
   echo ""
   echo "Will REMOVE (symlinks back to ~/.agents/Recall/ — canonical files stay):"
@@ -165,6 +169,7 @@ print_summary() {
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
+  [[ "$SKIP_GROK" != "true" ]] && echo "  • Grok Recall lifecycle hook (~/.grok/hooks/RecallLifecycle.json)"
   [[ "$SKIP_OMP" != "true" ]] && echo "  • omp agent skills (~/.omp/agent/skills/)"
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
@@ -508,6 +513,16 @@ remove_opencode() {
   return 0
 }
 
+# Grok lifecycle hook removal. Only the Recall-managed symlink is owned;
+# foreign files at the same path are preserved by recall_unlink_if_managed.
+remove_grok() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "  [dry-run] would remove managed Grok lifecycle hook"
+  else
+    recall_uninstall_grok_platform
+  fi
+}
+
 # ── Pi removal ───────────────────────────────────────────────────────────────
 
 remove_pi() {
@@ -716,6 +731,12 @@ main() {
   if [[ "$SKIP_PI" != "true" ]]; then
     log_info "Removing Pi integration..."
     remove_pi
+    echo ""
+  fi
+
+  if [[ "$SKIP_GROK" != "true" ]]; then
+    log_info "Removing Grok lifecycle integration..."
+    remove_grok
     echo ""
   fi
 

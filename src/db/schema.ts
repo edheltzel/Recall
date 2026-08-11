@@ -234,6 +234,31 @@ CREATE TABLE IF NOT EXISTS session_progress (
   last_correction_turn INTEGER DEFAULT 0,
   updated_at           TEXT
 );
+
+/* Automatic lifecycle capture for hosts that supply a stable transcript or
+   export command. The state row is the durable watermark; message keys make a
+   repeated or overlapping hook delivery idempotent without rewriting sessions. */
+CREATE TABLE IF NOT EXISTS host_ingest_state (
+  source            TEXT NOT NULL,
+  session_id        TEXT NOT NULL,
+  transcript_ref    TEXT,
+  watermark         TEXT,
+  transcript_digest TEXT NOT NULL,
+  finalized_at      TEXT,
+  updated_at        TEXT NOT NULL,
+  PRIMARY KEY (source, session_id),
+  FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+);
+
+CREATE TABLE IF NOT EXISTS host_ingest_messages (
+  source      TEXT NOT NULL,
+  session_id  TEXT NOT NULL,
+  message_key TEXT NOT NULL,
+  message_id  INTEGER,
+  PRIMARY KEY (source, session_id, message_key),
+  FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+  FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
+);
 `;
 
 export const CREATE_INDEXES = `
@@ -245,6 +270,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_project ON messages(project);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_message_id ON host_ingest_messages(message_id);
 
 -- Decision indexes
 CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project);

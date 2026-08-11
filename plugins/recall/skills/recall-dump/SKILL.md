@@ -7,7 +7,7 @@ description: "Flush current session to Recall database and capture a Library of 
 
 ## Codex routing
 
-Use the `memory_dump` MCP tool with `source: "codex"` and explicit visible `messages`. MCP does not expose lifecycle auto-capture or a supported Codex transcript path.
+Codex lifecycle hooks capture supported transcripts automatically. Use `memory_dump` only for an explicit supplemental snapshot of visible messages.
 
 The canonical workflow below remains authoritative, but equivalent behavior is not assumed across hosts.
 

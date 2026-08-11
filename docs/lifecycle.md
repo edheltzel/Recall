@@ -68,7 +68,7 @@ Two situations the original scripts didn't spell out:
 
 **`recall uninstall`** (delegates to `./uninstall.sh`) removes Recall's integration surgically and **preserves your memory database by default**. Exit your agent first.
 
-Flags (forwarded verbatim): `--dry-run` (narrate, touch nothing), `--purge` (also destroy `~/.agents/Recall/` — DB + backups — after a `pre_purge_<TS>/` snapshot and an interactive `PURGE` confirmation), `--no-confirm`, `--skip-opencode`, `--skip-pi`. The exact list of what is removed vs. preserved is in [Installation → Uninstalling](installation.md#uninstalling).
+Flags (forwarded verbatim): `--dry-run` (narrate, touch nothing), `--purge` (also destroy `~/.agents/Recall/` — DB + backups — after a `pre_purge_<TS>/` snapshot and an interactive `PURGE` confirmation), `--no-confirm`, `--skip-opencode`, `--skip-pi`, `--skip-grok`. The exact list of what is removed vs. preserved is in [Installation → Uninstalling](installation.md#uninstalling).
 
 ---
 

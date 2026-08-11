@@ -15,6 +15,7 @@ import { runImport } from './commands/import.js';
 import { runImportConversations } from './commands/import-conversations.js';
 import { runLoa, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
 import { runDump } from './commands/dump.js';
+import { runHostHook } from './commands/host-hook.js';
 import { runImportLegacy } from './commands/import-legacy.js';
 import { runScrubArchive } from './commands/scrub-archive.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
@@ -476,6 +477,14 @@ program
       limit: options.limit ? parseInt(options.limit, 10) : undefined,
       skipFabric: options.skipFabric
     });
+    closeDb();
+  });
+
+// Internal lifecycle adapter entry point. Host plugins own invocation.
+program
+  .command('host-hook <host>', { hidden: true })
+  .action(async (host) => {
+    await runHostHook(host);
     closeDb();
   });
 

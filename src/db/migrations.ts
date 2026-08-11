@@ -394,6 +394,36 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS code_files;
     `);
   },
+
+  // Migration 17 to 18: host lifecycle ingest watermarks and message keys.
+  // CREATE_TABLES handles fresh databases; these statements preserve upgrade
+  // behavior when applyMigrations is called against a legacy schema directly.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS host_ingest_state (
+        source            TEXT NOT NULL,
+        session_id        TEXT NOT NULL,
+        transcript_ref    TEXT,
+        watermark         TEXT,
+        transcript_digest TEXT NOT NULL,
+        finalized_at      TEXT,
+        updated_at        TEXT NOT NULL,
+        PRIMARY KEY (source, session_id),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+      );
+      CREATE TABLE IF NOT EXISTS host_ingest_messages (
+        source      TEXT NOT NULL,
+        session_id  TEXT NOT NULL,
+        message_key TEXT NOT NULL,
+        message_id  INTEGER,
+        PRIMARY KEY (source, session_id, message_key),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_host_ingest_message_id
+        ON host_ingest_messages(message_id);
+    `);
+  },
 ];
 
 // ---------------------------------------------------------------------------

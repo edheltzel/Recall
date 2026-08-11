@@ -100,6 +100,7 @@ do_install() {
   [[ "${RECALL_PACKAGED:-false}" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL - 3))
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
+  [[ "$GROK_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$OMP_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
   # Pre-flight summary panel — shows what's about to happen and asks the
@@ -110,6 +111,7 @@ do_install() {
     [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && _platforms+=("Claude Code")
     [[ "$OPENCODE_DETECTED" == "true" ]] && _platforms+=("OpenCode")
     [[ "$PI_DETECTED" == "true" ]] && _platforms+=("Pi")
+    [[ "$GROK_DETECTED" == "true" ]] && _platforms+=("Grok")
     [[ "$OMP_DETECTED" == "true" ]] && _platforms+=("omp")
     local _plist
     _plist=$(IFS=", "; echo "${_platforms[*]:-(none — core install only)}")
@@ -225,6 +227,11 @@ do_install() {
   if [[ "$PI_DETECTED" == "true" ]]; then
     _step "Pi" "Configuring Pi package and MCP integration"
     recall_install_pi_platform
+  fi
+
+  if [[ "$GROK_DETECTED" == "true" ]]; then
+    _step "Grok" "Configuring automatic lifecycle capture"
+    recall_install_grok_platform
   fi
 
   if [[ "$OMP_DETECTED" == "true" ]]; then

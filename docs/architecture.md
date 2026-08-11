@@ -68,11 +68,11 @@ Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extr
 
 Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agents/Recall`) instead of a host configuration directory.
 
-Codex is distributed as the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`.
+Codex is distributed as the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`. Its `.mcp.json` registers `recall-memory`, `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical sources, and plugin hooks provide supported transcript capture and session-start context. See [Codex Integration](CODEX_INTEGRATION.md).
 
-Its `.mcp.json` registers `recall-memory`, and `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical `agent-skills/` sources.
+Grok lifecycle capture is installer-owned. A managed global hook runs `grok export <session-id>` and writes immediately through `src/lib/host-ingest.ts`; Grok has no verified automatic injection surface. See [Grok Integration](GROK_INTEGRATION.md).
 
-MCP covers the nine query/write operations but does not define transcript lifecycle events; see [Codex Integration](CODEX_INTEGRATION.md).
+The same ingest seam owns scrub, native session IDs, source/project attribution, persistent message keys, watermarks, and terminal finalization. JCode does not call it because the bounded live probe did not prove safe history ordering or additive configuration. See [JCode Integration](JCODE_INTEGRATION.md).
 
 Claude Code can install the native plugin in `plugins/recall-claude/` for skills + MCP while the lifecycle installer continues to own hooks and reconciles legacy duplicate surfaces; see [Claude Integration](CLAUDE_INTEGRATION.md).
 
@@ -85,6 +85,8 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | Table | Purpose | FTS5 Indexed |
 |-------|---------|:---:|
 | sessions | Cross-host session metadata (ID, timestamps, project, branch, source) | No |
+| host_ingest_state | Per-host transcript reference, digest, watermark, and terminal state | No |
+| host_ingest_messages | Persistent lifecycle message keys linked to inserted message rows | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) column | Yes |
 | loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) column | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
