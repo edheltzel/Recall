@@ -28,6 +28,15 @@ export interface HostTranscript {
   capturedAt?: string;
   incremental?: boolean;
   finalize?: boolean;
+  batch?: HostIngestBatch;
+}
+
+export interface HostIngestBatch {
+  fallbackOccurrences: Map<string, number>;
+}
+
+export function createHostIngestBatch(): HostIngestBatch {
+  return { fallbackOccurrences: new Map() };
 }
 
 export interface HostIngestResult {
@@ -220,7 +229,7 @@ function insertNewMessages(
   input: HostTranscript,
   prepared: PreparedTranscript
 ): number {
-  const occurrences = new Map<string, number>();
+  const occurrences = input.batch?.fallbackOccurrences ?? new Map<string, number>();
   const latestOccurrence = db.prepare(`
     SELECT message_key FROM host_ingest_messages
     WHERE source = ? AND session_id = ? AND message_key >= ? AND message_key < ?

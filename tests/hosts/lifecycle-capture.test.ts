@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { handleGrokHostHook, handleHostHook } from '../../src/commands/host-hook';
 import { closeDb, getDb, initDb } from '../../src/db/connection';
 import { parseCodexRollout } from '../../src/hosts/codex-lifecycle';
 import { parseGrokExport } from '../../src/hosts/grok-lifecycle';
-import { ingestHostTranscript, type HostTranscript } from '../../src/lib/host-ingest';
+import {
+  createHostIngestBatch,
+  ingestHostTranscript,
+  type HostTranscript,
+} from '../../src/lib/host-ingest';
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, '..', 'fixtures', 'host-lifecycle', name), 'utf-8');
@@ -261,6 +265,9 @@ describe('host hook payload routing', () => {
     });
     expect(start.skipped).toBe('unsupported-event');
     expect(start.stdout).toBeUndefined();
+    const stagingBefore = new Set(
+      readdirSync(tmpdir()).filter(name => name.startsWith('recall-grok-export-'))
+    );
 
     const result = await handleGrokHostHook(
       {
@@ -274,6 +281,11 @@ describe('host hook payload routing', () => {
           return fixture('grok-export.md');
         },
         ingest: input => {
+          const stagingDirectories = readdirSync(tmpdir()).filter(
+            name => name.startsWith('recall-grok-export-') && !stagingBefore.has(name)
+          );
+          expect(stagingDirectories).toHaveLength(1);
+          expect(readdirSync(join(tmpdir(), stagingDirectories[0]))).toEqual([]);
           received = input;
           return {
             sessionId: input.sessionId,
@@ -323,6 +335,7 @@ describe('host hook payload routing', () => {
     const codexLengths: number[] = [];
     const codexFinalization: boolean[] = [];
     const codexIncremental: boolean[] = [];
+    const codexBatches: Array<HostTranscript['batch']> = [];
     const codex = handleHostHook(
       'codex',
       {
@@ -339,6 +352,7 @@ describe('host hook payload routing', () => {
         ingest: input => {
           codexFinalization.push(Boolean(input.finalize));
           codexIncremental.push(Boolean(input.incremental));
+          codexBatches.push(input.batch);
           return {
             sessionId: input.sessionId,
             inserted: input.messages.length,
@@ -353,10 +367,13 @@ describe('host hook payload routing', () => {
     expect(codex.ingest).toMatchObject({ inserted: 2, finalized: true });
     expect(codexFinalization).toEqual([false, true]);
     expect(codexIncremental).toEqual([false, false]);
+    expect(codexBatches[0]).toBeDefined();
+    expect(codexBatches[1]).toBe(codexBatches[0]);
     expect(Math.max(...codexLengths)).toBeLessThanOrEqual(maxChunk);
 
     const grokFinalization: boolean[] = [];
     const grokIncremental: boolean[] = [];
+    const grokBatches: Array<HostTranscript['batch']> = [];
     const grokChunkSizes: number[] = [];
     const grokBlock = Buffer.from('grok export padding\n'.repeat(4096));
     const grok = await handleGrokHostHook(
@@ -373,6 +390,7 @@ describe('host hook payload routing', () => {
         ingest: input => {
           grokFinalization.push(Boolean(input.finalize));
           grokIncremental.push(Boolean(input.incremental));
+          grokBatches.push(input.batch);
           for (const message of input.messages) {
             grokChunkSizes.push(Buffer.byteLength(message.content));
           }
@@ -390,6 +408,8 @@ describe('host hook payload routing', () => {
     expect(grok.ingest).toMatchObject({ inserted: 2, finalized: true });
     expect(grokFinalization).toEqual([false, true]);
     expect(grokIncremental).toEqual([false, false]);
+    expect(grokBatches[0]).toBeDefined();
+    expect(grokBatches[1]).toBe(grokBatches[0]);
     expect(Math.max(...grokChunkSizes)).toBeLessThanOrEqual(maxChunk);
   });
 
@@ -420,6 +440,25 @@ describe('host hook payload routing', () => {
 });
 
 describe('host-neutral immediate SQLite ingest', () => {
+  test('shares fallback occurrences across reset batch chunks', () => {
+    const batch = createHostIngestBatch();
+    const input: HostTranscript = {
+      source: 'codex',
+      sessionId: 'codex-reset-batch-occurrences',
+      messages: [{ role: 'user', content: 'Continue.' }],
+      incremental: false,
+      batch,
+    };
+
+    expect(ingestHostTranscript(input)).toMatchObject({ inserted: 1 });
+    expect(ingestHostTranscript(input)).toMatchObject({ inserted: 1 });
+
+    const row = getDb()
+      .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
+      .get(input.sessionId) as { count: number };
+    expect(row.count).toBe(2);
+  });
+
   test('reconciles fallback keys across append-only and reset captures', () => {
     const sessionId = 'codex-fallback-reconciliation';
     const first = { role: 'user' as const, content: 'First retained turn.' };
