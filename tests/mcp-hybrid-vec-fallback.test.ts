@@ -249,6 +249,52 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     )).toBe(true);
   });
 
+  test('deduplicates identities when near-tied KNN pages reorder', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    const orphans = Array.from({ length: 9 }, (_, index) => ({
+      source_table: 'decisions',
+      source_id: 210_000 + index,
+      distance: 0.001 + index * 0.0001,
+    }));
+    knnHits = (k) => k === 10
+      ? [...orphans, { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }]
+      : [
+          { source_table: 'decisions', source_id: bruteForceDecisionId, distance: 0.0005 },
+          ...orphans,
+          { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 },
+        ];
+
+    const { results, semanticBackend } = await hybridSearch('knnreorderedcandidatequery115', { limit: 5 });
+
+    expect(semanticBackend).toBe('knn');
+    expect(knnCalls.map(call => call.k)).toEqual([10, 20]);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === bruteForceDecisionId,
+    )).toBe(true);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === knnDecisionId,
+    )).toBe(true);
+  });
+
+  test('falls back when bounded KNN filtering cannot reach published results', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    knnHits = (k) => Array.from({ length: k }, (_, index) => ({
+      source_table: 'decisions',
+      source_id: 220_000 + index,
+      distance: 0.001 + index * 0.0001,
+    }));
+
+    const { results, semanticBackend } = await hybridSearch('knnexhaustedcandidatequery114', { limit: 5 });
+
+    expect(semanticBackend).toBe('bruteforce');
+    expect(knnCalls.map(call => call.k)).toEqual([10, 20, 30, 40]);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === bruteForceDecisionId,
+    )).toBe(true);
+  });
+
   test('materializes vector-only content inside the guarded KNN read', async () => {
     resetVecMock();
     vecAvailable = true;

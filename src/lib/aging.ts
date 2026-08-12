@@ -19,6 +19,7 @@ import type { ProvenanceTable } from '../types/index.js';
 import { notRecordedSurvivorSql, notMarkedDuplicateSql, fkProtectedIds } from './dedup.js';
 import { clampImportance } from './memory.js';
 import { chunked } from './chunk.js';
+import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
 
 /** Tables the aging policy operates on, in display order. */
 export const AGE_TABLES: readonly ProvenanceTable[] = [
@@ -205,6 +206,7 @@ export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
       if (report.action === 'delete') {
         for (const chunk of chunked(ids)) {
           const placeholders = chunk.map(() => '?').join(', ');
+          deleteRecordEmbeddingsByIdsInTransaction(db, report.table, chunk);
           db.prepare(`DELETE FROM ${report.table} WHERE id IN (${placeholders})`).run(...chunk);
           if (report.table === 'messages') {
             db.prepare(`
@@ -212,9 +214,6 @@ export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
               WHERE message_id IN (${placeholders})
             `).run(...chunk);
           }
-          db.prepare(
-            `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`
-          ).run(report.table, ...chunk);
         }
         result.deleted += ids.length;
       } else if (report.action === 'expire') {

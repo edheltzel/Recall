@@ -10,6 +10,10 @@ import {
   invalidateRecordEmbedding,
 } from '../lib/memory.js';
 import { chunked } from '../lib/chunk.js';
+import {
+  deleteRecordEmbeddingsByIdsInTransaction,
+  deleteRecordEmbeddingsBySelectionInTransaction,
+} from '../lib/embedding-store.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
 import { discoverCurrentSession } from '../hosts/session-sources.js';
@@ -85,6 +89,7 @@ export function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: 
     }
 
     for (const chunk of chunks) {
+      deleteRecordEmbeddingsByIdsInTransaction(db, 'loa_entries', chunk);
       db.prepare(`
         DELETE FROM loa_entries WHERE id IN (${chunk.map(() => '?').join(',')})
       `).run(...chunk);
@@ -112,6 +117,12 @@ function clearSessionMessages(sessionId: string): number {
       }
     }
 
+    deleteRecordEmbeddingsBySelectionInTransaction(
+      db,
+      'messages',
+      'SELECT id FROM messages WHERE session_id = ?',
+      [sessionId]
+    );
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
 
     return count;

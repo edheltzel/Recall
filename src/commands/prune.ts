@@ -1,8 +1,8 @@
 // recall prune command — table lifecycle management
 
 import { getDb } from '../db/connection.js';
-import { invalidateVecIndex } from '../db/vec.js';
 import { notRecordedSurvivorSql } from '../lib/dedup.js';
+import { deleteRecordEmbeddingsBySelectionInTransaction } from '../lib/embedding-store.js';
 
 interface PruneOptions {
   execute?: boolean;
@@ -141,11 +141,11 @@ export function runPrune(options: PruneOptions): void {
   // Execute deletes
   if (messageCount > 0) {
     db.transaction(() => {
-      const removedEmbeddings = db.prepare(`
-        DELETE FROM embeddings WHERE source_table = 'messages' AND source_id IN (
-          SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
-        )
-      `).run();
+      deleteRecordEmbeddingsBySelectionInTransaction(
+        db,
+        'messages',
+        `SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}`
+      );
       db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
         WHERE message_id IN (
           SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
@@ -154,7 +154,6 @@ export function runPrune(options: PruneOptions): void {
         AND (host_ingest_token IS NULL OR EXISTS (
           SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
         ))`).run();
-      if (removedEmbeddings.changes > 0) invalidateVecIndex(db);
     })();
   }
 
@@ -168,11 +167,25 @@ export function runPrune(options: PruneOptions): void {
   }
 
   if (breadcrumbCount > 0) {
-    db.prepare(`DELETE FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`).run();
+    db.transaction(() => {
+      deleteRecordEmbeddingsBySelectionInTransaction(
+        db,
+        'breadcrumbs',
+        `SELECT id FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`
+      );
+      db.prepare(`DELETE FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`).run();
+    })();
   }
 
   if (!keepDecisions && decisionCount > 0) {
-    db.prepare(`DELETE FROM decisions ${decisionWhere} ${decisionGuard}`).run();
+    db.transaction(() => {
+      deleteRecordEmbeddingsBySelectionInTransaction(
+        db,
+        'decisions',
+        `SELECT id FROM decisions ${decisionWhere} ${decisionGuard}`
+      );
+      db.prepare(`DELETE FROM decisions ${decisionWhere} ${decisionGuard}`).run();
+    })();
   }
 
   if (trackerCount > 0) {
