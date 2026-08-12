@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "recall host-hook grok",
-            "timeout": 60
+            "timeout": 90
           }
         ]
       }
@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "recall host-hook grok",
-            "timeout": 60
+            "timeout": 90
           }
         ]
       }
@@ -28,7 +28,7 @@
           {
             "type": "command",
             "command": "recall host-hook grok",
-            "timeout": 60
+            "timeout": 90
           }
         ]
       }
@@ -39,7 +39,7 @@
           {
             "type": "command",
             "command": "recall host-hook grok",
-            "timeout": 60
+            "timeout": 90
           }
         ]
       }

@@ -72,6 +72,7 @@ describe('Grok lifecycle hook ownership', () => {
     expect(config.hooks.SessionStart).toBeUndefined();
     for (const groups of Object.values(config.hooks) as any[]) {
       expect(groups[0].hooks[0].command).toBe('recall host-hook grok');
+      expect(groups[0].hooks[0].timeout).toBe(90);
     }
 
     const second = helper('recall_install_grok_platform');

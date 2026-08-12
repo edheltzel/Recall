@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport } from '../hosts/grok-lifecycle.js';
 import {
+  createHostIngestBatch,
   ingestHostTranscript,
   getHostIngestCheckpoint,
   type HostIngestCheckpoint,
@@ -26,6 +27,7 @@ import {
 const MAX_HOOK_INPUT_BYTES = 1024 * 1024;
 const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
 const WATERMARK_TAIL_BYTES = 4096;
+const GROK_EXPORT_TIMEOUT_MS = 45_000;
 
 interface HookPayload {
   hook_event_name?: unknown;
@@ -228,7 +230,7 @@ async function* runGrokExportStream(sessionId: string): AsyncGenerator<Buffer> {
   const timeout = setTimeout(() => {
     timedOut = true;
     child.kill('SIGKILL');
-  }, 60_000);
+  }, GROK_EXPORT_TIMEOUT_MS);
   try {
     for await (const chunk of child.stdout) yield asBuffer(chunk);
     const result = await completion;
@@ -262,24 +264,27 @@ function grokExportStream(
 
 async function stageGrokExport(
   source: AsyncIterable<string | Buffer>
-): Promise<{ directory: string; path: string }> {
+): Promise<{ directory: string; fd: number; size: number }> {
   const directory = mkdtempSync(join(tmpdir(), 'recall-grok-export-'));
   const path = join(directory, 'export.md');
-  const fd = openSync(path, 'wx');
-  let closed = false;
+  const fd = openSync(path, 'wx+', 0o600);
+  let size = 0;
   try {
+    rmSync(path);
     for await (const value of source) {
       const raw = asBuffer(value);
+      if (!Number.isSafeInteger(size + raw.length)) {
+        throw new Error('Grok export is too large to capture safely');
+      }
       let written = 0;
       while (written < raw.length) {
         written += writeSync(fd, raw, written, raw.length - written);
       }
+      size += raw.length;
     }
-    closeSync(fd);
-    closed = true;
-    return { directory, path };
+    return { directory, fd, size };
   } catch (error) {
-    if (!closed) closeSync(fd);
+    closeSync(fd);
     rmSync(directory, { recursive: true, force: true });
     throw error;
   }
@@ -288,16 +293,22 @@ async function stageGrokExport(
 function ingestStagedGrokExport(
   request: GrokHookRequest,
   dependencies: HostHookDependencies,
-  path: string
+  staged: { fd: number; size: number }
 ): HostHookResult {
   const transcriptRef = 'grok export';
   const ingest = dependencies.ingest ?? ingestHostTranscript;
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
   const previous = checkpoint('grok', request.sessionId);
-  const size = suppliedTranscriptSize(path);
-  const read = (start: number, length: number) => readSuppliedTranscript(path, start, length);
+  const size = staged.size;
+  const read = (start: number, length: number) => {
+    const bytes = Math.max(0, Math.min(length, size - start));
+    const buffer = Buffer.alloc(bytes);
+    const read = readSync(staged.fd, buffer, 0, bytes, start);
+    return read === bytes ? buffer : buffer.subarray(0, read);
+  };
   const start = byteCaptureStart(previous, transcriptRef, size, read);
   const incremental = start > 0;
+  const batch = createHostIngestBatch();
   if (start === size && (!request.finalize || previous?.finalized)) {
     return { skipped: 'unchanged-transcript' };
   }
@@ -313,6 +324,7 @@ function ingestStagedGrokExport(
         capturedAt: request.capturedAt,
         incremental,
         finalize: true,
+        batch,
       }),
     };
   }
@@ -329,6 +341,7 @@ function ingestStagedGrokExport(
       capturedAt: request.capturedAt,
       incremental,
       finalize: request.finalize && chunk.end === size,
+      batch,
     }));
   }
   return { ingest: aggregate };
@@ -343,8 +356,9 @@ export async function handleGrokHostHook(
   if ('skipped' in request) return request;
   const staged = await stageGrokExport(grokExportStream(request.sessionId, dependencies));
   try {
-    return ingestStagedGrokExport(request, dependencies, staged.path);
+    return ingestStagedGrokExport(request, dependencies, staged);
   } finally {
+    closeSync(staged.fd);
     rmSync(staged.directory, { recursive: true, force: true });
   }
 }
@@ -428,6 +442,7 @@ export function handleHostHook(
     const previous = checkpoint('codex', sessionId);
     const start = byteCaptureStart(previous, transcriptPath, size, read);
     const incremental = start > 0;
+    const batch = createHostIngestBatch();
     const finalize = event === 'sessionend';
     if (start === size && (!finalize || previous?.finalized)) {
       return { skipped: 'unchanged-transcript' };
@@ -444,6 +459,7 @@ export function handleHostHook(
           capturedAt,
           incremental,
           finalize: true,
+          batch,
         }),
       };
     }
@@ -464,6 +480,7 @@ export function handleHostHook(
         capturedAt,
         incremental,
         finalize: finalize && chunk.end === size,
+        batch,
       }));
     }
     return { ingest: aggregate };
