@@ -659,6 +659,7 @@ describe('host hook payload routing', () => {
     expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 1 });
     markdown = 'Frame A\n\nFrame B';
     expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 1 });
+    expect((await handleGrokHostHook(payload, dependencies)).skipped).toBe('unchanged-transcript');
     getDb().prepare(`
       UPDATE host_ingest_state SET watermark = ? WHERE source = 'grok' AND session_id = ?
     `).run(
@@ -714,12 +715,14 @@ describe('host hook payload routing', () => {
     let checkpointReads = 0;
     let batchCalls = 0;
     let exports = 0;
+    const exportTimeouts: number[] = [];
 
     const result = await handleGrokHostHook(
       { hook_event_name: 'Stop', session_id: 'grok-checkpoint-retry' },
       {
-        exportGrok: () => {
+        exportGrok: (_sessionId, timeoutMs) => {
           exports++;
+          exportTimeouts.push(timeoutMs ?? 0);
           return markdown;
         },
         checkpoint: () => checkpointReads++ === 0 ? undefined : advanced,
@@ -732,6 +735,7 @@ describe('host hook payload routing', () => {
 
     expect(result).toEqual({ skipped: 'unchanged-transcript' });
     expect(exports).toBe(2);
+    expect(exportTimeouts.every(timeout => timeout > 0 && timeout <= 30_000)).toBe(true);
     expect(checkpointReads).toBe(2);
     expect(batchCalls).toBe(1);
   });

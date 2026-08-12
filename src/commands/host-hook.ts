@@ -30,8 +30,10 @@ import {
 const MAX_HOOK_INPUT_BYTES = 1024 * 1024;
 const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
 const HASH_READ_BYTES = 1024 * 1024;
-const GROK_EXPORT_TIMEOUT_MS = 45_000;
-const GROK_CHECKPOINT_ATTEMPTS = 3;
+const GROK_CAPTURE_BUDGET_MS = 75_000;
+const GROK_FINALIZATION_MARGIN_MS = 15_000;
+const GROK_EXPORT_ATTEMPT_MAX_MS = 30_000;
+const GROK_CHECKPOINT_ATTEMPTS = 2;
 const ROLLING_SEEDS = [0x811c9dc5, 0x9e3779b9] as const;
 const ROLLING_FACTORS = [0x01000193, 0x27d4eb2d] as const;
 
@@ -55,8 +57,11 @@ interface HookPayload {
 export interface HostHookDependencies {
   readTranscript?: (path: string, start?: number, length?: number) => string | Buffer;
   transcriptSize?: (path: string) => number;
-  exportGrok?: (sessionId: string) => string;
-  exportGrokStream?: (sessionId: string) => AsyncIterable<string | Buffer>;
+  exportGrok?: (sessionId: string, timeoutMs?: number) => string;
+  exportGrokStream?: (
+    sessionId: string,
+    timeoutMs?: number
+  ) => AsyncIterable<string | Buffer>;
   renderContext?: () => string;
   ingest?: typeof ingestHostTranscript;
   ingestBatch?: typeof ingestHostTranscriptBatch;
@@ -278,7 +283,10 @@ function grokHookRequest(payload: HookPayload): GrokHookRequest | { skipped: str
   };
 }
 
-async function* runGrokExportStream(sessionId: string): AsyncGenerator<Buffer> {
+async function* runGrokExportStream(
+  sessionId: string,
+  timeoutMs: number
+): AsyncGenerator<Buffer> {
   const command = process.env.GROK_BIN || 'grok';
   const child = spawn(command, ['export', sessionId], {
     env: process.env,
@@ -302,7 +310,7 @@ async function* runGrokExportStream(sessionId: string): AsyncGenerator<Buffer> {
   const timeout = setTimeout(() => {
     timedOut = true;
     child.kill('SIGKILL');
-  }, GROK_EXPORT_TIMEOUT_MS);
+  }, timeoutMs);
   try {
     for await (const chunk of child.stdout) yield asBuffer(chunk);
     const result = await completion;
@@ -323,15 +331,26 @@ async function* runGrokExportStream(sessionId: string): AsyncGenerator<Buffer> {
 
 function grokExportStream(
   sessionId: string,
-  dependencies: HostHookDependencies
+  dependencies: HostHookDependencies,
+  timeoutMs: number
 ): AsyncIterable<string | Buffer> {
-  if (dependencies.exportGrokStream) return dependencies.exportGrokStream(sessionId);
+  if (dependencies.exportGrokStream) {
+    return dependencies.exportGrokStream(sessionId, timeoutMs);
+  }
   if (dependencies.exportGrok) {
     return (async function* () {
-      yield dependencies.exportGrok!(sessionId);
+      yield dependencies.exportGrok!(sessionId, timeoutMs);
     })();
   }
-  return runGrokExportStream(sessionId);
+  return runGrokExportStream(sessionId, timeoutMs);
+}
+
+function grokExportAttemptTimeout(deadline: number, attemptsRemaining: number): number {
+  const available = deadline - Date.now() - GROK_FINALIZATION_MARGIN_MS;
+  if (available <= 0) throw new Error('Grok lifecycle capture deadline exhausted');
+  return Math.min(GROK_EXPORT_ATTEMPT_MAX_MS, Math.max(1, Math.floor(
+    available / attemptsRemaining
+  )));
 }
 
 async function stageGrokExport(
@@ -441,7 +460,7 @@ function ingestStagedGrokExport(
         watermark: chunk.watermark,
         capturedAt: request.capturedAt,
         incremental,
-        reconcileComplete: !incremental && chunk.end === size,
+        reconcileComplete: chunk.end === size,
         finalize: request.finalize && chunk.end === size,
         batch,
       };
@@ -463,8 +482,15 @@ export async function handleGrokHostHook(
   if (payloadIsSubagent(payload) && !includeSubagents()) return { skipped: 'subagent' };
   const request = grokHookRequest(payload);
   if ('skipped' in request) return request;
+  const deadline = Date.now() + GROK_CAPTURE_BUDGET_MS;
   for (let attempt = 0; attempt < GROK_CHECKPOINT_ATTEMPTS; attempt++) {
-    const staged = await stageGrokExport(grokExportStream(request.sessionId, dependencies));
+    const timeoutMs = grokExportAttemptTimeout(
+      deadline,
+      GROK_CHECKPOINT_ATTEMPTS - attempt
+    );
+    const staged = await stageGrokExport(
+      grokExportStream(request.sessionId, dependencies, timeoutMs)
+    );
     try {
       return ingestStagedGrokExport(request, dependencies, staged);
     } catch (error) {

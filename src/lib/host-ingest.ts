@@ -1,5 +1,8 @@
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'crypto';
+import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { getDb } from '../db/connection.js';
 import { chunked } from './chunk.js';
 import { detectProject } from './project.js';
@@ -108,6 +111,25 @@ interface PreparedTranscript {
   watermark: string;
   digest: string;
   redactions: Set<string>;
+}
+
+interface SerializedPreparedInput {
+  input: Pick<
+    HostTranscript,
+    'source' | 'sessionId' | 'incremental' | 'reconcileComplete' | 'finalize'
+  >;
+  batchIndex: number | null;
+  prepared: Omit<PreparedTranscript, 'messages' | 'redactions'> & {
+    messages: Array<Omit<PreparedMessage, 'nativeId' | 'identityContent'>>;
+    redactions: string[];
+  };
+}
+
+interface PreparedInputStage {
+  directory: string;
+  fd: number;
+  count: number;
+  batches: HostIngestBatch[];
 }
 
 interface IngestStateRow {
@@ -235,6 +257,110 @@ function prepareTranscript(input: HostTranscript): PreparedTranscript {
     digest,
     redactions,
   };
+}
+
+function writePreparedRecord(fd: number, value: SerializedPreparedInput): void {
+  const payload = Buffer.from(JSON.stringify(value));
+  const header = Buffer.allocUnsafe(4);
+  header.writeUInt32BE(payload.length);
+  for (const buffer of [header, payload]) {
+    let offset = 0;
+    while (offset < buffer.length) {
+      offset += writeSync(fd, buffer, offset, buffer.length - offset);
+    }
+  }
+}
+
+function readPreparedBytes(fd: number, length: number, position: number): Buffer {
+  const buffer = Buffer.allocUnsafe(length);
+  let offset = 0;
+  while (offset < length) {
+    const bytesRead = readSync(fd, buffer, offset, length - offset, position + offset);
+    if (bytesRead === 0) throw new Error('Prepared host transcript stage ended unexpectedly');
+    offset += bytesRead;
+  }
+  return buffer;
+}
+
+function stagePreparedInputs(
+  inputs: Iterable<HostTranscript>,
+  expectation?: HostIngestCheckpointExpectation
+): PreparedInputStage {
+  const directory = mkdtempSync(join(tmpdir(), 'recall-host-ingest-'));
+  const path = join(directory, 'prepared.jsonl');
+  const fd = openSync(path, 'wx+', 0o600);
+  const batches: HostIngestBatch[] = [];
+  const batchIndexes = new Map<HostIngestBatch, number>();
+  let count = 0;
+  try {
+    rmSync(path);
+    for (const input of inputs) {
+      assertSessionId(input.sessionId);
+      if (expectation && (
+        input.source !== expectation.source || input.sessionId !== expectation.sessionId
+      )) {
+        throw new Error('Expected checkpoint must own every host transcript batch input');
+      }
+      let batchIndex: number | null = null;
+      if (input.batch) {
+        const existingIndex = batchIndexes.get(input.batch);
+        batchIndex = existingIndex ?? batches.length;
+        if (existingIndex === undefined) {
+          batchIndexes.set(input.batch, batchIndex);
+          batches.push(input.batch);
+        }
+      }
+      const prepared = prepareTranscript(input);
+      writePreparedRecord(fd, {
+        input: {
+          source: input.source,
+          sessionId: input.sessionId,
+          incremental: input.incremental,
+          reconcileComplete: input.reconcileComplete,
+          finalize: input.finalize,
+        },
+        batchIndex,
+        prepared: {
+          ...prepared,
+          messages: prepared.messages.map(message => ({
+            role: message.role,
+            content: message.content,
+            timestamp: message.timestamp,
+            messageKey: message.messageKey,
+            identityBase: message.identityBase,
+            sourcePosition: message.sourcePosition,
+          })),
+          redactions: [...prepared.redactions],
+        },
+      });
+      count++;
+    }
+    if (count === 0) throw new Error('Host transcript batch must not be empty');
+    return { directory, fd, count, batches };
+  } catch (error) {
+    closeSync(fd);
+    rmSync(path, { force: true });
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function* readPreparedInputs(
+  stage: PreparedInputStage
+): Generator<{ input: HostTranscript; prepared: PreparedTranscript }> {
+  let position = 0;
+  for (let index = 0; index < stage.count; index++) {
+    const header = readPreparedBytes(stage.fd, 4, position);
+    position += header.length;
+    const payload = readPreparedBytes(stage.fd, header.readUInt32BE(0), position);
+    position += payload.length;
+    const value = JSON.parse(payload.toString('utf-8')) as SerializedPreparedInput;
+    const batch = value.batchIndex === null ? undefined : stage.batches[value.batchIndex];
+    yield {
+      input: { ...value.input, messages: [], batch },
+      prepared: { ...value.prepared, redactions: new Set(value.prepared.redactions) },
+    };
+  }
 }
 
 function assertSessionOwnership(db: Database, input: HostTranscript): void {
@@ -697,33 +823,24 @@ export function ingestHostTranscriptBatch(
   inputs: Iterable<HostTranscript>,
   expectation?: HostIngestCheckpointExpectation
 ): HostIngestResult {
-  const preparedInputs: Array<{ input: HostTranscript; prepared: PreparedTranscript }> = [];
-  for (const input of inputs) {
-    assertSessionId(input.sessionId);
-    if (expectation && (
-      input.source !== expectation.source || input.sessionId !== expectation.sessionId
-    )) {
-      throw new Error('Expected checkpoint must own every host transcript batch input');
-    }
-    preparedInputs.push({
-      input: { ...input, messages: [] },
-      prepared: prepareTranscript(input),
-    });
+  const stage = stagePreparedInputs(inputs, expectation);
+  try {
+    const db = getDb();
+    return db
+      .transaction(() => {
+        if (expectation) assertExpectedCheckpoint(db, expectation);
+        let aggregate: HostIngestResult | undefined;
+        for (const { input, prepared } of readPreparedInputs(stage)) {
+          aggregate = mergeHostIngestResults(
+            aggregate,
+            ingestHostTranscriptInTransaction(db, input, prepared)
+          );
+        }
+        return aggregate!;
+      })
+      .immediate();
+  } finally {
+    closeSync(stage.fd);
+    rmSync(stage.directory, { recursive: true, force: true });
   }
-  if (preparedInputs.length === 0) throw new Error('Host transcript batch must not be empty');
-
-  const db = getDb();
-  return db
-    .transaction(() => {
-      if (expectation) assertExpectedCheckpoint(db, expectation);
-      let aggregate: HostIngestResult | undefined;
-      for (const { input, prepared } of preparedInputs) {
-        aggregate = mergeHostIngestResults(
-          aggregate,
-          ingestHostTranscriptInTransaction(db, input, prepared)
-        );
-      }
-      return aggregate!;
-    })
-    .immediate();
 }
