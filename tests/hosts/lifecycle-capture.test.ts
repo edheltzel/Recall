@@ -683,6 +683,23 @@ describe('host hook payload routing', () => {
     expect(rows.map(row => row.content)).toEqual(['Frame A', '\n\nFrame B']);
   });
 
+  test('persists terminal state for an unchanged Grok export', async () => {
+    const sessionId = 'grok-unchanged-terminal';
+    const dependencies = { exportGrok: () => 'Frame A\n\nFrame B' };
+
+    expect((await handleGrokHostHook(
+      { hook_event_name: 'Stop', session_id: sessionId },
+      dependencies
+    )).ingest).toMatchObject({ inserted: 2, finalized: false });
+    expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({ finalized: false });
+
+    expect((await handleGrokHostHook(
+      { hook_event_name: 'SessionEnd', session_id: sessionId },
+      dependencies
+    )).ingest).toMatchObject({ inserted: 0, finalized: true });
+    expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({ finalized: true });
+  });
+
   test('validates a terminal Grok Stop before finalizing', async () => {
     let markdown = 'Frame A';
     const payload = { hook_event_name: 'Stop', session_id: 'grok-terminal-stop' };
@@ -763,6 +780,19 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     expect(contentReads).toBeGreaterThan(0);
     expect(result.redactions).toContain('generic-assignment');
+  });
+
+  test('rejects an expired ingest generation before publication', () => {
+    const sessionId = 'grok-expired-generation';
+    expect(() => ingestHostTranscriptBatch([{
+      source: 'grok',
+      sessionId,
+      messages: [{ role: 'system', content: 'Frame A', sourcePosition: 0 }],
+      batch: createHostIngestBatch(),
+    }], undefined, Date.now() - 1)).toThrow('Host lifecycle ingest deadline exhausted');
+
+    expect(getDb().prepare('SELECT 1 FROM sessions WHERE session_id = ?').get(sessionId))
+      .toBeNull();
   });
 
   test('rolls back every Grok reset mutation when its batch is interrupted', () => {
