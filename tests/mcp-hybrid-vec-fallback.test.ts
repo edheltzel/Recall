@@ -22,6 +22,7 @@ let knnCalls: Array<{ queryEmbedding: number[]; k: number }> = [];
 // VecHit[] to return, or an Error for the mocked knnSearch to throw (pins the
 // knn→bruteforce catch fallback).
 let knnHits: VecHit[] | Error = [];
+let afterConsistentSearch: (() => void) | undefined;
 
 // bun's mock.module is PROCESS-GLOBAL and applies to every test file sharing
 // the run, so BOTH mocks below must delegate to the real module unless this
@@ -51,6 +52,7 @@ function resetVecMock(): void {
   vecSynced = true;
   knnCalls = [];
   knnHits = [];
+  afterConsistentSearch = undefined;
   embedThrows = false;
 }
 
@@ -74,7 +76,10 @@ mock.module('../src/db/vec', () => ({
   ): T | null => {
     if (!mockEngaged) return realWithConsistentVecIndex(db, search);
     ensureVecIndexSyncedCalls += 1;
-    return vecSynced ? search() : null;
+    if (!vecSynced) return null;
+    const result = search();
+    afterConsistentSearch?.();
+    return result;
   },
 }));
 mock.module('../src/lib/embeddings', () => ({
@@ -157,6 +162,27 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(hit).toBeDefined();
     expect(hit!.source).toBe('vec');
     expect(hit!.content).toContain('knn deterministic vector-only issue 146');
+  });
+
+  test('materializes vector-only content inside the guarded KNN read', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    knnHits = [{ source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }];
+    afterConsistentSearch = () => {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('replacement content published after guarded search', knnDecisionId);
+    };
+
+    try {
+      const { results, semanticBackend } = await hybridSearch('guardedcontentquery108', { limit: 5 });
+
+      expect(semanticBackend).toBe('knn');
+      const hit = results.find((r) => r.table === 'decisions' && r.id === knnDecisionId);
+      expect(hit?.content).toContain('knn deterministic vector-only issue 146');
+    } finally {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('knn deterministic vector-only issue 146', knnDecisionId);
+    }
   });
 
   test('treats empty KNN over non-empty embeddings as failure and falls back to brute-force (#217 ruling)', async () => {

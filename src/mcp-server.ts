@@ -109,6 +109,8 @@ type VectorSearchHit = {
 	source_table: string;
 	source_id: number;
 	similarity: number;
+	content: string;
+	provenance: Provenance | null;
 };
 
 type VectorSearchOutcome = {
@@ -143,7 +145,19 @@ function bruteForceVectorScan(
 	const out: VectorSearchHit[] = [];
 	for (const row of embeddings) {
 		const similarity = cosineSimilarity(queryEmbedding, blobToEmbedding(row.embedding));
-		out.push({ source_table: row.source_table, source_id: row.source_id, similarity });
+		const { content, provenance } = vectorRowContentProvenance(
+			row.source_table,
+			row.source_id,
+		);
+		if (content) {
+			out.push({
+				source_table: row.source_table,
+				source_id: row.source_id,
+				similarity,
+				content,
+				provenance,
+			});
+		}
 	}
 	out.sort((a, b) => b.similarity - a.similarity);
 	return out.slice(0, limit * 2);
@@ -161,16 +175,26 @@ function bruteForceVectorScan(
 // spam a long-lived server on every query (#217 review).
 let vecFallbackLogged = false;
 
-function currentVectorHits(
+function materializeCurrentVectorHits(
 	db: ReturnType<typeof getDb>,
-	hits: VectorSearchHit[],
+	hits: Array<Omit<VectorSearchHit, "content" | "provenance">>,
 ): VectorSearchHit[] {
 	const current = db.prepare(`
 		SELECT 1 FROM embeddings
 		WHERE source_table = ? AND source_id = ?
 		  AND ${publishedEmbeddingSql(db, "embeddings.source_table", "embeddings.source_id")}
 	`);
-	return hits.filter((hit) => Boolean(current.get(hit.source_table, hit.source_id)));
+	const materialized: VectorSearchHit[] = [];
+	for (const hit of hits) {
+		if (!current.get(hit.source_table, hit.source_id)) continue;
+		const { content, provenance } = vectorRowContentProvenance(
+			hit.source_table,
+			hit.source_id,
+		);
+		if (!content) continue;
+		materialized.push({ ...hit, content, provenance });
+	}
+	return materialized;
 }
 
 function vectorSearch(
@@ -181,7 +205,7 @@ function vectorSearch(
 	if (isVecAvailable()) {
 		try {
 			const hits = withConsistentVecIndex(db, () =>
-				currentVectorHits(
+				materializeCurrentVectorHits(
 					db,
 					knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
 						source_table: h.source_table,
@@ -313,6 +337,7 @@ export async function hybridSearch(
 
 		const semanticRanked = semanticResults.map((r) => ({
 			id: `${r.source_table}:${r.source_id}`,
+			content: r.content,
 		}));
 
 		const fusedScores = reciprocalRankFusion([ftsRanked, semanticRanked]);
@@ -349,23 +374,13 @@ export async function hybridSearch(
 			if (existing) {
 				existing.source = "both";
 			} else {
-				// Resolve content + provenance for a vector-only match. The
-				// shared helper covers every embedded table — issue #67: the
-				// learnings case was missing here, so vector-only learnings
-				// matches reported provenance as unknown.
-				const { content, provenance } = vectorRowContentProvenance(
-					r.source_table,
-					r.source_id,
-				);
-				if (!content) continue;
-
 				resultMap.set(key, {
 					table: r.source_table === "loa_entries" ? "loa" : r.source_table,
 					id: r.source_id,
-					content,
+					content: r.content,
 					score: fusedScores.get(key) || 0,
 					source: "vec",
-					provenance,
+					provenance: r.provenance,
 				});
 			}
 		}
