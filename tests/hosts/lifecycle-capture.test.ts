@@ -995,6 +995,66 @@ describe('host-neutral immediate SQLite ingest', () => {
     `).get()).toEqual({ value: '1' });
   });
 
+  test('keeps an active generation until semantic invalidations drain', () => {
+    const sessionId = 'semantic-invalidation-supersession';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [{ role: 'assistant', content: 'first semantic answer', nativeId: 'answer-1' }],
+    });
+    const db = getDb();
+    const active = db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId) as { active_generation: string };
+    const message = db.prepare(`
+      SELECT message_id FROM host_ingest_generation_messages
+      WHERE generation_id = ? LIMIT 1
+    `).get(active.active_generation) as { message_id: number };
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('messages', ?, 'test', 1, ?)
+    `).run(message.message_id, Buffer.alloc(4));
+    db.prepare(`
+      INSERT INTO host_ingest_embedding_invalidations (generation_id, message_id)
+      VALUES (?, ?)
+    `).run(active.active_generation, message.message_id);
+
+    const successor = {
+      source: 'codex' as const,
+      sessionId,
+      messages: [
+        { role: 'assistant' as const, content: 'first semantic answer', nativeId: 'answer-1' },
+        { role: 'assistant' as const, content: 'second semantic answer', nativeId: 'answer-2' },
+      ],
+    };
+    expect(() => ingestHostTranscript(successor)).toThrow(HostIngestCheckpointConflictError);
+    expect(db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId)).toEqual(active);
+    expect(db.prepare(`
+      SELECT 1 AS present FROM host_ingest_embedding_invalidations WHERE generation_id = ?
+    `).get(active.active_generation)).toEqual({ present: 1 });
+
+    getHostIngestCheckpoint('codex', sessionId);
+    expect(ingestHostTranscript(successor)).toMatchObject({ inserted: 1 });
+  });
+
+  test('indexes lifecycle semantic readiness lookups', () => {
+    const indexes = getDb().prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'index' AND name IN (
+        'idx_host_ingest_embedding_invalidations_message',
+        'idx_host_ingest_state_active_generation'
+      ) ORDER BY name
+    `).all() as Array<{ name: string }>;
+    expect(indexes.map(row => row.name)).toEqual([
+      'idx_host_ingest_embedding_invalidations_message',
+      'idx_host_ingest_state_active_generation',
+    ]);
+  });
+
   test('fuses physical and generation message ranks', () => {
     const db = getDb();
     db.prepare(`

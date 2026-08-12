@@ -1,13 +1,8 @@
 import type { Database } from 'bun:sqlite';
+import { tableExists } from '../db/introspection.js';
 
 export function publishedRecordTable(table: string): string {
   return table === 'messages' ? 'published_messages' : table;
-}
-
-function tableExists(db: Database, table: string): boolean {
-  return Boolean(db.prepare(`
-    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
-  `).get(table));
 }
 
 export function publishedEmbeddingSql(

@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { invalidateVecIndex } from '../db/vec.js';
+import { tableExists } from '../db/introspection.js';
 
 export const LIFECYCLE_SEARCH_RETRYABLE =
   'RETRYABLE: Lifecycle message search index is not ready; retry the search or run recall repair --execute.';
@@ -13,12 +14,6 @@ interface LifecycleSearchRepairOptions {
   project?: string;
   generationId?: string;
   maxPages?: number;
-}
-
-function tableExists(db: Database, name: string): boolean {
-  return Boolean(db.prepare(`
-    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
-  `).get(name));
 }
 
 function lifecycleStorageAvailable(db: Database): boolean {
@@ -124,7 +119,12 @@ function repairLifecycleEmbeddingInvalidationPage(
       DELETE FROM embeddings
       WHERE source_table = 'messages'
         AND source_id IN (${ids.map(() => '?').join(',')})
-    `).run(...ids);
+        AND EXISTS (
+          SELECT 1 FROM host_ingest_embedding_invalidations AS invalidation
+          WHERE invalidation.generation_id = ?
+            AND invalidation.message_id = embeddings.source_id
+        )
+    `).run(...ids, generationId);
     db.prepare(`
       DELETE FROM host_ingest_embedding_invalidations
       WHERE generation_id = ?

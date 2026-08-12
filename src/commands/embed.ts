@@ -9,6 +9,7 @@ import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/r
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
 import { publishedEmbeddingSql, publishedRecordTable } from '../lib/published-records.js';
+import { upsertEmbedding, upsertEmbeddingInTransaction } from '../lib/embedding-store.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
@@ -116,12 +117,6 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
 
   console.log(`Embedding ${rows.length} ${table} entries...\n`);
 
-  // Prepare insert statement
-  const insertStmt = db.prepare(`
-    INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
   let success = 0;
   let failed = 0;
 
@@ -142,7 +137,14 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
       const result = await embed(content);
       const blob = embeddingToBlob(result.embedding);
 
-      insertStmt.run(sourceTable, row.id, result.model, result.dimensions, blob);
+      upsertEmbedding(db, {
+        sourceTable,
+        sourceId: row.id,
+        model: result.model,
+        dimensions: result.dimensions,
+        embedding: blob,
+        sourceContent: sourceTable === 'messages' ? String(row.content ?? '') : undefined,
+      });
 
       console.log(`✓ (${result.dimensions}d)`);
       success++;
@@ -203,7 +205,14 @@ export async function runRebackfill(): Promise<void> {
   // Phase 1: produce every new embedding up front (no DB writes yet). We embed
   // only rows that still have a resolvable, long-enough source — the rest are
   // dropped by the clear in phase 2, keeping the table uniform.
-  const updates: Array<{ table: string; id: number; model: string; dimensions: number; blob: Buffer }> = [];
+  const updates: Array<{
+    table: string;
+    id: number;
+    model: string;
+    dimensions: number;
+    blob: Buffer;
+    sourceContent?: string;
+  }> = [];
   let processed = 0;
 
   for (const config of EMBED_SOURCES) {
@@ -217,7 +226,8 @@ export async function runRebackfill(): Promise<void> {
 
     for (const row of rows) {
       processed++;
-      const text = embeddingTextFor(config.table, row).trim();
+      const sourceContent = embeddingTextFor(config.table, row);
+      const text = sourceContent.trim();
       if (text.length < MIN_EMBED_TEXT_LENGTH) continue; // pruned by the clear
 
       process.stdout.write(`  [${processed}/${total}] Re-embedding ${config.table}#${row.id}... `);
@@ -228,6 +238,7 @@ export async function runRebackfill(): Promise<void> {
         model: result.model,
         dimensions: result.dimensions,
         blob: embeddingToBlob(result.embedding),
+        sourceContent: config.table === 'messages' ? sourceContent : undefined,
       });
       console.log(`✓ (${result.dimensions}d)`);
     }
@@ -235,13 +246,17 @@ export async function runRebackfill(): Promise<void> {
 
   // Phase 2: atomic swap. Clear the old (possibly mixed-model) rows, insert the
   // freshly produced ones, and stamp the marker — all or nothing.
-  const insert = db.prepare(
-    `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding) VALUES (?, ?, ?, ?, ?)`
-  );
   const swap = db.transaction(() => {
     db.prepare('DELETE FROM embeddings').run();
     for (const u of updates) {
-      insert.run(u.table, u.id, u.model, u.dimensions, u.blob);
+      upsertEmbeddingInTransaction(db, {
+        sourceTable: u.table,
+        sourceId: u.id,
+        model: u.model,
+        dimensions: u.dimensions,
+        embedding: u.blob,
+        sourceContent: u.sourceContent,
+      });
     }
     writeEmbeddingMarker(db);
   });
