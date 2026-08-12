@@ -7,7 +7,9 @@ import {
   knnSearch,
   createVecTable,
   ensureVecIndexSynced,
+  invalidateVecIndex,
   resetVecSyncCache,
+  withConsistentVecIndex,
 } from '../../src/db/vec';
 import {
   embeddingToBlob,
@@ -90,6 +92,49 @@ describe('sqlite-vec index (issue #148)', () => {
     expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
       .toBeNull();
     expect(knnSearch(db, vec(2), 1)[0].distance).toBeLessThan(0.001);
+  });
+
+  test('retries a KNN read when the vector generation changes', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    let calls = 0;
+
+    const result = withConsistentVecIndex(db, () => {
+      calls += 1;
+      if (calls === 1) invalidateVecIndex(db);
+      return knnSearch(db, vec(1), 1);
+    });
+
+    expect(calls).toBe(2);
+    expect(result?.[0]?.distance).toBeLessThan(0.001);
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toBeNull();
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
+      .toEqual({ value: '1' });
+  });
+
+  test('rejects a KNN read after two vector generation changes', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    let calls = 0;
+
+    const result = withConsistentVecIndex(db, () => {
+      calls += 1;
+      const hits = knnSearch(db, vec(1), 1);
+      invalidateVecIndex(db);
+      return hits;
+    });
+
+    expect(calls).toBe(2);
+    expect(result).toBeNull();
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toEqual({ value: '1' });
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
+      .toEqual({ value: '2' });
   });
 
   test('KNN ordering matches the brute-force cosine ranking (parity)', () => {

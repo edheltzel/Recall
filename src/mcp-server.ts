@@ -78,8 +78,8 @@ import {
 } from "./lib/embedding-marker.js";
 import {
 	isVecAvailable,
-	ensureVecIndexSynced,
 	knnSearch,
+	withConsistentVecIndex,
 } from "./db/vec.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
 import { publishedEmbeddingSql } from "./lib/published-records.js";
@@ -180,15 +180,17 @@ function vectorSearch(
 ): VectorSearchOutcome {
 	if (isVecAvailable()) {
 		try {
-			if (!ensureVecIndexSynced(db)) throw new Error("vec index synchronization unconfirmed");
-			const hits = currentVectorHits(
-				db,
-				knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
-					source_table: h.source_table,
-					source_id: h.source_id,
-					similarity: 1 - h.distance,
-				})),
-			).slice(0, limit * 2);
+			const hits = withConsistentVecIndex(db, () =>
+				currentVectorHits(
+					db,
+					knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
+						source_table: h.source_table,
+						source_id: h.source_id,
+						similarity: 1 - h.distance,
+					})),
+				).slice(0, limit * 2),
+			);
+			if (hits === null) throw new Error("vec index synchronization unconfirmed");
 			// #217 ruling: an empty KNN result over a non-empty canonical
 			// embeddings table is a FAILURE (e.g. a failed self-heal left the vec
 			// index empty — knnSearch returns [] rather than throwing), not a valid

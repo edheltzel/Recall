@@ -61,6 +61,7 @@ ensureCustomSqlite();
 
 let vecAvailable = false;
 const VEC_INDEX_DIRTY_KEY = 'vec_index_dirty';
+const VEC_INDEX_GENERATION_KEY = 'vec_index_generation';
 
 /**
  * Attempt to load sqlite-vec into an open DB connection. Per-connection (the
@@ -139,9 +140,34 @@ let syncedThisProcess = false;
 let syncInFlight = false;
 
 export function invalidateVecIndex(db: Database): void {
-  db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
-    .run(VEC_INDEX_DIRTY_KEY, '1');
+  db.prepare(
+    `INSERT INTO schema_meta (key, value) VALUES (?, '1'), (?, '1')
+     ON CONFLICT(key) DO UPDATE SET value = CASE
+       WHEN key = ? THEN CAST(schema_meta.value AS INTEGER) + 1
+       ELSE '1'
+     END`
+  ).run(VEC_INDEX_DIRTY_KEY, VEC_INDEX_GENERATION_KEY, VEC_INDEX_GENERATION_KEY);
   syncedThisProcess = false;
+}
+
+type VecIndexState = {
+  generation: number;
+  dirty: number;
+};
+
+function vecIndexState(db: Database): VecIndexState {
+  return db.prepare(
+    `SELECT
+       COALESCE(MAX(CASE WHEN key = ? THEN CAST(value AS INTEGER) END), 0) AS generation,
+       COALESCE(MAX(CASE WHEN key = ? THEN 1 ELSE 0 END), 0) AS dirty
+     FROM schema_meta
+     WHERE key IN (?, ?)`
+  ).get(
+    VEC_INDEX_GENERATION_KEY,
+    VEC_INDEX_DIRTY_KEY,
+    VEC_INDEX_GENERATION_KEY,
+    VEC_INDEX_DIRTY_KEY
+  ) as VecIndexState;
 }
 
 /**
@@ -186,6 +212,18 @@ export function ensureVecIndexSynced(db: Database): boolean {
 /** Reset the once-per-process sync cache. Test-only. */
 export function resetVecSyncCache(): void {
   syncedThisProcess = false;
+}
+
+export function withConsistentVecIndex<T>(db: Database, search: () => T): T | null {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!ensureVecIndexSynced(db)) return null;
+    const before = vecIndexState(db);
+    if (before.dirty) continue;
+    const result = search();
+    const after = vecIndexState(db);
+    if (!after.dirty && after.generation === before.generation) return result;
+  }
+  return null;
 }
 
 export interface VecHit {
