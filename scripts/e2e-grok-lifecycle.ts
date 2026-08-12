@@ -246,13 +246,21 @@ context_window = 16000
     ].join('\n');
     throw new Error(`Grok lifecycle hook did not create an automatic session row\n${diagnostic}`);
   }
-  const firstCount = (
-    db
-      .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
-      .get(session.session_id) as { count: number }
-  ).count;
+  const captured = db
+    .prepare(`
+      SELECT COUNT(*) AS count, GROUP_CONCAT(content, '\n') AS content
+      FROM messages WHERE session_id = ?
+    `)
+    .get(session.session_id) as { count: number; content: string };
+  const firstCount = captured.count;
   db.close();
-  if (firstCount < 2) throw new Error(`Grok lifecycle hook captured only ${firstCount} messages`);
+  if (
+    firstCount < 1 ||
+    !captured.content.includes('Capture this current CLI session automatically.') ||
+    !captured.content.includes('Automatic Grok capture completed.')
+  ) {
+    throw new Error(`Grok lifecycle hook captured an incomplete export: ${JSON.stringify(captured)}`);
+  }
   console.log(`grok.automatic_rows=${firstCount}`);
 
   const replay = spawnSync(join(testBin, 'recall'), ['host-hook', 'grok'], {

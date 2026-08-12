@@ -604,6 +604,31 @@ stream_max_retries = 0
       const loaId = Number(resultText(dump).match(/LoA Entry:\*\* #(\d+)/)?.[1]);
       if (!loaId) throw new Error(`LoA ID missing: ${resultText(dump)}`);
 
+      const preservationDb = new Database(testDb, { readonly: true });
+      const preserved = preservationDb
+        .prepare(`
+          SELECT
+            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS first_prompt,
+            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS second_prompt,
+            (SELECT COUNT(*) FROM loa_entries
+             WHERE session_id = ? AND tags LIKE 'automatic-capture,%') AS automatic_extracts
+        `)
+        .get(
+          sessionId,
+          firstPrompt,
+          sessionId,
+          secondPrompt,
+          sessionId
+        ) as { first_prompt: number; second_prompt: number; automatic_extracts: number };
+      preservationDb.close();
+      if (
+        preserved.first_prompt !== 1 ||
+        preserved.second_prompt !== 1 ||
+        preserved.automatic_extracts !== 1
+      ) {
+        throw new Error(`Explicit MCP dump replaced lifecycle capture: ${JSON.stringify(preserved)}`);
+      }
+
       const calls: Array<[string, Record<string, unknown>]> = [
         ['loa_show', { id: loaId }],
         ['memory_search', { query: 'native Codex plugin', project: 'Recall-e2e' }],
@@ -621,6 +646,7 @@ stream_max_retries = 0
       }
       console.log(`mcp.tools_verified=${expectedTools.length}`);
       console.log('mcp.repeat_dump=true');
+      console.log('mcp.lifecycle_capture_preserved=true');
     } finally {
       await client.close();
     }

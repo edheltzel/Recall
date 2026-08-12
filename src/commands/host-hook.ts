@@ -1,16 +1,20 @@
+import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
-import { existsSync, readFileSync, statSync } from 'fs';
+import { closeSync, existsSync, openSync, readSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport } from '../hosts/grok-lifecycle.js';
 import {
   ingestHostTranscript,
+  getHostIngestCheckpoint,
+  type HostIngestCheckpoint,
   type HostIngestResult,
   type LifecycleHost,
 } from '../lib/host-ingest.js';
 
 const MAX_HOOK_INPUT_BYTES = 1024 * 1024;
 const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
+const WATERMARK_TAIL_BYTES = 4096;
 
 interface HookPayload {
   hook_event_name?: unknown;
@@ -30,10 +34,12 @@ interface HookPayload {
 }
 
 export interface HostHookDependencies {
-  readTranscript?: (path: string) => string;
+  readTranscript?: (path: string, start?: number, length?: number) => string | Buffer;
+  transcriptSize?: (path: string) => number;
   exportGrok?: (sessionId: string) => string;
   renderContext?: () => string;
   ingest?: typeof ingestHostTranscript;
+  checkpoint?: (source: LifecycleHost, sessionId: string) => HostIngestCheckpoint | undefined;
 }
 
 export interface HostHookResult {
@@ -65,13 +71,56 @@ function payloadIsSubagent(payload: HookPayload): boolean {
   );
 }
 
-function readSuppliedTranscript(path: string): string {
+function suppliedTranscriptSize(path: string): number {
   if (!existsSync(path)) throw new Error(`Supplied transcript does not exist: ${path}`);
   const size = statSync(path).size;
   if (size > MAX_TRANSCRIPT_BYTES) {
     throw new Error(`Supplied transcript exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
   }
-  return readFileSync(path, 'utf-8');
+  return size;
+}
+
+function readSuppliedTranscript(path: string, start = 0, length?: number): Buffer {
+  const size = suppliedTranscriptSize(path);
+  const bytes = Math.max(0, Math.min(length ?? size - start, size - start));
+  const buffer = Buffer.alloc(bytes);
+  const fd = openSync(path, 'r');
+  try {
+    readSync(fd, buffer, 0, bytes, start);
+  } finally {
+    closeSync(fd);
+  }
+  return buffer;
+}
+
+function asBuffer(value: string | Buffer): Buffer {
+  return Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf-8');
+}
+
+function tailHash(value: Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function byteCaptureRange(
+  checkpoint: HostIngestCheckpoint | undefined,
+  transcriptRef: string,
+  size: number,
+  read: (start: number, length: number) => Buffer
+): { start: number; watermark: string } {
+  let start = 0;
+  const match = checkpoint?.watermark?.match(/^bytes:(\d+):tail:([0-9a-f]{64})$/);
+  if (checkpoint?.transcriptRef === transcriptRef && match) {
+    const previousSize = Number(match[1]);
+    if (Number.isSafeInteger(previousSize) && previousSize <= size) {
+      const tailStart = Math.max(0, previousSize - WATERMARK_TAIL_BYTES);
+      const previousTail = read(tailStart, previousSize - tailStart);
+      if (tailHash(previousTail) === match[2]) start = previousSize;
+    }
+  }
+
+  const tailStart = Math.max(0, size - WATERMARK_TAIL_BYTES);
+  const currentTail = read(tailStart, size - tailStart);
+  return { start, watermark: `bytes:${size}:tail:${tailHash(currentTail)}` };
 }
 
 function renderRecallContext(): string {
@@ -133,6 +182,7 @@ export function handleHostHook(
   const cwd = stringValue(payload.cwd) ?? stringValue(payload.workspaceRoot);
   const capturedAt = stringValue(payload.timestamp);
   const ingest = dependencies.ingest ?? ingestHostTranscript;
+  const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
 
   if (payloadIsSubagent(payload) && !includeSubagents()) {
     return { skipped: 'subagent' };
@@ -158,15 +208,24 @@ export function handleHostHook(
     const transcriptPath =
       stringValue(payload.transcript_path) ?? stringValue(payload.transcriptPath);
     if (!transcriptPath) return { skipped: 'missing-supplied-transcript' };
-    const raw = (dependencies.readTranscript ?? readSuppliedTranscript)(transcriptPath);
-    const parsed = parseCodexRollout(raw);
-    if (
-      (parsed.isSubagent || (parsed.sessionId && parsed.sessionId !== sessionId)) &&
-      !includeSubagents()
-    ) {
-      return { skipped: parsed.isSubagent ? 'subagent' : 'session-id-mismatch' };
+    const size = (dependencies.transcriptSize ?? suppliedTranscriptSize)(transcriptPath);
+    if (size > MAX_TRANSCRIPT_BYTES) {
+      throw new Error(`Supplied transcript exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
     }
-    const bytes = Buffer.byteLength(raw, 'utf-8');
+    const read = (start: number, length: number) =>
+      asBuffer((dependencies.readTranscript ?? readSuppliedTranscript)(transcriptPath, start, length));
+    const previous = checkpoint('codex', sessionId);
+    const range = byteCaptureRange(previous, transcriptPath, size, read);
+    const finalize = event === 'sessionend';
+    if (range.start === size && (!finalize || previous?.finalized)) {
+      return { skipped: 'unchanged-transcript' };
+    }
+    const raw = read(range.start, size - range.start).toString('utf-8');
+    const parsed = parseCodexRollout(raw);
+    if (parsed.sessionId && parsed.sessionId !== sessionId) {
+      return { skipped: 'session-id-mismatch' };
+    }
+    if (parsed.isSubagent && !includeSubagents()) return { skipped: 'subagent' };
     return {
       ingest: ingest({
         source: 'codex',
@@ -174,9 +233,9 @@ export function handleHostHook(
         messages: parsed.messages,
         cwd: cwd ?? parsed.cwd,
         transcriptRef: transcriptPath,
-        watermark: `bytes:${bytes}`,
+        watermark: range.watermark,
         capturedAt,
-        finalize: event === 'sessionend',
+        finalize,
       }),
     };
   }
@@ -190,19 +249,32 @@ export function handleHostHook(
     if (Buffer.byteLength(markdown, 'utf-8') > MAX_TRANSCRIPT_BYTES) {
       throw new Error(`Grok export exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
     }
-    const parsed = parseGrokExport(markdown);
     const reason = stringValue(payload.reason)?.toLowerCase();
     const terminalStop = event === 'stop' && ['channel_closed', 'shutdown'].includes(reason ?? '');
+    const finalize = event === 'sessionend' || terminalStop;
+    const transcriptRef = 'grok export';
+    const raw = Buffer.from(markdown, 'utf-8');
+    const previous = checkpoint('grok', sessionId);
+    const range = byteCaptureRange(
+      previous,
+      transcriptRef,
+      raw.length,
+      (start, length) => raw.subarray(start, start + length)
+    );
+    if (range.start === raw.length && (!finalize || previous?.finalized)) {
+      return { skipped: 'unchanged-transcript' };
+    }
+    const parsed = parseGrokExport(raw.subarray(range.start).toString('utf-8'));
     return {
       ingest: ingest({
         source: 'grok',
         sessionId,
         messages: parsed.messages,
         cwd,
-        transcriptRef: 'grok export',
-        watermark: `bytes:${Buffer.byteLength(markdown, 'utf-8')}`,
+        transcriptRef,
+        watermark: range.watermark,
         capturedAt,
-        finalize: event === 'sessionend' || terminalStop,
+        finalize,
       }),
     };
   }

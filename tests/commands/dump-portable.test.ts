@@ -47,15 +47,17 @@ describe('portable explicit session dump', () => {
     expect(session).toEqual({ source: 'codex', project: 'recall-test' });
   });
 
-  test('re-import keeps lifecycle deduplication state for the same session', async () => {
+  test('re-import preserves automatic lifecycle capture for the same session', async () => {
     const sessionId = 'codex-lifecycle-reimport';
-    const content = 'Preserve this lifecycle message across explicit re-imports.';
+    const lifecycleContent = 'Preserve this lifecycle message across explicit re-imports.';
+    const explicitContent = 'Add this explicit snapshot without replacing automatic capture.';
     const timestamp = '2026-08-12T12:00:00.000Z';
     const lifecycle = {
       source: 'codex' as const,
       sessionId,
       watermark: 'bytes:42',
-      messages: [{ role: 'user' as const, content, timestamp }],
+      messages: [{ role: 'user' as const, content: lifecycleContent, timestamp }],
+      finalize: true,
     };
     ingestHostTranscript(lifecycle);
 
@@ -70,9 +72,9 @@ describe('portable explicit session dump', () => {
         messages: [
           {
             session_id: sessionId,
-            timestamp,
-            role: 'user' as const,
-            content,
+            timestamp: '2026-08-12T12:00:01.000Z',
+            role: 'assistant' as const,
+            content: explicitContent,
             project: 'recall-test',
           },
         ],
@@ -90,14 +92,20 @@ describe('portable explicit session dump', () => {
       .prepare('SELECT message_id FROM host_ingest_messages WHERE source = ? AND session_id = ?')
       .get('codex', sessionId) as { message_id: number | null };
     expect(state.watermark).toBe('bytes:42');
-    expect(key.message_id).toBeNull();
+    expect(key.message_id).toBeNumber();
     expect(ingestHostTranscript(lifecycle)).toMatchObject({ inserted: 0, skipped: 1 });
-    expect(
-      (
-        db
-          .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
-          .get(sessionId) as { count: number }
-      ).count
-    ).toBe(1);
+    const messages = db
+      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(sessionId) as Array<{ content: string }>;
+    expect(messages.map(message => message.content)).toEqual([lifecycleContent, explicitContent]);
+    const loa = db
+      .prepare(`
+        SELECT description, tags FROM loa_entries
+        WHERE session_id = ? ORDER BY id
+      `)
+      .all(sessionId) as Array<{ description: string | null; tags: string | null }>;
+    expect(loa).toHaveLength(2);
+    expect(loa.filter(entry => entry.tags?.includes('automatic-capture'))).toHaveLength(1);
+    expect(loa.filter(entry => entry.description === 'Explicit memory dump.')).toHaveLength(1);
   });
 });
