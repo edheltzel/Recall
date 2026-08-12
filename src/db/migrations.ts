@@ -15,6 +15,7 @@ import {
   FTS_SCHEMA,
   LOA_MESSAGE_RETENTION_SCHEMA,
   LOA_MESSAGE_SOURCES_SCHEMA,
+  PUBLISHED_MESSAGES_SCHEMA,
 } from './schema';
 import { claudePaths } from '../hosts/claude.js';
 
@@ -581,6 +582,40 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`
         CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_host_ingest_token
           ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL
+      `);
+    }
+  },
+
+  (db) => {
+    const messageColumns = new Set(
+      (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const loaColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const hostMessageColumns = new Set(
+      (db.prepare('PRAGMA table_info(host_ingest_messages)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const hasPublishedMessages = messageColumns.has('host_ingest_token') &&
+      hostMessageColumns.has('message_id');
+    if (hasPublishedMessages) db.exec(PUBLISHED_MESSAGES_SCHEMA);
+    if (
+      messageColumns.has('id') &&
+      loaColumns.has('snapshot_max_message_id') &&
+      loaColumns.has('tags') &&
+      loaColumns.has('message_count')
+    ) {
+      db.exec(`
+        UPDATE loa_entries
+        SET snapshot_max_message_id = COALESCE((
+          SELECT MAX(id) FROM ${hasPublishedMessages ? 'published_messages' : 'messages'}
+        ), 0)
+        WHERE snapshot_max_message_id IS NULL
+          AND tags LIKE 'automatic-capture,%'
+          AND COALESCE(message_count, 0) = 0
       `);
     }
   },

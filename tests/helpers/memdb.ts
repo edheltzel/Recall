@@ -5,13 +5,19 @@
 // the same tables/indexes in memory in ~1ms. FTS virtual tables and triggers
 // are omitted: the export/dedup logic under property test never touches them.
 import { Database } from 'bun:sqlite';
-import { CREATE_TABLES, CREATE_INDEXES, CREATE_VECTOR_TABLES } from '../../src/db/schema';
+import {
+  CREATE_TABLES,
+  CREATE_INDEXES,
+  CREATE_VECTOR_TABLES,
+  PUBLISHED_MESSAGES_SCHEMA,
+} from '../../src/db/schema';
 
 export function createMemoryDb(): Database {
   const db = new Database(':memory:');
   db.exec('PRAGMA foreign_keys = ON'); // matches production getDb()
   db.exec(CREATE_TABLES);
   db.exec(CREATE_INDEXES);
+  db.exec(PUBLISHED_MESSAGES_SCHEMA);
   db.exec(CREATE_VECTOR_TABLES);
   return db;
 }

@@ -17,7 +17,7 @@ import {
   type HostTranscript,
 } from '../../src/lib/host-ingest';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
-import { getLoaMessages } from '../../src/lib/memory';
+import { getLoaMessages, getMessagesSinceLastLoa } from '../../src/lib/memory';
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, '..', 'fixtures', 'host-lifecycle', name), 'utf-8');
@@ -828,7 +828,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(current.id).toBeGreaterThan(Number(retired.lastInsertRowid));
   });
 
-  test('publishes staged messages set-wise with SQLite ID mapping', () => {
+  test('materializes staged messages in bounded pages with SQLite ID mapping', () => {
     const sessionId = 'set-wise-generation';
     const messages = Array.from({ length: SQLITE_SAFE_CHUNK_SIZE + 1 }, (_, index) => ({
       role: 'system' as const,
@@ -846,16 +846,94 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     const stored = getDb().prepare(`
       SELECT COUNT(*) AS count, COUNT(DISTINCT stored.message_id) AS distinct_ids,
-        COUNT(message.host_ingest_token) AS pending_tokens
+        COUNT(message.host_ingest_token) AS generation_tokens
       FROM host_ingest_messages AS stored
       JOIN messages AS message ON message.id = stored.message_id
       WHERE stored.session_id = ?
-    `).get(sessionId) as { count: number; distinct_ids: number; pending_tokens: number };
+    `).get(sessionId) as { count: number; distinct_ids: number; generation_tokens: number };
     expect(stored).toEqual({
       count: messages.length,
       distinct_ids: messages.length,
-      pending_tokens: 0,
+      generation_tokens: messages.length,
     });
+  });
+
+  test('hides shadow rows until their lifecycle keys are published', () => {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, source)
+      VALUES ('shadow-visibility', '2026-08-12T10:00:00.000Z', 'grok')
+    `).run();
+    const pending = db.prepare(`
+      INSERT INTO messages (
+        session_id, timestamp, role, content, provenance, host_ingest_token
+      ) VALUES (?, ?, 'system', 'pending frame', 'verbatim', 'pending:1')
+    `).run('shadow-visibility', '2026-08-12T10:00:00.000Z');
+
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
+    `).get('shadow-visibility')).toEqual({ count: 0 });
+
+    db.prepare(`
+      INSERT INTO host_ingest_messages
+        (source, session_id, message_key, message_id, source_position)
+      VALUES ('grok', ?, 'native:pending', ?, 0)
+    `).run('shadow-visibility', pending.lastInsertRowid);
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
+    `).get('shadow-visibility')).toEqual({ count: 1 });
+  });
+
+  test('discards a shadow generation when checkpoint activation loses', () => {
+    const sessionId = 'shadow-checkpoint-conflict';
+    expect(() => ingestHostTranscriptBatch([{
+      source: 'grok',
+      sessionId,
+      messages: [{ role: 'system', content: 'pending', sourcePosition: 0 }],
+      batch: createHostIngestBatch(),
+    }], {
+      source: 'grok',
+      sessionId,
+      checkpoint: { watermark: 'stale', finalized: false },
+    })).toThrow(HostIngestCheckpointConflictError);
+
+    expect(getDb().prepare('SELECT 1 FROM messages WHERE session_id = ?').get(sessionId))
+      .toBeNull();
+    expect(getDb().prepare('SELECT 1 FROM sessions WHERE session_id = ?').get(sessionId))
+      .toBeNull();
+  });
+
+  test('records the global high-water cursor for an empty terminal capture', () => {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, source)
+      VALUES ('prior-session', '2026-08-12T09:00:00.000Z', 'mcp')
+    `).run();
+    const prior = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES ('prior-session', '2026-08-12T09:00:00.000Z', 'user', 'prior', 'verbatim')
+    `).run();
+
+    const result = ingestHostTranscriptBatch([{
+      source: 'grok',
+      sessionId: 'empty-terminal-cursor',
+      messages: [],
+      incremental: false,
+      reconcileComplete: true,
+      finalize: true,
+      batch: createHostIngestBatch(),
+    }]);
+    expect(db.prepare(`
+      SELECT snapshot_max_message_id FROM loa_entries WHERE id = ?
+    `).get(result.loaId!)).toEqual({ snapshot_max_message_id: Number(prior.lastInsertRowid) });
+    expect(getMessagesSinceLastLoa().messages).toEqual([]);
+
+    const next = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES ('prior-session', '2026-08-12T11:00:00.000Z', 'assistant', 'next', 'verbatim')
+    `).run();
+    expect(getMessagesSinceLastLoa().messages.map(message => message.id))
+      .toEqual([Number(next.lastInsertRowid)]);
   });
 
   test('pins finalized LoA evidence across non-terminal reconciliation', () => {

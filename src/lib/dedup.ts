@@ -315,6 +315,7 @@ export function scanCandidates(
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ScanResult {
   const config = TABLE_SCAN_CONFIG[table];
+  const sourceTable = table === 'messages' ? 'published_messages' : table;
   const where = [
     'id > ?',
     ...(config.extraWhere ? [config.extraWhere] : []),
@@ -324,7 +325,7 @@ export function scanCandidates(
     SELECT id, project, provenance, importance,
            ${config.createdAtColumn} AS created_at,
            ${config.textColumns.join(', ')}
-    FROM ${table}
+    FROM ${sourceTable}
     WHERE ${where}
     ORDER BY id
     LIMIT ?

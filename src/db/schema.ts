@@ -364,6 +364,16 @@ CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
   ON dedup_lineage(survivor_table, survivor_id);
 `;
 
+export const PUBLISHED_MESSAGES_SCHEMA = `
+CREATE VIEW IF NOT EXISTS published_messages AS
+SELECT message.* FROM messages AS message
+WHERE message.host_ingest_token IS NULL
+   OR EXISTS (
+     SELECT 1 FROM host_ingest_messages AS stored
+     WHERE stored.message_id = message.id
+   );
+`;
+
 // Per-source-table FTS5 DDL. Single source of truth: the CREATE_FTS /
 // CREATE_FTS_TRIGGERS strings consumed by initDb are derived from this map,
 // and `recall repair` uses individual entries to recreate one missing index

@@ -151,7 +151,7 @@ function writeExtractionErrors(items: ErrorPatternItem[]): number {
 function writeLoa(ctx: StructuredExtractionContext): number {
   const db = getDb();
   const range = db.prepare(
-    'SELECT MIN(id) AS minId, MAX(id) AS maxId, COUNT(*) AS count FROM messages WHERE session_id = ?'
+    'SELECT MIN(id) AS minId, MAX(id) AS maxId, COUNT(*) AS count FROM published_messages WHERE session_id = ?'
   ).get(ctx.sessionId) as { minId: number | null; maxId: number | null; count: number };
 
   return createLoaEntry({

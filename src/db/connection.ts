@@ -4,7 +4,14 @@ import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
-import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_VECTOR_TABLES } from './schema.js';
+import {
+  CREATE_TABLES,
+  CREATE_INDEXES,
+  CREATE_FTS,
+  CREATE_FTS_TRIGGERS,
+  CREATE_VECTOR_TABLES,
+  PUBLISHED_MESSAGES_SCHEMA,
+} from './schema.js';
 import { applyMigrations } from './migrations.js';
 // Importing vec sets up bun:sqlite's custom (extension-capable) SQLite on macOS
 // at module load — BEFORE any Database is opened below, as setCustomSQLite
@@ -144,6 +151,7 @@ function ensureSchema(database: Database): void {
   database.exec(CREATE_TABLES);
   const migration = applyMigrations(database);
   database.exec(CREATE_INDEXES);
+  database.exec(PUBLISHED_MESSAGES_SCHEMA);
   database.exec(CREATE_FTS);
   database.exec(CREATE_FTS_TRIGGERS);
   database.exec(CREATE_VECTOR_TABLES);

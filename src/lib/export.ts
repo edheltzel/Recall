@@ -136,12 +136,13 @@ export function collectTableRows(
   table: ExportTable,
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ExportRow[] {
+  const sourceTable = table === 'messages' ? 'published_messages' : table;
   const hasId = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
     .some(column => column.name === 'id');
   const cursor = hasId ? 'id' : 'rowid';
   const cursorResult = hasId ? '*' : 'rowid AS __recall_rowid, *';
   const stmt = db.prepare(
-    `SELECT ${cursorResult} FROM ${table} WHERE ${cursor} > ? ORDER BY ${cursor} LIMIT ?`
+    `SELECT ${cursorResult} FROM ${sourceTable} WHERE ${cursor} > ? ORDER BY ${cursor} LIMIT ?`
   );
   const rows: ExportRow[] = [];
   let lastId = -1;
@@ -174,8 +175,9 @@ export function collectExportData(db: Database): ExportData {
 export function buildProvenanceCounts(db: Database): Record<string, Record<string, number>> {
   const counts: Record<string, Record<string, number>> = {};
   for (const table of PROVENANCE_TABLES) {
+    const sourceTable = table === 'messages' ? 'published_messages' : table;
     const rows = db.prepare(
-      `SELECT COALESCE(provenance, 'unknown') AS p, COUNT(*) AS c FROM ${table} GROUP BY COALESCE(provenance, 'unknown')`
+      `SELECT COALESCE(provenance, 'unknown') AS p, COUNT(*) AS c FROM ${sourceTable} GROUP BY COALESCE(provenance, 'unknown')`
     ).all() as Array<{ p: string; c: number }>;
     const histogram: Record<string, number> = { unknown: 0 };
     for (const row of rows) histogram[row.p] = row.c;
@@ -192,7 +194,8 @@ export function buildManifest(
 ): ExportManifest {
   const counts: Record<string, number> = {};
   for (const table of tables) {
-    counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+    const sourceTable = table === 'messages' ? 'published_messages' : table;
+    counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${sourceTable}`).get() as { c: number }).c;
   }
   return {
     recall_version: VERSION,

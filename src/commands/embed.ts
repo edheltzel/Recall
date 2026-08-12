@@ -90,8 +90,8 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
     case 'messages':
       sourceTable = 'messages';
       query = options.force
-        ? `SELECT id, content FROM messages WHERE role = 'assistant' ORDER BY timestamp DESC LIMIT ?`
-        : `SELECT m.id, m.content FROM messages m
+        ? `SELECT id, content FROM published_messages WHERE role = 'assistant' ORDER BY timestamp DESC LIMIT ?`
+        : `SELECT m.id, m.content FROM published_messages m
            LEFT JOIN embeddings e ON e.source_table = 'messages' AND e.source_id = m.id
            WHERE e.id IS NULL AND m.role = 'assistant'
            ORDER BY m.timestamp DESC LIMIT ?`;

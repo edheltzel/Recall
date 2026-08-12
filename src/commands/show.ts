@@ -32,7 +32,7 @@ export function runShow(table: string, id: number): void {
 
     case 'message':
     case 'messages': {
-      const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Message | undefined;
+      const row = db.prepare('SELECT * FROM published_messages WHERE id = ?').get(id) as Message | undefined;
       if (!row) {
         console.error(`Message #${id} not found`);
         process.exit(1);

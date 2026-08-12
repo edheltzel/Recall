@@ -55,8 +55,8 @@ export function runPrune(options: PruneOptions): void {
     `WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
      AND timestamp < ${cutoff}`;
   const messageGuard = `AND ${notRecordedSurvivorSql("'messages'", 'messages.id')}`;
-  const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM messages ${messageWhere}`);
-  const messageCount = countRows(db, `SELECT COUNT(*) as count FROM messages ${messageWhere} ${messageGuard}`);
+  const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere}`);
+  const messageCount = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard}`);
   results.push({ table: 'messages', description: `Consolidated messages older than ${days}d`, count: messageCount, protected: messageMatched - messageCount });
 
   // 2. Sessions: delete orphaned sessions (no messages, no LoA) older than N days
@@ -139,7 +139,10 @@ export function runPrune(options: PruneOptions): void {
 
   // Execute deletes
   if (messageCount > 0) {
-    db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}`).run();
+    db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}
+      AND (host_ingest_token IS NULL OR EXISTS (
+        SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
+      ))`).run();
   }
 
   if (sessionCount > 0) {

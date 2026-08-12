@@ -365,7 +365,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         sql = `
           SELECT m.id, m.content, m.project, m.timestamp as created_at, m.provenance, f.rank
           FROM messages_fts f
-          JOIN messages m ON m.id = f.rowid
+          JOIN published_messages m ON m.id = f.rowid
           WHERE messages_fts MATCH ?
           ${duplicateFilter(options, 'messages', 'm.id')}
           ${options?.project ? 'AND m.project = ?' : ''}
@@ -596,7 +596,7 @@ export function vectorRowContentProvenance(
     };
   }
   if (sourceTable === 'messages') {
-    const msg = db.prepare('SELECT content, provenance FROM messages WHERE id = ?').get(sourceId) as any;
+    const msg = db.prepare('SELECT content, provenance FROM published_messages WHERE id = ?').get(sourceId) as any;
     if (!msg) return empty;
     return {
       content: msg.content?.slice(0, 200) || '',
@@ -633,8 +633,8 @@ export function vectorRowContentProvenance(
 export function recentMessages(limit: number = 10, project?: string): Message[] {
   const db = getDb();
   const sql = project
-    ? 'SELECT * FROM messages WHERE project = ? ORDER BY timestamp DESC LIMIT ?'
-    : 'SELECT * FROM messages ORDER BY timestamp DESC LIMIT ?';
+    ? 'SELECT * FROM published_messages WHERE project = ? ORDER BY timestamp DESC LIMIT ?'
+    : 'SELECT * FROM published_messages ORDER BY timestamp DESC LIMIT ?';
   const params = project ? [project, limit] : [limit];
   return db.prepare(sql).all(...params) as Message[];
 }
@@ -770,7 +770,7 @@ export function getLoaMessages(loaId: number): Message[] {
         const messages: Message[] = [];
         for (const idChunk of chunked(ids)) {
           messages.push(...db.prepare(`
-            SELECT * FROM messages WHERE id IN (${idChunk.map(() => '?').join(',')})
+            SELECT * FROM published_messages WHERE id IN (${idChunk.map(() => '?').join(',')})
           `).all(...idChunk) as Message[]);
         }
         const order = new Map(ids.map((id, index) => [id, index]));
@@ -789,13 +789,13 @@ export function getLoaMessages(loaId: number): Message[] {
   }
   if (loa.session_id) {
     return db.prepare(`
-      SELECT * FROM messages
+      SELECT * FROM published_messages
       WHERE id >= ? AND id <= ? AND session_id = ?
       ORDER BY timestamp
     `).all(loa.message_range_start, loa.message_range_end, loa.session_id) as Message[];
   }
   return db.prepare(`
-    SELECT * FROM messages WHERE id >= ? AND id <= ? ORDER BY timestamp
+    SELECT * FROM published_messages WHERE id >= ? AND id <= ? ORDER BY timestamp
   `).all(loa.message_range_start, loa.message_range_end) as Message[];
 }
 
@@ -807,15 +807,15 @@ export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; 
   let params: number[];
 
   const cursor = lastLoa?.snapshot_max_message_id ?? lastLoa?.message_range_end;
-  if (cursor) {
+  if (cursor !== undefined && cursor !== null) {
     sql = limit
-      ? 'SELECT * FROM messages WHERE id > ? ORDER BY timestamp LIMIT ?'
-      : 'SELECT * FROM messages WHERE id > ? ORDER BY timestamp';
+      ? 'SELECT * FROM published_messages WHERE id > ? ORDER BY timestamp LIMIT ?'
+      : 'SELECT * FROM published_messages WHERE id > ? ORDER BY timestamp';
     params = limit ? [cursor, limit] : [cursor];
   } else {
     sql = limit
-      ? 'SELECT * FROM messages ORDER BY timestamp LIMIT ?'
-      : 'SELECT * FROM messages ORDER BY timestamp';
+      ? 'SELECT * FROM published_messages ORDER BY timestamp LIMIT ?'
+      : 'SELECT * FROM published_messages ORDER BY timestamp';
     params = limit ? [limit] : [];
   }
 
@@ -844,7 +844,7 @@ export function getStats(): Stats {
   const count = (sql: string) => (db.prepare(sql).get() as { count: number }).count;
 
   const sessions = count('SELECT COUNT(*) as count FROM sessions');
-  const messages = count('SELECT COUNT(*) as count FROM messages');
+  const messages = count('SELECT COUNT(*) as count FROM published_messages');
   const decisions = count('SELECT COUNT(*) as count FROM decisions');
   const decisions_active = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'active'");
   const decisions_superseded = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'superseded'");

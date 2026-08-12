@@ -138,12 +138,13 @@ function planTable(
   const threshold = options.importanceThreshold ?? DEFAULT_IMPORTANCE_THRESHOLD;
 
   const where = matchWhere(config, ageCutoffDays, horizon, threshold);
+  const sourceTable = table === 'messages' ? 'published_messages AS messages' : table;
   const matched = (db.prepare(
-    `SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`
+    `SELECT COUNT(*) AS count FROM ${sourceTable} WHERE ${where}`
   ).get() as { count: number }).count;
 
   const rows = db.prepare(
-    `SELECT id, importance FROM ${table} WHERE ${where} AND ${guardSql(table)} ORDER BY id`
+    `SELECT id, importance FROM ${sourceTable} WHERE ${where} AND ${guardSql(table)} ORDER BY id`
   ).all() as Array<{ id: number; importance: number }>;
 
   // FK protection withholds explicit LoA ranges. Automatic lifecycle ranges
