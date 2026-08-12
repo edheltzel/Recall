@@ -1,6 +1,9 @@
 import type { Database } from 'bun:sqlite';
 import { tableExists } from '../db/introspection.js';
 import { invalidateVecIndex } from '../db/vec.js';
+import { EMBEDDING_CLEANUP_TRIGGERS } from '../db/schema.js';
+import { chunked } from './chunk.js';
+import type { ProvenanceTable } from '../types/index.js';
 
 const invalidationTableAvailability = new WeakMap<Database, boolean>();
 
@@ -11,6 +14,65 @@ export interface EmbeddingWrite {
   dimensions: number;
   embedding: Buffer;
   sourceContent?: string;
+}
+
+const EMBEDDING_CLEANUP_TRIGGER_NAMES = [
+  'embeddings_ad',
+  'messages_embedding_ad',
+  'decisions_embedding_ad',
+  'learnings_embedding_ad',
+  'breadcrumbs_embedding_ad',
+  'loa_entries_embedding_ad',
+];
+
+export function ensureEmbeddingCleanupReady(db: Database): void {
+  db.exec(EMBEDDING_CLEANUP_TRIGGERS);
+  const placeholders = EMBEDDING_CLEANUP_TRIGGER_NAMES.map(() => '?').join(', ');
+  const count = db.prepare(
+    `SELECT COUNT(*) AS count FROM sqlite_master
+     WHERE type = 'trigger' AND name IN (${placeholders})`
+  ).get(...EMBEDDING_CLEANUP_TRIGGER_NAMES) as { count: number };
+  if (count.count !== EMBEDDING_CLEANUP_TRIGGER_NAMES.length) {
+    throw new Error('embedding cleanup schema is not ready');
+  }
+}
+
+function finishEmbeddingDeletion(db: Database, changes: number): number {
+  if (changes > 0 && !db.prepare(
+    `SELECT 1 FROM schema_meta WHERE key = 'vec_index_dirty'`
+  ).get()) {
+    invalidateVecIndex(db);
+  }
+  return changes;
+}
+
+export function deleteRecordEmbeddingsByIdsInTransaction(
+  db: Database,
+  sourceTable: ProvenanceTable,
+  sourceIds: number[]
+): number {
+  ensureEmbeddingCleanupReady(db);
+  let changes = 0;
+  for (const ids of chunked(sourceIds)) {
+    const placeholders = ids.map(() => '?').join(', ');
+    changes += db.prepare(
+      `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`
+    ).run(sourceTable, ...ids).changes;
+  }
+  return finishEmbeddingDeletion(db, changes);
+}
+
+export function deleteRecordEmbeddingsBySelectionInTransaction(
+  db: Database,
+  sourceTable: ProvenanceTable,
+  sourceIdSelection: string,
+  params: Array<string | number> = []
+): number {
+  ensureEmbeddingCleanupReady(db);
+  const changes = db.prepare(
+    `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${sourceIdSelection})`
+  ).run(sourceTable, ...params).changes;
+  return finishEmbeddingDeletion(db, changes);
 }
 
 function acknowledgeLifecycleInvalidation(

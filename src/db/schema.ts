@@ -786,23 +786,7 @@ export const CREATE_FTS = Object.values(FTS_SCHEMA).map(s => s.createTable).join
 export const CREATE_FTS_TRIGGERS = Object.values(FTS_SCHEMA).map(s => s.createTriggers).join('');
 
 // Vector embeddings tables (requires sqlite-vec extension)
-export const CREATE_VECTOR_TABLES = `
--- Embedding metadata: tracks what's embedded and with which model
-CREATE TABLE IF NOT EXISTS embeddings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source_table TEXT NOT NULL,
-  source_id INTEGER NOT NULL,
-  model TEXT NOT NULL DEFAULT 'qwen3-embedding:0.6b',
-  dimensions INTEGER NOT NULL DEFAULT 1024,
-  embedding BLOB NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(source_table, source_id)
-);
-
--- Index for efficient lookups
-CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source_table, source_id);
-CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
-
+export const EMBEDDING_CLEANUP_TRIGGERS = `
 CREATE TRIGGER IF NOT EXISTS embeddings_ad
 AFTER DELETE ON embeddings BEGIN
   INSERT INTO schema_meta (key, value) VALUES ('vec_index_generation', '1')
@@ -835,6 +819,26 @@ CREATE TRIGGER IF NOT EXISTS loa_entries_embedding_ad
 AFTER DELETE ON loa_entries BEGIN
   DELETE FROM embeddings WHERE source_table = 'loa_entries' AND source_id = old.id;
 END;
+`;
+
+export const CREATE_VECTOR_TABLES = `
+-- Embedding metadata: tracks what's embedded and with which model
+CREATE TABLE IF NOT EXISTS embeddings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_table TEXT NOT NULL,
+  source_id INTEGER NOT NULL,
+  model TEXT NOT NULL DEFAULT 'qwen3-embedding:0.6b',
+  dimensions INTEGER NOT NULL DEFAULT 1024,
+  embedding BLOB NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_table, source_id)
+);
+
+-- Index for efficient lookups
+CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source_table, source_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
+
+${EMBEDDING_CLEANUP_TRIGGERS}
 `;
 
 // Note: sqlite-vec virtual tables are created dynamically after loading the extension

@@ -6,6 +6,7 @@ import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
 import { createLoaEntry } from '../../src/lib/memory';
 import { deleteLoaEntriesRecursive } from '../../src/commands/dump';
+import { embeddingToBlob } from '../../src/lib/embeddings';
 
 function loaCount(): number {
   const row = getDb().prepare('SELECT COUNT(*) as count FROM loa_entries').get() as { count: number };
@@ -60,5 +61,27 @@ describe('deleteLoaEntriesRecursive', () => {
     deleteLoaEntriesRecursive(getDb(), []);
 
     expect(loaCount()).toBe(1);
+  });
+
+  test('restores cleanup readiness before deleting an embedded entry', () => {
+    const db = getDb();
+    const id = createLoaEntry({ title: 'embedded', fabric_extract: 'x' });
+    db.prepare(
+      `INSERT INTO embeddings (source_table, source_id, embedding) VALUES ('loa_entries', ?, ?)`
+    ).run(id, embeddingToBlob(new Array(1024).fill(0)));
+    db.exec('DROP TRIGGER embeddings_ad; DROP TRIGGER loa_entries_embedding_ad;');
+    db.prepare(`DELETE FROM schema_meta WHERE key IN ('vec_index_dirty', 'vec_index_generation')`).run();
+
+    deleteLoaEntriesRecursive(db, [id]);
+
+    expect(db.prepare(
+      `SELECT 1 FROM embeddings WHERE source_table = 'loa_entries' AND source_id = ?`
+    ).get(id)).toBeNull();
+    expect(db.prepare(
+      `SELECT COUNT(*) AS count FROM sqlite_master
+       WHERE type = 'trigger' AND name IN ('embeddings_ad', 'loa_entries_embedding_ad')`
+    ).get()).toEqual({ count: 2 });
+    expect(db.prepare(`SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'`).get())
+      .toEqual({ value: '1' });
   });
 });

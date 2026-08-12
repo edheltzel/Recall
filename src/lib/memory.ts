@@ -5,14 +5,14 @@ import { existsSync, statSync } from 'fs';
 import { notMarkedDuplicateSql } from './dedup.js';
 import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { scrub } from './write-safety.js';
-import { invalidateVecIndex } from '../db/vec.js';
+import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
 import { publishedRecordTable } from './published-records.js';
 import {
   LIFECYCLE_SEARCH_RETRYABLE,
   repairLifecycleSearchIndex,
   type LifecycleSearchReadiness,
 } from './lifecycle-search.js';
-import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
+import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance, ProvenanceTable } from '../types/index.js';
 
 export { LIFECYCLE_SEARCH_RETRYABLE } from './lifecycle-search.js';
 
@@ -858,14 +858,14 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
 
 export function invalidateRecordEmbedding(
   db: ReturnType<typeof getDb>,
-  sourceTable: string,
+  sourceTable: ProvenanceTable,
   sourceId: number
 ): boolean {
-  const result = db.prepare('DELETE FROM embeddings WHERE source_table = ? AND source_id = ?')
-    .run(sourceTable, sourceId);
-  if (result.changes === 0) return false;
-  invalidateVecIndex(db);
-  return true;
+  return deleteRecordEmbeddingsByIdsInTransaction(
+    db,
+    sourceTable,
+    [sourceId]
+  ) > 0;
 }
 
 export function getLoaEntry(id: number): LoaEntry | undefined {

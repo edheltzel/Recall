@@ -191,11 +191,12 @@ function boundedCurrentKnnHits(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
 	limit: number,
-): { hits: VectorSearchHit[]; candidatesSeen: number } {
+): { hits: VectorSearchHit[]; candidatesSeen: number; complete: boolean } {
 	const target = Math.max(1, limit * 2);
 	const maxPages = 4;
 	const hits: VectorSearchHit[] = [];
-	let candidatesSeen = 0;
+	const seenCandidates = new Set<string>();
+	let indexExhausted = false;
 	for (let page = 1; page <= maxPages && hits.length < target; page++) {
 		const requested = target * page;
 		const candidates = knnSearch(db, queryEmbedding, requested).map((hit) => ({
@@ -203,12 +204,23 @@ function boundedCurrentKnnHits(
 			source_id: hit.source_id,
 			similarity: 1 - hit.distance,
 		}));
-		const unseen = candidates.slice(candidatesSeen);
-		candidatesSeen = candidates.length;
+		const unseen = candidates.filter((candidate) => {
+			const key = `${candidate.source_table}\0${candidate.source_id}`;
+			if (seenCandidates.has(key)) return false;
+			seenCandidates.add(key);
+			return true;
+		});
 		hits.push(...materializeCurrentVectorHits(db, unseen));
-		if (candidates.length < requested) break;
+		if (candidates.length < requested) {
+			indexExhausted = true;
+			break;
+		}
 	}
-	return { hits: hits.slice(0, target), candidatesSeen };
+	return {
+		hits: hits.slice(0, target),
+		candidatesSeen: seenCandidates.size,
+		complete: hits.length >= target || indexExhausted,
+	};
 }
 
 function vectorSearch(
@@ -222,7 +234,12 @@ function vectorSearch(
 				boundedCurrentKnnHits(db, queryEmbedding, limit),
 			);
 			if (snapshot === null) throw new Error("vec index synchronization unconfirmed");
-			const { hits, candidatesSeen } = snapshot;
+			const { hits, candidatesSeen, complete } = snapshot;
+			if (!complete) {
+				throw new Error(
+					"bounded KNN filtering exhausted before enough published results; run `recall repair --execute`",
+				);
+			}
 			// #217 ruling: an empty KNN result over a non-empty canonical
 			// embeddings table is a FAILURE (e.g. a failed self-heal left the vec
 			// index empty — knnSearch returns [] rather than throwing), not a valid

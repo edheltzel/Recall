@@ -35,6 +35,7 @@ import { Database } from 'bun:sqlite';
 import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { publishedRecordTable } from './published-records.js';
 import { blobToEmbedding, cosineSimilarity } from './embeddings.js';
+import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
 import {
   PROVENANCE_TABLES,
   PROVENANCE_VALUES,
@@ -695,6 +696,7 @@ export function applyDedupPlan(
     for (const [table, ids] of toDelete) {
       for (const chunk of chunked(ids)) {
         const placeholders = chunk.map(() => '?').join(', ');
+        deleteRecordEmbeddingsByIdsInTransaction(db, table, chunk);
         if (table === 'messages') {
           db.prepare(`
             UPDATE host_ingest_generation_messages SET content = NULL
@@ -702,9 +704,6 @@ export function applyDedupPlan(
           `).run(...chunk);
         }
         db.prepare(`DELETE FROM ${table} WHERE id IN (${placeholders})`).run(...chunk);
-        db.prepare(
-          `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`
-        ).run(table, ...chunk);
       }
     }
   });
