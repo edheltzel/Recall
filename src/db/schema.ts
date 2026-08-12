@@ -458,6 +458,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_host_ingest_token
   ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_fts_pending
   ON host_ingest_generation_messages(generation_id, fts_pending, ordinal);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_embedding_invalidations_message
+  ON host_ingest_embedding_invalidations(message_id, generation_id);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_state_active_generation
+  ON host_ingest_state(active_generation);
 
 -- Decision indexes
 CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project);

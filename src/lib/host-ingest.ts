@@ -1231,6 +1231,15 @@ function activatePreparedGeneration(
   if (pending.message_count !== generation.generationRowCount) {
     throw new Error('Lifecycle generation was not fully materialized');
   }
+  if (generation.previous?.active_generation && db.prepare(`
+    SELECT 1 FROM host_ingest_embedding_invalidations
+    WHERE generation_id = ? LIMIT 1
+  `).get(generation.previous.active_generation)) {
+    throw new HostIngestCheckpointConflictError(
+      generation.input.source,
+      generation.input.sessionId
+    );
+  }
 
   const { input, prepared, previous } = generation;
   upsertGeneratedSession(db, generation);

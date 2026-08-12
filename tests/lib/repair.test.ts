@@ -262,12 +262,27 @@ describe('embedding gap detection', () => {
       messages: [{ role: 'assistant', content: CRUMB }],
     });
     expect(captured.inserted).toBe(1);
+    const generation = getDb().prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = 'generation-embedding-repair'
+    `).get() as { active_generation: string };
+    const message = getDb().prepare(`
+      SELECT message_id FROM host_ingest_generation_messages
+      WHERE generation_id = ? LIMIT 1
+    `).get(generation.active_generation) as { message_id: number };
+    getDb().prepare(`
+      INSERT INTO host_ingest_embedding_invalidations (generation_id, message_id)
+      VALUES (?, ?)
+    `).run(generation.active_generation, message.message_id);
     const config = EMBED_SOURCES.find(c => c.table === 'messages')!;
     expect(countEmbedGaps(getDb(), config)).toMatchObject({ missing: 1, tooShort: 0 });
 
     const plan = planRepair(getDb(), { table: 'messages' });
     const result = await applyEmbedRepair(getDb(), plan, okEmbed);
     expect(result.embedded).toBe(1);
+    expect(getDb().prepare(`
+      SELECT 1 FROM host_ingest_embedding_invalidations WHERE generation_id = ?
+    `).get(generation.active_generation)).toBeNull();
     expect(checkOrphans(getDb()).find(report => report.check === 'orphaned-embeddings:messages'))
       .toBeUndefined();
   });

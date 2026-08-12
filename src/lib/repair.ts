@@ -33,6 +33,8 @@ import {
   getLifecycleSearchReadiness,
   type LifecycleSearchReadiness,
 } from './lifecycle-search.js';
+import { tableExists } from '../db/introspection.js';
+import { upsertEmbedding } from './embedding-store.js';
 
 /** Source tables carrying an FTS5 index — derived from the schema map. */
 export const FTS_SOURCES = Object.keys(FTS_SCHEMA);
@@ -106,13 +108,6 @@ export interface FtsReport {
   status: FtsStatus;
   action: FtsAction;
   detail: string;
-}
-
-function tableExists(db: Database, name: string): boolean {
-  // FTS5 virtual tables are recorded in sqlite_master with type 'table'.
-  return !!db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
-  ).get(name);
 }
 
 /**
@@ -550,10 +545,6 @@ export async function applyEmbedRepair(
   embedFn: EmbedFn,
   onProgress?: (table: string, done: number, total: number) => void
 ): Promise<EmbedRepairResult> {
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
-    VALUES (?, ?, ?, ?, ?)
-  `);
   const result: EmbedRepairResult = { embedded: 0, skippedTooShort: 0, failed: [] };
 
   for (const gap of plan.embedGaps) {
@@ -568,8 +559,16 @@ export async function applyEmbedRepair(
         continue;
       }
       try {
-        const res = await embedFn(config.text(row).trim());
-        insert.run(config.table, row.id as number, res.model, res.dimensions, embeddingToBlob(res.embedding));
+        const sourceContent = config.text(row);
+        const res = await embedFn(sourceContent.trim());
+        upsertEmbedding(db, {
+          sourceTable: config.table,
+          sourceId: row.id as number,
+          model: res.model,
+          dimensions: res.dimensions,
+          embedding: embeddingToBlob(res.embedding),
+          sourceContent,
+        });
         result.embedded++;
       } catch (err) {
         result.failed.push({
