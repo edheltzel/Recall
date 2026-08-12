@@ -81,6 +81,27 @@ function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function sourceMessageIds(raw: string | null | undefined): Set<number> {
+  if (!raw) return new Set();
+  try {
+    const entries: unknown = JSON.parse(raw);
+    if (!Array.isArray(entries)) return new Set();
+    return new Set(
+      entries.flatMap(entry => {
+        if (!entry || typeof entry !== 'object') return [];
+        const item = entry as { table?: unknown; id?: unknown };
+        return item.table === 'messages' &&
+          typeof item.id === 'number' &&
+          Number.isSafeInteger(item.id)
+          ? [item.id]
+          : [];
+      })
+    );
+  } catch {
+    return new Set();
+  }
+}
+
 function assertSessionId(sessionId: string): void {
   if (!sessionId || sessionId.length > 512 || /[\u0000-\u001f\u007f]/.test(sessionId)) {
     throw new Error('Lifecycle hook supplied an invalid native session ID');
@@ -315,25 +336,35 @@ function finalizeSession(
   const title = `${input.source[0].toUpperCase()}${input.source.slice(1)} session ${input.sessionId}`;
   const description = `Automatic terminal extraction from ${input.source} lifecycle capture.`;
   const tags = `automatic-capture,${input.source}`;
-  const currentExtract = input.source === 'grok'
-    ? generateFrameSummary(messages, 'Grok export')
-    : generateBasicSummary(messages);
   const sourceIds = JSON.stringify(messages.map(message => ({ table: 'messages', id: message.id })));
   const existing = db
     .prepare(`
-      SELECT id, fabric_extract FROM loa_entries
+      SELECT id, fabric_extract, source_ids FROM loa_entries
       WHERE session_id = ? AND description = ? AND tags = ?
       ORDER BY id DESC LIMIT 1
     `)
     .get(input.sessionId, description, tags) as
-      { id: number; fabric_extract: string } | undefined;
+      { id: number; fabric_extract: string; source_ids: string | null } | undefined;
   const lifecycleCounts = db.prepare(`
     SELECT COUNT(*) AS total,
       SUM(CASE WHEN message_id IS NULL THEN 1 ELSE 0 END) AS pruned
     FROM host_ingest_messages WHERE source = ? AND session_id = ?
   `).get(input.source, input.sessionId) as { total: number; pruned: number | null };
-  const fabricExtract = existing && (lifecycleCounts.pruned ?? 0) > 0
-    ? `${existing.fabric_extract}\n\n## RESUMED SESSION UPDATE\n\n${currentExtract}`
+  const previousMessageIds = sourceMessageIds(existing?.source_ids);
+  const terminalMessages = existing
+    ? messages.filter(message => !previousMessageIds.has(message.id))
+    : messages;
+  const preserveExisting = Boolean(existing && (lifecycleCounts.pruned ?? 0) > 0);
+  const summaryMessages = preserveExisting ? terminalMessages : messages;
+  const currentExtract = summaryMessages.length === 0
+    ? ''
+    : input.source === 'grok'
+      ? generateFrameSummary(summaryMessages, 'Grok export')
+      : generateBasicSummary(summaryMessages);
+  const fabricExtract = preserveExisting
+    ? currentExtract
+      ? `${existing!.fabric_extract}\n\n## RESUMED SESSION UPDATE\n\n${currentExtract}`
+      : existing!.fabric_extract
     : currentExtract;
   let loaId: number;
   if (existing) {
@@ -352,7 +383,9 @@ function finalizeSession(
       sourceIds,
       existing.id
     );
-    invalidateRecordEmbedding(db, 'loa_entries', existing.id);
+    if (existing.fabric_extract !== fabricExtract) {
+      invalidateRecordEmbedding(db, 'loa_entries', existing.id);
+    }
     loaId = existing.id;
   } else {
     const result = db.prepare(`

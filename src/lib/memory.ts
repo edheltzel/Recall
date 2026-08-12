@@ -699,10 +699,12 @@ export function invalidateRecordEmbedding(
   db: ReturnType<typeof getDb>,
   sourceTable: string,
   sourceId: number
-): void {
-  db.prepare('DELETE FROM embeddings WHERE source_table = ? AND source_id = ?')
+): boolean {
+  const result = db.prepare('DELETE FROM embeddings WHERE source_table = ? AND source_id = ?')
     .run(sourceTable, sourceId);
+  if (result.changes === 0) return false;
   invalidateVecIndex(db);
+  return true;
 }
 
 export function getLoaEntry(id: number): LoaEntry | undefined {
