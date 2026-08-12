@@ -12,8 +12,8 @@
 import { getDb } from '../db/connection.js';
 import { checkEmbeddingService, embed } from '../lib/embeddings.js';
 import {
-  getLifecycleSearchReadiness,
   repairLifecycleSearchIndex,
+  type LifecycleSearchReadiness,
 } from '../lib/lifecycle-search.js';
 import {
   applyEmbedRepair,
@@ -48,6 +48,7 @@ export interface RepairRunResult {
   embeddings: EmbedRepairResult | null;
   /** Why the embedding pass did not run, or null if it ran. */
   embedSkipped: string | null;
+  lifecycle: LifecycleSearchReadiness | null;
 }
 
 const DEFAULT_DEPS: RepairDeps = { checkService: checkEmbeddingService, embedFn: embed };
@@ -103,10 +104,11 @@ export async function runRepair(
       process.exitCode = 1;
     }
   }
-  if (target === 'all' || target === 'messages') {
-    const lifecycle = execute
+  let lifecycle = plan.lifecycle;
+  if (lifecycle) {
+    lifecycle = execute
       ? repairLifecycleSearchIndex(db, { maxPages: 8 })
-      : getLifecycleSearchReadiness(db);
+      : lifecycle;
     if (lifecycle.status === 'ready') {
       console.log('  Lifecycle message index: ready');
     } else {
@@ -114,6 +116,7 @@ export async function runRepair(
       console.log(
         `  Lifecycle message index: ${lifecycle.pendingGenerations} generation(s) pending — ${action}`
       );
+      if (execute) process.exitCode = 1;
     }
   }
   console.log('');
@@ -195,12 +198,13 @@ export async function runRepair(
   if (!execute) {
     const ftsWork = plan.fts.filter(f => f.action === 'rebuild' || f.action === 'create-and-rebuild').length;
     const embedWork = plan.embedGaps.reduce((sum, g) => sum + (g.missing - g.tooShort), 0);
-    if (ftsWork > 0 || embedWork > 0) {
+    const lifecycleWork = lifecycle?.status === 'retryable';
+    if (ftsWork > 0 || embedWork > 0 || lifecycleWork) {
       console.log("Re-run with --execute to apply repairs. Recommended: 'recall export --backup' first.");
     } else {
       console.log('Nothing to repair.');
     }
   }
 
-  return { plan, fts: ftsResult, embeddings: embedResult, embedSkipped };
+  return { plan, fts: ftsResult, embeddings: embedResult, embedSkipped, lifecycle };
 }

@@ -82,6 +82,7 @@ import {
 	knnSearch,
 } from "./db/vec.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
+import { publishedEmbeddingSql } from "./lib/published-records.js";
 import {
 	shouldFallbackToHybrid,
 	buildHybridFallbackOutcome,
@@ -131,9 +132,7 @@ function bruteForceVectorScan(
 		.prepare(`
         SELECT source_table, source_id, embedding FROM embeddings
         WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
-          AND (source_table <> 'messages' OR EXISTS (
-            SELECT 1 FROM published_messages WHERE id = embeddings.source_id
-          ))
+          AND ${publishedEmbeddingSql(db, "source_table", "embeddings.source_id")}
       `)
 		.all() as Array<{
 		source_table: string;
@@ -166,10 +165,12 @@ function currentVectorHits(
 	db: ReturnType<typeof getDb>,
 	hits: VectorSearchHit[],
 ): VectorSearchHit[] {
-	const published = db.prepare("SELECT 1 FROM published_messages WHERE id = ?");
-	return hits.filter((hit) =>
-		hit.source_table !== "messages" || Boolean(published.get(hit.source_id))
-	);
+	const current = db.prepare(`
+		SELECT 1 FROM embeddings
+		WHERE source_table = ? AND source_id = ?
+		  AND ${publishedEmbeddingSql(db, "embeddings.source_table", "embeddings.source_id")}
+	`);
+	return hits.filter((hit) => Boolean(current.get(hit.source_table, hit.source_id)));
 }
 
 function vectorSearch(
@@ -179,7 +180,7 @@ function vectorSearch(
 ): VectorSearchOutcome {
 	if (isVecAvailable()) {
 		try {
-			ensureVecIndexSynced(db); // once per process, cached on success — never per query
+			if (!ensureVecIndexSynced(db)) throw new Error("vec index synchronization unconfirmed");
 			const hits = currentVectorHits(
 				db,
 				knnSearch(db, queryEmbedding, limit * 2).map((h) => ({

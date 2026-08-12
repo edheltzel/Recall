@@ -22,6 +22,7 @@ import {
   createLoaEntry,
 } from '../../src/lib/memory';
 import type { LineageStatus } from '../../src/lib/dedup';
+import { embeddingToBlob } from '../../src/lib/embeddings';
 
 const originalLog = console.log;
 const originalError = console.error;
@@ -77,9 +78,20 @@ describe('prune respects dedup survivors (#80)', () => {
       ],
     });
 
+    const db = getDb();
+    const messageId = (db.prepare(`
+      SELECT message_id FROM host_ingest_generation_messages
+      WHERE generation_id = json_extract(
+        (SELECT source_ids FROM loa_entries WHERE id = ?), '$.generation_id'
+      ) AND content IS NOT NULL ORDER BY ordinal LIMIT 1
+    `).get(result.loaId!) as { message_id: number }).message_id;
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('messages', ?, 'test', 3, ?)
+    `).run(messageId, embeddingToBlob([1, 0, 0]));
+
     runPrune({ execute: true });
 
-    const db = getDb();
     expect((db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get(sessionId) as { count: number }).count).toBe(0);
@@ -96,6 +108,12 @@ describe('prune respects dedup survivors (#80)', () => {
         (SELECT source_ids FROM loa_entries WHERE id = ?), '$.generation_id'
       ) AND content IS NOT NULL
     `).get(result.loaId!) as { count: number }).count).toBe(0);
+    expect(db.prepare(`
+      SELECT 1 FROM embeddings WHERE source_table = 'messages' AND source_id = ?
+    `).get(messageId)).toBeNull();
+    expect(db.prepare(`
+      SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'
+    `).get()).toEqual({ value: '1' });
   });
 
   test('protects a recorded survivor message and still prunes a non-survivor', () => {

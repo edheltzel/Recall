@@ -29,6 +29,10 @@ import { notMarkedDuplicateSql } from './dedup.js';
 import { embeddingToBlob, type EmbeddingResult } from './embeddings.js';
 import { PROVENANCE_TABLES } from '../types/index.js';
 import { publishedRecordTable } from './published-records.js';
+import {
+  getLifecycleSearchReadiness,
+  type LifecycleSearchReadiness,
+} from './lifecycle-search.js';
 
 /** Source tables carrying an FTS5 index — derived from the schema map. */
 export const FTS_SOURCES = Object.keys(FTS_SCHEMA);
@@ -453,6 +457,7 @@ export interface RepairPlan {
   embedGaps: EmbedGapReport[];
   orphans: OrphanReport[];
   migrations: MigrationReport;
+  lifecycle: LifecycleSearchReadiness | null;
 }
 
 export interface PlanRepairOptions {
@@ -481,6 +486,9 @@ export function planRepair(db: Database, options: PlanRepairOptions = {}): Repai
     embedGaps,
     orphans: checkOrphans(db),
     migrations: checkMigrations(db),
+    lifecycle: !options.table || options.table === 'messages'
+      ? getLifecycleSearchReadiness(db)
+      : null,
   };
 }
 

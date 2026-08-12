@@ -160,6 +160,7 @@ describe('manifest', () => {
       dedup_lineage: 0,
       host_ingest_generations: 0,
       host_ingest_generation_messages: 0,
+      host_ingest_embedding_invalidations: 0,
       host_ingest_state: 1,
       host_ingest_messages: 1,
       loa_message_sources: 1,
@@ -198,6 +199,7 @@ describe('SQL dump', () => {
     expect(sql).toContain('INSERT INTO "host_ingest_state"');
     expect(sql).toContain('CREATE TABLE host_ingest_generations');
     expect(sql).toContain('CREATE TABLE host_ingest_generation_messages');
+    expect(sql).toContain('CREATE TABLE host_ingest_embedding_invalidations');
     expect(sql).toContain('INSERT INTO "host_ingest_messages"');
     expect(sql).toContain('INSERT INTO "loa_message_sources"');
     expect(sql).toContain("''quoted''"); // escaped single quotes
@@ -238,6 +240,7 @@ describe('SQL dump', () => {
         dedup_lineage: 0,
         host_ingest_generations: 0,
         host_ingest_generation_messages: 0,
+        host_ingest_embedding_invalidations: 0,
         host_ingest_state: 1,
         host_ingest_messages: 1,
         loa_message_sources: 1,

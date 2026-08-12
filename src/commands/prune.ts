@@ -1,6 +1,7 @@
 // recall prune command — table lifecycle management
 
 import { getDb } from '../db/connection.js';
+import { invalidateVecIndex } from '../db/vec.js';
 import { notRecordedSurvivorSql } from '../lib/dedup.js';
 
 interface PruneOptions {
@@ -139,14 +140,22 @@ export function runPrune(options: PruneOptions): void {
 
   // Execute deletes
   if (messageCount > 0) {
-    db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
-      WHERE message_id IN (
-        SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
-      )`).run();
-    db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}
-      AND (host_ingest_token IS NULL OR EXISTS (
-        SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
-      ))`).run();
+    db.transaction(() => {
+      const removedEmbeddings = db.prepare(`
+        DELETE FROM embeddings WHERE source_table = 'messages' AND source_id IN (
+          SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
+        )
+      `).run();
+      db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
+        WHERE message_id IN (
+          SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
+        )`).run();
+      db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}
+        AND (host_ingest_token IS NULL OR EXISTS (
+          SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
+        ))`).run();
+      if (removedEmbeddings.changes > 0) invalidateVecIndex(db);
+    })();
   }
 
   if (sessionCount > 0) {
