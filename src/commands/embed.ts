@@ -9,7 +9,7 @@ import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/r
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
 import { publishedEmbeddingSql, publishedRecordTable } from '../lib/published-records.js';
-import { upsertEmbedding, upsertEmbeddingInTransaction } from '../lib/embedding-store.js';
+import { upsertEmbedding, upsertEmbeddingsInTransaction } from '../lib/embedding-store.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
@@ -248,16 +248,14 @@ export async function runRebackfill(): Promise<void> {
   // freshly produced ones, and stamp the marker — all or nothing.
   const swap = db.transaction(() => {
     db.prepare('DELETE FROM embeddings').run();
-    for (const u of updates) {
-      upsertEmbeddingInTransaction(db, {
-        sourceTable: u.table,
-        sourceId: u.id,
-        model: u.model,
-        dimensions: u.dimensions,
-        embedding: u.blob,
-        sourceContent: u.sourceContent,
-      });
-    }
+    upsertEmbeddingsInTransaction(db, updates.map(u => ({
+      sourceTable: u.table,
+      sourceId: u.id,
+      model: u.model,
+      dimensions: u.dimensions,
+      embedding: u.blob,
+      sourceContent: u.sourceContent,
+    })));
     writeEmbeddingMarker(db);
   });
   swap();

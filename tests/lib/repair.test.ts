@@ -283,6 +283,9 @@ describe('embedding gap detection', () => {
     expect(getDb().prepare(`
       SELECT 1 FROM host_ingest_embedding_invalidations WHERE generation_id = ?
     `).get(generation.active_generation)).toBeNull();
+    expect(getDb().prepare(`
+      SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'
+    `).get()).toEqual({ value: '1' });
     expect(checkOrphans(getDb()).find(report => report.check === 'orphaned-embeddings:messages'))
       .toBeUndefined();
   });
