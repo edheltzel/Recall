@@ -80,7 +80,7 @@ function checkMessages(): CheckResult {
   try {
     const db = getDb();
     const row = db.prepare<{ count: number; latest: string | null }, []>(
-      'SELECT COUNT(*) as count, MAX(timestamp) as latest FROM messages'
+      'SELECT COUNT(*) as count, MAX(timestamp) as latest FROM published_messages'
     ).get();
 
     if (!row || row.count === 0) {

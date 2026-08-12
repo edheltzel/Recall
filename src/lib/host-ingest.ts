@@ -155,6 +155,8 @@ interface PreparedBatchGeneration {
   publishToken: string;
 }
 
+const STALE_GENERATION_MS = 5 * 60 * 1000;
+
 function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -560,7 +562,9 @@ function prepareBatchGeneration(
     messageCount: timeRange.count,
     newMessageCount,
     expectedKeyCount,
-    publishToken: hash(`${stage.path}\u0000${first.source}\u0000${first.session_id}`),
+    publishToken: `${Date.now().toString(16).padStart(12, '0')}${hash(
+      `${stage.path}\u0000${first.source}\u0000${first.session_id}`
+    )}`,
   };
 }
 
@@ -634,17 +638,16 @@ function publishGenerationMessages(
   if (currentKeyCount !== generation.expectedKeyCount) {
     throw new HostIngestCheckpointConflictError(input.source, input.sessionId);
   }
-  db.prepare(`
-    INSERT INTO messages (
-      session_id, timestamp, role, content, project, importance, provenance,
-      host_ingest_token
-    )
-    SELECT session_id, timestamp, role, content, project, 5, 'verbatim',
-      ? || ':' || printf('%016d', ordinal)
-    FROM host_ingest_stage.generation_messages
-    WHERE existing_key = 0
-    ORDER BY ordinal
-  `).run(generation.publishToken);
+  const materialized = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM host_ingest_stage.generation_messages AS generation
+    JOIN messages AS pending
+      ON pending.host_ingest_token = ? || ':' || printf('%016d', generation.ordinal)
+    WHERE generation.existing_key = 0
+  `).get(generation.publishToken) as { count: number }).count;
+  if (materialized !== generation.newMessageCount) {
+    throw new Error('Lifecycle generation was not fully materialized');
+  }
   const inserted = generation.newMessageCount;
   db.prepare(`
     INSERT INTO host_ingest_messages
@@ -657,15 +660,6 @@ function publishGenerationMessages(
     WHERE generation.existing_key = 0
     ORDER BY generation.ordinal
   `).run(generation.publishToken);
-  db.prepare(`
-    UPDATE messages SET host_ingest_token = NULL
-    WHERE EXISTS (
-      SELECT 1 FROM host_ingest_stage.generation_messages AS generation
-      WHERE generation.existing_key = 0
-        AND messages.host_ingest_token = ? || ':' || printf('%016d', generation.ordinal)
-    )
-  `).run(generation.publishToken);
-
   const positionChanges = db.prepare(`
     UPDATE host_ingest_messages SET source_position = (
       SELECT generation.source_position
@@ -744,6 +738,142 @@ function publishGenerationMessages(
     inserted,
     reconciled: positionChanges + contentChanges + clearedPositions,
   };
+}
+
+function ensureGenerationSession(
+  db: Database,
+  generation: PreparedBatchGeneration
+): boolean {
+  const existing = db.prepare('SELECT 1 FROM sessions WHERE session_id = ?')
+    .get(generation.input.sessionId);
+  if (existing) {
+    assertSessionOwnership(db, generation.input);
+    return true;
+  }
+  db.prepare(`
+    INSERT INTO sessions (session_id, started_at, project, cwd, source)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(
+    generation.input.sessionId,
+    generation.startedAt,
+    generation.prepared.project ?? null,
+    generation.prepared.cwd ?? null,
+    generation.input.source
+  );
+  return false;
+}
+
+function materializeGenerationMessages(
+  db: Database,
+  generation: PreparedBatchGeneration,
+  deadline?: number
+): void {
+  const page = db.prepare(`
+    SELECT ordinal FROM host_ingest_stage.generation_messages
+    WHERE existing_key = 0 AND ordinal > ?
+    ORDER BY ordinal LIMIT ?
+  `);
+  const insert = db.prepare(`
+    INSERT INTO messages (
+      session_id, timestamp, role, content, project, importance, provenance,
+      host_ingest_token
+    )
+    SELECT session_id, timestamp, role, content, project, 5, 'verbatim',
+      ? || ':' || printf('%016d', ordinal)
+    FROM host_ingest_stage.generation_messages
+    WHERE existing_key = 0 AND ordinal > ? AND ordinal <= ?
+    ORDER BY ordinal
+  `);
+  let cursor = -1;
+  for (;;) {
+    assertHostDeadline(deadline);
+    const rows = page.all(cursor, SQLITE_SAFE_CHUNK_SIZE) as Array<{ ordinal: number }>;
+    if (rows.length === 0) break;
+    const lastOrdinal = rows.at(-1)!.ordinal;
+    db.transaction(() => {
+      insert.run(generation.publishToken, cursor, lastOrdinal);
+    }).immediate();
+    cursor = lastOrdinal;
+  }
+  assertHostDeadline(deadline);
+}
+
+function discardGenerationMessages(
+  db: Database,
+  generation: PreparedBatchGeneration
+): void {
+  const selectIds = db.prepare(`
+    SELECT pending.id
+    FROM messages AS pending
+    JOIN host_ingest_stage.generation_messages AS generation
+      ON pending.host_ingest_token = ? || ':' || printf('%016d', generation.ordinal)
+    WHERE generation.existing_key = 0
+      AND NOT EXISTS (
+        SELECT 1 FROM host_ingest_messages AS stored
+        WHERE stored.message_id = pending.id
+      )
+    ORDER BY pending.id LIMIT ?
+  `);
+  for (;;) {
+    const ids = (selectIds.all(generation.publishToken, SQLITE_SAFE_CHUNK_SIZE) as
+      Array<{ id: number }>).map(row => row.id);
+    if (ids.length === 0) break;
+    db.transaction(() => {
+      db.prepare(`
+        DELETE FROM messages
+        WHERE id IN (${ids.map(() => '?').join(',')})
+      `).run(...ids);
+    }).immediate();
+  }
+}
+
+function discardGenerationSession(
+  db: Database,
+  generation: PreparedBatchGeneration
+): void {
+  db.prepare(`
+    DELETE FROM sessions
+    WHERE session_id = ?
+      AND NOT EXISTS (SELECT 1 FROM messages WHERE session_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM host_ingest_state WHERE session_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM loa_entries WHERE session_id = ?)
+  `).run(
+    generation.input.sessionId,
+    generation.input.sessionId,
+    generation.input.sessionId,
+    generation.input.sessionId
+  );
+}
+
+function discardStaleGenerationMessages(
+  db: Database,
+  generation: PreparedBatchGeneration
+): void {
+  const cutoff = (Date.now() - STALE_GENERATION_MS).toString(16).padStart(12, '0');
+  const selectIds = db.prepare(`
+    SELECT message.id FROM messages AS message
+    WHERE message.session_id = ?
+      AND message.host_ingest_token IS NOT NULL
+      AND substr(message.host_ingest_token, 1, 12) < ?
+      AND NOT EXISTS (
+        SELECT 1 FROM host_ingest_messages AS stored
+        WHERE stored.message_id = message.id
+      )
+    ORDER BY message.id LIMIT ?
+  `);
+  for (;;) {
+    const ids = (selectIds.all(
+      generation.input.sessionId,
+      cutoff,
+      SQLITE_SAFE_CHUNK_SIZE
+    ) as Array<{ id: number }>).map(row => row.id);
+    if (ids.length === 0) break;
+    db.transaction(() => {
+      db.prepare(`
+        DELETE FROM messages WHERE id IN (${ids.map(() => '?').join(',')})
+      `).run(...ids);
+    }).immediate();
+  }
 }
 
 function insertNewMessages(
@@ -1161,10 +1291,15 @@ function finalizeSession(
       ? `${existing!.fabric_extract}\n\n## RESUMED SESSION UPDATE\n\n${currentExtract}`
       : existing!.fabric_extract
     : currentExtract;
+  const emptySnapshotHighWater = emptyReconciliation
+    ? (db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM published_messages')
+        .get() as { id: number }).id
+    : 0;
   const snapshotMaxMessageId = Math.max(
     existing?.previous_message_id ?? 0,
-    stats.rangeEnd ?? 0
-  ) || null;
+    stats.rangeEnd ?? 0,
+    emptySnapshotHighWater
+  );
   assertHostDeadline(deadline);
   let loaId: number;
   if (existing) {
@@ -1386,27 +1521,43 @@ export function ingestHostTranscriptBatch(
   const db = getDb();
   let stageOpen = true;
   let attached = false;
+  let generationMaterialized = false;
+  let generationActivated = false;
+  let sessionExisted = true;
+  let generation: PreparedBatchGeneration | undefined;
   try {
-    const generation = db
+    const preparedGeneration = db
       .transaction(() => prepareBatchGeneration(stage, db, deadline))
       .deferred();
+    generation = preparedGeneration;
     stage.db.close();
     stageOpen = false;
     db.prepare('ATTACH DATABASE ? AS host_ingest_stage').run(stage.path);
     attached = true;
-    return db
+    discardStaleGenerationMessages(db, preparedGeneration);
+    sessionExisted = db.transaction(() => ensureGenerationSession(db, preparedGeneration)).immediate();
+    generationMaterialized = true;
+    materializeGenerationMessages(db, preparedGeneration, deadline);
+    const result = db
       .transaction(() => {
-        return ingestBatchGenerationInTransaction(db, generation, expectation, deadline);
+        return ingestBatchGenerationInTransaction(db, preparedGeneration, expectation, deadline);
       })
       .immediate();
+    generationActivated = true;
+    return result;
   } finally {
     try {
-      if (attached) {
-        db.exec('DETACH DATABASE host_ingest_stage');
+      if (attached && generationMaterialized && !generationActivated && generation) {
+        discardGenerationMessages(db, generation);
+        if (!sessionExisted) discardGenerationSession(db, generation);
       }
     } finally {
-      if (stageOpen) stage.db.close();
-      rmSync(stage.directory, { recursive: true, force: true });
+      try {
+        if (attached) db.exec('DETACH DATABASE host_ingest_stage');
+      } finally {
+        if (stageOpen) stage.db.close();
+        rmSync(stage.directory, { recursive: true, force: true });
+      }
     }
   }
 }

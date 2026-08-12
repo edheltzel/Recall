@@ -96,10 +96,10 @@ function clearSessionMessages(sessionId: string): number {
   const db = getDb();
 
   const deleteAll = db.transaction(() => {
-    const countResult = db.prepare('SELECT COUNT(*) as count FROM messages WHERE session_id = ?').get(sessionId) as { count: number };
+    const countResult = db.prepare('SELECT COUNT(*) as count FROM published_messages WHERE session_id = ?').get(sessionId) as { count: number };
     const count = countResult?.count || 0;
 
-    const rangeResult = db.prepare('SELECT MIN(id) as minId, MAX(id) as maxId FROM messages WHERE session_id = ?').get(sessionId) as { minId: number | null; maxId: number | null };
+    const rangeResult = db.prepare('SELECT MIN(id) as minId, MAX(id) as maxId FROM published_messages WHERE session_id = ?').get(sessionId) as { minId: number | null; maxId: number | null };
 
     if (rangeResult && rangeResult.minId !== null && rangeResult.maxId !== null) {
       const affectedLoaIds = db.prepare(`
@@ -135,7 +135,7 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
   const rows = getDb()
     .prepare(`
       SELECT m.id, m.content, m.role, m.timestamp, m.project
-      FROM messages m
+      FROM published_messages m
       WHERE m.session_id = ?
         AND NOT EXISTS (
           SELECT 1 FROM host_ingest_messages h WHERE h.message_id = m.id
@@ -249,7 +249,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     ? (existingSnapshot ?? findExplicitSnapshot(session) ?? [])
     : db.prepare(`
         SELECT id, content, role, timestamp, project
-        FROM messages
+        FROM published_messages
         WHERE session_id = ?
         ORDER BY timestamp
       `).all(session.sessionId) as DumpMessageRow[];
