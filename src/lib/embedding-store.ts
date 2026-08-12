@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { tableExists } from '../db/introspection.js';
+import { invalidateVecIndex } from '../db/vec.js';
 
 const invalidationTableAvailability = new WeakMap<Database, boolean>();
 
@@ -43,7 +44,7 @@ function acknowledgeLifecycleInvalidation(
   `).run(sourceId, sourceContent);
 }
 
-export function upsertEmbeddingInTransaction(db: Database, write: EmbeddingWrite): void {
+function persistEmbedding(db: Database, write: EmbeddingWrite): void {
   db.prepare(`
     INSERT OR REPLACE INTO embeddings (
       source_table, source_id, model, dimensions, embedding
@@ -61,6 +62,19 @@ export function upsertEmbeddingInTransaction(db: Database, write: EmbeddingWrite
     write.sourceId,
     write.sourceContent
   );
+}
+
+export function upsertEmbeddingInTransaction(db: Database, write: EmbeddingWrite): void {
+  invalidateVecIndex(db);
+  persistEmbedding(db, write);
+}
+
+export function upsertEmbeddingsInTransaction(
+  db: Database,
+  writes: Iterable<EmbeddingWrite>
+): void {
+  invalidateVecIndex(db);
+  for (const write of writes) persistEmbedding(db, write);
 }
 
 export function upsertEmbedding(db: Database, write: EmbeddingWrite): void {
