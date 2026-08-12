@@ -210,20 +210,30 @@ function grokFrameBoundary(raw: Buffer): number {
     while (raw[cursor] === 0x20 || raw[cursor] === 0x09) cursor--;
     if (raw[cursor] === 0x0a) return end;
   }
+  const windowSize = Math.min(64, raw.length);
+  const base = 257;
+  let power = 1;
+  for (let index = 1; index < windowSize; index++) power = Math.imul(power, base) >>> 0;
   let hash = 0;
+  for (let index = 0; index < windowSize; index++) {
+    hash = (Math.imul(hash, base) + raw[index]) >>> 0;
+  }
   let boundary = 0;
-  let fallback = 1;
+  let fallback = windowSize;
   let minimum = 0xffffffff;
   const minimumBoundary = Math.min(1024 * 1024, raw.length);
-  for (let index = 0; index < raw.length; index++) {
-    hash = ((hash << 1) + Math.imul(raw[index] + 1, 0x9e3779b1)) >>> 0;
-    if (index + 1 < minimumBoundary) continue;
-    if (index + 1 < raw.length && (raw[index + 1] & 0xc0) === 0x80) continue;
-    if ((hash & 0xfffff) === 0) boundary = index + 1;
-    if (hash < minimum) {
-      minimum = hash;
-      fallback = index + 1;
+  const maximumBoundary = Math.max(minimumBoundary, raw.length - 64 * 1024);
+  for (let end = windowSize; end <= maximumBoundary; end++) {
+    if (end >= minimumBoundary && (end === raw.length || (raw[end] & 0xc0) !== 0x80)) {
+      if ((hash & 0xfffff) === 0) boundary = end;
+      if (hash < minimum) {
+        minimum = hash;
+        fallback = end;
+      }
     }
+    if (end === maximumBoundary) break;
+    const outgoing = Math.imul(raw[end - windowSize], power) >>> 0;
+    hash = (Math.imul((hash - outgoing) >>> 0, base) + raw[end]) >>> 0;
   }
   return boundary || fallback;
 }
@@ -266,7 +276,7 @@ function grokHookRequest(payload: HookPayload): GrokHookRequest | { skipped: str
     capturedAt: stringValue(payload.timestamp),
     finalize: event === 'sessionend' ||
       (event === 'stop' && ['channel_closed', 'shutdown'].includes(reason ?? '')),
-    validatePrefix: event !== 'stop',
+    validatePrefix: event !== 'stop' || ['channel_closed', 'shutdown'].includes(reason ?? ''),
   };
 }
 
@@ -395,7 +405,9 @@ function ingestStagedGrokExport(
   }
   let aggregate: HostIngestResult | undefined;
   for (const chunk of boundedTranscriptChunks(start, size, read, capture.digest, grokFrameBoundary)) {
-    const parsed = parseGrokExport(chunk.raw.toString('utf-8'));
+    const parsed = parseGrokExport(chunk.raw.toString('utf-8'), {
+      sourceOffset: chunk.start,
+    });
     aggregate = mergeIngestResults(aggregate, ingest({
       source: 'grok',
       sessionId: request.sessionId,

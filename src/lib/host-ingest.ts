@@ -15,6 +15,8 @@ export interface HostTranscriptMessage {
   content: string;
   timestamp?: string;
   nativeId?: string;
+  identityContent?: string;
+  sourcePosition?: number;
 }
 
 export interface HostTranscript {
@@ -34,10 +36,11 @@ export interface HostTranscript {
 export interface HostIngestBatch {
   fallbackOccurrences: Map<string, number>;
   nextOrdinal: number;
+  positionsReset: boolean;
 }
 
 export function createHostIngestBatch(): HostIngestBatch {
-  return { fallbackOccurrences: new Map(), nextOrdinal: 0 };
+  return { fallbackOccurrences: new Map(), nextOrdinal: 0, positionsReset: false };
 }
 
 export interface HostIngestResult {
@@ -139,10 +142,14 @@ function prepareMessages(
     const cleaned = scrub(message.content);
     for (const kind of cleaned.redactions) redactions.add(kind);
     if (!cleaned.text.trim()) continue;
+    const identity = message.identityContent === undefined
+      ? cleaned
+      : scrub(message.identityContent);
+    for (const kind of identity.redactions) redactions.add(kind);
 
     const identityBase = message.nativeId
       ? undefined
-      : hash(`${message.role}\u0000${cleaned.text}`);
+      : hash(`${message.role}\u0000${identity.text}`);
 
     prepared.push({
       ...message,
@@ -150,6 +157,9 @@ function prepareMessages(
       timestamp: normalizedTimestamp(message.timestamp, capturedAt, ordinalOffset + ordinal),
       messageKey: message.nativeId ? `native:${hash(message.nativeId)}` : '',
       identityBase,
+      sourcePosition: Number.isSafeInteger(message.sourcePosition) && message.sourcePosition! >= 0
+        ? message.sourcePosition
+        : undefined,
     });
   }
 
@@ -233,6 +243,13 @@ function insertNewMessages(
   input: HostTranscript,
   prepared: PreparedTranscript
 ): number {
+  if (input.source === 'grok' && !input.incremental && !input.batch?.positionsReset) {
+    db.prepare(`
+      UPDATE host_ingest_messages SET source_position = NULL
+      WHERE source = ? AND session_id = ?
+    `).run(input.source, input.sessionId);
+    if (input.batch) input.batch.positionsReset = true;
+  }
   const occurrences = input.batch?.fallbackOccurrences ?? new Map<string, number>();
   const latestOccurrence = db.prepare(`
     SELECT message_key FROM host_ingest_messages
@@ -261,29 +278,60 @@ function insertNewMessages(
     message.messageKey = `content:${message.identityBase}:${String(occurrence).padStart(16, '0')}`;
   }
 
-  const knownKeys = new Set<string>();
+  const knownKeys = new Map<string, { messageId: number | null; content: string | null }>();
   for (const keys of chunked(prepared.messages.map(message => message.messageKey))) {
     const rows = db
       .prepare(`
-        SELECT message_key FROM host_ingest_messages
-        WHERE source = ? AND session_id = ?
-          AND message_key IN (${keys.map(() => '?').join(',')})
+        SELECT h.message_key, h.message_id, m.content
+        FROM host_ingest_messages h
+        LEFT JOIN messages m ON m.id = h.message_id
+        WHERE h.source = ? AND h.session_id = ?
+          AND h.message_key IN (${keys.map(() => '?').join(',')})
       `)
-      .all(input.source, input.sessionId, ...keys) as Array<{ message_key: string }>;
-    for (const row of rows) knownKeys.add(row.message_key);
+      .all(input.source, input.sessionId, ...keys) as Array<{
+        message_key: string;
+        message_id: number | null;
+        content: string | null;
+      }>;
+    for (const row of rows) {
+      knownKeys.set(row.message_key, { messageId: row.message_id, content: row.content });
+    }
   }
   const insertMessage = db.prepare(`
     INSERT INTO messages (session_id, timestamp, role, content, project, importance, provenance)
     VALUES (?, ?, ?, ?, ?, 5, 'verbatim')
   `);
   const insertKey = db.prepare(`
-    INSERT INTO host_ingest_messages (source, session_id, message_key, message_id)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO host_ingest_messages
+      (source, session_id, message_key, message_id, source_position)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const updateKeyPosition = db.prepare(`
+    UPDATE host_ingest_messages SET source_position = ?
+    WHERE source = ? AND session_id = ? AND message_key = ?
+  `);
+  const updateMessage = db.prepare(`
+    UPDATE messages SET content = ? WHERE id = ?
   `);
 
   let inserted = 0;
   for (const message of prepared.messages) {
-    if (knownKeys.has(message.messageKey)) continue;
+    if (knownKeys.has(message.messageKey)) {
+      if (message.sourcePosition !== undefined) {
+        updateKeyPosition.run(
+          message.sourcePosition,
+          input.source,
+          input.sessionId,
+          message.messageKey
+        );
+        const known = knownKeys.get(message.messageKey);
+        if (known && known.messageId !== null && known.content !== message.content) {
+          updateMessage.run(message.content, known.messageId);
+          invalidateRecordEmbedding(db, 'messages', known.messageId);
+        }
+      }
+      continue;
+    }
     const result = insertMessage.run(
       input.sessionId,
       message.timestamp,
@@ -291,8 +339,17 @@ function insertNewMessages(
       message.content,
       prepared.project ?? null
     );
-    insertKey.run(input.source, input.sessionId, message.messageKey, result.lastInsertRowid);
-    knownKeys.add(message.messageKey);
+    insertKey.run(
+      input.source,
+      input.sessionId,
+      message.messageKey,
+      result.lastInsertRowid,
+      message.sourcePosition ?? null
+    );
+    knownKeys.set(message.messageKey, {
+      messageId: Number(result.lastInsertRowid),
+      content: message.content,
+    });
     inserted++;
   }
   return inserted;
@@ -334,22 +391,30 @@ function finalizeSession(
 ): { finalized: boolean; loaId?: number } {
   if (!input.finalize || !shouldFinalize) return { finalized: false };
 
-  const messages = db
-    .prepare(`
-      SELECT m.id, m.role, m.content, m.timestamp FROM messages m
-      WHERE m.session_id = ? AND EXISTS (
-        SELECT 1 FROM host_ingest_messages h
-        WHERE h.source = ? AND h.session_id = ? AND h.message_id = m.id
-      )
-      ORDER BY m.timestamp, m.id
-    `)
-    .all(input.sessionId, input.source, input.sessionId) as StoredMessage[];
+  const messages = input.source === 'grok'
+    ? db.prepare(`
+        SELECT m.id, m.role, m.content, m.timestamp FROM messages m
+        JOIN host_ingest_messages h ON h.message_id = m.id
+        WHERE m.session_id = ? AND h.source = ? AND h.session_id = ?
+          AND h.source_position IS NOT NULL
+        ORDER BY h.source_position, m.id
+      `).all(input.sessionId, input.source, input.sessionId) as StoredMessage[]
+    : db.prepare(`
+        SELECT m.id, m.role, m.content, m.timestamp FROM messages m
+        WHERE m.session_id = ? AND EXISTS (
+          SELECT 1 FROM host_ingest_messages h
+          WHERE h.source = ? AND h.session_id = ? AND h.message_id = m.id
+        )
+        ORDER BY m.timestamp, m.id
+      `).all(input.sessionId, input.source, input.sessionId) as StoredMessage[];
   if (messages.length === 0) return { finalized: false };
 
   const title = `${input.source[0].toUpperCase()}${input.source.slice(1)} session ${input.sessionId}`;
   const description = `Automatic terminal extraction from ${input.source} lifecycle capture.`;
   const tags = `automatic-capture,${input.source}`;
   const sourceIds = JSON.stringify(messages.map(message => ({ table: 'messages', id: message.id })));
+  const messageRangeStart = Math.min(...messages.map(message => message.id));
+  const messageRangeEnd = Math.max(...messages.map(message => message.id));
   const existing = db
     .prepare(`
       SELECT id, fabric_extract, source_ids FROM loa_entries
@@ -362,7 +427,8 @@ function finalizeSession(
     SELECT COUNT(*) AS total,
       SUM(CASE WHEN message_id IS NULL THEN 1 ELSE 0 END) AS pruned
     FROM host_ingest_messages WHERE source = ? AND session_id = ?
-  `).get(input.source, input.sessionId) as { total: number; pruned: number | null };
+      AND (? <> 'grok' OR source_position IS NOT NULL)
+  `).get(input.source, input.sessionId, input.source) as { total: number; pruned: number | null };
   const previousMessageIds = sourceMessageIds(existing?.source_ids);
   const terminalMessages = existing
     ? messages.filter(message => !previousMessageIds.has(message.id))
@@ -389,8 +455,8 @@ function finalizeSession(
     `).run(
       title,
       fabricExtract,
-      messages[0].id,
-      messages.at(-1)!.id,
+      messageRangeStart,
+      messageRangeEnd,
       project ?? null,
       lifecycleCounts.total,
       sourceIds,
@@ -410,8 +476,8 @@ function finalizeSession(
       title,
       description,
       fabricExtract,
-      messages[0].id,
-      messages.at(-1)!.id,
+      messageRangeStart,
+      messageRangeEnd,
       input.sessionId,
       project ?? null,
       tags,
