@@ -429,7 +429,8 @@ function finalizeSession(
   db: Database,
   input: HostTranscript,
   project: string | undefined,
-  shouldFinalize: boolean
+  shouldFinalize: boolean,
+  emptyReconciliation: boolean
 ): { finalized: boolean; loaId?: number } {
   if (!input.finalize || !shouldFinalize) return { finalized: false };
 
@@ -449,14 +450,18 @@ function finalizeSession(
         )
         ORDER BY m.timestamp, m.id
       `).all(input.sessionId, input.source, input.sessionId) as StoredMessage[];
-  if (messages.length === 0) return { finalized: false };
+  if (messages.length === 0 && !emptyReconciliation) return { finalized: false };
 
   const title = `${input.source[0].toUpperCase()}${input.source.slice(1)} session ${input.sessionId}`;
   const description = `Automatic terminal extraction from ${input.source} lifecycle capture.`;
   const tags = `automatic-capture,${input.source}`;
   const sourceIds = JSON.stringify(messages.map(message => ({ table: 'messages', id: message.id })));
-  const messageRangeStart = Math.min(...messages.map(message => message.id));
-  const messageRangeEnd = Math.max(...messages.map(message => message.id));
+  const messageRangeStart = messages.length > 0
+    ? Math.min(...messages.map(message => message.id))
+    : null;
+  const messageRangeEnd = messages.length > 0
+    ? Math.max(...messages.map(message => message.id))
+    : null;
   const existing = db
     .prepare(`
       SELECT id, fabric_extract, source_ids FROM loa_entries
@@ -475,13 +480,19 @@ function finalizeSession(
   const terminalMessages = existing
     ? messages.filter(message => !previousMessageIds.has(message.id))
     : messages;
-  const preserveExisting = Boolean(existing && (lifecycleCounts.pruned ?? 0) > 0);
+  const preserveExisting = Boolean(
+    !emptyReconciliation && existing && (lifecycleCounts.pruned ?? 0) > 0
+  );
   const summaryMessages = preserveExisting ? terminalMessages : messages;
-  const currentExtract = summaryMessages.length === 0
-    ? ''
-    : input.source === 'grok'
+  let currentExtract = '';
+  if (emptyReconciliation) {
+    const sourceName = `${input.source[0].toUpperCase()}${input.source.slice(1)}`;
+    currentExtract = `## ${sourceName} terminal capture\n\nNo transcript content was present.`;
+  } else if (summaryMessages.length > 0) {
+    currentExtract = input.source === 'grok'
       ? generateFrameSummary(summaryMessages, 'Grok export')
       : generateBasicSummary(summaryMessages);
+  }
   const fabricExtract = preserveExisting
     ? currentExtract
       ? `${existing!.fabric_extract}\n\n## RESUMED SESSION UPDATE\n\n${currentExtract}`
@@ -500,7 +511,7 @@ function finalizeSession(
       messageRangeStart,
       messageRangeEnd,
       project ?? null,
-      lifecycleCounts.total,
+      emptyReconciliation ? 0 : lifecycleCounts.total,
       sourceIds,
       existing.id
     );
@@ -523,7 +534,7 @@ function finalizeSession(
       input.sessionId,
       project ?? null,
       tags,
-      lifecycleCounts.total,
+      emptyReconciliation ? 0 : lifecycleCounts.total,
       sourceIds
     );
     loaId = Number(result.lastInsertRowid);
@@ -584,9 +595,17 @@ export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
       const previous = getIngestState(db, input);
       upsertSession(db, input, prepared);
       const mutations = insertNewMessages(db, input, prepared);
-      const resumed = (mutations.inserted > 0 || mutations.reconciled > 0) &&
+      const reconciliationComplete = input.source === 'grok' &&
+        !input.incremental &&
+        (input.reconcileComplete ?? true);
+      const emptyReconciliation = reconciliationComplete &&
+        (input.batch?.seenMessageKeys.size ?? prepared.messages.length) === 0;
+      const resumed = (
+        mutations.inserted > 0 || mutations.reconciled > 0 || reconciliationComplete
+      ) &&
         Boolean(previous?.finalized_at);
-      if (resumed && !input.finalize) {
+      const checkpointReady = input.reconcileComplete !== false;
+      if (resumed && !input.finalize && checkpointReady) {
         db.prepare('UPDATE sessions SET ended_at = NULL WHERE session_id = ?').run(input.sessionId);
       }
       const session = db
@@ -596,9 +615,12 @@ export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
         db,
         input,
         session.project ?? undefined,
-        !previous?.finalized_at || resumed
+        !previous?.finalized_at || resumed,
+        emptyReconciliation
       );
-      persistIngestState(db, input, prepared, previous, terminal.finalized, resumed);
+      if (checkpointReady) {
+        persistIngestState(db, input, prepared, previous, terminal.finalized, resumed);
+      }
 
       return {
         sessionId: input.sessionId,
