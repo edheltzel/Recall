@@ -21,7 +21,7 @@ let vecSynced = true;
 let knnCalls: Array<{ queryEmbedding: number[]; k: number }> = [];
 // VecHit[] to return, or an Error for the mocked knnSearch to throw (pins the
 // knn→bruteforce catch fallback).
-let knnHits: VecHit[] | Error = [];
+let knnHits: VecHit[] | Error | ((k: number) => VecHit[]) = [];
 let afterConsistentSearch: (() => void) | undefined;
 let afterReadSnapshot: (() => void) | undefined;
 
@@ -71,7 +71,7 @@ mock.module('../src/db/vec', () => ({
     if (!mockEngaged) return realKnnSearch(db, queryEmbedding, k);
     knnCalls.push({ queryEmbedding, k });
     if (knnHits instanceof Error) throw knnHits;
-    return knnHits;
+    return typeof knnHits === 'function' ? knnHits(k) : knnHits;
   },
   withReadSnapshot: <T>(
     db: Parameters<typeof realKnnSearch>[0],
@@ -228,19 +228,24 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(hit!.content).toContain('knn deterministic vector-only issue 146');
   });
 
-  test('falls back when capped KNN candidates include orphan sources', async () => {
+  test('filters bounded KNN pages until a published source is found', async () => {
     resetVecMock();
     vecAvailable = true;
-    knnHits = [
-      { source_table: 'decisions', source_id: 200_000, distance: 0.001 },
-      { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 },
-    ];
+    const orphans = Array.from({ length: 10 }, (_, index) => ({
+      source_table: 'decisions',
+      source_id: 200_000 + index,
+      distance: 0.001 + index * 0.0001,
+    }));
+    knnHits = (k) => k === 10
+      ? orphans
+      : [...orphans, { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }];
 
     const { results, semanticBackend } = await hybridSearch('knnorphancandidatequery111', { limit: 5 });
 
-    expect(semanticBackend).toBe('bruteforce');
+    expect(semanticBackend).toBe('knn');
+    expect(knnCalls.map(call => call.k)).toEqual([10, 20]);
     expect(results.some(
-      (result) => result.table === 'decisions' && result.id === bruteForceDecisionId,
+      (result) => result.table === 'decisions' && result.id === knnDecisionId,
     )).toBe(true);
   });
 

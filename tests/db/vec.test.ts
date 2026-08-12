@@ -97,6 +97,25 @@ describe('sqlite-vec index (issue #148)', () => {
     expect(count).toBe(5);
   });
 
+  test('deleting an embedding source removes its vector and dirties the index', () => {
+    const db = getDb();
+    const decisionId = Number(db.prepare(
+      `INSERT INTO decisions (decision) VALUES ('delete source vector')`
+    ).run().lastInsertRowid);
+    insertEmbedding(decisionId, vec(1));
+    db.prepare(`DELETE FROM schema_meta WHERE key IN ('vec_index_dirty', 'vec_index_generation')`).run();
+
+    db.prepare('DELETE FROM decisions WHERE id = ?').run(decisionId);
+
+    expect(db.prepare(
+      `SELECT 1 FROM embeddings WHERE source_table = 'decisions' AND source_id = ?`
+    ).get(decisionId)).toBeNull();
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toEqual({ value: '1' });
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
+      .toEqual({ value: '1' });
+  });
+
   test('honors persisted invalidation after the process cache is warm', () => {
     if (!isVecAvailable()) return;
     const db = getDb();
