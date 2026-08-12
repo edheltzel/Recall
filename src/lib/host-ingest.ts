@@ -33,10 +33,11 @@ export interface HostTranscript {
 
 export interface HostIngestBatch {
   fallbackOccurrences: Map<string, number>;
+  nextOrdinal: number;
 }
 
 export function createHostIngestBatch(): HostIngestBatch {
-  return { fallbackOccurrences: new Map() };
+  return { fallbackOccurrences: new Map(), nextOrdinal: 0 };
 }
 
 export interface HostIngestResult {
@@ -126,7 +127,8 @@ function normalizedTimestamp(value: string | undefined, fallback: string, ordina
 function prepareMessages(
   messages: HostTranscriptMessage[],
   capturedAt: string,
-  redactions: Set<string>
+  redactions: Set<string>,
+  ordinalOffset: number
 ): PreparedMessage[] {
   const prepared: PreparedMessage[] = [];
 
@@ -145,7 +147,7 @@ function prepareMessages(
     prepared.push({
       ...message,
       content: cleaned.text,
-      timestamp: normalizedTimestamp(message.timestamp, capturedAt, ordinal),
+      timestamp: normalizedTimestamp(message.timestamp, capturedAt, ordinalOffset + ordinal),
       messageKey: message.nativeId ? `native:${hash(message.nativeId)}` : '',
       identityBase,
     });
@@ -157,7 +159,9 @@ function prepareMessages(
 function prepareTranscript(input: HostTranscript): PreparedTranscript {
   const capturedAt = normalizedTimestamp(input.capturedAt, new Date().toISOString(), 0);
   const redactions = new Set<string>();
-  const messages = prepareMessages(input.messages, capturedAt, redactions);
+  const ordinalOffset = input.batch?.nextOrdinal ?? 0;
+  const messages = prepareMessages(input.messages, capturedAt, redactions, ordinalOffset);
+  if (input.batch) input.batch.nextOrdinal += input.messages.length;
   const cwdResult = input.cwd ? scrub(input.cwd) : undefined;
   const detectedProject = input.project ?? detectProject(input.cwd);
   const projectResult = detectedProject ? scrub(detectedProject) : undefined;

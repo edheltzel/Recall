@@ -50,7 +50,7 @@ Codex CLI 0.147.0 provides supported plugin hooks, supplied transcript paths, co
 | `PostCompact` | Reconciles the supplied rollout after compaction. |
 | `SessionEnd` | Captures the final rollout, closes the session, and creates one extracted summary. |
 
-The host-neutral ingest seam preserves the native Codex session ID and project attribution. It scrubs unattended content before storage as required by [#50](https://github.com/edheltzel/Recall/issues/50), records `source = 'codex'`, and persists message keys plus a validated byte watermark. Unchanged rollouts avoid full parsing, append-only rollouts read only their suffix, and rewrites or shrinkage fall back to a full reconciliation.
+The host-neutral ingest seam preserves the native Codex session ID and project attribution. It scrubs unattended content before storage as required by [#50](https://github.com/edheltzel/Recall/issues/50), records `source = 'codex'`, and persists message keys plus a rolling byte watermark. Ordinary `Stop` events read only an append-only suffix. Compaction and terminal events validate the complete prior prefix, while shrinkage resets to a full reconciliation.
 
 Capture writes directly to `recall.db`; it does not depend on the optional batch cron. Subagent rollouts are skipped by default. Set `RECALL_INCLUDE_SUBAGENTS=1` to opt in.
 

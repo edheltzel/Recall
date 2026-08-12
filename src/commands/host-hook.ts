@@ -1,4 +1,3 @@
-import { createHash, type Hash } from 'crypto';
 import { spawn, spawnSync } from 'child_process';
 import {
   closeSync,
@@ -28,6 +27,8 @@ const MAX_HOOK_INPUT_BYTES = 1024 * 1024;
 const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
 const HASH_READ_BYTES = 1024 * 1024;
 const GROK_EXPORT_TIMEOUT_MS = 45_000;
+const ROLLING_SEEDS = [0x811c9dc5, 0x9e3779b9] as const;
+const ROLLING_FACTORS = [0x01000193, 0x27d4eb2d] as const;
 
 interface HookPayload {
   hook_event_name?: unknown;
@@ -110,54 +111,70 @@ function asBuffer(value: string | Buffer): Buffer {
 function byteCheckpoint(
   checkpoint: HostIngestCheckpoint | undefined,
   transcriptRef: string
-): { size: number; digest: string } | undefined {
-  const match = checkpoint?.watermark?.match(/^bytes:(\d+):sha256:([0-9a-f]{64})$/);
+): { size: number; digest: [number, number] } | undefined {
+  const match = checkpoint?.watermark?.match(
+    /^bytes:(\d+):rolling:([0-9a-f]{8})([0-9a-f]{8})$/
+  );
   if (checkpoint?.transcriptRef !== transcriptRef || !match) return undefined;
   const size = Number(match[1]);
-  return Number.isSafeInteger(size) && size >= 0 ? { size, digest: match[2] } : undefined;
+  return Number.isSafeInteger(size) && size >= 0
+    ? { size, digest: [Number.parseInt(match[2], 16), Number.parseInt(match[3], 16)] }
+    : undefined;
 }
 
-function hashPrefix(
+function updateByteDigest(digest: [number, number], raw: Buffer): void {
+  for (const byte of raw) {
+    digest[0] = Math.imul(digest[0] ^ byte, ROLLING_FACTORS[0]) >>> 0;
+    digest[1] = Math.imul(digest[1] ^ byte, ROLLING_FACTORS[1]) >>> 0;
+  }
+}
+
+function digestPrefix(
   end: number,
   read: (start: number, length: number) => Buffer
-): Hash {
-  const hash = createHash('sha256');
+): [number, number] {
+  const digest: [number, number] = [ROLLING_SEEDS[0], ROLLING_SEEDS[1]];
   let cursor = 0;
   while (cursor < end) {
     const length = Math.min(HASH_READ_BYTES, end - cursor);
     const raw = read(cursor, length);
     if (raw.length !== length) throw new Error('Transcript read returned incomplete data');
-    hash.update(raw);
+    updateByteDigest(digest, raw);
     cursor += raw.length;
   }
-  return hash;
+  return digest;
+}
+
+function byteWatermark(end: number, digest: [number, number]): string {
+  const encoded = digest.map(value => value.toString(16).padStart(8, '0')).join('');
+  return `bytes:${end}:rolling:${encoded}`;
 }
 
 function byteCapture(
   checkpoint: HostIngestCheckpoint | undefined,
   transcriptRef: string,
   size: number,
-  read: (start: number, length: number) => Buffer
-): { start: number; hash: Hash } {
+  read: (start: number, length: number) => Buffer,
+  validatePrefix: boolean
+): { start: number; digest: [number, number] } {
   const previous = byteCheckpoint(checkpoint, transcriptRef);
   if (previous && previous.size <= size) {
-    const hash = hashPrefix(previous.size, read);
-    if (hash.copy().digest('hex') === previous.digest) {
-      return { start: previous.size, hash };
+    if (!validatePrefix) {
+      return { start: previous.size, digest: [previous.digest[0], previous.digest[1]] };
+    }
+    const digest = digestPrefix(previous.size, read);
+    if (digest[0] === previous.digest[0] && digest[1] === previous.digest[1]) {
+      return { start: previous.size, digest };
     }
   }
-  return { start: 0, hash: createHash('sha256') };
-}
-
-function byteWatermark(end: number, read: (start: number, length: number) => Buffer): string {
-  return `bytes:${end}:sha256:${hashPrefix(end, read).digest('hex')}`;
+  return { start: 0, digest: [ROLLING_SEEDS[0], ROLLING_SEEDS[1]] };
 }
 
 function* boundedTranscriptChunks(
   start: number,
   size: number,
   read: (start: number, length: number) => Buffer,
-  hash: Hash,
+  digest: [number, number],
   boundary: (raw: Buffer) => number = raw => raw.lastIndexOf(0x0a) + 1
 ): Generator<{ start: number; end: number; raw: Buffer; watermark: string }> {
   let cursor = start;
@@ -174,12 +191,12 @@ function* boundedTranscriptChunks(
       raw = raw.subarray(0, boundaryEnd);
       end = cursor + raw.length;
     }
-    hash.update(raw);
+    updateByteDigest(digest, raw);
     yield {
       start: cursor,
       end,
       raw,
-      watermark: `bytes:${end}:sha256:${hash.copy().digest('hex')}`,
+      watermark: byteWatermark(end, digest),
     };
     cursor = end;
   }
@@ -193,7 +210,22 @@ function grokFrameBoundary(raw: Buffer): number {
     while (raw[cursor] === 0x20 || raw[cursor] === 0x09) cursor--;
     if (raw[cursor] === 0x0a) return end;
   }
-  return 0;
+  let hash = 0;
+  let boundary = 0;
+  let fallback = 1;
+  let minimum = 0xffffffff;
+  const minimumBoundary = Math.min(1024 * 1024, raw.length);
+  for (let index = 0; index < raw.length; index++) {
+    hash = ((hash << 1) + Math.imul(raw[index] + 1, 0x9e3779b1)) >>> 0;
+    if (index + 1 < minimumBoundary) continue;
+    if (index + 1 < raw.length && (raw[index + 1] & 0xc0) === 0x80) continue;
+    if ((hash & 0xfffff) === 0) boundary = index + 1;
+    if (hash < minimum) {
+      minimum = hash;
+      fallback = index + 1;
+    }
+  }
+  return boundary || fallback;
 }
 
 function mergeIngestResults(
@@ -217,6 +249,7 @@ interface GrokHookRequest {
   cwd?: string;
   capturedAt?: string;
   finalize: boolean;
+  validatePrefix: boolean;
 }
 
 function grokHookRequest(payload: HookPayload): GrokHookRequest | { skipped: string } {
@@ -233,6 +266,7 @@ function grokHookRequest(payload: HookPayload): GrokHookRequest | { skipped: str
     capturedAt: stringValue(payload.timestamp),
     finalize: event === 'sessionend' ||
       (event === 'stop' && ['channel_closed', 'shutdown'].includes(reason ?? '')),
+    validatePrefix: event !== 'stop',
   };
 }
 
@@ -336,7 +370,7 @@ function ingestStagedGrokExport(
     const read = readSync(staged.fd, buffer, 0, bytes, start);
     return read === bytes ? buffer : buffer.subarray(0, read);
   };
-  const capture = byteCapture(previous, transcriptRef, size, read);
+  const capture = byteCapture(previous, transcriptRef, size, read, request.validatePrefix);
   const start = capture.start;
   const incremental = start > 0;
   const batch = createHostIngestBatch();
@@ -351,7 +385,7 @@ function ingestStagedGrokExport(
         messages: [],
         cwd: request.cwd,
         transcriptRef,
-        watermark: previous?.watermark ?? byteWatermark(size, read),
+        watermark: previous?.watermark ?? byteWatermark(size, capture.digest),
         capturedAt: request.capturedAt,
         incremental,
         finalize: true,
@@ -360,7 +394,7 @@ function ingestStagedGrokExport(
     };
   }
   let aggregate: HostIngestResult | undefined;
-  for (const chunk of boundedTranscriptChunks(start, size, read, capture.hash, grokFrameBoundary)) {
+  for (const chunk of boundedTranscriptChunks(start, size, read, capture.digest, grokFrameBoundary)) {
     const parsed = parseGrokExport(chunk.raw.toString('utf-8'));
     aggregate = mergeIngestResults(aggregate, ingest({
       source: 'grok',
@@ -471,7 +505,8 @@ export function handleHostHook(
         (dependencies.readTranscript ?? readSuppliedTranscript)(transcriptPath, start, length)
       ).subarray(0, length);
     const previous = checkpoint('codex', sessionId);
-    const capture = byteCapture(previous, transcriptPath, size, read);
+    const validatePrefix = ['precompact', 'postcompact', 'sessionend'].includes(event);
+    const capture = byteCapture(previous, transcriptPath, size, read, validatePrefix);
     const start = capture.start;
     const incremental = start > 0;
     const batch = createHostIngestBatch();
@@ -487,7 +522,7 @@ export function handleHostHook(
           messages: [],
           cwd,
           transcriptRef: transcriptPath,
-          watermark: previous?.watermark ?? byteWatermark(size, read),
+          watermark: previous?.watermark ?? byteWatermark(size, capture.digest),
           capturedAt,
           incremental,
           finalize: true,
@@ -496,7 +531,7 @@ export function handleHostHook(
       };
     }
     let aggregate: HostIngestResult | undefined;
-    for (const chunk of boundedTranscriptChunks(start, size, read, capture.hash)) {
+    for (const chunk of boundedTranscriptChunks(start, size, read, capture.digest)) {
       const parsed = parseCodexRollout(chunk.raw.toString('utf-8'));
       if (parsed.sessionId && parsed.sessionId !== sessionId) {
         return { skipped: 'session-id-mismatch' };

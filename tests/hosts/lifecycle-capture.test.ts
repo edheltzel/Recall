@@ -220,7 +220,7 @@ describe('host hook payload routing', () => {
     expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
     starts.length = 0;
     expect(handleHostHook('codex', payload, dependencies).skipped).toBe('unchanged-transcript');
-    expect(starts).toContain(0);
+    expect(starts).toEqual([]);
 
     const previousSize = transcript.length;
     transcript = Buffer.concat([
@@ -239,7 +239,7 @@ describe('host hook payload routing', () => {
     starts.length = 0;
     expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
     expect(starts).toContain(previousSize);
-    expect(starts).toContain(0);
+    expect(starts).not.toContain(0);
     expect(
       (
         getDb()
@@ -258,7 +258,13 @@ describe('host hook payload routing', () => {
     expect(rewriteIndex).toBeLessThan(transcript.length - 4096);
     transcript[rewriteIndex] = transcript[rewriteIndex] === 120 ? 121 : 120;
     starts.length = 0;
-    const rewritten = handleHostHook('codex', payload, dependencies);
+    expect(handleHostHook('codex', payload, dependencies).skipped).toBe('unchanged-transcript');
+    expect(starts).toEqual([]);
+    const rewritten = handleHostHook(
+      'codex',
+      { ...payload, hook_event_name: 'PreCompact' },
+      dependencies
+    );
     expect(rewritten.skipped).toBeUndefined();
     expect(rewritten.ingest).toBeDefined();
     expect(starts).toContain(0);
@@ -309,7 +315,7 @@ describe('host hook payload routing', () => {
     expect(exported).toBe('grok-native-456');
     expect(received?.source).toBe('grok');
     expect(received?.finalize).toBe(true);
-    expect(result.ingest?.inserted).toBe(parseGrokExport(fixture('grok-export.md')).messages.length);
+    expect(result.ingest?.inserted).toBe(received?.messages.length);
   });
 
   test('captures oversized Codex and streamed Grok transcripts in bounded chunks', async () => {
@@ -393,7 +399,6 @@ describe('host hook payload routing', () => {
             yield grokBlock;
             emitted += grokBlock.length;
           }
-          yield Buffer.from('\n');
           yield Buffer.from(`${'second Grok frame '.repeat(8192)}\n`);
         },
         ingest: input => {
@@ -449,7 +454,7 @@ describe('host hook payload routing', () => {
 
   test('reconciles inserted Grok frames without overlapping snapshots', async () => {
     let markdown = 'Frame A\n\nFrame B';
-    const payload = { hook_event_name: 'Stop', session_id: 'grok-frame-rewrite' };
+    const payload = { hook_event_name: 'SessionEnd', session_id: 'grok-frame-rewrite' };
     const dependencies = { exportGrok: () => markdown };
 
     expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 2 });
@@ -464,11 +469,30 @@ describe('host hook payload routing', () => {
       .all(payload.session_id) as Array<{ content: string }>;
     expect(rows).toHaveLength(3);
     expect(rows.map(row => row.content).sort()).toEqual([
-      'Frame A\n\n',
+      'Frame A',
       'Frame B',
-      'New frame\n\n',
+      'New frame',
     ].sort());
     expect(rows.some(row => row.content.includes('New frame\n\nFrame A'))).toBe(false);
+  });
+
+  test('keeps Grok frame identity stable across incremental delimiters and reset', async () => {
+    let markdown = 'Frame A';
+    const payload = { hook_event_name: 'Stop', session_id: 'grok-delimiter-boundary' };
+    const dependencies = { exportGrok: () => markdown };
+
+    expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 1 });
+    markdown = 'Frame A\n\nFrame B';
+    expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 1 });
+    expect((await handleGrokHostHook(
+      { ...payload, hook_event_name: 'PreCompact' },
+      { ...dependencies, checkpoint: () => undefined }
+    )).ingest).toMatchObject({ inserted: 0, skipped: 2 });
+
+    const rows = getDb()
+      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(payload.session_id) as Array<{ content: string }>;
+    expect(rows.map(row => row.content)).toEqual(['Frame A', 'Frame B']);
   });
 });
 
@@ -479,6 +503,7 @@ describe('host-neutral immediate SQLite ingest', () => {
       source: 'codex',
       sessionId: 'codex-reset-batch-occurrences',
       messages: [{ role: 'user', content: 'Continue.' }],
+      capturedAt: '2026-07-01T10:00:00.000Z',
       incremental: false,
       batch,
     };
@@ -486,10 +511,11 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(ingestHostTranscript(input)).toMatchObject({ inserted: 1 });
     expect(ingestHostTranscript(input)).toMatchObject({ inserted: 1 });
 
-    const row = getDb()
-      .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
-      .get(input.sessionId) as { count: number };
-    expect(row.count).toBe(2);
+    const rows = getDb()
+      .prepare('SELECT timestamp FROM messages WHERE session_id = ? ORDER BY id')
+      .all(input.sessionId) as Array<{ timestamp: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[1].timestamp > rows[0].timestamp).toBe(true);
   });
 
   test('reconciles fallback keys across append-only and reset captures', () => {
@@ -550,7 +576,11 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(replay.skipped).toBe('unchanged-transcript');
     expect(replay.ingest).toBeUndefined();
 
-    expect(rows).toHaveLength(parseGrokExport(fixture('grok-export.md')).messages.length);
+    expect(rows).toHaveLength(
+      parseGrokExport(fixture('grok-export.md')).messages.filter(
+        message => message.content.trim()
+      ).length
+    );
     expect(rows.some(row => row.content.includes('[REDACTED:generic-assignment]'))).toBe(true);
     expect(rows.every(row => row.provenance === 'verbatim')).toBe(true);
     const summary = db
