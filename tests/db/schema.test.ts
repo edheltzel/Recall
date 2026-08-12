@@ -145,7 +145,6 @@ describe('FTS triggers', () => {
       'documents_ai',
       'documents_au',
       'host_ingest_generation_messages_fts_ad',
-      'host_ingest_generation_messages_fts_ai',
       'host_ingest_generation_messages_fts_au',
       'learnings_ad',
       'learnings_ai',

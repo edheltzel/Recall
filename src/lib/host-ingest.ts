@@ -950,6 +950,116 @@ function persistPreparedGeneration(
   }).immediate();
 }
 
+function isPublishedGeneration(db: Database, generationId: string): boolean {
+  return Boolean(db.prepare(`
+    SELECT 1 FROM host_ingest_generations AS generation
+    JOIN host_ingest_state AS state
+      ON state.active_generation = generation.generation_id
+     AND state.source = generation.source
+     AND state.session_id = generation.session_id
+    WHERE generation.generation_id = ? AND generation.status = 'active'
+  `).get(generationId));
+}
+
+function removeGenerationSearchRows(
+  db: Database,
+  generationId: string,
+  activeGenerationId: string,
+  deadline?: number
+): boolean {
+  const select = db.prepare(`
+    SELECT rowid FROM host_ingest_generation_messages_fts
+    WHERE generation_id = ? LIMIT ?
+  `);
+  const remove = db.prepare(`
+    DELETE FROM host_ingest_generation_messages_fts
+    WHERE rowid = ? AND generation_id = ?
+  `);
+  for (;;) {
+    assertHostDeadline(deadline);
+    const rows = select.all(generationId, SQLITE_SAFE_CHUNK_SIZE) as Array<{ rowid: number }>;
+    if (rows.length === 0) return true;
+    const removed = db.transaction(() => {
+      if (!isPublishedGeneration(db, activeGenerationId)) return false;
+      for (const row of rows) remove.run(row.rowid, generationId);
+      return true;
+    }).immediate();
+    if (!removed) return false;
+  }
+}
+
+function indexPublishedGeneration(
+  db: Database,
+  generationId: string,
+  deadline?: number
+): void {
+  const generation = db.prepare(`
+    SELECT generation.source, generation.session_id
+    FROM host_ingest_generations AS generation
+    JOIN host_ingest_state AS state
+      ON state.active_generation = generation.generation_id
+     AND state.source = generation.source
+     AND state.session_id = generation.session_id
+    WHERE generation.generation_id = ? AND generation.status = 'active'
+  `).get(generationId) as { source: string; session_id: string } | undefined;
+  if (!generation) return;
+  const page = db.prepare(`
+    SELECT message_id, content, project
+    FROM host_ingest_generation_messages
+    WHERE generation_id = ? AND message_id > ? AND content IS NOT NULL
+      AND (source <> 'grok' OR source_position IS NOT NULL)
+    ORDER BY message_id LIMIT ?
+  `);
+  const remove = db.prepare(`
+    DELETE FROM host_ingest_generation_messages_fts WHERE rowid = ?
+  `);
+  const insert = db.prepare(`
+    INSERT INTO host_ingest_generation_messages_fts(
+      rowid, content, project, generation_id
+    ) VALUES (?, ?, ?, ?)
+  `);
+  let cursor = 0;
+  for (;;) {
+    assertHostDeadline(deadline);
+    const rows = page.all(generationId, cursor, SQLITE_SAFE_CHUNK_SIZE) as Array<{
+      message_id: number;
+      content: string;
+      project: string | null;
+    }>;
+    if (rows.length === 0) break;
+    const indexed = db.transaction(() => {
+      if (!isPublishedGeneration(db, generationId)) return false;
+      for (const row of rows) {
+        remove.run(row.message_id);
+        insert.run(row.message_id, row.content, row.project, generationId);
+      }
+      return true;
+    }).immediate();
+    if (!indexed) return;
+    cursor = rows.at(-1)!.message_id;
+  }
+  const stale = db.prepare(`
+    SELECT generation_id FROM host_ingest_generations
+    WHERE source = ? AND session_id = ? AND generation_id <> ?
+  `).all(generation.source, generation.session_id, generationId) as Array<{
+    generation_id: string;
+  }>;
+  for (const row of stale) {
+    if (!removeGenerationSearchRows(db, row.generation_id, generationId, deadline)) return;
+  }
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE host_ingest_generations SET fts_ready = 1
+      WHERE generation_id = ? AND status = 'active' AND EXISTS (
+        SELECT 1 FROM host_ingest_state AS state
+        WHERE state.active_generation = host_ingest_generations.generation_id
+          AND state.source = host_ingest_generations.source
+          AND state.session_id = host_ingest_generations.session_id
+      )
+    `).run(generationId);
+  }).immediate();
+}
+
 function deleteGeneration(
   db: Database,
   generationId: string,
@@ -1226,7 +1336,7 @@ function activatePreparedGeneration(
 
   if (previous?.active_generation) {
     db.prepare(`
-      UPDATE host_ingest_generations SET status = 'superseded'
+      UPDATE host_ingest_generations SET status = 'superseded', fts_ready = 0
       WHERE generation_id = ? AND status = 'active'
     `).run(previous.active_generation);
   }
@@ -1302,6 +1412,10 @@ export function ingestHostTranscriptBatch(
       })
       .immediate();
     activated = true;
+    try {
+      indexPublishedGeneration(db, preparedGeneration.publishToken, deadline);
+    } catch {
+    }
     discardSupersededGenerations(db, deadline);
     return result;
   } finally {

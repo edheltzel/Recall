@@ -877,6 +877,25 @@ describe('host-neutral immediate SQLite ingest', () => {
     const results = search('Frame AND 500', { table: 'messages' });
     expect(results.map(result => result.content)).toContain('Frame 500');
     expect(results.find(result => result.content === 'Frame 500')?.rank).toBeLessThan(0);
+    const indexed = getDb().prepare(`
+      SELECT f.rowid, f.generation_id
+      FROM host_ingest_generation_messages_fts AS f
+      JOIN host_ingest_generation_messages AS generated
+        ON generated.message_id = f.rowid
+       AND generated.generation_id = f.generation_id
+      WHERE generated.session_id = ? AND generated.content = 'Frame 500'
+    `).get(sessionId) as { rowid: number; generation_id: string };
+    expect(indexed.rowid).toBeGreaterThan(0);
+    getDb().exec('VACUUM');
+    expect(search('Frame AND 500', { table: 'messages' })
+      .map(result => result.content)).toContain('Frame 500');
+    getDb().exec(`
+      DROP TRIGGER host_ingest_generation_messages_fts_ad;
+      DROP TRIGGER host_ingest_generation_messages_fts_au;
+      DROP TABLE host_ingest_generation_messages_fts;
+    `);
+    expect(search('Frame AND 500', { table: 'messages' })
+      .map(result => result.content)).toContain('Frame 500');
   });
 
   test('hides shadow rows until their lifecycle keys are published', () => {
@@ -897,6 +916,10 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get('shadow-visibility')).toEqual({ count: 0 });
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM host_ingest_generation_messages_fts
+      WHERE host_ingest_generation_messages_fts MATCH 'pending AND frame'
+    `).get()).toEqual({ count: 0 });
     expect(search('pending AND frame', { table: 'messages' })).toEqual([]);
 
     db.prepare(`
@@ -915,6 +938,33 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get('shadow-visibility')).toEqual({ count: 1 });
+    expect(search('pending AND frame', { table: 'messages' })
+      .map(result => result.content)).toEqual(['pending frame']);
+  });
+
+  test('fuses physical and generation message ranks', () => {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, source)
+      VALUES ('physical-search', '2026-08-12T09:00:00.000Z', 'mcp')
+    `).run();
+    db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES ('physical-search', '2026-08-12T09:00:00.000Z', 'user',
+        'fusiontoken physical message', 'verbatim')
+    `).run();
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'generation-search',
+      messages: [{ role: 'assistant', content: 'fusiontoken generation message' }],
+    });
+
+    const matches = search('fusiontoken', { table: 'messages', limit: 2 });
+    expect(matches.map(result => result.content).sort()).toEqual([
+      'fusiontoken generation message',
+      'fusiontoken physical message',
+    ]);
+    expect(matches.every(result => (result.rank ?? 0) < 0)).toBe(true);
   });
 
   test('sweeps stale unpublished generations across sessions', () => {
