@@ -141,9 +141,6 @@ let syncInFlight = false;
 export function invalidateVecIndex(db: Database): void {
   db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
     .run(VEC_INDEX_DIRTY_KEY, '1');
-  try {
-    db.exec('DELETE FROM vec_embeddings');
-  } catch {}
   syncedThisProcess = false;
 }
 

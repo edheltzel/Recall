@@ -456,6 +456,45 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           rank: row.rank
         });
       }
+      if (table === 'messages') {
+        const generationParams: Array<string | number> = [query];
+        if (options?.project) generationParams.push(options.project);
+        generationParams.push(limit);
+        const generationRows = db.prepare(`
+          SELECT generated.message_id AS id, generated.content, generated.project,
+            generated.timestamp AS created_at, generated.provenance, 0 AS rank
+          FROM host_ingest_generation_messages AS generated
+          JOIN host_ingest_state AS state
+            ON state.active_generation = generated.generation_id
+           AND state.source = generated.source
+           AND state.session_id = generated.session_id
+          WHERE generated.content LIKE '%' || ? || '%'
+            AND generated.message_id IS NOT NULL
+            AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM messages WHERE id = generated.message_id)
+            ${duplicateFilter(options, 'messages', 'generated.message_id')}
+            ${options?.project ? 'AND generated.project = ?' : ''}
+          ORDER BY generated.timestamp DESC LIMIT ?
+        `).all(...generationParams) as Array<{
+          id: number;
+          content: string;
+          project: string | null;
+          created_at: string;
+          provenance: Provenance | null;
+          rank: number;
+        }>;
+        for (const row of generationRows) {
+          results.push({
+            table,
+            id: row.id,
+            content: row.content,
+            project: row.project || undefined,
+            created_at: row.created_at,
+            provenance: row.provenance ?? null,
+            rank: row.rank,
+          });
+        }
+      }
     } catch (err) {
       // FIX #7: Record errors instead of silently swallowing
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -743,6 +782,33 @@ function getPinnedLoaMessages(loaId: number): Message[] {
   return messages;
 }
 
+function getGenerationLoaMessages(generationId: string): Message[] {
+  const db = getDb();
+  const statement = db.prepare(`
+    SELECT message_id AS id, session_id, timestamp, role, content, project,
+      importance, provenance, ordinal
+    FROM host_ingest_generation_messages
+    WHERE generation_id = ? AND ordinal > ? AND message_id IS NOT NULL
+      AND content IS NOT NULL
+      AND (source <> 'grok' OR source_position IS NOT NULL)
+    ORDER BY ordinal LIMIT ?
+  `);
+  const messages: Message[] = [];
+  let ordinal = -1;
+  for (;;) {
+    const batch = statement.all(generationId, ordinal, SQLITE_SAFE_CHUNK_SIZE) as Array<
+      Message & { ordinal: number }
+    >;
+    if (batch.length === 0) break;
+    for (const message of batch) {
+      ordinal = message.ordinal;
+      const { ordinal: _ordinal, ...source } = message;
+      messages.push(source);
+    }
+  }
+  return messages;
+}
+
 export function getLoaMessages(loaId: number): Message[] {
   const db = getDb();
   const loa = getLoaEntry(loaId);
@@ -757,6 +823,13 @@ export function getLoaMessages(loaId: number): Message[] {
         (sources as { loa_id?: unknown }).loa_id === loaId
       ) {
         return getPinnedLoaMessages(loaId);
+      }
+      if (
+        typeof sources === 'object' && sources !== null &&
+        (sources as { table?: unknown }).table === 'host_ingest_generation_messages' &&
+        typeof (sources as { generation_id?: unknown }).generation_id === 'string'
+      ) {
+        return getGenerationLoaMessages((sources as { generation_id: string }).generation_id);
       }
       if (
         Array.isArray(sources) &&

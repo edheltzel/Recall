@@ -138,7 +138,7 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
       FROM published_messages m
       WHERE m.session_id = ?
         AND NOT EXISTS (
-          SELECT 1 FROM host_ingest_messages h WHERE h.message_id = m.id
+          SELECT 1 FROM active_host_ingest_messages h WHERE h.message_id = m.id
         )
       ORDER BY m.id
     `)

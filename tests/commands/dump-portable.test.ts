@@ -120,7 +120,7 @@ describe('portable explicit session dump', () => {
       .prepare('SELECT watermark FROM host_ingest_state WHERE source = ? AND session_id = ?')
       .get('codex', sessionId) as { watermark: string };
     const key = db
-      .prepare('SELECT message_id FROM host_ingest_messages WHERE source = ? AND session_id = ?')
+      .prepare('SELECT message_id FROM active_host_ingest_messages WHERE source = ? AND session_id = ?')
       .get('codex', sessionId) as { message_id: number | null };
     expect(state.watermark).toBe('bytes:42');
     expect(key.message_id).toBeNumber();
@@ -160,7 +160,7 @@ describe('portable explicit session dump', () => {
     expect(refreshedFinal).toMatchObject({ inserted: 0, finalized: true, loaId: initialFinal.loaId });
 
     const messages = db
-      .prepare('SELECT id, content FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare('SELECT id, content FROM published_messages WHERE session_id = ? ORDER BY id')
       .all(sessionId) as Array<{ id: number; content: string }>;
     expect(messages.map(message => message.content)).toEqual([
       lifecycleContent,
@@ -188,9 +188,8 @@ describe('portable explicit session dump', () => {
     const automaticLoa = loa.filter(entry => entry.tags?.includes('automatic-capture'));
     expect(automaticLoa).toHaveLength(1);
     expect(automaticLoa[0]).toMatchObject({ message_count: 2, project: 'recall-test' });
-    expect(JSON.parse(automaticLoa[0].source_ids ?? 'null')).toEqual({
-      table: 'loa_message_sources',
-      loa_id: automaticLoa[0].id,
+    expect(JSON.parse(automaticLoa[0].source_ids ?? 'null')).toMatchObject({
+      table: 'host_ingest_generation_messages',
     });
     expect(getLoaMessages(automaticLoa[0].id).map(message => message.content)).toEqual([
       lifecycleContent,
@@ -238,7 +237,7 @@ describe('portable explicit session dump', () => {
     ).toEqual({ source: 'codex' });
     expect(
       (
-        getDb().prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
+        getDb().prepare('SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?')
           .get(sessionId) as { count: number }
       ).count
     ).toBe(1);

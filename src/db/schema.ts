@@ -36,6 +36,46 @@ AFTER DELETE ON messages BEGIN
 END;
 `;
 
+export const HOST_INGEST_GENERATION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS host_ingest_generations (
+  generation_id TEXT PRIMARY KEY,
+  source        TEXT NOT NULL,
+  session_id    TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  message_count INTEGER NOT NULL DEFAULT 0,
+  max_message_id INTEGER NOT NULL DEFAULT 0,
+  ready         INTEGER NOT NULL DEFAULT 0 CHECK (ready IN (0, 1)),
+  status        TEXT NOT NULL CHECK (status IN ('pending', 'active', 'superseded'))
+);
+
+CREATE TABLE IF NOT EXISTS host_ingest_generation_messages (
+  generation_id  TEXT NOT NULL,
+  ordinal        INTEGER NOT NULL,
+  source         TEXT NOT NULL,
+  session_id     TEXT NOT NULL,
+  message_key    TEXT NOT NULL,
+  message_id     INTEGER,
+  timestamp      DATETIME,
+  role           TEXT CHECK (role IN ('user', 'assistant', 'system')),
+  content        TEXT,
+  project        TEXT,
+  importance     INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+  provenance     TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
+  source_position INTEGER,
+  PRIMARY KEY (generation_id, message_key),
+  UNIQUE (generation_id, ordinal),
+  FOREIGN KEY (generation_id) REFERENCES host_ingest_generations(generation_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_session
+  ON host_ingest_generations(source, session_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_status_max
+  ON host_ingest_generations(status, max_message_id);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_pending
+  ON host_ingest_generations(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_message_id
+  ON host_ingest_generation_messages(message_id);
+`;
+
 export const CREATE_TABLES = `
 -- Sessions table: tracks coding agent sessions (Claude Code, OpenCode, etc.)
 CREATE TABLE IF NOT EXISTS sessions (
@@ -283,6 +323,7 @@ CREATE TABLE IF NOT EXISTS host_ingest_state (
   transcript_ref    TEXT,
   watermark         TEXT,
   transcript_digest TEXT NOT NULL,
+  active_generation TEXT,
   finalized_at      TEXT,
   updated_at        TEXT NOT NULL,
   PRIMARY KEY (source, session_id),
@@ -299,6 +340,8 @@ CREATE TABLE IF NOT EXISTS host_ingest_messages (
   FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
   FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
 );
+
+${HOST_INGEST_GENERATION_SCHEMA}
 `;
 
 export const CREATE_INDEXES = `
@@ -365,13 +408,60 @@ CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
 `;
 
 export const PUBLISHED_MESSAGES_SCHEMA = `
+DROP VIEW IF EXISTS active_host_ingest_messages;
+DROP VIEW IF EXISTS published_messages;
+CREATE VIEW active_host_ingest_messages AS
+SELECT stored.source, stored.session_id, stored.message_key,
+  stored.message_id, stored.source_position
+FROM host_ingest_messages AS stored
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM host_ingest_state AS state
+  JOIN host_ingest_generation_messages AS generated
+    ON generated.generation_id = state.active_generation
+   AND generated.source = state.source
+   AND generated.session_id = state.session_id
+  WHERE state.source = stored.source
+    AND state.session_id = stored.session_id
+    AND generated.message_key = stored.message_key
+)
+UNION ALL
+SELECT generated.source, generated.session_id, generated.message_key,
+  generated.message_id, generated.source_position
+FROM host_ingest_generation_messages AS generated
+JOIN host_ingest_state AS state
+  ON state.active_generation = generated.generation_id
+ AND state.source = generated.source
+ AND state.session_id = generated.session_id;
+
 CREATE VIEW IF NOT EXISTS published_messages AS
 SELECT message.* FROM messages AS message
-WHERE message.host_ingest_token IS NULL
-   OR EXISTS (
-     SELECT 1 FROM host_ingest_messages AS stored
-     WHERE stored.message_id = message.id
-   );
+WHERE (message.host_ingest_token IS NULL OR EXISTS (
+    SELECT 1 FROM host_ingest_messages AS stored
+    WHERE stored.message_id = message.id
+  ))
+  AND NOT EXISTS (
+    SELECT 1
+    FROM host_ingest_state AS state
+    JOIN host_ingest_generation_messages AS generated
+      ON generated.generation_id = state.active_generation
+     AND generated.source = state.source
+     AND generated.session_id = state.session_id
+    WHERE generated.message_id = message.id
+  )
+UNION ALL
+SELECT generated.message_id AS id, generated.session_id, generated.timestamp,
+  generated.role, generated.content, generated.project, generated.importance,
+  generated.provenance, 0 AS access_count, NULL AS last_accessed,
+  generated.generation_id AS host_ingest_token
+FROM host_ingest_generation_messages AS generated
+JOIN host_ingest_state AS state
+  ON state.active_generation = generated.generation_id
+ AND state.source = generated.source
+ AND state.session_id = generated.session_id
+WHERE generated.message_id IS NOT NULL
+  AND generated.content IS NOT NULL
+  AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL);
 `;
 
 // Per-source-table FTS5 DDL. Single source of truth: the CREATE_FTS /

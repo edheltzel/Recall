@@ -81,7 +81,7 @@ describe('prune respects dedup survivors (#80)', () => {
 
     const db = getDb();
     expect((db.prepare(`
-      SELECT COUNT(*) AS count FROM messages WHERE session_id = ?
+      SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get(sessionId) as { count: number }).count).toBe(0);
     expect(db.prepare(`
       SELECT message_range_start, message_range_end FROM loa_entries WHERE id = ?
@@ -91,8 +91,10 @@ describe('prune respects dedup survivors (#80)', () => {
     });
     expect(getLoaMessages(result.loaId!)).toEqual([]);
     expect((db.prepare(`
-      SELECT COUNT(*) AS count FROM loa_message_sources
-      WHERE loa_id = ? AND content <> ''
+      SELECT COUNT(*) AS count FROM host_ingest_generation_messages
+      WHERE generation_id = json_extract(
+        (SELECT source_ids FROM loa_entries WHERE id = ?), '$.generation_id'
+      ) AND content IS NOT NULL
     `).get(result.loaId!) as { count: number }).count).toBe(0);
   });
 

@@ -13,6 +13,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import {
   FTS_SCHEMA,
+  HOST_INGEST_GENERATION_SCHEMA,
   LOA_MESSAGE_RETENTION_SCHEMA,
   LOA_MESSAGE_SOURCES_SCHEMA,
   PUBLISHED_MESSAGES_SCHEMA,
@@ -586,6 +587,8 @@ export const MIGRATIONS: Migration[] = [
     }
   },
 
+  (_db) => {},
+
   (db) => {
     const messageColumns = new Set(
       (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
@@ -595,29 +598,34 @@ export const MIGRATIONS: Migration[] = [
       (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
         .map(column => column.name)
     );
-    const hostMessageColumns = new Set(
-      (db.prepare('PRAGMA table_info(host_ingest_messages)').all() as Array<{ name: string }>)
+    const stateColumns = new Set(
+      (db.prepare('PRAGMA table_info(host_ingest_state)').all() as Array<{ name: string }>)
         .map(column => column.name)
     );
-    const hasPublishedMessages = messageColumns.has('host_ingest_token') &&
-      hostMessageColumns.has('message_id');
-    if (hasPublishedMessages) db.exec(PUBLISHED_MESSAGES_SCHEMA);
-    if (
-      messageColumns.has('id') &&
-      loaColumns.has('snapshot_max_message_id') &&
-      loaColumns.has('tags') &&
-      loaColumns.has('message_count')
-    ) {
+    const hasState = stateColumns.size > 0;
+    if (hasState && !stateColumns.has('active_generation')) {
+      db.exec('ALTER TABLE host_ingest_state ADD COLUMN active_generation TEXT');
+    }
+    db.exec(HOST_INGEST_GENERATION_SCHEMA);
+    if (messageColumns.has('id') && messageColumns.has('timestamp') &&
+      loaColumns.has('snapshot_max_message_id') && loaColumns.has('tags') &&
+      loaColumns.has('message_count') && loaColumns.has('created_at')) {
       db.exec(`
-        UPDATE loa_entries
-        SET snapshot_max_message_id = COALESCE((
-          SELECT MAX(id) FROM ${hasPublishedMessages ? 'published_messages' : 'messages'}
+        UPDATE loa_entries AS loa SET snapshot_max_message_id = COALESCE((
+          SELECT MAX(message.id) FROM messages AS message
+          WHERE datetime(message.timestamp) <= datetime(loa.created_at)
+            AND (${messageColumns.has('host_ingest_token')
+              ? `message.host_ingest_token IS NULL OR EXISTS (
+                  SELECT 1 FROM host_ingest_messages AS stored
+                  WHERE stored.message_id = message.id
+                )`
+              : '1 = 1'})
         ), 0)
-        WHERE snapshot_max_message_id IS NULL
-          AND tags LIKE 'automatic-capture,%'
-          AND COALESCE(message_count, 0) = 0
+        WHERE loa.tags LIKE 'automatic-capture,%'
+          AND COALESCE(loa.message_count, 0) = 0;
       `);
     }
+    if (hasState) db.exec(PUBLISHED_MESSAGES_SCHEMA);
   },
 ];
 
