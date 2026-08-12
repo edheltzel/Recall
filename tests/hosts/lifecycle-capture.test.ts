@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { handleHostHook } from '../../src/commands/host-hook';
+import { handleGrokHostHook, handleHostHook } from '../../src/commands/host-hook';
 import { closeDb, getDb, initDb } from '../../src/db/connection';
 import { parseCodexRollout } from '../../src/hosts/codex-lifecycle';
 import { parseGrokExport } from '../../src/hosts/grok-lifecycle';
@@ -293,7 +293,7 @@ describe('host hook payload routing', () => {
     expect(result.ingest?.inserted).toBe(1);
   });
 
-  test('captures oversized Codex and Grok transcripts in bounded chunks', () => {
+  test('captures oversized Codex and streamed Grok transcripts in bounded chunks', async () => {
     const maxChunk = 25 * 1024 * 1024;
     const paddingLine = `${JSON.stringify({
       type: 'event_msg',
@@ -353,17 +353,25 @@ describe('host hook payload routing', () => {
     expect(codexFinalization).toEqual([false, true]);
     expect(Math.max(...codexLengths)).toBeLessThanOrEqual(maxChunk);
 
-    const grokMarkdown = `${'grok export padding\n'.repeat(
-      Math.ceil((maxChunk + 1024) / 'grok export padding\n'.length)
-    )}Grok oversized final content.\n`;
     const grokFinalization: boolean[] = [];
-    const grok = handleHostHook(
-      'grok',
+    const grokChunkSizes: number[] = [];
+    const grokBlock = Buffer.from('grok export padding\n'.repeat(4096));
+    const grok = await handleGrokHostHook(
       { hook_event_name: 'SessionEnd', session_id: 'grok-oversized-session' },
       {
-        exportGrok: () => grokMarkdown,
+        exportGrokStream: async function* () {
+          let emitted = 0;
+          while (emitted <= maxChunk + 1024) {
+            yield grokBlock;
+            emitted += grokBlock.length;
+          }
+          yield Buffer.from('Grok oversized final content.\n');
+        },
         ingest: input => {
           grokFinalization.push(Boolean(input.finalize));
+          for (const message of input.messages) {
+            grokChunkSizes.push(Buffer.byteLength(message.content));
+          }
           return {
             sessionId: input.sessionId,
             inserted: input.messages.length,
@@ -376,7 +384,8 @@ describe('host hook payload routing', () => {
       }
     );
     expect(grok.ingest).toMatchObject({ inserted: 2, finalized: true });
-    expect(grokFinalization).toEqual([false, true]);
+    expect(grokFinalization).toEqual([false, false, true]);
+    expect(Math.max(...grokChunkSizes)).toBeLessThanOrEqual(maxChunk);
   });
 });
 
@@ -585,6 +594,31 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(
       db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty')
     ).toEqual({ value: '1' });
+
+    db.prepare('DELETE FROM schema_meta WHERE key = ?').run('vec_index_dirty');
+    const secondResume = {
+      role: 'assistant' as const,
+      content: 'Second resumed terminal answer.',
+    };
+    const secondRefresh = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [first, pruned, boundary, resumed, secondResume],
+      finalize: true,
+    });
+    expect(secondRefresh).toMatchObject({ inserted: 1, finalized: true, loaId: initial.loaId });
+    const finalExtract = (
+      db.prepare('SELECT fabric_extract FROM loa_entries WHERE id = ?').get(initial.loaId!) as {
+        fabric_extract: string;
+      }
+    ).fabric_extract;
+    expect(finalExtract.split(first.content)).toHaveLength(2);
+    expect(finalExtract.split(resumed.content)).toHaveLength(2);
+    expect(finalExtract).toContain(secondResume.content);
+    expect(finalExtract.match(/## RESUMED SESSION UPDATE/g) ?? []).toHaveLength(2);
+    expect(
+      db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty')
+    ).toBeNull();
   });
 
   test('rejects a native session ID already owned by another host', () => {

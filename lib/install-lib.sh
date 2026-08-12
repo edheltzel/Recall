@@ -840,6 +840,20 @@ recall_prompt_db_path() {
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 
+recall_backup_file() {
+  local file="$1"
+  local destination="$2"
+  local filename
+  filename="$(basename "$file")"
+  if [[ "$filename" == "RecallLifecycle.json" && -L "$file" ]]; then
+    cp -pL "$file" "$destination/$filename"
+    readlink "$file" >"$destination/$filename.symlink-target"
+  else
+    cp -p "$file" "$destination/$filename"
+    rm -f "$destination/$filename.symlink-target"
+  fi
+}
+
 recall_create_backup() {
   log_info "Creating backup at: $BACKUP_DIR"
   mkdir -p "$BACKUP_DIR"
@@ -847,7 +861,7 @@ recall_create_backup() {
   local backed_up=0
   for file in "${FILES_TO_BACKUP[@]}"; do
     if [[ -f "$file" ]]; then
-      cp -p "$file" "$BACKUP_DIR/"
+      recall_backup_file "$file" "$BACKUP_DIR"
       log_success "Backed up: $(basename "$file")"
       backed_up=$((backed_up + 1))
     fi
@@ -949,7 +963,7 @@ recall_do_restore() {
   local pre_backed=0
   for file in "${FILES_TO_BACKUP[@]}"; do
     if [[ -f "$file" ]]; then
-      cp -p "$file" "$pre_restore_dir/"
+      recall_backup_file "$file" "$pre_restore_dir"
       pre_backed=$((pre_backed + 1))
     fi
   done
@@ -965,6 +979,7 @@ recall_do_restore() {
     [[ ! -f "$file" ]] && continue
     local filename=$(basename "$file")
     [[ "$filename" == "manifest.txt" ]] && continue
+    [[ "$filename" == *.symlink-target ]] && continue
 
     local target
     case "$filename" in
@@ -979,10 +994,16 @@ recall_do_restore() {
         ;;
     esac
     mkdir -p "$(dirname "$target")"
-    if [[ "$filename" == "RecallLifecycle.json" && -L "$target" ]]; then
-      rm "$target"
+    local symlink_target_file="$restore_dir/$filename.symlink-target"
+    if [[ "$filename" == "RecallLifecycle.json" && -f "$symlink_target_file" ]]; then
+      rm -f "$target"
+      ln -s "$(<"$symlink_target_file")" "$target"
+    else
+      if [[ "$filename" == "RecallLifecycle.json" && -L "$target" ]]; then
+        rm "$target"
+      fi
+      cp -p "$file" "$target"
     fi
-    cp -p "$file" "$target"
     log_success "Restored: $filename → $target"
     restored=$((restored + 1))
   done

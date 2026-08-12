@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   rmSync,
   statSync,
@@ -139,6 +140,33 @@ describe('installer restore (rollback)', () => {
     expect(statSync(target).mode & 0o777).toBe(0o600);
     expect(readFileSync(canonical, 'utf-8')).toBe('{"managed":true}');
     expect(existsSync(join(claudeDir, 'RecallLifecycle.json'))).toBe(false);
+  });
+
+  test('restores a backed-up Grok symlink with its exact target', () => {
+    const stamp = '20260303120000';
+    const backupDir = join(backupBase, stamp);
+    const target = join(grokDir, 'hooks', 'RecallLifecycle.json');
+    const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
+    mkdirSync(join(recallDir, 'grok', 'hooks'), { recursive: true });
+    writeFileSync(canonical, '{"managed":true}');
+    symlinkSync(canonical, target);
+
+    const created = sh('recall_create_backup', { TIMESTAMP: stamp, BACKUP_DIR: backupDir });
+    expect(created.status).toBe(0);
+    expect(readFileSync(join(backupDir, 'RecallLifecycle.json.symlink-target'), 'utf-8').trim())
+      .toBe(canonical);
+
+    rmSync(target);
+    writeFileSync(target, '{"temporary":true}');
+    const restored = sh(`_confirm() { return 0; }\nrecall_do_restore "${stamp}"`, {
+      TIMESTAMP: stamp,
+      BACKUP_DIR: backupDir,
+    });
+
+    expect(restored.status).toBe(0);
+    expect(lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(target)).toBe(canonical);
+    expect(readFileSync(target, 'utf-8')).toBe('{"managed":true}');
   });
 
   test('an unknown timestamp fails without touching current files', () => {

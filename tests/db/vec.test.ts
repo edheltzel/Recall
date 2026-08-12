@@ -7,7 +7,6 @@ import {
   knnSearch,
   createVecTable,
   ensureVecIndexSynced,
-  invalidateVecIndex,
   resetVecSyncCache,
 } from '../../src/db/vec';
 import {
@@ -74,14 +73,17 @@ describe('sqlite-vec index (issue #148)', () => {
     expect(count).toBe(5);
   });
 
-  test('rebuilds an invalidated index when canonical row counts stay equal', () => {
+  test('honors persisted invalidation after the process cache is warm', () => {
     if (!isVecAvailable()) return;
     const db = getDb();
     insertEmbedding(1, vec(1));
     reindexVec(db);
+    ensureVecIndexSynced(db);
 
     db.prepare("DELETE FROM embeddings WHERE source_table = 'decisions' AND source_id = 1").run();
-    invalidateVecIndex(db);
+    db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+      .run('vec_index_dirty', '1');
+    db.exec('DELETE FROM vec_embeddings');
     insertEmbedding(1, vec(2));
     ensureVecIndexSynced(db);
 

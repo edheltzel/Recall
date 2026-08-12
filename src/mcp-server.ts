@@ -5,6 +5,7 @@
 
 import { appendFileSync, existsSync as fsExistsSync, mkdirSync } from "fs";
 import { randomUUID } from "crypto";
+import { SESSION_SOURCES } from "./hosts/session-source.js";
 import { join } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VERSION } from "./version.js";
@@ -912,7 +913,7 @@ server.tool(
 			.optional()
 			.describe("Stable caller session ID. Generated when messages are supplied and this is omitted."),
 		source: z
-			.enum(["claude", "opencode", "pi", "codex", "mcp"])
+			.enum(SESSION_SOURCES)
 			.default("mcp")
 			.describe("Host/source label for caller-supplied messages."),
 		messages: z

@@ -158,15 +158,16 @@ export function invalidateVecIndex(db: Database): void {
  * throws.
  */
 export function ensureVecIndexSynced(db: Database): void {
-  if (!vecAvailable || syncedThisProcess || syncInFlight) return;
+  if (!vecAvailable || syncInFlight) return;
+  const dirty = Boolean(
+    db.prepare('SELECT 1 FROM schema_meta WHERE key = ?').get(VEC_INDEX_DIRTY_KEY)
+  );
+  if (syncedThisProcess && !dirty) return;
   syncInFlight = true;
   try {
     createVecTable(db);
     const want = (db.prepare('SELECT COUNT(*) AS c FROM embeddings WHERE dimensions = ?').get(EMBEDDING_DIMENSIONS) as { c: number }).c;
     const have = (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
-    const dirty = Boolean(
-      db.prepare('SELECT 1 FROM schema_meta WHERE key = ?').get(VEC_INDEX_DIRTY_KEY)
-    );
     if (dirty || have !== want) {
       // One-time O(n) rebuild (~4s @100k) inside the first vector query after
       // an upgrade — say so on stderr so an agent host doesn't read it as a hang.
