@@ -11,7 +11,6 @@ import {
   generateFrameSummaryFromStats,
 } from './extraction.js';
 import { invalidateRecordEmbedding } from './memory.js';
-import { invalidateVecIndex } from '../db/vec.js';
 import { repairLifecycleSearchGenerationPage } from './lifecycle-search.js';
 import { scrub } from './write-safety.js';
 
@@ -365,6 +364,7 @@ function stagePreparedInputs(
         source_position INTEGER,
         existing_key INTEGER NOT NULL DEFAULT 0,
         search_changed INTEGER NOT NULL DEFAULT 1,
+        embedding_changed INTEGER NOT NULL DEFAULT 0,
         message_id INTEGER,
         UNIQUE (source, session_id, message_key)
       );
@@ -576,14 +576,14 @@ function prepareBatchGeneration(
   const markExisting = stage.db.prepare(`
     UPDATE generation_messages SET existing_key = 1, message_id = ?,
       content = CASE WHEN ? IS NULL THEN NULL ELSE content END,
-      search_changed = ?
+      search_changed = ?, embedding_changed = ?
     WHERE message_key = ?
   `);
   const insertExisting = stage.db.prepare(`
     INSERT INTO generation_messages (
       source, session_id, message_key, message_id, timestamp, role, content,
-      project, source_position, existing_key, search_changed
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      project, source_position, existing_key, search_changed, embedding_changed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
   `);
   let reconciled = 0;
   let keyCursor = '';
@@ -627,10 +627,15 @@ function prepareBatchGeneration(
             oldVisible !== nextVisible ||
             (oldVisible && nextVisible &&
               (nextContent !== row.content || current.project !== row.project));
+          const embeddingChanged = row.message_id !== null && (
+            oldVisible !== nextVisible ||
+            ((oldVisible || nextVisible) && nextContent !== row.content)
+          );
           markExisting.run(
             row.message_id,
             row.content,
             searchChanged ? 1 : 0,
+            embeddingChanged ? 1 : 0,
             row.message_key
           );
           if ((row.content !== null &&
@@ -651,6 +656,7 @@ function prepareBatchGeneration(
         const searchChanged = Boolean(row.fts_pending) ||
           (nextVisible && !Boolean(row.generation_backed)) ||
           nextVisible !== oldVisible;
+        const embeddingChanged = row.message_id !== null && nextVisible !== oldVisible;
         if (sourcePosition !== row.source_position) reconciled++;
         insertExisting.run(
           first.source,
@@ -662,7 +668,8 @@ function prepareBatchGeneration(
           row.content,
           row.project,
           sourcePosition,
-          searchChanged ? 1 : 0
+          searchChanged ? 1 : 0,
+          embeddingChanged ? 1 : 0
         );
       }
     })();
@@ -938,6 +945,11 @@ function persistPreparedGeneration(
       fts_pending
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const queueEmbeddingInvalidation = db.prepare(`
+    INSERT OR IGNORE INTO host_ingest_embedding_invalidations (
+      generation_id, message_id
+    ) VALUES (?, ?)
+  `);
   let cursor = -1;
   for (;;) {
     assertHostDeadline(deadline);
@@ -955,6 +967,7 @@ function persistPreparedGeneration(
       provenance: string | null;
       source_position: number | null;
       search_changed: number;
+      embedding_changed: number;
     }>;
     if (rows.length === 0) break;
     db.transaction(() => {
@@ -975,6 +988,9 @@ function persistPreparedGeneration(
           row.source_position,
           row.search_changed
         );
+        if (row.embedding_changed && row.message_id !== null) {
+          queueEmbeddingInvalidation.run(generation.publishToken, row.message_id);
+        }
       }
     }).immediate();
     cursor = rows.at(-1)!.ordinal;
@@ -1191,39 +1207,6 @@ function sameIngestState(
       left.finalized_at === right.finalized_at;
 }
 
-function invalidateChangedGenerationEmbeddings(
-  db: Database,
-  generationId: string,
-  previousGenerationId?: string
-): void {
-  const result = db.prepare(`
-    DELETE FROM embeddings
-    WHERE source_table = 'messages' AND source_id IN (
-      SELECT next.message_id
-      FROM host_ingest_generation_messages AS next
-      LEFT JOIN host_ingest_generation_messages AS previous
-        ON previous.generation_id = ?
-       AND previous.message_key = next.message_key
-      LEFT JOIN messages AS physical ON physical.id = next.message_id
-      WHERE next.generation_id = ? AND next.message_id IS NOT NULL
-        AND (
-          next.content IS NULL
-          OR (next.source = 'grok' AND next.source_position IS NULL)
-          OR (
-            previous.message_key IS NOT NULL
-            AND (previous.content IS NOT next.content OR previous.project IS NOT next.project)
-          )
-          OR (
-            previous.message_key IS NULL
-            AND physical.id IS NOT NULL
-            AND (physical.content IS NOT next.content OR physical.project IS NOT next.project)
-          )
-        )
-    )
-  `).run(previousGenerationId ?? null, generationId);
-  if (result.changes > 0) invalidateVecIndex(db);
-}
-
 function activatePreparedGeneration(
   db: Database,
   generation: PreparedBatchGeneration,
@@ -1324,11 +1307,6 @@ function activatePreparedGeneration(
     UPDATE host_ingest_generations SET status = 'active'
     WHERE generation_id = ? AND status = 'pending'
   `).run(generation.publishToken);
-  invalidateChangedGenerationEmbeddings(
-    db,
-    generation.publishToken,
-    previous?.active_generation ?? undefined
-  );
   const finalizedAt = terminal
     ? prepared.capturedAt
     : resumed

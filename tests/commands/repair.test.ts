@@ -29,6 +29,7 @@ import { runRepair, type RepairDeps } from '../../src/commands/repair';
 import { checkFtsIndexes } from '../../src/commands/doctor';
 import { checkFts } from '../../src/lib/repair';
 import { embeddingToBlob, type EmbeddingResult } from '../../src/lib/embeddings';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import {
   addBreadcrumb,
   addDecision,
@@ -89,6 +90,28 @@ function embeddingsCount(): number {
 }
 
 describe('dry-run vs execute', () => {
+  test('keeps incomplete lifecycle repair in the plan, result, and exit status', async () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'repair-lifecycle-readiness',
+      messages: [{ role: 'assistant', content: 'lifecycle readiness repair row' }],
+    });
+    getDb().exec(`
+      DROP TRIGGER host_ingest_generation_messages_fts_ad;
+      DROP TRIGGER host_ingest_generation_messages_fts_au;
+      DROP TABLE host_ingest_generation_messages_fts;
+    `);
+
+    const dryRun = (await runRepair({ embed: false }))!;
+    expect(dryRun.plan.lifecycle?.status).toBe('retryable');
+    expect(dryRun.lifecycle?.status).toBe('retryable');
+    expect(process.exitCode).not.toBe(1);
+
+    const executed = (await runRepair({ execute: true, embed: false }))!;
+    expect(executed.lifecycle?.status).toBe('retryable');
+    expect(process.exitCode).toBe(1);
+  });
+
   test('dry-run reports the plan and writes nothing', async () => {
     addBreadcrumb({ content: CRUMB, importance: 5 });
     addDecision({ decision: 'Adopt SQLite WAL mode for every database connection.', status: 'active' });

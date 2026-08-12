@@ -68,6 +68,13 @@ CREATE TABLE IF NOT EXISTS host_ingest_generation_messages (
   UNIQUE (generation_id, ordinal),
   FOREIGN KEY (generation_id) REFERENCES host_ingest_generations(generation_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS host_ingest_embedding_invalidations (
+  generation_id TEXT NOT NULL,
+  message_id    INTEGER NOT NULL,
+  PRIMARY KEY (generation_id, message_id),
+  FOREIGN KEY (generation_id) REFERENCES host_ingest_generations(generation_id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_session
   ON host_ingest_generations(source, session_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_status_max

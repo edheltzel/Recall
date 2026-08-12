@@ -40,6 +40,7 @@ export const EXPORT_TABLES = [
   'dedup_lineage',
   'host_ingest_generations',
   'host_ingest_generation_messages',
+  'host_ingest_embedding_invalidations',
   'host_ingest_state',
   'host_ingest_messages',
   'loa_message_sources',

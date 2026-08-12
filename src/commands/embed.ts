@@ -8,14 +8,17 @@ import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
-import { publishedRecordTable } from '../lib/published-records.js';
+import { publishedEmbeddingSql, publishedRecordTable } from '../lib/published-records.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
 // so the dedup-hiding contract for the semantic + hybrid vector paths can be
 // pinned by tests (issue #74).
-export function embeddingsWhere(table?: string): string {
-  const conditions = [notMarkedDuplicateSql('source_table', 'source_id')];
+export function embeddingsWhere(db: ReturnType<typeof getDb>, table?: string): string {
+  const conditions = [
+    notMarkedDuplicateSql('source_table', 'source_id'),
+    publishedEmbeddingSql(db),
+  ];
   if (table) conditions.push(`source_table = '${table}'`);
   return `WHERE ${conditions.join(' AND ')}`;
 }
@@ -295,7 +298,7 @@ export async function runSemanticSearch(query: string, options: { table?: string
   const embeddings = db.prepare(`
     SELECT id, source_table, source_id, embedding
     FROM embeddings
-    ${embeddingsWhere(options.table)}
+    ${embeddingsWhere(db, options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   if (embeddings.length === 0) {
@@ -426,7 +429,7 @@ export async function runHybridSearch(query: string, options: { table?: string; 
   const embeddings = db.prepare(`
     SELECT id, source_table, source_id, embedding
     FROM embeddings
-    ${embeddingsWhere(options.table)}
+    ${embeddingsWhere(db, options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   // Calculate similarities

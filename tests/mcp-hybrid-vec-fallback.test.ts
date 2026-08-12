@@ -12,9 +12,12 @@ import type { hybridSearch as HybridSearchFn, formatHybridModeNote as FormatHybr
 // in both cases, so vec/both results prove the semantic path supplied the row.
 const QV = new Array(1024).fill(0);
 QV[0] = 1;
+const KNN_VECTOR = new Array(1024).fill(0);
+KNN_VECTOR[1] = 1;
 
 let vecAvailable = false;
 let ensureVecIndexSyncedCalls = 0;
+let vecSynced = true;
 let knnCalls: Array<{ queryEmbedding: number[]; k: number }> = [];
 // VecHit[] to return, or an Error for the mocked knnSearch to throw (pins the
 // knn→bruteforce catch fallback).
@@ -44,6 +47,7 @@ const realCheckEmbeddingService = embeddingsReal.checkEmbeddingService;
 function resetVecMock(): void {
   vecAvailable = false;
   ensureVecIndexSyncedCalls = 0;
+  vecSynced = true;
   knnCalls = [];
   knnHits = [];
   embedThrows = false;
@@ -55,6 +59,7 @@ mock.module('../src/db/vec', () => ({
   ensureVecIndexSynced: (db: Parameters<typeof realEnsureVecIndexSynced>[0]) => {
     if (!mockEngaged) return realEnsureVecIndexSynced(db);
     ensureVecIndexSyncedCalls += 1;
+    return vecSynced;
   },
   knnSearch: (db: Parameters<typeof realKnnSearch>[0], queryEmbedding: number[], k: number) => {
     if (!mockEngaged) return realKnnSearch(db, queryEmbedding, k);
@@ -102,6 +107,10 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
       `INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
        VALUES ('decisions', ?, 'qwen3-embedding:0.6b', 1024, ?)`
     ).run(bruteForceDecisionId, embeddingToBlob(QV));
+    getDb().prepare(
+      `INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
+       VALUES ('decisions', ?, 'qwen3-embedding:0.6b', 1024, ?)`
+    ).run(knnDecisionId, embeddingToBlob(KNN_VECTOR));
   });
   afterAll(() => {
     mockEngaged = false;
@@ -171,6 +180,20 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(embeddingsAvailable).toBe(true);
     const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
     expect(hit).toBeDefined(); // the seeded row still surfaces via brute-force
+  });
+
+  test('falls back to canonical embeddings when vec synchronization is unconfirmed', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    vecSynced = false;
+    knnHits = [{ source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }];
+
+    const { results, semanticBackend } = await hybridSearch('wibblefrotz zharkon', { limit: 5 });
+
+    expect(ensureVecIndexSyncedCalls).toBe(1);
+    expect(knnCalls).toHaveLength(0);
+    expect(semanticBackend).toBe('bruteforce');
+    expect(results.some((r) => r.table === 'decisions' && r.id === bruteForceDecisionId)).toBe(true);
   });
 
   test('reports embeddings unavailable and backend none when the query embed throws', async () => {

@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
+import { invalidateVecIndex } from '../db/vec.js';
 
 export const LIFECYCLE_SEARCH_RETRYABLE =
   'RETRYABLE: Lifecycle message search index is not ready; retry the search or run recall repair --execute.';
@@ -43,6 +44,12 @@ function generationReadinessAvailable(db: Database): boolean {
 }
 
 function activeGenerationCount(db: Database, project?: string, unreadyOnly = false): number {
+  const invalidationPending = tableExists(db, 'host_ingest_embedding_invalidations')
+    ? `OR EXISTS (
+        SELECT 1 FROM host_ingest_embedding_invalidations AS invalidation
+        WHERE invalidation.generation_id = generation.generation_id
+      )`
+    : '';
   const row = db.prepare(`
     SELECT COUNT(*) AS count
     FROM host_ingest_generations AS generation
@@ -51,7 +58,7 @@ function activeGenerationCount(db: Database, project?: string, unreadyOnly = fal
      AND state.source = generation.source
      AND state.session_id = generation.session_id
     WHERE generation.status = 'active'
-      ${unreadyOnly ? 'AND generation.fts_ready = 0' : ''}
+      ${unreadyOnly ? `AND (generation.fts_ready = 0 ${invalidationPending})` : ''}
       ${project ? `AND EXISTS (
         SELECT 1 FROM host_ingest_generation_messages AS message
         WHERE message.generation_id = generation.generation_id
@@ -100,6 +107,37 @@ function isPublishedGeneration(db: Database, generationId: string): boolean {
   `).get(generationId));
 }
 
+function repairLifecycleEmbeddingInvalidationPage(
+  db: Database,
+  generationId: string
+): boolean {
+  if (!tableExists(db, 'host_ingest_embedding_invalidations')) return true;
+  const rows = db.prepare(`
+    SELECT message_id FROM host_ingest_embedding_invalidations
+    WHERE generation_id = ? ORDER BY message_id LIMIT ?
+  `).all(generationId, SQLITE_SAFE_CHUNK_SIZE) as Array<{ message_id: number }>;
+  if (rows.length === 0) return true;
+  const ids = rows.map(row => row.message_id);
+  db.transaction(() => {
+    if (!isPublishedGeneration(db, generationId)) return;
+    const removed = db.prepare(`
+      DELETE FROM embeddings
+      WHERE source_table = 'messages'
+        AND source_id IN (${ids.map(() => '?').join(',')})
+    `).run(...ids);
+    db.prepare(`
+      DELETE FROM host_ingest_embedding_invalidations
+      WHERE generation_id = ?
+        AND message_id IN (${ids.map(() => '?').join(',')})
+    `).run(generationId, ...ids);
+    if (removed.changes > 0) invalidateVecIndex(db);
+  }).immediate();
+  return !db.prepare(`
+    SELECT 1 FROM host_ingest_embedding_invalidations
+    WHERE generation_id = ? LIMIT 1
+  `).get(generationId);
+}
+
 export function repairLifecycleSearchGenerationPage(
   db: Database,
   generationId: string
@@ -113,7 +151,10 @@ export function repairLifecycleSearchGenerationPage(
      AND state.session_id = generation.session_id
     WHERE generation.generation_id = ? AND generation.status = 'active'
   `).get(generationId) as { fts_ready: number } | undefined;
-  if (!generation || generation.fts_ready === 1) return true;
+  if (!generation) return true;
+  if (!repairLifecycleEmbeddingInvalidationPage(db, generationId)) return false;
+  if (generation.fts_ready === 1) return true;
+  if (!lifecycleFtsAvailable(db)) return false;
 
   const rows = db.prepare(`
     SELECT ordinal, source, message_id, content, project, source_position
@@ -182,8 +223,7 @@ export function repairLifecycleSearchIndex(
   options: LifecycleSearchRepairOptions = {}
 ): LifecycleSearchReadiness {
   let readiness = getLifecycleSearchReadiness(db, options.project);
-  if (readiness.status === 'ready' || !lifecycleFtsAvailable(db) ||
-    !generationReadinessAvailable(db)) {
+  if (readiness.status === 'ready' || !generationReadinessAvailable(db)) {
     return readiness;
   }
 
@@ -196,7 +236,13 @@ export function repairLifecycleSearchIndex(
         ON state.active_generation = generation.generation_id
        AND state.source = generation.source
        AND state.session_id = generation.session_id
-      WHERE generation.status = 'active' AND generation.fts_ready = 0
+      WHERE generation.status = 'active' AND (
+        generation.fts_ready = 0
+        ${tableExists(db, 'host_ingest_embedding_invalidations') ? `OR EXISTS (
+          SELECT 1 FROM host_ingest_embedding_invalidations AS invalidation
+          WHERE invalidation.generation_id = generation.generation_id
+        )` : ''}
+      )
         ${options.generationId ? 'AND generation.generation_id = ?' : ''}
         ${options.project ? `AND EXISTS (
           SELECT 1 FROM host_ingest_generation_messages AS message

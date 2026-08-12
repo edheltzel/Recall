@@ -1156,6 +1156,7 @@ describe('pinned automatic LoA sources migration (19 to 20)', () => {
     for (const table of [
       'host_ingest_generations',
       'host_ingest_generation_messages',
+      'host_ingest_embedding_invalidations',
     ]) {
       expect(db.prepare(`
         SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?

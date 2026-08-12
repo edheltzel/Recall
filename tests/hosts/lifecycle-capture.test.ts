@@ -17,6 +17,7 @@ import {
   type HostTranscript,
 } from '../../src/lib/host-ingest';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
+import { publishedEmbeddingSql } from '../../src/lib/published-records';
 import {
   getLastSearchErrors,
   getLastSearchReadiness,
@@ -949,6 +950,49 @@ describe('host-neutral immediate SQLite ingest', () => {
     `).get('shadow-visibility')).toEqual({ count: 1 });
     expect(search('pending AND frame', { table: 'messages' })
       .map(result => result.content)).toEqual(['pending frame']);
+  });
+
+  test('gates stale lifecycle embeddings until bounded invalidation repair completes', () => {
+    const sessionId = 'semantic-invalidation-gate';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [{ role: 'assistant', content: 'semantic content before rewrite' }],
+    });
+    const db = getDb();
+    const active = db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId) as { active_generation: string };
+    const message = db.prepare(`
+      SELECT message_id FROM host_ingest_generation_messages
+      WHERE generation_id = ? LIMIT 1
+    `).get(active.active_generation) as { message_id: number };
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('messages', ?, 'test', 1, ?)
+    `).run(message.message_id, Buffer.alloc(4));
+    db.prepare(`
+      INSERT INTO host_ingest_embedding_invalidations (generation_id, message_id)
+      VALUES (?, ?)
+    `).run(active.active_generation, message.message_id);
+
+    expect(db.prepare(`
+      SELECT source_id FROM embeddings
+      WHERE ${publishedEmbeddingSql(db)}
+    `).all()).toEqual([]);
+
+    getHostIngestCheckpoint('codex', sessionId);
+
+    expect(db.prepare(`
+      SELECT 1 FROM embeddings WHERE source_table = 'messages' AND source_id = ?
+    `).get(message.message_id)).toBeNull();
+    expect(db.prepare(`
+      SELECT 1 FROM host_ingest_embedding_invalidations WHERE generation_id = ?
+    `).get(active.active_generation)).toBeNull();
+    expect(db.prepare(`
+      SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'
+    `).get()).toEqual({ value: '1' });
   });
 
   test('fuses physical and generation message ranks', () => {

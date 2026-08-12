@@ -154,12 +154,12 @@ export function invalidateVecIndex(db: Database): void {
  * its lifetime silently serving an empty index (#217 review, 225-1). Never
  * throws.
  */
-export function ensureVecIndexSynced(db: Database): void {
-  if (!vecAvailable || syncInFlight) return;
+export function ensureVecIndexSynced(db: Database): boolean {
+  if (!vecAvailable || syncInFlight) return false;
   const dirty = Boolean(
     db.prepare('SELECT 1 FROM schema_meta WHERE key = ?').get(VEC_INDEX_DIRTY_KEY)
   );
-  if (syncedThisProcess && !dirty) return;
+  if (syncedThisProcess && !dirty) return true;
   syncInFlight = true;
   try {
     createVecTable(db);
@@ -172,10 +172,12 @@ export function ensureVecIndexSynced(db: Database): void {
       reindexVec(db);
     }
     syncedThisProcess = true;
+    return true;
   } catch (err) {
     // Never block startup/query on index sync — brute-force remains available,
     // and the un-latched flag retries the rebuild on the next vector query.
     console.error(`[recall] vec index rebuild failed (will retry on next vector query): ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   } finally {
     syncInFlight = false;
   }
