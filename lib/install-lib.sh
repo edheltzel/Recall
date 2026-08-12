@@ -996,8 +996,15 @@ recall_do_restore() {
     mkdir -p "$(dirname "$target")"
     local symlink_target_file="$restore_dir/$filename.symlink-target"
     if [[ "$filename" == "RecallLifecycle.json" && -f "$symlink_target_file" ]]; then
+      local saved_symlink_target
+      saved_symlink_target="$(<"$symlink_target_file")"
+      local managed_grok_canonical="$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
+      if [[ "$saved_symlink_target" == "$managed_grok_canonical" ]]; then
+        mkdir -p "$(dirname "$managed_grok_canonical")"
+        cp -p "$file" "$managed_grok_canonical"
+      fi
       rm -f "$target"
-      ln -s "$(<"$symlink_target_file")" "$target"
+      ln -s "$saved_symlink_target" "$target"
     else
       if [[ "$filename" == "RecallLifecycle.json" && -L "$target" ]]; then
         rm "$target"

@@ -1,6 +1,17 @@
 import { createHash } from 'crypto';
 import { spawn, spawnSync } from 'child_process';
-import { closeSync, existsSync, openSync, readSync, statSync } from 'fs';
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport } from '../hosts/grok-lifecycle.js';
@@ -193,14 +204,6 @@ function grokHookRequest(payload: HookPayload): GrokHookRequest | { skipped: str
   };
 }
 
-function appendTail(current: Buffer, next: Buffer): Buffer {
-  if (next.length >= WATERMARK_TAIL_BYTES) return next.subarray(-WATERMARK_TAIL_BYTES);
-  const combined = Buffer.concat([current, next]);
-  return combined.length > WATERMARK_TAIL_BYTES
-    ? combined.subarray(-WATERMARK_TAIL_BYTES)
-    : combined;
-}
-
 async function* runGrokExportStream(sessionId: string): AsyncGenerator<Buffer> {
   const command = process.env.GROK_BIN || 'grok';
   const child = spawn(command, ['export', sessionId], {
@@ -244,117 +247,91 @@ async function* runGrokExportStream(sessionId: string): AsyncGenerator<Buffer> {
   }
 }
 
-async function ingestGrokStreamPass(
+function grokExportStream(
+  sessionId: string,
+  dependencies: HostHookDependencies
+): AsyncIterable<string | Buffer> {
+  if (dependencies.exportGrokStream) return dependencies.exportGrokStream(sessionId);
+  if (dependencies.exportGrok) {
+    return (async function* () {
+      yield dependencies.exportGrok!(sessionId);
+    })();
+  }
+  return runGrokExportStream(sessionId);
+}
+
+async function stageGrokExport(
+  source: AsyncIterable<string | Buffer>
+): Promise<{ directory: string; path: string }> {
+  const directory = mkdtempSync(join(tmpdir(), 'recall-grok-export-'));
+  const path = join(directory, 'export.md');
+  const fd = openSync(path, 'wx');
+  let closed = false;
+  try {
+    for await (const value of source) {
+      const raw = asBuffer(value);
+      let written = 0;
+      while (written < raw.length) {
+        written += writeSync(fd, raw, written, raw.length - written);
+      }
+    }
+    closeSync(fd);
+    closed = true;
+    return { directory, path };
+  } catch (error) {
+    if (!closed) closeSync(fd);
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function ingestStagedGrokExport(
   request: GrokHookRequest,
   dependencies: HostHookDependencies,
-  previous: HostIngestCheckpoint | undefined,
-  useCheckpoint: boolean
-): Promise<{ reset: boolean; result?: HostHookResult }> {
+  path: string
+): HostHookResult {
   const transcriptRef = 'grok export';
-  const checkpoint = useCheckpoint ? byteCheckpoint(previous, transcriptRef) : undefined;
   const ingest = dependencies.ingest ?? ingestHostTranscript;
-  const source = (dependencies.exportGrokStream ?? runGrokExportStream)(request.sessionId);
-  let validated = !checkpoint;
-  let bytesRead = 0;
-  let captureCursor = checkpoint?.size ?? 0;
-  let prefixTail = Buffer.alloc(0);
-  let currentTail = Buffer.alloc(0);
-  let pending: Buffer[] = [];
-  let pendingBytes = 0;
-  let aggregate: HostIngestResult | undefined;
-
-  if (checkpoint?.size === 0) {
-    if (tailHash(prefixTail) !== checkpoint.tail) return { reset: true };
-    validated = true;
+  const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
+  const previous = checkpoint('grok', request.sessionId);
+  const size = suppliedTranscriptSize(path);
+  const read = (start: number, length: number) => readSuppliedTranscript(path, start, length);
+  const start = byteCaptureStart(previous, transcriptRef, size, read);
+  const incremental = start > 0;
+  if (start === size && (!request.finalize || previous?.finalized)) {
+    return { skipped: 'unchanged-transcript' };
   }
-
-  const ingestChunk = (raw: Buffer) => {
-    const start = captureCursor;
-    captureCursor += raw.length;
-    currentTail = appendTail(currentTail, raw);
-    const parsed = parseGrokExport(raw.toString('utf-8'));
+  if (start === size) {
+    return {
+      ingest: ingest({
+        source: 'grok',
+        sessionId: request.sessionId,
+        messages: [],
+        cwd: request.cwd,
+        transcriptRef,
+        watermark: previous?.watermark ?? byteWatermark(size, read),
+        capturedAt: request.capturedAt,
+        incremental,
+        finalize: true,
+      }),
+    };
+  }
+  let aggregate: HostIngestResult | undefined;
+  for (const chunk of boundedTranscriptChunks(start, size, read)) {
+    const parsed = parseGrokExport(chunk.raw.toString('utf-8'));
     aggregate = mergeIngestResults(aggregate, ingest({
       source: 'grok',
       sessionId: request.sessionId,
       messages: parsed.messages,
       cwd: request.cwd,
       transcriptRef,
-      watermark: `bytes:${captureCursor}:tail:${tailHash(currentTail)}`,
+      watermark: chunk.watermark,
       capturedAt: request.capturedAt,
-      incremental: start > 0,
-      finalize: false,
-    }));
-  };
-
-  const flushBounded = () => {
-    while (pendingBytes > MAX_TRANSCRIPT_BYTES) {
-      const combined = Buffer.concat(pending, pendingBytes);
-      const newline = combined.subarray(0, MAX_TRANSCRIPT_BYTES).lastIndexOf(0x0a);
-      if (newline < 0) {
-        throw new Error(`Transcript record exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
-      }
-      ingestChunk(combined.subarray(0, newline + 1));
-      const remainder = combined.subarray(newline + 1);
-      pending = remainder.length ? [remainder] : [];
-      pendingBytes = remainder.length;
-    }
-  };
-
-  const queue = (raw: Buffer) => {
-    let offset = 0;
-    while (offset < raw.length) {
-      const take = Math.min(
-        MAX_TRANSCRIPT_BYTES + 1 - pendingBytes,
-        raw.length - offset
-      );
-      pending.push(raw.subarray(offset, offset + take));
-      pendingBytes += take;
-      offset += take;
-      flushBounded();
-    }
-  };
-
-  for await (const value of source) {
-    const raw = asBuffer(value);
-    let offset = 0;
-    if (!validated && checkpoint) {
-      const take = Math.min(checkpoint.size - bytesRead, raw.length);
-      prefixTail = appendTail(prefixTail, raw.subarray(0, take));
-      bytesRead += take;
-      offset = take;
-      if (bytesRead === checkpoint.size) {
-        if (tailHash(prefixTail) !== checkpoint.tail) return { reset: true };
-        validated = true;
-        currentTail = prefixTail;
-      }
-    }
-    if (validated && offset < raw.length) {
-      const suffix = raw.subarray(offset);
-      bytesRead += suffix.length;
-      queue(suffix);
-    }
-  }
-
-  if (!validated) return { reset: true };
-  if (pendingBytes > 0) ingestChunk(Buffer.concat(pending, pendingBytes));
-
-  if (!aggregate && (!request.finalize || previous?.finalized)) {
-    return { reset: false, result: { skipped: 'unchanged-transcript' } };
-  }
-  if (request.finalize) {
-    aggregate = mergeIngestResults(aggregate, ingest({
-      source: 'grok',
-      sessionId: request.sessionId,
-      messages: [],
-      cwd: request.cwd,
-      transcriptRef,
-      watermark: `bytes:${bytesRead}:tail:${tailHash(currentTail)}`,
-      capturedAt: request.capturedAt,
-      incremental: bytesRead > 0,
-      finalize: true,
+      incremental,
+      finalize: request.finalize && chunk.end === size,
     }));
   }
-  return { reset: false, result: { ingest: aggregate } };
+  return { ingest: aggregate };
 }
 
 export async function handleGrokHostHook(
@@ -364,14 +341,12 @@ export async function handleGrokHostHook(
   if (payloadIsSubagent(payload) && !includeSubagents()) return { skipped: 'subagent' };
   const request = grokHookRequest(payload);
   if ('skipped' in request) return request;
-  const checkpoint = (dependencies.checkpoint ?? getHostIngestCheckpoint)(
-    'grok',
-    request.sessionId
-  );
-  const first = await ingestGrokStreamPass(request, dependencies, checkpoint, true);
-  if (!first.reset) return first.result ?? { skipped: 'empty-export' };
-  const reset = await ingestGrokStreamPass(request, dependencies, checkpoint, false);
-  return reset.result ?? { skipped: 'empty-export' };
+  const staged = await stageGrokExport(grokExportStream(request.sessionId, dependencies));
+  try {
+    return ingestStagedGrokExport(request, dependencies, staged.path);
+  } finally {
+    rmSync(staged.directory, { recursive: true, force: true });
+  }
 }
 
 function renderRecallContext(): string {
@@ -409,7 +384,7 @@ function parsePayload(raw: string): HookPayload {
 }
 
 export function handleHostHook(
-  host: LifecycleHost,
+  host: Exclude<LifecycleHost, 'grok'>,
   payload: HookPayload,
   dependencies: HostHookDependencies = {}
 ): HostHookResult {
@@ -452,6 +427,7 @@ export function handleHostHook(
       ).subarray(0, length);
     const previous = checkpoint('codex', sessionId);
     const start = byteCaptureStart(previous, transcriptPath, size, read);
+    const incremental = start > 0;
     const finalize = event === 'sessionend';
     if (start === size && (!finalize || previous?.finalized)) {
       return { skipped: 'unchanged-transcript' };
@@ -466,7 +442,7 @@ export function handleHostHook(
           transcriptRef: transcriptPath,
           watermark: previous?.watermark ?? byteWatermark(size, read),
           capturedAt,
-          incremental: start > 0,
+          incremental,
           finalize: true,
         }),
       };
@@ -486,61 +462,8 @@ export function handleHostHook(
         transcriptRef: transcriptPath,
         watermark: chunk.watermark,
         capturedAt,
-        incremental: chunk.start > 0,
+        incremental,
         finalize: finalize && chunk.end === size,
-      }));
-    }
-    return { ingest: aggregate };
-  }
-
-  if (host === 'grok') {
-    const request = grokHookRequest(payload);
-    if ('skipped' in request) return request;
-    if (!dependencies.exportGrok) {
-      throw new Error('Synchronous Grok routing requires an injected export');
-    }
-    const markdown = dependencies.exportGrok(request.sessionId);
-    const transcriptRef = 'grok export';
-    const raw = Buffer.from(markdown, 'utf-8');
-    const previous = checkpoint('grok', request.sessionId);
-    const read = (start: number, length: number) => raw.subarray(start, start + length);
-    const start = byteCaptureStart(
-      previous,
-      transcriptRef,
-      raw.length,
-      read
-    );
-    if (start === raw.length && (!request.finalize || previous?.finalized)) {
-      return { skipped: 'unchanged-transcript' };
-    }
-    if (start === raw.length) {
-      return {
-        ingest: ingest({
-          source: 'grok',
-          sessionId: request.sessionId,
-          messages: [],
-          cwd: request.cwd,
-          transcriptRef,
-          watermark: previous?.watermark ?? byteWatermark(raw.length, read),
-          capturedAt: request.capturedAt,
-          incremental: start > 0,
-          finalize: true,
-        }),
-      };
-    }
-    let aggregate: HostIngestResult | undefined;
-    for (const chunk of boundedTranscriptChunks(start, raw.length, read)) {
-      const parsed = parseGrokExport(chunk.raw.toString('utf-8'));
-      aggregate = mergeIngestResults(aggregate, ingest({
-        source: 'grok',
-        sessionId: request.sessionId,
-        messages: parsed.messages,
-        cwd: request.cwd,
-        transcriptRef,
-        watermark: chunk.watermark,
-        capturedAt: request.capturedAt,
-        incremental: chunk.start > 0,
-        finalize: request.finalize && chunk.end === raw.length,
       }));
     }
     return { ingest: aggregate };
@@ -570,7 +493,7 @@ export async function runHostHook(hostValue: string): Promise<void> {
     const payload = parsePayload(await readStdin());
     const result = hostValue === 'grok'
       ? await handleGrokHostHook(payload)
-      : handleHostHook(hostValue as LifecycleHost, payload);
+      : handleHostHook(hostValue as Exclude<LifecycleHost, 'grok'>, payload);
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.ingest?.redactions.length) {
       process.stderr.write(`Recall redacted: ${result.ingest.redactions.join(', ')}\n`);

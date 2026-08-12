@@ -252,18 +252,17 @@ describe('host hook payload routing', () => {
     expect(starts).toContain(0);
   });
 
-  test('Grok exports by native session ID and does not claim SessionStart injection', () => {
+  test('Grok exports by native session ID and does not claim SessionStart injection', async () => {
     let exported = '';
     let received: HostTranscript | undefined;
-    const start = handleHostHook('grok', {
+    const start = await handleGrokHostHook({
       hookEventName: 'session_start',
       sessionId: 'grok-native-456',
     });
     expect(start.skipped).toBe('unsupported-event');
     expect(start.stdout).toBeUndefined();
 
-    const result = handleHostHook(
-      'grok',
+    const result = await handleGrokHostHook(
       {
         hookEventName: 'session_end',
         sessionId: 'grok-native-456',
@@ -323,6 +322,7 @@ describe('host hook payload routing', () => {
     );
     const codexLengths: number[] = [];
     const codexFinalization: boolean[] = [];
+    const codexIncremental: boolean[] = [];
     const codex = handleHostHook(
       'codex',
       {
@@ -338,6 +338,7 @@ describe('host hook payload routing', () => {
         },
         ingest: input => {
           codexFinalization.push(Boolean(input.finalize));
+          codexIncremental.push(Boolean(input.incremental));
           return {
             sessionId: input.sessionId,
             inserted: input.messages.length,
@@ -351,9 +352,11 @@ describe('host hook payload routing', () => {
     );
     expect(codex.ingest).toMatchObject({ inserted: 2, finalized: true });
     expect(codexFinalization).toEqual([false, true]);
+    expect(codexIncremental).toEqual([false, false]);
     expect(Math.max(...codexLengths)).toBeLessThanOrEqual(maxChunk);
 
     const grokFinalization: boolean[] = [];
+    const grokIncremental: boolean[] = [];
     const grokChunkSizes: number[] = [];
     const grokBlock = Buffer.from('grok export padding\n'.repeat(4096));
     const grok = await handleGrokHostHook(
@@ -369,6 +372,7 @@ describe('host hook payload routing', () => {
         },
         ingest: input => {
           grokFinalization.push(Boolean(input.finalize));
+          grokIncremental.push(Boolean(input.incremental));
           for (const message of input.messages) {
             grokChunkSizes.push(Buffer.byteLength(message.content));
           }
@@ -384,8 +388,34 @@ describe('host hook payload routing', () => {
       }
     );
     expect(grok.ingest).toMatchObject({ inserted: 2, finalized: true });
-    expect(grokFinalization).toEqual([false, false, true]);
+    expect(grokFinalization).toEqual([false, true]);
+    expect(grokIncremental).toEqual([false, false]);
     expect(Math.max(...grokChunkSizes)).toBeLessThanOrEqual(maxChunk);
+  });
+
+  test('does not ingest a partial Grok export when the exporter fails', async () => {
+    let ingests = 0;
+    await expect(handleGrokHostHook(
+      { hook_event_name: 'SessionEnd', session_id: 'grok-failed-export' },
+      {
+        exportGrokStream: async function* () {
+          yield Buffer.from('partial export\n');
+          throw new Error('export failed');
+        },
+        ingest: input => {
+          ingests += 1;
+          return {
+            sessionId: input.sessionId,
+            inserted: input.messages.length,
+            skipped: 0,
+            finalized: Boolean(input.finalize),
+            redactions: [],
+            digest: 'digest',
+          };
+        },
+      }
+    )).rejects.toThrow('export failed');
+    expect(ingests).toBe(0);
   });
 });
 
@@ -427,7 +457,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     ]);
   });
 
-  test('Grok export capture writes automatic rows immediately and deduplicates replay', () => {
+  test('Grok export capture writes automatic rows immediately and deduplicates replay', async () => {
     const payload = {
       hookEventName: 'SessionEnd',
       sessionId: 'grok-native-456',
@@ -435,8 +465,8 @@ describe('host-neutral immediate SQLite ingest', () => {
     };
     const dependencies = { exportGrok: () => fixture('grok-export.md') };
 
-    const first = handleHostHook('grok', payload, dependencies);
-    const replay = handleHostHook('grok', payload, dependencies);
+    const first = await handleGrokHostHook(payload, dependencies);
+    const replay = await handleGrokHostHook(payload, dependencies);
 
     expect(first.ingest?.redactions).toContain('generic-assignment');
 
