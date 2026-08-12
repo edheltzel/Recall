@@ -16,6 +16,7 @@ import {
   mergeHostIngestResults,
   type HostTranscript,
 } from '../../src/lib/host-ingest';
+import { getLoaMessages } from '../../src/lib/memory';
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, '..', 'fixtures', 'host-lifecycle', name), 'utf-8');
@@ -25,18 +26,10 @@ let previousDbPath: string | undefined;
 let previousSkip: string | undefined;
 let previousIncludeSubagents: string | undefined;
 
-function expectLifecycleSelector(
-  raw: string,
-  source: 'codex' | 'grok' | 'jcode',
-  sessionId: string,
-  maxMessageId: number | null
-): void {
-  expect(JSON.parse(raw)).toEqual({
-    table: 'host_ingest_messages',
-    source,
-    session_id: sessionId,
-    max_message_id: maxMessageId,
-  });
+function expectLifecycleSources(raw: string, messageIds: number[]): void {
+  expect(JSON.parse(raw)).toEqual(
+    messageIds.map(id => ({ table: 'messages', id }))
+  );
 }
 
 beforeEach(() => {
@@ -563,12 +556,7 @@ describe('host hook payload routing', () => {
     const loa = getDb()
       .prepare('SELECT source_ids FROM loa_entries WHERE session_id = ?')
       .get(payload.session_id) as { source_ids: string };
-    expectLifecycleSelector(
-      loa.source_ids,
-      'grok',
-      payload.session_id,
-      Math.max(...rows.map(row => row.id))
-    );
+    expectLifecycleSources(loa.source_ids, rows.map(row => row.id));
   });
 
   test('refreshes finalized Grok lineage after reorder and removal reconciliation', async () => {
@@ -594,12 +582,7 @@ describe('host hook payload routing', () => {
     const reorderedLoa = db.prepare(`
       SELECT source_ids FROM loa_entries WHERE session_id = ?
     `).get(payload.session_id) as { source_ids: string };
-    expectLifecycleSelector(
-      reorderedLoa.source_ids,
-      'grok',
-      payload.session_id,
-      Math.max(...reorderedIds.map(row => row.id))
-    );
+    expectLifecycleSources(reorderedLoa.source_ids, reorderedIds.map(row => row.id));
 
     markdown = 'Frame C\n\nFrame A';
     const removed = await handleGrokHostHook(payload, dependencies);
@@ -617,12 +600,7 @@ describe('host hook payload routing', () => {
     `).get(payload.session_id) as { fabric_extract: string; source_ids: string };
 
     expect(rows.map(row => row.content).join('')).toBe(markdown);
-    expectLifecycleSelector(
-      loa.source_ids,
-      'grok',
-      payload.session_id,
-      Math.max(...rows.map(row => row.id))
-    );
+    expectLifecycleSources(loa.source_ids, rows.map(row => row.id));
     expect(loa.fabric_extract).toContain('Frame C');
     expect(loa.fabric_extract).toContain('Frame A');
     expect(loa.fabric_extract).not.toContain('Frame B');
@@ -667,7 +645,7 @@ describe('host hook payload routing', () => {
       expect(loa.message_range_start).toBeNull();
       expect(loa.message_range_end).toBeNull();
       expect(loa.message_count).toBe(0);
-      expectLifecycleSelector(loa.source_ids, 'grok', sessionId, null);
+      expectLifecycleSources(loa.source_ids, []);
       expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
         finalized: true,
       });
@@ -818,6 +796,83 @@ describe('host-neutral immediate SQLite ingest', () => {
       .toBeNull();
   });
 
+  test('lets SQLite allocate staged message IDs after retired rows', () => {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, source) VALUES (?, ?, 'grok')
+    `).run('retired-message-session', '2026-08-12T10:00:00.000Z');
+    const retired = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES (?, ?, 'system', 'retired', 'verbatim')
+    `).run('retired-message-session', '2026-08-12T10:00:00.000Z');
+    db.prepare('DELETE FROM messages WHERE id = ?').run(retired.lastInsertRowid);
+
+    ingestHostTranscriptBatch([{
+      source: 'grok',
+      sessionId: 'sqlite-allocated-message',
+      messages: [{ role: 'system', content: 'current', sourcePosition: 0 }],
+      batch: createHostIngestBatch(),
+    }]);
+
+    const current = db.prepare(`
+      SELECT message.id FROM messages AS message
+      JOIN host_ingest_messages AS stored ON stored.message_id = message.id
+      WHERE stored.session_id = ?
+    `).get('sqlite-allocated-message') as { id: number };
+    expect(current.id).toBeGreaterThan(Number(retired.lastInsertRowid));
+  });
+
+  test('pins finalized LoA evidence across non-terminal reconciliation', () => {
+    const sessionId = 'grok-pinned-loa-evidence';
+    const initial = ingestHostTranscript({
+      source: 'grok',
+      sessionId,
+      messages: [
+        { role: 'system', content: 'Frame A', sourcePosition: 0 },
+        { role: 'system', content: 'Frame B', sourcePosition: 7 },
+      ],
+      incremental: false,
+      reconcileComplete: true,
+      finalize: true,
+    });
+
+    expect(getLoaMessages(initial.loaId!).map(message => message.content)).toEqual([
+      'Frame A',
+      'Frame B',
+    ]);
+
+    const reconciled = ingestHostTranscript({
+      source: 'grok',
+      sessionId,
+      messages: [
+        {
+          role: 'system',
+          content: 'Frame B updated',
+          identityContent: 'Frame B',
+          sourcePosition: 0,
+        },
+        { role: 'system', content: 'Frame A', sourcePosition: 16 },
+      ],
+      incremental: false,
+      reconcileComplete: true,
+      finalize: false,
+    });
+
+    expect(reconciled.reconciled).toBeGreaterThan(0);
+    const active = getDb().prepare(`
+      SELECT message.content FROM messages AS message
+      JOIN host_ingest_messages AS stored ON stored.message_id = message.id
+      WHERE stored.source = 'grok' AND stored.session_id = ?
+        AND stored.source_position IS NOT NULL
+      ORDER BY stored.source_position
+    `).all(sessionId) as Array<{ content: string }>;
+    expect(active.map(message => message.content)).toEqual(['Frame B updated', 'Frame A']);
+    expect(getLoaMessages(initial.loaId!).map(message => message.content)).toEqual([
+      'Frame A',
+      'Frame B',
+    ]);
+  });
+
   test('rolls back every Grok reset mutation when its batch is interrupted', () => {
     const sessionId = 'grok-interrupted-reset';
     const transcriptRef = 'grok export';
@@ -882,12 +937,7 @@ describe('host-neutral immediate SQLite ingest', () => {
       ['Frame A\n\n', 0],
       ['Frame B', 9],
     ]);
-    expectLifecycleSelector(
-      originalLoa.source_ids,
-      'grok',
-      sessionId,
-      Math.max(...originalRows.map(row => row.id))
-    );
+    expectLifecycleSources(originalLoa.source_ids, originalRows.map(row => row.id));
     expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
       watermark: 'bytes:16:rolling:1111111122222222',
       finalized: true,
@@ -917,12 +967,7 @@ describe('host-neutral immediate SQLite ingest', () => {
       .get(sessionId) as { source_ids: string };
 
     expect(rows.map(row => row.content)).toEqual(['Frame B']);
-    expectLifecycleSelector(
-      loa.source_ids,
-      'grok',
-      sessionId,
-      Math.max(...rows.map(row => row.id))
-    );
+    expectLifecycleSources(loa.source_ids, rows.map(row => row.id));
     expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
       watermark: 'bytes:7:rolling:5555555566666666',
       finalized: true,

@@ -722,6 +722,13 @@ export function getLoaMessages(loaId: number): Message[] {
   const loa = getLoaEntry(loaId);
   if (!loa) return [];
 
+  const pinned = db.prepare(`
+    SELECT message_id AS id, session_id, timestamp, role, content, project,
+      importance, provenance
+    FROM loa_message_sources WHERE loa_id = ? ORDER BY ordinal
+  `).all(loaId) as Message[];
+  if (pinned.length > 0) return pinned;
+
   if (loa.source_ids) {
     try {
       const sources = JSON.parse(loa.source_ids) as unknown;
@@ -745,42 +752,6 @@ export function getLoaMessages(loaId: number): Message[] {
           (order.get(left.id!) ?? Number.MAX_SAFE_INTEGER) -
           (order.get(right.id!) ?? Number.MAX_SAFE_INTEGER)
         );
-      }
-      if (typeof sources === 'object' && sources !== null) {
-        const selector = sources as {
-          table?: unknown;
-          source?: unknown;
-          session_id?: unknown;
-          max_message_id?: unknown;
-        };
-        if (
-          selector.table === 'host_ingest_messages' &&
-          ['codex', 'grok', 'jcode'].includes(String(selector.source)) &&
-          typeof selector.session_id === 'string' &&
-          selector.session_id === loa.session_id &&
-          typeof selector.max_message_id === 'number' &&
-          Number.isSafeInteger(selector.max_message_id)
-        ) {
-          const source = String(selector.source);
-          const order = source === 'grok'
-            ? 'stored.source_position, message.id'
-            : 'message.timestamp, message.id';
-          return db.prepare(`
-            SELECT message.* FROM messages AS message
-            JOIN host_ingest_messages AS stored ON stored.message_id = message.id
-            WHERE stored.source = ? AND stored.session_id = ? AND message.id <= ?
-              AND (? <> 'grok' OR stored.source_position IS NOT NULL)
-            ORDER BY ${order}
-          `).all(
-            source,
-            selector.session_id,
-            selector.max_message_id,
-            source
-          ) as Message[];
-        }
-        if (selector.table === 'host_ingest_messages' && selector.max_message_id === null) {
-          return [];
-        }
       }
     } catch {
       return [];
