@@ -114,12 +114,11 @@ function clearSessionMessages(sessionId: string): number {
   return deleteAll();
 }
 
-function lifecycleOwnsSession(sessionId: string): boolean {
-  return Boolean(
-    getDb()
-      .prepare('SELECT 1 FROM host_ingest_state WHERE session_id = ? LIMIT 1')
-      .get(sessionId)
-  );
+function lifecycleSessionSource(sessionId: string): string | undefined {
+  const row = getDb()
+    .prepare('SELECT source FROM host_ingest_state WHERE session_id = ? LIMIT 1')
+    .get(sessionId) as { source: string } | undefined;
+  return row?.source;
 }
 
 function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 'project'>): string {
@@ -196,7 +195,19 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   }
 
   const replacingSession = sessionExists(session.sessionId);
-  const lifecycleOwned = replacingSession && lifecycleOwnsSession(session.sessionId);
+  const lifecycleSource = replacingSession
+    ? lifecycleSessionSource(session.sessionId)
+    : undefined;
+  if (lifecycleSource && lifecycleSource !== session.source) {
+    return {
+      success: false,
+      sessionId: session.sessionId,
+      messageCount: 0,
+      source: session.source,
+      error: `Session ${session.sessionId} is owned by ${lifecycleSource}, not ${session.source}`,
+    };
+  }
+  const lifecycleOwned = Boolean(lifecycleSource);
   if (replacingSession && !lifecycleOwned) clearSessionMessages(session.sessionId);
   const existingSnapshot = lifecycleOwned ? findExplicitSnapshot(session) : undefined;
   if (lifecycleOwned) clearExplicitDumpLoa(session.sessionId);
@@ -279,6 +290,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     project: options.project || session.project,
     tags: options.tags,
     message_count: importedMessages.length,
+    source_ids: JSON.stringify(importedMessages.map(message => ({ table: 'messages', id: message.id }))),
     // Fabric output and the basic-summary fallback are both generated from
     // the session messages — extracted either way (ADR-0001).
     provenance: 'extracted'

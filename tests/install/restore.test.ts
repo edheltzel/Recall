@@ -21,6 +21,7 @@ const REPO = join(import.meta.dir, '..', '..');
 describe('installer restore (rollback)', () => {
   let root: string;
   let claudeDir: string;
+  let grokDir: string;
   let recallDir: string;
   let backupBase: string;
 
@@ -33,6 +34,7 @@ describe('installer restore (rollback)', () => {
         REPO,
         HOME: root,
         CLAUDE_DIR: claudeDir,
+        GROK_CONFIG_DIR: grokDir,
         RECALL_DIR: recallDir,
         BACKUP_BASE: backupBase,
         RECALL_REPO_DIR: REPO,
@@ -56,9 +58,11 @@ describe('installer restore (rollback)', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'recall-restore-'));
     claudeDir = join(root, '.claude');
+    grokDir = join(root, '.grok');
     recallDir = join(root, '.agents', 'Recall');
     backupBase = join(recallDir, 'backups');
     mkdirSync(claudeDir, { recursive: true });
+    mkdirSync(join(grokDir, 'hooks'), { recursive: true });
     mkdirSync(backupBase, { recursive: true });
   });
 
@@ -102,6 +106,20 @@ describe('installer restore (rollback)', () => {
 
     expect(result.status).toBe(0);
     expect(readFileSync(join(claudeDir, 'settings.json'), 'utf-8')).toBe('{"older":true}');
+  });
+
+  test('restores the Grok hook to its original path', () => {
+    writeFileSync(join(grokDir, 'hooks', 'RecallLifecycle.json'), '{"current":true}');
+    seedBackup('20260101120000', {
+      'RecallLifecycle.json': '{"restored":true}',
+    });
+
+    const result = sh('_confirm() { return 0; }\nrecall_do_restore ""');
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(grokDir, 'hooks', 'RecallLifecycle.json'), 'utf-8'))
+      .toBe('{"restored":true}');
+    expect(existsSync(join(claudeDir, 'RecallLifecycle.json'))).toBe(false);
   });
 
   test('an unknown timestamp fails without touching current files', () => {
