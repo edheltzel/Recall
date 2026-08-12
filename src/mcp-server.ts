@@ -45,8 +45,7 @@ import { z } from "zod";
 import { getDb, initDb, getDbPath } from "./db/connection.js";
 import {
 	search,
-	getLastSearchErrors,
-	LIFECYCLE_SEARCH_RETRYABLE,
+	getLastSearchReadiness,
 	bumpAccess,
 	SEARCH_TABLES,
 	recentMessages,
@@ -65,6 +64,7 @@ import {
 	getStats,
 	vectorRowContentProvenance,
 } from "./lib/memory.js";
+import type { LifecycleSearchReadiness } from "./lib/lifecycle-search.js";
 import {
 	blobToEmbedding,
 	cosineSimilarity,
@@ -131,6 +131,9 @@ function bruteForceVectorScan(
 		.prepare(`
         SELECT source_table, source_id, embedding FROM embeddings
         WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
+          AND (source_table <> 'messages' OR EXISTS (
+            SELECT 1 FROM published_messages WHERE id = embeddings.source_id
+          ))
       `)
 		.all() as Array<{
 		source_table: string;
@@ -159,6 +162,16 @@ function bruteForceVectorScan(
 // spam a long-lived server on every query (#217 review).
 let vecFallbackLogged = false;
 
+function currentVectorHits(
+	db: ReturnType<typeof getDb>,
+	hits: VectorSearchHit[],
+): VectorSearchHit[] {
+	const published = db.prepare("SELECT 1 FROM published_messages WHERE id = ?");
+	return hits.filter((hit) =>
+		hit.source_table !== "messages" || Boolean(published.get(hit.source_id))
+	);
+}
+
 function vectorSearch(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
@@ -167,11 +180,14 @@ function vectorSearch(
 	if (isVecAvailable()) {
 		try {
 			ensureVecIndexSynced(db); // once per process, cached on success — never per query
-			const hits = knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
-				source_table: h.source_table,
-				source_id: h.source_id,
-				similarity: 1 - h.distance,
-			}));
+			const hits = currentVectorHits(
+				db,
+				knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
+					source_table: h.source_table,
+					source_id: h.source_id,
+					similarity: 1 - h.distance,
+				})),
+			).slice(0, limit * 2);
 			// #217 ruling: an empty KNN result over a non-empty canonical
 			// embeddings table is a FAILURE (e.g. a failed self-heal left the vec
 			// index empty — knnSearch returns [] rather than throwing), not a valid
@@ -215,6 +231,14 @@ export function formatHybridModeNote(
 		: `(keyword-only: embeddings unavailable; ${backendNote})`;
 }
 
+function lifecycleReadinessMessage(
+	readiness: LifecycleSearchReadiness,
+): string | undefined {
+	return readiness.status === "retryable"
+		? `[messages:lifecycle] ${readiness.message}`
+		: undefined;
+}
+
 /**
  * Hybrid search combining FTS5 + vector embeddings with RRF fusion
  * Used by context_for_agent and memory_hybrid_search
@@ -233,6 +257,7 @@ export async function hybridSearch(
 	}>;
 	embeddingsAvailable: boolean;
 	semanticBackend: SemanticBackend;
+	readiness: LifecycleSearchReadiness;
 }> {
 	const db = getDb();
 	const limit = options.limit || 10;
@@ -242,6 +267,7 @@ export async function hybridSearch(
 		project: options.project,
 		limit: limit * 2,
 	});
+	const readiness = getLastSearchReadiness();
 
 	// 2. Try semantic search (graceful degradation if unavailable)
 	let semanticResults: VectorSearchHit[] = [];
@@ -328,6 +354,7 @@ export async function hybridSearch(
 					r.source_table,
 					r.source_id,
 				);
+				if (!content) continue;
 
 				resultMap.set(key, {
 					table: r.source_table === "loa_entries" ? "loa" : r.source_table,
@@ -347,7 +374,7 @@ export async function hybridSearch(
 		// Bump-on-use (issue #153): only the final returned set, never the
 		// limit*2 candidate pool that fed search() above.
 		bumpAccess(results);
-		return { results, embeddingsAvailable, semanticBackend };
+		return { results, embeddingsAvailable, semanticBackend, readiness };
 	}
 
 	// FTS only fallback. Run the single ranked list through RRF so `score` carries
@@ -376,7 +403,7 @@ export async function hybridSearch(
 
 	// Bump-on-use (issue #153): only the final returned set.
 	bumpAccess(ftsOnly);
-	return { results: ftsOnly, embeddingsAvailable, semanticBackend };
+	return { results: ftsOnly, embeddingsAvailable, semanticBackend, readiness };
 }
 
 // Ensure DB exists
@@ -443,13 +470,12 @@ server.tool(
 	async ({ query, project, table, bias_type, limit }) => {
 		try {
 			const results = search(query, { project, table, biasType: bias_type, limit });
-			const lifecycleReadiness = getLastSearchErrors().find(error =>
-				error.includes(LIFECYCLE_SEARCH_RETRYABLE)
-			);
-			if (lifecycleReadiness && results.length === 0) {
+			const readiness = getLastSearchReadiness();
+			const readinessMessage = lifecycleReadinessMessage(readiness);
+			if (readinessMessage && results.length === 0 && table) {
 				logMemoryUsage("memory_search", query, 0, project);
 				return {
-					content: [{ type: "text", text: lifecycleReadiness }],
+					content: [{ type: "text", text: readinessMessage }],
 					isError: true,
 				};
 			}
@@ -458,13 +484,20 @@ server.tool(
 			// so a phrasing mismatch never silently returns nothing (#39). A hard
 			// `table` filter is respected — narrowing means the honest empty result.
 			if (shouldFallbackToHybrid(results.length, table)) {
-				const { results: hybridResults } = await hybridSearch(query, {
+				const hybrid = await hybridSearch(query, {
 					project,
 					limit,
 				});
-				const outcome = buildHybridFallbackOutcome(query, hybridResults);
+				const outcome = buildHybridFallbackOutcome(query, hybrid.results);
+				const hybridReadiness = lifecycleReadinessMessage(hybrid.readiness);
 				logMemoryUsage(outcome.logTool, query, outcome.logCount, project);
-				return { content: [{ type: "text", text: outcome.text }] };
+				return {
+					content: [{
+						type: "text",
+						text: `${hybridReadiness ? `${hybridReadiness}\n\n` : ""}${outcome.text}`,
+					}],
+					...(hybridReadiness && hybrid.results.length === 0 ? { isError: true } : {}),
+				};
 			}
 
 			// Keyword hits, or a table-filtered empty result: one honest log line.
@@ -495,7 +528,7 @@ server.tool(
 				content: [
 					{
 						type: "text",
-						text: `${lifecycleReadiness ? `${lifecycleReadiness}\n\n` : ""}Found ${results.length} results for "${query}":\n\n${formatted}`,
+						text: `${readinessMessage ? `${readinessMessage}\n\n` : ""}Found ${results.length} results for "${query}":\n\n${formatted}`,
 					},
 				],
 			};
@@ -524,17 +557,22 @@ server.tool(
 	},
 	async ({ query, project, limit }) => {
 		try {
-			const { results, embeddingsAvailable, semanticBackend } = await hybridSearch(query, {
+			const { results, embeddingsAvailable, semanticBackend, readiness } = await hybridSearch(query, {
 				project,
 				limit,
 			});
+			const readinessMessage = lifecycleReadinessMessage(readiness);
 
 			// Log memory usage for metrics
 			logMemoryUsage("memory_hybrid_search", query, results.length, project);
 
 			if (results.length === 0) {
 				return {
-					content: [{ type: "text", text: `No results found for: "${query}"` }],
+					content: [{
+						type: "text",
+						text: readinessMessage ?? `No results found for: "${query}"`,
+					}],
+					...(readinessMessage ? { isError: true } : {}),
 				};
 			}
 
@@ -552,7 +590,7 @@ server.tool(
 				content: [
 					{
 						type: "text",
-						text: `Found ${results.length} results ${modeNote}:\n\n${formatted}`,
+						text: `${readinessMessage ? `${readinessMessage}\n\n` : ""}Found ${results.length} results ${modeNote}:\n\n${formatted}`,
 					},
 				],
 			};
@@ -1061,8 +1099,9 @@ server.tool(
 	async ({ agent_task, project }) => {
 		try {
 			// Use hybrid search for best context retrieval
-			const { results: hybridResults, embeddingsAvailable } =
+			const { results: hybridResults, embeddingsAvailable, readiness } =
 				await hybridSearch(agent_task, { project, limit: 5 });
+			const readinessMessage = lifecycleReadinessMessage(readiness);
 
 			// Log memory usage for metrics (pre-agent context is important to track)
 			logMemoryUsage(
@@ -1087,6 +1126,9 @@ server.tool(
 				: "keyword-only";
 			let output = `## Agent Context (INCLUDE IN AGENT PROMPT)\n\n`;
 			output += `**Search Mode:** ${searchMode}\n\n`;
+			if (readinessMessage) {
+				output += `**Search Readiness:** ${readinessMessage}\n\n`;
+			}
 
 			if (hybridResults.length > 0) {
 				output += `### Relevant Memory (${hybridResults.length} matches)\n`;

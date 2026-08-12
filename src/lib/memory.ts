@@ -7,7 +7,14 @@ import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { scrub } from './write-safety.js';
 import { invalidateVecIndex } from '../db/vec.js';
 import { publishedRecordTable } from './published-records.js';
+import {
+  LIFECYCLE_SEARCH_RETRYABLE,
+  repairLifecycleSearchIndex,
+  type LifecycleSearchReadiness,
+} from './lifecycle-search.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
+
+export { LIFECYCLE_SEARCH_RETRYABLE } from './lifecycle-search.js';
 
 // Choke point for redacting known-prefix secrets (and stripping invisible
 // unicode) on the EXPLICIT add paths — `recall add` (CLI) and `memory_add`
@@ -308,6 +315,10 @@ export function getBreadcrumb(id: number): Breadcrumb | undefined {
 
 // Track search errors for debugging (FIX #7)
 let lastSearchErrors: string[] = [];
+let lastSearchReadiness: LifecycleSearchReadiness = {
+  status: 'ready',
+  pendingGenerations: 0,
+};
 
 export const SEARCH_TABLES = ['messages', 'loa', 'decisions', 'learnings', 'breadcrumbs'] as const;
 export type SearchTable = typeof SEARCH_TABLES[number];
@@ -347,8 +358,9 @@ export function getLastSearchErrors(): string[] {
   return lastSearchErrors;
 }
 
-export const LIFECYCLE_SEARCH_RETRYABLE =
-  'RETRYABLE: Lifecycle message search index is not ready; retry after the next lifecycle checkpoint.';
+export function getLastSearchReadiness(): LifecycleSearchReadiness {
+  return lastSearchReadiness;
+}
 
 type RankedSearchRow = {
   id: number;
@@ -404,6 +416,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
   const limit = options?.limit || 20;
   const results: SearchResult[] = [];
   lastSearchErrors = []; // Reset errors for this search
+  lastSearchReadiness = { status: 'ready', pendingGenerations: 0 };
   const schemaTables = new Set((db.prepare(`
     SELECT name FROM sqlite_master WHERE type = 'table'
   `).all() as Array<{ name: string }>).map(row => row.name));
@@ -523,34 +536,38 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
       }
 
       let activeGeneration = false;
-      let generationSearchIncomplete = false;
       if (generationStorageAvailable) {
         try {
+          lastSearchReadiness = repairLifecycleSearchIndex(db, {
+            project: options?.project,
+            maxPages: 1,
+          });
           activeGeneration = Boolean(db.prepare(`
             SELECT 1 FROM host_ingest_generations AS generation
             JOIN host_ingest_state AS state
               ON state.active_generation = generation.generation_id
              AND state.source = generation.source
              AND state.session_id = generation.session_id
-            WHERE generation.status = 'active' LIMIT 1
-          `).get());
-          generationSearchIncomplete = activeGeneration &&
-            (!generationFtsAvailable || !generationFtsReadinessAvailable ||
-              Boolean(generationFtsReadinessAvailable && db.prepare(`
-                SELECT 1 FROM host_ingest_generations AS generation
-                JOIN host_ingest_state AS state
-                  ON state.active_generation = generation.generation_id
-                 AND state.source = generation.source
-                 AND state.session_id = generation.session_id
-                WHERE generation.status = 'active' AND generation.fts_ready = 0
-                LIMIT 1
-              `).get()));
+            WHERE generation.status = 'active'
+              ${options?.project ? `AND EXISTS (
+                SELECT 1 FROM host_ingest_generation_messages AS message
+                WHERE message.generation_id = generation.generation_id
+                  AND message.project = ?
+                  AND message.content IS NOT NULL
+                  AND (message.source <> 'grok' OR message.source_position IS NOT NULL)
+              )` : ''}
+            LIMIT 1
+          `).get(...(options?.project ? [options.project] : [])));
         } catch {
-          generationSearchIncomplete = true;
+          lastSearchReadiness = {
+            status: 'retryable',
+            pendingGenerations: 1,
+            message: LIFECYCLE_SEARCH_RETRYABLE,
+          };
         }
       }
-      if (generationSearchIncomplete) {
-        lastSearchErrors.push(`[messages:lifecycle] ${LIFECYCLE_SEARCH_RETRYABLE}`);
+      if (lastSearchReadiness.status === 'retryable') {
+        lastSearchErrors.push(`[messages:lifecycle] ${lastSearchReadiness.message}`);
       }
 
       if (activeGeneration && generationFtsAvailable && generationFtsReadinessAvailable) {
@@ -582,6 +599,11 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           messageGroups.push(generationRows);
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
+          lastSearchReadiness = {
+            status: 'retryable',
+            pendingGenerations: 1,
+            message: LIFECYCLE_SEARCH_RETRYABLE,
+          };
           lastSearchErrors.push(
             `[messages:lifecycle] ${LIFECYCLE_SEARCH_RETRYABLE} (${errorMsg})`
           );

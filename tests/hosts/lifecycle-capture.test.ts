@@ -19,6 +19,7 @@ import {
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 import {
   getLastSearchErrors,
+  getLastSearchReadiness,
   getLoaMessages,
   getMessagesSinceLastLoa,
   search,
@@ -986,7 +987,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     ]);
   });
 
-  test('indexes only changed lifecycle messages and repairs readiness from checkpoints', () => {
+  test('inherits pending FTS work and repairs it independently from search', () => {
     const db = getDb();
     const sessionId = 'generation-search-delta';
     ingestHostTranscript({
@@ -1032,25 +1033,124 @@ describe('host-neutral immediate SQLite ingest', () => {
       DELETE FROM host_ingest_generation_messages_fts
       WHERE rowid = (
         SELECT message_id FROM host_ingest_generation_messages
-        WHERE generation_id = ? AND message_key = 'native:frame-3'
+        WHERE generation_id = ? AND content = 'new delta frame'
       )
     `).run(secondGeneration);
     db.prepare(`
       UPDATE host_ingest_generation_messages SET fts_pending = 1
-      WHERE generation_id = ? AND message_key = 'native:frame-3'
+      WHERE generation_id = ? AND content = 'new delta frame'
     `).run(secondGeneration);
     db.prepare(`
       UPDATE host_ingest_generations SET fts_ready = 0 WHERE generation_id = ?
     `).run(secondGeneration);
-    expect(search('new AND delta', { table: 'messages' })).toEqual([]);
-    expect(getLastSearchErrors()).toEqual([
-      expect.stringContaining('RETRYABLE: Lifecycle message search index is not ready'),
-    ]);
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [
+        { role: 'user', content: 'unchanged delta frame', nativeId: 'frame-1' },
+        { role: 'assistant', content: 'second delta frame', nativeId: 'frame-2' },
+        { role: 'assistant', content: 'new delta frame', nativeId: 'frame-3' },
+        { role: 'assistant', content: 'latest delta frame', nativeId: 'frame-4' },
+      ],
+    });
+    const thirdGeneration = (db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId) as { active_generation: string }).active_generation;
+    expect(search('new AND delta', { table: 'messages' })
+      .map(result => result.content)).toEqual(['new delta frame']);
+    expect(db.prepare(`
+      SELECT generation_id FROM host_ingest_generation_messages_fts
+      WHERE rowid = (
+        SELECT message_id FROM host_ingest_generation_messages
+        WHERE generation_id = ? AND content = 'new delta frame'
+      )
+    `).get(thirdGeneration)).toEqual({ generation_id: thirdGeneration });
 
-    getHostIngestCheckpoint('codex', sessionId);
+    db.prepare(`
+      DELETE FROM host_ingest_generation_messages_fts
+      WHERE rowid = (
+        SELECT message_id FROM host_ingest_generation_messages
+        WHERE generation_id = ? AND content = 'latest delta frame'
+      )
+    `).run(thirdGeneration);
+    db.prepare(`
+      UPDATE host_ingest_generation_messages SET fts_pending = 1
+      WHERE generation_id = ? AND content = 'latest delta frame'
+    `).run(thirdGeneration);
+    db.prepare(`
+      UPDATE host_ingest_generations SET fts_ready = 0 WHERE generation_id = ?
+    `).run(thirdGeneration);
+    expect(search('latest AND delta', { table: 'messages' })
+      .map(result => result.content)).toEqual(['latest delta frame']);
+    expect(getLastSearchReadiness()).toEqual({
+      status: 'ready',
+      pendingGenerations: 0,
+    });
     expect(search('new AND delta', { table: 'messages' })
       .map(result => result.content)).toEqual(['new delta frame']);
     expect(getLastSearchErrors()).toEqual([]);
+  });
+
+  test('scopes lifecycle readiness to the requested project', () => {
+    const db = getDb();
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'readiness-project-b',
+      project: 'project-b',
+      messages: [{ role: 'user', content: 'projectb pending token', nativeId: 'b-1' }],
+    });
+    const generation = (db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = 'readiness-project-b'
+    `).get() as { active_generation: string }).active_generation;
+    db.prepare(`
+      UPDATE host_ingest_generation_messages SET fts_pending = 1
+      WHERE generation_id = ?
+    `).run(generation);
+    db.prepare(`
+      UPDATE host_ingest_generations SET fts_ready = 0 WHERE generation_id = ?
+    `).run(generation);
+
+    expect(search('missing-token', { table: 'messages', project: 'project-a' })).toEqual([]);
+    expect(getLastSearchReadiness()).toEqual({
+      status: 'ready',
+      pendingGenerations: 0,
+    });
+    expect(db.prepare(`
+      SELECT fts_ready FROM host_ingest_generations WHERE generation_id = ?
+    `).get(generation)).toEqual({ fts_ready: 0 });
+  });
+
+  test('invalidates embeddings when lifecycle message content changes', () => {
+    const db = getDb();
+    const sessionId = 'changed-message-embedding';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [{ role: 'assistant', content: 'old semantic content', nativeId: 'answer' }],
+    });
+    const message = db.prepare(`
+      SELECT id FROM published_messages WHERE session_id = ?
+    `).get(sessionId) as { id: number };
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('messages', ?, 'test', 1, ?)
+    `).run(message.id, Buffer.alloc(4));
+
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [{ role: 'assistant', content: 'new semantic content', nativeId: 'answer' }],
+    });
+
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM embeddings
+      WHERE source_table = 'messages' AND source_id = ?
+    `).get(message.id)).toEqual({ count: 0 });
+    expect(db.prepare(`
+      SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'
+    `).get()).toEqual({ value: '1' });
   });
 
   test('sweeps stale unpublished generations across sessions', () => {

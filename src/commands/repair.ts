@@ -12,6 +12,10 @@
 import { getDb } from '../db/connection.js';
 import { checkEmbeddingService, embed } from '../lib/embeddings.js';
 import {
+  getLifecycleSearchReadiness,
+  repairLifecycleSearchIndex,
+} from '../lib/lifecycle-search.js';
+import {
   applyEmbedRepair,
   applyFtsRepair,
   FTS_SOURCES,
@@ -97,6 +101,19 @@ export async function runRepair(
     for (const failure of ftsResult.failed) {
       console.error(`  FAILED ${failure.ftsTable}: ${failure.error}`);
       process.exitCode = 1;
+    }
+  }
+  if (target === 'all' || target === 'messages') {
+    const lifecycle = execute
+      ? repairLifecycleSearchIndex(db, { maxPages: 8 })
+      : getLifecycleSearchReadiness(db);
+    if (lifecycle.status === 'ready') {
+      console.log('  Lifecycle message index: ready');
+    } else {
+      const action = execute ? 'repair remains' : 'would repair';
+      console.log(
+        `  Lifecycle message index: ${lifecycle.pendingGenerations} generation(s) pending — ${action}`
+      );
     }
   }
   console.log('');

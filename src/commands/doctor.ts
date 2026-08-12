@@ -7,6 +7,7 @@ import { createHash } from 'crypto';
 import { homedir } from 'os';
 import { getDb, getDbPath } from '../db/connection.js';
 import { checkAllFts } from '../lib/repair.js';
+import { getLifecycleSearchReadiness } from '../lib/lifecycle-search.js';
 import { VERSION } from '../version.js';
 import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
@@ -153,16 +154,24 @@ export function checkFtsIndexes(): CheckResult {
   const label = 'FTS5 search indexes in sync';
 
   try {
-    const reports = checkAllFts(getDb());
+    const db = getDb();
+    const reports = checkAllFts(db);
     const problems = reports.filter(r => r.status !== 'ok');
+    const lifecycle = getLifecycleSearchReadiness(db);
 
-    if (problems.length === 0) {
+    if (problems.length === 0 && lifecycle.status === 'ready') {
       return { label, status: 'PASS', message: `All ${reports.length} FTS indexes in sync with source tables` };
     }
 
-    const summary = problems
-      .map(p => `${p.ftsTable}: ${p.status} (${p.detail})`)
-      .join('; ');
+    const summaries = problems.map(
+      p => `${p.ftsTable}: ${p.status} (${p.detail})`
+    );
+    if (lifecycle.status === 'retryable') {
+      summaries.push(
+        `lifecycle messages: ${lifecycle.pendingGenerations} generation(s) pending`
+      );
+    }
+    const summary = summaries.join('; ');
     return {
       label,
       status: 'WARN',
