@@ -73,11 +73,7 @@ function payloadIsSubagent(payload: HookPayload): boolean {
 
 function suppliedTranscriptSize(path: string): number {
   if (!existsSync(path)) throw new Error(`Supplied transcript does not exist: ${path}`);
-  const size = statSync(path).size;
-  if (size > MAX_TRANSCRIPT_BYTES) {
-    throw new Error(`Supplied transcript exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
-  }
-  return size;
+  return statSync(path).size;
 }
 
 function readSuppliedTranscript(path: string, start = 0, length?: number): Buffer {
@@ -101,12 +97,12 @@ function tailHash(value: Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function byteCaptureRange(
+function byteCaptureStart(
   checkpoint: HostIngestCheckpoint | undefined,
   transcriptRef: string,
   size: number,
   read: (start: number, length: number) => Buffer
-): { start: number; watermark: string } {
+): number {
   let start = 0;
   const match = checkpoint?.watermark?.match(/^bytes:(\d+):tail:([0-9a-f]{64})$/);
   if (checkpoint?.transcriptRef === transcriptRef && match) {
@@ -117,10 +113,52 @@ function byteCaptureRange(
       if (tailHash(previousTail) === match[2]) start = previousSize;
     }
   }
+  return start;
+}
 
-  const tailStart = Math.max(0, size - WATERMARK_TAIL_BYTES);
-  const currentTail = read(tailStart, size - tailStart);
-  return { start, watermark: `bytes:${size}:tail:${tailHash(currentTail)}` };
+function byteWatermark(end: number, read: (start: number, length: number) => Buffer): string {
+  const tailStart = Math.max(0, end - WATERMARK_TAIL_BYTES);
+  return `bytes:${end}:tail:${tailHash(read(tailStart, end - tailStart))}`;
+}
+
+function* boundedTranscriptChunks(
+  start: number,
+  size: number,
+  read: (start: number, length: number) => Buffer
+): Generator<{ start: number; end: number; raw: Buffer; watermark: string }> {
+  let cursor = start;
+  while (cursor < size) {
+    const length = Math.min(MAX_TRANSCRIPT_BYTES, size - cursor);
+    let raw = read(cursor, length);
+    if (raw.length !== length) throw new Error('Transcript read returned incomplete data');
+    let end = cursor + raw.length;
+    if (end < size) {
+      const newline = raw.lastIndexOf(0x0a);
+      if (newline < 0) {
+        throw new Error(`Transcript record exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
+      }
+      raw = raw.subarray(0, newline + 1);
+      end = cursor + raw.length;
+    }
+    yield { start: cursor, end, raw, watermark: byteWatermark(end, read) };
+    cursor = end;
+  }
+}
+
+function mergeIngestResults(
+  current: HostIngestResult | undefined,
+  next: HostIngestResult
+): HostIngestResult {
+  if (!current) return next;
+  return {
+    sessionId: next.sessionId,
+    inserted: current.inserted + next.inserted,
+    skipped: current.skipped + next.skipped,
+    finalized: current.finalized || next.finalized,
+    loaId: next.loaId ?? current.loaId,
+    redactions: [...new Set([...current.redactions, ...next.redactions])],
+    digest: next.digest,
+  };
 }
 
 function renderRecallContext(): string {
@@ -145,7 +183,7 @@ function runGrokExport(sessionId: string): string {
   const command = process.env.GROK_BIN || 'grok';
   const result = spawnSync(command, ['export', sessionId], {
     encoding: 'utf-8',
-    maxBuffer: MAX_TRANSCRIPT_BYTES,
+    maxBuffer: Number.MAX_SAFE_INTEGER,
     timeout: 60_000,
     env: process.env,
   });
@@ -209,36 +247,52 @@ export function handleHostHook(
       stringValue(payload.transcript_path) ?? stringValue(payload.transcriptPath);
     if (!transcriptPath) return { skipped: 'missing-supplied-transcript' };
     const size = (dependencies.transcriptSize ?? suppliedTranscriptSize)(transcriptPath);
-    if (size > MAX_TRANSCRIPT_BYTES) {
-      throw new Error(`Supplied transcript exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
-    }
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid transcript size');
     const read = (start: number, length: number) =>
-      asBuffer((dependencies.readTranscript ?? readSuppliedTranscript)(transcriptPath, start, length));
+      asBuffer(
+        (dependencies.readTranscript ?? readSuppliedTranscript)(transcriptPath, start, length)
+      ).subarray(0, length);
     const previous = checkpoint('codex', sessionId);
-    const range = byteCaptureRange(previous, transcriptPath, size, read);
+    const start = byteCaptureStart(previous, transcriptPath, size, read);
     const finalize = event === 'sessionend';
-    if (range.start === size && (!finalize || previous?.finalized)) {
+    if (start === size && (!finalize || previous?.finalized)) {
       return { skipped: 'unchanged-transcript' };
     }
-    const raw = read(range.start, size - range.start).toString('utf-8');
-    const parsed = parseCodexRollout(raw);
-    if (parsed.sessionId && parsed.sessionId !== sessionId) {
-      return { skipped: 'session-id-mismatch' };
+    if (start === size) {
+      return {
+        ingest: ingest({
+          source: 'codex',
+          sessionId,
+          messages: [],
+          cwd,
+          transcriptRef: transcriptPath,
+          watermark: previous?.watermark ?? byteWatermark(size, read),
+          capturedAt,
+          incremental: start > 0,
+          finalize: true,
+        }),
+      };
     }
-    if (parsed.isSubagent && !includeSubagents()) return { skipped: 'subagent' };
-    return {
-      ingest: ingest({
+    let aggregate: HostIngestResult | undefined;
+    for (const chunk of boundedTranscriptChunks(start, size, read)) {
+      const parsed = parseCodexRollout(chunk.raw.toString('utf-8'));
+      if (parsed.sessionId && parsed.sessionId !== sessionId) {
+        return { skipped: 'session-id-mismatch' };
+      }
+      if (parsed.isSubagent && !includeSubagents()) return { skipped: 'subagent' };
+      aggregate = mergeIngestResults(aggregate, ingest({
         source: 'codex',
         sessionId,
         messages: parsed.messages,
         cwd: cwd ?? parsed.cwd,
         transcriptRef: transcriptPath,
-        watermark: range.watermark,
+        watermark: chunk.watermark,
         capturedAt,
-        incremental: range.start > 0,
-        finalize,
-      }),
-    };
+        incremental: chunk.start > 0,
+        finalize: finalize && chunk.end === size,
+      }));
+    }
+    return { ingest: aggregate };
   }
 
   if (host === 'grok') {
@@ -247,38 +301,53 @@ export function handleHostHook(
     }
     if (!sessionId) return { skipped: 'missing-session-id' };
     const markdown = (dependencies.exportGrok ?? runGrokExport)(sessionId);
-    if (Buffer.byteLength(markdown, 'utf-8') > MAX_TRANSCRIPT_BYTES) {
-      throw new Error(`Grok export exceeds ${MAX_TRANSCRIPT_BYTES} bytes`);
-    }
     const reason = stringValue(payload.reason)?.toLowerCase();
     const terminalStop = event === 'stop' && ['channel_closed', 'shutdown'].includes(reason ?? '');
     const finalize = event === 'sessionend' || terminalStop;
     const transcriptRef = 'grok export';
     const raw = Buffer.from(markdown, 'utf-8');
     const previous = checkpoint('grok', sessionId);
-    const range = byteCaptureRange(
+    const read = (start: number, length: number) => raw.subarray(start, start + length);
+    const start = byteCaptureStart(
       previous,
       transcriptRef,
       raw.length,
-      (start, length) => raw.subarray(start, start + length)
+      read
     );
-    if (range.start === raw.length && (!finalize || previous?.finalized)) {
+    if (start === raw.length && (!finalize || previous?.finalized)) {
       return { skipped: 'unchanged-transcript' };
     }
-    const parsed = parseGrokExport(raw.subarray(range.start).toString('utf-8'));
-    return {
-      ingest: ingest({
+    if (start === raw.length) {
+      return {
+        ingest: ingest({
+          source: 'grok',
+          sessionId,
+          messages: [],
+          cwd,
+          transcriptRef,
+          watermark: previous?.watermark ?? byteWatermark(raw.length, read),
+          capturedAt,
+          incremental: start > 0,
+          finalize: true,
+        }),
+      };
+    }
+    let aggregate: HostIngestResult | undefined;
+    for (const chunk of boundedTranscriptChunks(start, raw.length, read)) {
+      const parsed = parseGrokExport(chunk.raw.toString('utf-8'));
+      aggregate = mergeIngestResults(aggregate, ingest({
         source: 'grok',
         sessionId,
         messages: parsed.messages,
         cwd,
         transcriptRef,
-        watermark: range.watermark,
+        watermark: chunk.watermark,
         capturedAt,
-        incremental: range.start > 0,
-        finalize,
-      }),
-    };
+        incremental: chunk.start > 0,
+        finalize: finalize && chunk.end === raw.length,
+      }));
+    }
+    return { ingest: aggregate };
   }
 
   return { skipped: 'jcode-probe-did-not-prove-safe-capture' };

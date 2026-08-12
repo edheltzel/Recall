@@ -1,5 +1,17 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
@@ -109,16 +121,23 @@ describe('installer restore (rollback)', () => {
   });
 
   test('restores the Grok hook to its original path', () => {
-    writeFileSync(join(grokDir, 'hooks', 'RecallLifecycle.json'), '{"current":true}');
-    seedBackup('20260101120000', {
+    const target = join(grokDir, 'hooks', 'RecallLifecycle.json');
+    const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
+    mkdirSync(join(recallDir, 'grok', 'hooks'), { recursive: true });
+    writeFileSync(canonical, '{"managed":true}');
+    symlinkSync(canonical, target);
+    const backup = seedBackup('20260101120000', {
       'RecallLifecycle.json': '{"restored":true}',
     });
+    chmodSync(join(backup, 'RecallLifecycle.json'), 0o600);
 
     const result = sh('_confirm() { return 0; }\nrecall_do_restore ""');
 
     expect(result.status).toBe(0);
-    expect(readFileSync(join(grokDir, 'hooks', 'RecallLifecycle.json'), 'utf-8'))
-      .toBe('{"restored":true}');
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+    expect(readFileSync(target, 'utf-8')).toBe('{"restored":true}');
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+    expect(readFileSync(canonical, 'utf-8')).toBe('{"managed":true}');
     expect(existsSync(join(claudeDir, 'RecallLifecycle.json'))).toBe(false);
   });
 

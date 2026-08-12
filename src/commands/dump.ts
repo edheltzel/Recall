@@ -2,7 +2,13 @@
 // Core functions are exported for use by the MCP server's memory_dump tool.
 
 import { getDb } from '../db/connection.js';
-import { createSession, sessionExists, addMessagesBatch, createLoaEntry } from '../lib/memory.js';
+import {
+  createSession,
+  sessionExists,
+  addMessagesBatch,
+  createLoaEntry,
+  invalidateRecordEmbedding,
+} from '../lib/memory.js';
 import { chunked } from '../lib/chunk.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
@@ -161,13 +167,6 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
   return undefined;
 }
 
-function clearExplicitDumpLoa(sessionId: string): void {
-  const ids = getDb()
-    .prepare('SELECT id FROM loa_entries WHERE session_id = ? AND description = ?')
-    .all(sessionId, EXPLICIT_DUMP_DESCRIPTION) as Array<{ id: number }>;
-  deleteLoaEntriesRecursive(getDb(), ids.map(row => row.id));
-}
-
 // ============ Core Dump Logic (shared by CLI and MCP) ============
 
 /**
@@ -210,7 +209,6 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   const lifecycleOwned = Boolean(lifecycleSource);
   if (replacingSession && !lifecycleOwned) clearSessionMessages(session.sessionId);
   const existingSnapshot = lifecycleOwned ? findExplicitSnapshot(session) : undefined;
-  if (lifecycleOwned) clearExplicitDumpLoa(session.sessionId);
 
   // Import messages to SQLite FIRST (fast, always succeeds)
   const timestamps = session.messages.map(m => m.timestamp).sort();
@@ -279,22 +277,54 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     }
   }
 
-  const loaId = createLoaEntry({
-    title,
-    description: lifecycleOwned ? EXPLICIT_DUMP_DESCRIPTION : undefined,
-    fabric_extract: fabricExtract,
-    message_range_start: startId,
-    message_range_end: endId,
-    parent_loa_id: options.continues,
-    session_id: lifecycleOwned ? session.sessionId : undefined,
-    project: options.project || session.project,
-    tags: options.tags,
-    message_count: importedMessages.length,
-    source_ids: JSON.stringify(importedMessages.map(message => ({ table: 'messages', id: message.id }))),
-    // Fabric output and the basic-summary fallback are both generated from
-    // the session messages — extracted either way (ADR-0001).
-    provenance: 'extracted'
-  });
+  const sourceIds = JSON.stringify(
+    importedMessages.map(message => ({ table: 'messages', id: message.id }))
+  );
+  const existingLoa = lifecycleOwned
+    ? db.prepare(`
+        SELECT id, title, fabric_extract FROM loa_entries
+        WHERE session_id = ? AND description = ? AND source_ids = ?
+        ORDER BY id DESC LIMIT 1
+      `).get(session.sessionId, EXPLICIT_DUMP_DESCRIPTION, sourceIds) as
+        { id: number; title: string; fabric_extract: string } | undefined
+    : undefined;
+  let loaId: number;
+  if (existingLoa) {
+    db.prepare(`
+      UPDATE loa_entries SET
+        title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
+        project = ?, tags = ?, message_count = ?, created_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      title,
+      fabricExtract,
+      startId,
+      endId,
+      options.project || session.project,
+      options.tags ?? null,
+      importedMessages.length,
+      existingLoa.id
+    );
+    if (existingLoa.title !== title || existingLoa.fabric_extract !== fabricExtract) {
+      invalidateRecordEmbedding(db, 'loa_entries', existingLoa.id);
+    }
+    loaId = existingLoa.id;
+  } else {
+    loaId = createLoaEntry({
+      title,
+      description: lifecycleOwned ? EXPLICIT_DUMP_DESCRIPTION : undefined,
+      fabric_extract: fabricExtract,
+      message_range_start: startId,
+      message_range_end: endId,
+      parent_loa_id: options.continues,
+      session_id: lifecycleOwned ? session.sessionId : undefined,
+      project: options.project || session.project,
+      tags: options.tags,
+      message_count: importedMessages.length,
+      source_ids: sourceIds,
+      provenance: 'extracted'
+    });
+  }
 
   if (!options.skipEmbed) await autoEmbedLoaEntry(loaId, title, fabricExtract);
 

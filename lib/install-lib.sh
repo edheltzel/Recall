@@ -847,7 +847,7 @@ recall_create_backup() {
   local backed_up=0
   for file in "${FILES_TO_BACKUP[@]}"; do
     if [[ -f "$file" ]]; then
-      cp "$file" "$BACKUP_DIR/"
+      cp -p "$file" "$BACKUP_DIR/"
       log_success "Backed up: $(basename "$file")"
       backed_up=$((backed_up + 1))
     fi
@@ -949,7 +949,7 @@ recall_do_restore() {
   local pre_backed=0
   for file in "${FILES_TO_BACKUP[@]}"; do
     if [[ -f "$file" ]]; then
-      cp "$file" "$pre_restore_dir/"
+      cp -p "$file" "$pre_restore_dir/"
       pre_backed=$((pre_backed + 1))
     fi
   done
@@ -979,7 +979,10 @@ recall_do_restore() {
         ;;
     esac
     mkdir -p "$(dirname "$target")"
-    cp "$file" "$target"
+    if [[ "$filename" == "RecallLifecycle.json" && -L "$target" ]]; then
+      rm "$target"
+    fi
+    cp -p "$file" "$target"
     log_success "Restored: $filename → $target"
     restored=$((restored + 1))
   done

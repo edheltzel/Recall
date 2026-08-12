@@ -4,6 +4,7 @@ import { getDb } from '../db/connection.js';
 import { chunked } from './chunk.js';
 import { detectProject } from './project.js';
 import { generateBasicSummary, generateFrameSummary } from './extraction.js';
+import { invalidateRecordEmbedding } from './memory.js';
 import { scrub } from './write-safety.js';
 
 export type LifecycleHost = 'codex' | 'grok' | 'jcode';
@@ -314,17 +315,26 @@ function finalizeSession(
   const title = `${input.source[0].toUpperCase()}${input.source.slice(1)} session ${input.sessionId}`;
   const description = `Automatic terminal extraction from ${input.source} lifecycle capture.`;
   const tags = `automatic-capture,${input.source}`;
-  const fabricExtract = input.source === 'grok'
+  const currentExtract = input.source === 'grok'
     ? generateFrameSummary(messages, 'Grok export')
     : generateBasicSummary(messages);
   const sourceIds = JSON.stringify(messages.map(message => ({ table: 'messages', id: message.id })));
   const existing = db
     .prepare(`
-      SELECT id FROM loa_entries
+      SELECT id, fabric_extract FROM loa_entries
       WHERE session_id = ? AND description = ? AND tags = ?
       ORDER BY id DESC LIMIT 1
     `)
-    .get(input.sessionId, description, tags) as { id: number } | undefined;
+    .get(input.sessionId, description, tags) as
+      { id: number; fabric_extract: string } | undefined;
+  const lifecycleCounts = db.prepare(`
+    SELECT COUNT(*) AS total,
+      SUM(CASE WHEN message_id IS NULL THEN 1 ELSE 0 END) AS pruned
+    FROM host_ingest_messages WHERE source = ? AND session_id = ?
+  `).get(input.source, input.sessionId) as { total: number; pruned: number | null };
+  const fabricExtract = existing && (lifecycleCounts.pruned ?? 0) > 0
+    ? `${existing.fabric_extract}\n\n## RESUMED SESSION UPDATE\n\n${currentExtract}`
+    : currentExtract;
   let loaId: number;
   if (existing) {
     db.prepare(`
@@ -338,10 +348,11 @@ function finalizeSession(
       messages[0].id,
       messages.at(-1)!.id,
       project ?? null,
-      messages.length,
+      lifecycleCounts.total,
       sourceIds,
       existing.id
     );
+    invalidateRecordEmbedding(db, 'loa_entries', existing.id);
     loaId = existing.id;
   } else {
     const result = db.prepare(`
@@ -358,7 +369,7 @@ function finalizeSession(
       input.sessionId,
       project ?? null,
       tags,
-      messages.length,
+      lifecycleCounts.total,
       sourceIds
     );
     loaId = Number(result.lastInsertRowid);
