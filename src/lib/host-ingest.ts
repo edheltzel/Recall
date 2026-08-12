@@ -362,6 +362,7 @@ function stagePreparedInputs(
         provenance TEXT,
         source_position INTEGER,
         existing_key INTEGER NOT NULL DEFAULT 0,
+        search_changed INTEGER NOT NULL DEFAULT 1,
         message_id INTEGER,
         UNIQUE (source, session_id, message_key)
       );
@@ -540,6 +541,7 @@ function prepareBatchGeneration(
   });
   const existingPage = db.prepare(`
     SELECT stored.message_key, stored.message_id, stored.source_position,
+      generated.message_key IS NOT NULL AS generation_backed,
       CASE WHEN generated.message_key IS NOT NULL THEN generated.timestamp
         ELSE message.timestamp END AS timestamp,
       CASE WHEN generated.message_key IS NOT NULL THEN generated.role
@@ -565,18 +567,20 @@ function prepareBatchGeneration(
     ORDER BY stored.message_key LIMIT ?
   `);
   const stagedCurrent = stage.db.prepare(`
-    SELECT ordinal, content, source_position FROM generation_messages WHERE message_key = ?
+    SELECT ordinal, content, project, source_position
+    FROM generation_messages WHERE message_key = ?
   `);
   const markExisting = stage.db.prepare(`
     UPDATE generation_messages SET existing_key = 1, message_id = ?,
-      content = CASE WHEN ? IS NULL THEN NULL ELSE content END
+      content = CASE WHEN ? IS NULL THEN NULL ELSE content END,
+      search_changed = ?
     WHERE message_key = ?
   `);
   const insertExisting = stage.db.prepare(`
     INSERT INTO generation_messages (
       source, session_id, message_key, message_id, timestamp, role, content,
-      project, source_position, existing_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      project, source_position, existing_key, search_changed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
   `);
   let reconciled = 0;
   let keyCursor = '';
@@ -591,6 +595,7 @@ function prepareBatchGeneration(
       message_key: string;
       message_id: number | null;
       source_position: number | null;
+      generation_backed: number;
       timestamp: string | null;
       role: HostMessageRole | null;
       content: string | null;
@@ -604,11 +609,27 @@ function prepareBatchGeneration(
         const current = stagedCurrent.get(row.message_key) as {
           ordinal: number;
           content: string | null;
+          project: string | null;
           source_position: number | null;
         } | undefined;
         if (current) {
-          markExisting.run(row.message_id, row.content, row.message_key);
-          if ((row.content !== null && current.content !== row.content) ||
+          const nextContent = row.content === null ? null : current.content;
+          const oldVisible = row.message_id !== null && row.content !== null &&
+            (first.source !== 'grok' || row.source_position !== null);
+          const nextVisible = row.message_id !== null && nextContent !== null &&
+            (first.source !== 'grok' || current.source_position !== null);
+          const searchChanged = (nextVisible && !Boolean(row.generation_backed)) ||
+            oldVisible !== nextVisible ||
+            (oldVisible && nextVisible &&
+              (nextContent !== row.content || current.project !== row.project));
+          markExisting.run(
+            row.message_id,
+            row.content,
+            searchChanged ? 1 : 0,
+            row.message_key
+          );
+          if ((row.content !== null &&
+                (current.content !== row.content || current.project !== row.project)) ||
               current.source_position !== row.source_position) {
             reconciled++;
           }
@@ -618,6 +639,12 @@ function prepareBatchGeneration(
           (last.reconcile_complete === null || Boolean(last.reconcile_complete))
           ? null
           : row.source_position;
+        const nextVisible = row.message_id !== null && row.content !== null &&
+          (first.source !== 'grok' || sourcePosition !== null);
+        const oldVisible = row.message_id !== null && row.content !== null &&
+          (first.source !== 'grok' || row.source_position !== null);
+        const searchChanged = (nextVisible && !Boolean(row.generation_backed)) ||
+          nextVisible !== oldVisible;
         if (sourcePosition !== row.source_position) reconciled++;
         insertExisting.run(
           first.source,
@@ -628,7 +655,8 @@ function prepareBatchGeneration(
           row.role,
           row.content,
           row.project,
-          sourcePosition
+          sourcePosition,
+          searchChanged ? 1 : 0
         );
       }
     })();
@@ -900,8 +928,9 @@ function persistPreparedGeneration(
   const insert = db.prepare(`
     INSERT INTO host_ingest_generation_messages (
       generation_id, ordinal, source, session_id, message_key, message_id,
-      timestamp, role, content, project, importance, provenance, source_position
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      timestamp, role, content, project, importance, provenance, source_position,
+      fts_pending
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let cursor = -1;
   for (;;) {
@@ -919,6 +948,7 @@ function persistPreparedGeneration(
       importance: number | null;
       provenance: string | null;
       source_position: number | null;
+      search_changed: number;
     }>;
     if (rows.length === 0) break;
     db.transaction(() => {
@@ -936,7 +966,8 @@ function persistPreparedGeneration(
           row.project,
           row.importance ?? 5,
           row.provenance ?? 'verbatim',
-          row.source_position
+          row.source_position,
+          row.search_changed
         );
       }
     }).immediate();
@@ -961,54 +992,26 @@ function isPublishedGeneration(db: Database, generationId: string): boolean {
   `).get(generationId));
 }
 
-function removeGenerationSearchRows(
+function repairPublishedGenerationSearchPage(
   db: Database,
   generationId: string,
-  activeGenerationId: string,
   deadline?: number
 ): boolean {
-  const select = db.prepare(`
-    SELECT rowid FROM host_ingest_generation_messages_fts
-    WHERE generation_id = ? LIMIT ?
-  `);
-  const remove = db.prepare(`
-    DELETE FROM host_ingest_generation_messages_fts
-    WHERE rowid = ? AND generation_id = ?
-  `);
-  for (;;) {
-    assertHostDeadline(deadline);
-    const rows = select.all(generationId, SQLITE_SAFE_CHUNK_SIZE) as Array<{ rowid: number }>;
-    if (rows.length === 0) return true;
-    const removed = db.transaction(() => {
-      if (!isPublishedGeneration(db, activeGenerationId)) return false;
-      for (const row of rows) remove.run(row.rowid, generationId);
-      return true;
-    }).immediate();
-    if (!removed) return false;
-  }
-}
-
-function indexPublishedGeneration(
-  db: Database,
-  generationId: string,
-  deadline?: number
-): void {
   const generation = db.prepare(`
-    SELECT generation.source, generation.session_id
+    SELECT generation.fts_ready
     FROM host_ingest_generations AS generation
     JOIN host_ingest_state AS state
       ON state.active_generation = generation.generation_id
      AND state.source = generation.source
      AND state.session_id = generation.session_id
     WHERE generation.generation_id = ? AND generation.status = 'active'
-  `).get(generationId) as { source: string; session_id: string } | undefined;
-  if (!generation) return;
+  `).get(generationId) as { fts_ready: number } | undefined;
+  if (!generation || generation.fts_ready === 1) return true;
   const page = db.prepare(`
-    SELECT message_id, content, project
+    SELECT ordinal, source, message_id, content, project, source_position
     FROM host_ingest_generation_messages
-    WHERE generation_id = ? AND message_id > ? AND content IS NOT NULL
-      AND (source <> 'grok' OR source_position IS NOT NULL)
-    ORDER BY message_id LIMIT ?
+    WHERE generation_id = ? AND fts_pending = 1
+    ORDER BY ordinal LIMIT ?
   `);
   const remove = db.prepare(`
     DELETE FROM host_ingest_generation_messages_fts WHERE rowid = ?
@@ -1018,34 +1021,39 @@ function indexPublishedGeneration(
       rowid, content, project, generation_id
     ) VALUES (?, ?, ?, ?)
   `);
-  let cursor = 0;
-  for (;;) {
-    assertHostDeadline(deadline);
-    const rows = page.all(generationId, cursor, SQLITE_SAFE_CHUNK_SIZE) as Array<{
-      message_id: number;
-      content: string;
-      project: string | null;
-    }>;
-    if (rows.length === 0) break;
+  const complete = db.prepare(`
+    UPDATE host_ingest_generation_messages SET fts_pending = 0
+    WHERE generation_id = ? AND ordinal = ?
+  `);
+  assertHostDeadline(deadline);
+  const rows = page.all(generationId, SQLITE_SAFE_CHUNK_SIZE) as Array<{
+    ordinal: number;
+    source: LifecycleHost;
+    message_id: number | null;
+    content: string | null;
+    project: string | null;
+    source_position: number | null;
+  }>;
+  if (rows.length > 0) {
     const indexed = db.transaction(() => {
       if (!isPublishedGeneration(db, generationId)) return false;
       for (const row of rows) {
-        remove.run(row.message_id);
-        insert.run(row.message_id, row.content, row.project, generationId);
+        if (row.message_id !== null) {
+          remove.run(row.message_id);
+          if (row.content !== null &&
+            (row.source !== 'grok' || row.source_position !== null)) {
+            insert.run(row.message_id, row.content, row.project, generationId);
+          }
+        }
+        complete.run(generationId, row.ordinal);
       }
       return true;
     }).immediate();
-    if (!indexed) return;
-    cursor = rows.at(-1)!.message_id;
-  }
-  const stale = db.prepare(`
-    SELECT generation_id FROM host_ingest_generations
-    WHERE source = ? AND session_id = ? AND generation_id <> ?
-  `).all(generation.source, generation.session_id, generationId) as Array<{
-    generation_id: string;
-  }>;
-  for (const row of stale) {
-    if (!removeGenerationSearchRows(db, row.generation_id, generationId, deadline)) return;
+    if (!indexed) return true;
+    if (db.prepare(`
+      SELECT 1 FROM host_ingest_generation_messages
+      WHERE generation_id = ? AND fts_pending = 1 LIMIT 1
+    `).get(generationId)) return false;
   }
   db.transaction(() => {
     db.prepare(`
@@ -1058,6 +1066,19 @@ function indexPublishedGeneration(
       )
     `).run(generationId);
   }).immediate();
+  return true;
+}
+
+function repairPublishedGenerationSearch(
+  db: Database,
+  generationId: string,
+  deadline?: number,
+  maxPages = Number.POSITIVE_INFINITY
+): boolean {
+  for (let page = 0; page < maxPages; page++) {
+    if (repairPublishedGenerationSearchPage(db, generationId, deadline)) return true;
+  }
+  return false;
 }
 
 function deleteGeneration(
@@ -1215,7 +1236,8 @@ export function getHostIngestCheckpoint(
   sessionId: string
 ): HostIngestCheckpoint | undefined {
   assertSessionId(sessionId);
-  const row = getDb()
+  const db = getDb();
+  const row = db
     .prepare(`
       SELECT transcript_ref, watermark, transcript_digest, active_generation, finalized_at
       FROM host_ingest_state
@@ -1223,6 +1245,12 @@ export function getHostIngestCheckpoint(
     `)
     .get(source, sessionId) as IngestStateRow | undefined;
   if (!row) return undefined;
+  if (row.active_generation) {
+    try {
+      repairPublishedGenerationSearch(db, row.active_generation, undefined, 1);
+    } catch {
+    }
+  }
   return {
     transcriptRef: row.transcript_ref ?? undefined,
     watermark: row.watermark ?? undefined,
@@ -1413,7 +1441,7 @@ export function ingestHostTranscriptBatch(
       .immediate();
     activated = true;
     try {
-      indexPublishedGeneration(db, preparedGeneration.publishToken, deadline);
+      repairPublishedGenerationSearch(db, preparedGeneration.publishToken, deadline);
     } catch {
     }
     discardSupersededGenerations(db, deadline);

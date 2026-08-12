@@ -347,6 +347,9 @@ export function getLastSearchErrors(): string[] {
   return lastSearchErrors;
 }
 
+export const LIFECYCLE_SEARCH_RETRYABLE =
+  'RETRYABLE: Lifecycle message search index is not ready; retry after the next lifecycle checkpoint.';
+
 type RankedSearchRow = {
   id: number;
   content: string;
@@ -394,15 +397,6 @@ function fuseMessageSearchGroups(groups: RankedSearchRow[][]): SearchResult[] {
       ? best
       : best + ((worst - best) * index) / (ranked.length - 1),
   }));
-}
-
-function fallbackSearchTerms(query: string): string[] {
-  const operators = new Set(['AND', 'OR', 'NOT', 'NEAR']);
-  const matches = query.match(/"[^"]+"|[\p{L}\p{N}_-]+/gu) ?? [];
-  return [...new Set(matches
-    .map(term => term.replace(/^"|"$/g, '').trim())
-    .filter(term => term.length > 0 && !operators.has(term.toUpperCase())))]
-    .slice(0, 16);
 }
 
 export function search(query: string, options?: MemorySearchOptions): SearchResult[] {
@@ -519,94 +513,90 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
     }
     params.push(limit);
 
-    try {
-      // db.query (#151) caches the compiled statement per SQL shape on this
-      // connection, so repeat searches skip recompilation. There are a bounded
-      // number of shapes (per table × with/without project/duplicate filters);
-      // each is cached on first use. Identical SQL + params → identical output.
-      const rows = db.query(sql).all(...params) as RankedSearchRow[];
-      if (table !== 'messages') {
-        for (const row of rows) results.push(asSearchResult(table, row));
-        continue;
+    if (table === 'messages') {
+      const messageGroups: RankedSearchRow[][] = [];
+      try {
+        messageGroups.push(db.query(sql).all(...params) as RankedSearchRow[]);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        lastSearchErrors.push(`[messages] ${errorMsg}`);
       }
-      const messageGroups = [rows];
-      if (table === 'messages' && generationFtsAvailable) {
-        const generationParams: Array<string | number> = [query];
-        if (options?.project) generationParams.push(options.project);
-        generationParams.push(limit);
-        const generationRows = db.prepare(`
-          SELECT generated.message_id AS id, generated.content, generated.project,
-            generated.timestamp AS created_at, generated.provenance, f.rank
-          FROM host_ingest_generation_messages_fts AS f
-          JOIN host_ingest_generation_messages AS generated
-            ON generated.message_id = f.rowid
-           AND generated.generation_id = f.generation_id
-          JOIN host_ingest_generations AS generation
-            ON generation.generation_id = generated.generation_id
-           AND generation.status = 'active'
-           ${generationFtsReadinessAvailable ? 'AND generation.fts_ready = 1' : 'AND 0'}
-          JOIN host_ingest_state AS state
-            ON state.active_generation = generated.generation_id
-           AND state.source = generated.source
-           AND state.session_id = generated.session_id
-          WHERE host_ingest_generation_messages_fts MATCH ?
-            AND generated.message_id IS NOT NULL
-            AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
-            ${duplicateFilter(options, 'messages', 'generated.message_id')}
-            ${options?.project ? 'AND generated.project = ?' : ''}
-          ORDER BY f.rank LIMIT ?
-        `).all(...generationParams) as RankedSearchRow[];
-        messageGroups.push(generationRows);
-      }
-      if (generationStorageAvailable &&
-        (!generationFtsAvailable || !generationFtsReadinessAvailable ||
-          Boolean(db.prepare(`
+
+      let activeGeneration = false;
+      let generationSearchIncomplete = false;
+      if (generationStorageAvailable) {
+        try {
+          activeGeneration = Boolean(db.prepare(`
             SELECT 1 FROM host_ingest_generations AS generation
             JOIN host_ingest_state AS state
               ON state.active_generation = generation.generation_id
-            WHERE generation.status = 'active' AND generation.fts_ready = 0
-            LIMIT 1
-          `).get()))) {
-        const fallbackParams: Array<string | number> = [
-          JSON.stringify(fallbackSearchTerms(query)),
-        ];
-        if (options?.project) fallbackParams.push(options.project);
-        fallbackParams.push(limit);
-        const fallbackRows = db.prepare(`
-          SELECT generated.message_id AS id, generated.content, generated.project,
-            generated.timestamp AS created_at, generated.provenance, 0 AS rank
-          FROM host_ingest_generation_messages AS generated
-          JOIN host_ingest_generations AS generation
-            ON generation.generation_id = generated.generation_id
-           AND generation.status = 'active'
-          JOIN host_ingest_state AS state
-            ON state.active_generation = generated.generation_id
-           AND state.source = generated.source
-           AND state.session_id = generated.session_id
-          WHERE generated.message_id IS NOT NULL AND generated.content IS NOT NULL
-            AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
-            ${generationFtsAvailable && generationFtsReadinessAvailable
-              ? 'AND generation.fts_ready = 0' : ''}
-            AND NOT EXISTS (
-              SELECT 1 FROM json_each(?) AS term
-              WHERE instr(
-                lower(generated.content),
-                lower(CAST(term.value AS TEXT))
-              ) = 0
-            )
-            ${duplicateFilter(options, 'messages', 'generated.message_id')}
-            ${options?.project ? 'AND generated.project = ?' : ''}
-          ORDER BY generated.timestamp DESC, generated.message_id DESC
-          LIMIT ?
-        `).all(...fallbackParams) as RankedSearchRow[];
-        messageGroups.push(fallbackRows);
+             AND state.source = generation.source
+             AND state.session_id = generation.session_id
+            WHERE generation.status = 'active' LIMIT 1
+          `).get());
+          generationSearchIncomplete = activeGeneration &&
+            (!generationFtsAvailable || !generationFtsReadinessAvailable ||
+              Boolean(generationFtsReadinessAvailable && db.prepare(`
+                SELECT 1 FROM host_ingest_generations AS generation
+                JOIN host_ingest_state AS state
+                  ON state.active_generation = generation.generation_id
+                 AND state.source = generation.source
+                 AND state.session_id = generation.session_id
+                WHERE generation.status = 'active' AND generation.fts_ready = 0
+                LIMIT 1
+              `).get()));
+        } catch {
+          generationSearchIncomplete = true;
+        }
+      }
+      if (generationSearchIncomplete) {
+        lastSearchErrors.push(`[messages:lifecycle] ${LIFECYCLE_SEARCH_RETRYABLE}`);
+      }
+
+      if (activeGeneration && generationFtsAvailable && generationFtsReadinessAvailable) {
+        const generationParams: Array<string | number> = [query];
+        if (options?.project) generationParams.push(options.project);
+        generationParams.push(limit);
+        try {
+          const generationRows = db.prepare(`
+            SELECT generated.message_id AS id, generated.content, generated.project,
+              generated.timestamp AS created_at, generated.provenance, f.rank
+            FROM host_ingest_generation_messages_fts AS f
+            JOIN host_ingest_generation_messages AS generated
+              ON generated.message_id = f.rowid
+            JOIN host_ingest_generations AS generation
+              ON generation.generation_id = generated.generation_id
+             AND generation.status = 'active'
+             AND generation.fts_ready = 1
+            JOIN host_ingest_state AS state
+              ON state.active_generation = generated.generation_id
+             AND state.source = generated.source
+             AND state.session_id = generated.session_id
+            WHERE host_ingest_generation_messages_fts MATCH ?
+              AND generated.message_id IS NOT NULL
+              AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+              ${duplicateFilter(options, 'messages', 'generated.message_id')}
+              ${options?.project ? 'AND generated.project = ?' : ''}
+            ORDER BY f.rank LIMIT ?
+          `).all(...generationParams) as RankedSearchRow[];
+          messageGroups.push(generationRows);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          lastSearchErrors.push(
+            `[messages:lifecycle] ${LIFECYCLE_SEARCH_RETRYABLE} (${errorMsg})`
+          );
+        }
       }
       results.push(...fuseMessageSearchGroups(messageGroups));
+      continue;
+    }
+
+    try {
+      const rows = db.query(sql).all(...params) as RankedSearchRow[];
+      for (const row of rows) results.push(asSearchResult(table, row));
     } catch (err) {
-      // FIX #7: Record errors instead of silently swallowing
       const errorMsg = err instanceof Error ? err.message : String(err);
       lastSearchErrors.push(`[${table}] ${errorMsg}`);
-      // Continue searching other tables even if one fails
     }
   }
 

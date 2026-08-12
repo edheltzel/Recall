@@ -1,6 +1,12 @@
 // recall search command
 
-import { search, bumpAccess, SEARCH_TABLES, type SearchTable } from '../lib/memory.js';
+import {
+  search,
+  getLastSearchErrors,
+  bumpAccess,
+  SEARCH_TABLES,
+  type SearchTable,
+} from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
 
 interface SearchOptions {
@@ -28,6 +34,7 @@ export function runSearch(query: string, options: SearchOptions): void {
     limit: options.limit || 20,
     includeDuplicates: options.includeDuplicates
   });
+  for (const error of getLastSearchErrors()) console.error(error);
 
   if (results.length === 0) {
     console.log('No results found.');
