@@ -9,6 +9,7 @@ import { parseCodexRollout } from '../../src/hosts/codex-lifecycle';
 import { parseGrokExport } from '../../src/hosts/grok-lifecycle';
 import {
   createHostIngestBatch,
+  getHostIngestCheckpoint,
   ingestHostTranscript,
   type HostTranscript,
 } from '../../src/lib/host-ingest';
@@ -388,6 +389,7 @@ describe('host hook payload routing', () => {
 
     const grokFinalization: boolean[] = [];
     const grokIncremental: boolean[] = [];
+    const grokReconciliation: Array<boolean | undefined> = [];
     const grokBatches: Array<HostTranscript['batch']> = [];
     const grokChunkSizes: number[] = [];
     const grokSourcePositions: number[] = [];
@@ -406,6 +408,7 @@ describe('host hook payload routing', () => {
         ingest: input => {
           grokFinalization.push(Boolean(input.finalize));
           grokIncremental.push(Boolean(input.incremental));
+          grokReconciliation.push(input.reconcileComplete);
           grokBatches.push(input.batch);
           for (const message of input.messages) {
             grokChunkSizes.push(Buffer.byteLength(message.content));
@@ -425,6 +428,7 @@ describe('host hook payload routing', () => {
     expect(grok.ingest).toMatchObject({ inserted: 2, finalized: true });
     expect(grokFinalization).toEqual([false, true]);
     expect(grokIncremental).toEqual([false, false]);
+    expect(grokReconciliation).toEqual([false, true]);
     expect(grokBatches[0]).toBeDefined();
     expect(grokBatches[1]).toBe(grokBatches[0]);
     expect(Math.max(...grokChunkSizes)).toBeLessThanOrEqual(maxChunk);
@@ -590,6 +594,52 @@ describe('host hook payload routing', () => {
     expect(loa.fabric_extract).not.toContain('Frame B');
   });
 
+  test('replaces finalized Grok lineage for empty terminal exports', async () => {
+    for (const [suffix, replacement] of [['empty', ''], ['whitespace', ' \n\t']]) {
+      let markdown = 'Frame A\n\nFrame B';
+      const sessionId = `grok-${suffix}-terminal-export`;
+      const payload = { hook_event_name: 'SessionEnd', session_id: sessionId };
+      const dependencies = { exportGrok: () => markdown };
+
+      expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({
+        inserted: 2,
+        finalized: true,
+      });
+      markdown = replacement;
+      const reset = await handleGrokHostHook(payload, dependencies);
+
+      expect(reset.ingest).toMatchObject({ inserted: 0, finalized: true });
+      expect(reset.ingest?.reconciled).toBeGreaterThan(0);
+
+      const db = getDb();
+      const active = db.prepare(`
+        SELECT COUNT(*) AS count FROM host_ingest_messages
+        WHERE source = 'grok' AND session_id = ? AND source_position IS NOT NULL
+      `).get(sessionId) as { count: number };
+      const loa = db.prepare(`
+        SELECT fabric_extract, message_range_start, message_range_end, message_count, source_ids
+        FROM loa_entries WHERE session_id = ?
+      `).get(sessionId) as {
+        fabric_extract: string;
+        message_range_start: number | null;
+        message_range_end: number | null;
+        message_count: number;
+        source_ids: string;
+      };
+
+      expect(active.count).toBe(0);
+      expect(loa.fabric_extract).toContain('No transcript content was present.');
+      expect(loa.fabric_extract).not.toContain('Frame A');
+      expect(loa.message_range_start).toBeNull();
+      expect(loa.message_range_end).toBeNull();
+      expect(loa.message_count).toBe(0);
+      expect(JSON.parse(loa.source_ids)).toEqual([]);
+      expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
+        finalized: true,
+      });
+    }
+  });
+
   test('keeps Grok frame identity stable across incremental delimiters and reset', async () => {
     let markdown = 'Frame A\n';
     const payload = { hook_event_name: 'Stop', session_id: 'grok-delimiter-boundary' };
@@ -639,6 +689,74 @@ describe('host hook payload routing', () => {
 });
 
 describe('host-neutral immediate SQLite ingest', () => {
+  test('defers reset checkpoints until Grok reconciliation completes', () => {
+    const sessionId = 'grok-interrupted-reset';
+    const transcriptRef = 'grok export';
+    const initialBatch = createHostIngestBatch();
+    const initial = ingestHostTranscript({
+      source: 'grok',
+      sessionId,
+      transcriptRef,
+      watermark: 'bytes:16:rolling:1111111122222222',
+      messages: [
+        { role: 'system', content: 'Frame A\n\n', sourcePosition: 0 },
+        { role: 'system', content: 'Frame B', sourcePosition: 9 },
+      ],
+      incremental: false,
+      reconcileComplete: true,
+      finalize: true,
+      batch: initialBatch,
+    });
+    expect(initial).toMatchObject({ inserted: 2, finalized: true });
+
+    ingestHostTranscript({
+      source: 'grok',
+      sessionId,
+      transcriptRef,
+      watermark: 'bytes:7:rolling:3333333344444444',
+      messages: [{ role: 'system', content: 'Frame B', sourcePosition: 0 }],
+      incremental: false,
+      reconcileComplete: false,
+      batch: createHostIngestBatch(),
+    });
+    expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
+      watermark: 'bytes:16:rolling:1111111122222222',
+      finalized: true,
+    });
+
+    const retry = ingestHostTranscript({
+      source: 'grok',
+      sessionId,
+      transcriptRef,
+      watermark: 'bytes:7:rolling:5555555566666666',
+      messages: [{ role: 'system', content: 'Frame B', sourcePosition: 0 }],
+      incremental: false,
+      reconcileComplete: true,
+      finalize: true,
+      batch: createHostIngestBatch(),
+    });
+    expect(retry).toMatchObject({ inserted: 0, finalized: true });
+
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT m.id, m.content FROM messages m
+      JOIN host_ingest_messages h ON h.message_id = m.id
+      WHERE h.source = 'grok' AND h.session_id = ? AND h.source_position IS NOT NULL
+      ORDER BY h.source_position
+    `).all(sessionId) as Array<{ id: number; content: string }>;
+    const loa = db.prepare('SELECT source_ids FROM loa_entries WHERE session_id = ?')
+      .get(sessionId) as { source_ids: string };
+
+    expect(rows.map(row => row.content)).toEqual(['Frame B']);
+    expect(JSON.parse(loa.source_ids)).toEqual(
+      rows.map(row => ({ table: 'messages', id: row.id }))
+    );
+    expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
+      watermark: 'bytes:7:rolling:5555555566666666',
+      finalized: true,
+    });
+  });
+
   test('shares fallback occurrences across reset batch chunks', () => {
     const batch = createHostIngestBatch();
     const input: HostTranscript = {

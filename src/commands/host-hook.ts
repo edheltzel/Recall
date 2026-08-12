@@ -156,18 +156,26 @@ function byteCapture(
   size: number,
   read: (start: number, length: number) => Buffer,
   validatePrefix: boolean
-): { start: number; digest: [number, number] } {
+): { start: number; digest: [number, number]; reset: boolean } {
   const previous = byteCheckpoint(checkpoint, transcriptRef);
   if (previous && previous.size <= size) {
     if (!validatePrefix) {
-      return { start: previous.size, digest: [previous.digest[0], previous.digest[1]] };
+      return {
+        start: previous.size,
+        digest: [previous.digest[0], previous.digest[1]],
+        reset: false,
+      };
     }
     const digest = digestPrefix(previous.size, read);
     if (digest[0] === previous.digest[0] && digest[1] === previous.digest[1]) {
-      return { start: previous.size, digest };
+      return { start: previous.size, digest, reset: false };
     }
   }
-  return { start: 0, digest: [ROLLING_SEEDS[0], ROLLING_SEEDS[1]] };
+  return {
+    start: 0,
+    digest: [ROLLING_SEEDS[0], ROLLING_SEEDS[1]],
+    reset: true,
+  };
 }
 
 function* boundedTranscriptChunks(
@@ -385,7 +393,7 @@ function ingestStagedGrokExport(
   const start = capture.start;
   const incremental = start > 0;
   const batch = createHostIngestBatch();
-  if (start === size && (!request.finalize || previous?.finalized)) {
+  if (!capture.reset && start === size && (!request.finalize || previous?.finalized)) {
     return { skipped: 'unchanged-transcript' };
   }
   if (start === size) {
@@ -396,10 +404,13 @@ function ingestStagedGrokExport(
         messages: [],
         cwd: request.cwd,
         transcriptRef,
-        watermark: previous?.watermark ?? byteWatermark(size, capture.digest),
+        watermark: capture.reset
+          ? byteWatermark(size, capture.digest)
+          : previous?.watermark ?? byteWatermark(size, capture.digest),
         capturedAt: request.capturedAt,
         incremental,
-        finalize: true,
+        reconcileComplete: !incremental,
+        finalize: request.finalize,
         batch,
       }),
     };
@@ -525,7 +536,7 @@ export function handleHostHook(
     const incremental = start > 0;
     const batch = createHostIngestBatch();
     const finalize = event === 'sessionend';
-    if (start === size && (!finalize || previous?.finalized)) {
+    if (!capture.reset && start === size && (!finalize || previous?.finalized)) {
       return { skipped: 'unchanged-transcript' };
     }
     if (start === size) {
@@ -536,10 +547,12 @@ export function handleHostHook(
           messages: [],
           cwd,
           transcriptRef: transcriptPath,
-          watermark: previous?.watermark ?? byteWatermark(size, capture.digest),
+          watermark: capture.reset
+            ? byteWatermark(size, capture.digest)
+            : previous?.watermark ?? byteWatermark(size, capture.digest),
           capturedAt,
           incremental,
-          finalize: true,
+          finalize,
           batch,
         }),
       };
