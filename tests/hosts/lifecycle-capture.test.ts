@@ -874,8 +874,9 @@ describe('host-neutral immediate SQLite ingest', () => {
         SELECT message_id FROM host_ingest_generation_messages WHERE session_id = ?
       )
     `).get(sessionId)).toEqual({ count: 0 });
-    expect(search('Frame 500', { table: 'messages' }).map(result => result.content))
-      .toContain('Frame 500');
+    const results = search('Frame AND 500', { table: 'messages' });
+    expect(results.map(result => result.content)).toContain('Frame 500');
+    expect(results.find(result => result.content === 'Frame 500')?.rank).toBeLessThan(0);
   });
 
   test('hides shadow rows until their lifecycle keys are published', () => {
@@ -896,6 +897,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get('shadow-visibility')).toEqual({ count: 0 });
+    expect(search('pending AND frame', { table: 'messages' })).toEqual([]);
 
     db.prepare(`
       INSERT INTO sessions (session_id, started_at, source)
@@ -942,6 +944,61 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(db.prepare(`
       SELECT 1 FROM host_ingest_generation_messages WHERE generation_id = 'stale:other'
     `).get()).toBeNull();
+  });
+
+  test('sweeps superseded generations while retaining LoA-pinned evidence', () => {
+    const db = getDb();
+    const sessionId = 'superseded-generation-sweeper';
+    const first = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [{ role: 'user', content: 'first retained frame' }],
+      finalize: true,
+    });
+    const pinnedGeneration = JSON.parse((db.prepare(`
+      SELECT source_ids FROM loa_entries WHERE id = ?
+    `).get(first.loaId!) as { source_ids: string }).source_ids).generation_id as string;
+
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [
+        { role: 'user', content: 'first retained frame' },
+        { role: 'assistant', content: 'second active frame' },
+      ],
+    });
+    const unpinnedGeneration = (db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId) as { active_generation: string }).active_generation;
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [
+        { role: 'user', content: 'first retained frame' },
+        { role: 'assistant', content: 'second active frame' },
+        { role: 'assistant', content: 'third active frame' },
+      ],
+    });
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [
+        { role: 'user', content: 'first retained frame' },
+        { role: 'assistant', content: 'second active frame' },
+        { role: 'assistant', content: 'third active frame' },
+        { role: 'assistant', content: 'fourth active frame' },
+      ],
+    });
+
+    expect(db.prepare(`
+      SELECT generation_id FROM host_ingest_generations WHERE generation_id = ?
+    `).get(unpinnedGeneration)).toBeNull();
+    expect(db.prepare(`
+      SELECT generation_id FROM host_ingest_generations WHERE generation_id = ?
+    `).get(pinnedGeneration)).toEqual({ generation_id: pinnedGeneration });
+    expect(getLoaMessages(first.loaId!).map(message => message.content))
+      .toEqual(['first retained frame']);
   });
 
   test('discards a shadow generation when checkpoint activation loses', () => {

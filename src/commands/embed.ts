@@ -8,6 +8,7 @@ import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
+import { publishedRecordTable } from '../lib/published-records.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
@@ -87,15 +88,17 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
            WHERE e.id IS NULL
            ORDER BY l.created_at DESC LIMIT ?`;
       break;
-    case 'messages':
+    case 'messages': {
       sourceTable = 'messages';
+      const publishedMessages = publishedRecordTable(sourceTable);
       query = options.force
-        ? `SELECT id, content FROM published_messages WHERE role = 'assistant' ORDER BY timestamp DESC LIMIT ?`
-        : `SELECT m.id, m.content FROM published_messages m
+        ? `SELECT id, content FROM ${publishedMessages} WHERE role = 'assistant' ORDER BY timestamp DESC LIMIT ?`
+        : `SELECT m.id, m.content FROM ${publishedMessages} m
            LEFT JOIN embeddings e ON e.source_table = 'messages' AND e.source_id = m.id
            WHERE e.id IS NULL AND m.role = 'assistant'
            ORDER BY m.timestamp DESC LIMIT ?`;
       break;
+    }
     default:
       console.error(`Unknown table: ${table}`);
       process.exit(1);
@@ -201,10 +204,11 @@ export async function runRebackfill(): Promise<void> {
   let processed = 0;
 
   for (const config of EMBED_SOURCES) {
+    const sourceTable = publishedRecordTable(config.table);
     const cols = config.columns.map(c => `t.${c}`).join(', ');
     const rows = db.prepare(
       `SELECT t.id AS id, ${cols}
-       FROM ${config.table} t
+       FROM ${sourceTable} t
        JOIN embeddings e ON e.source_table = ? AND e.source_id = t.id`
     ).all(config.table) as Array<Record<string, unknown>>;
 

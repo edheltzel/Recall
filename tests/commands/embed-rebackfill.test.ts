@@ -23,6 +23,7 @@ import { embeddingToBlob } from '../../src/lib/embeddings';
 import { createSession, addDecision } from '../../src/lib/memory';
 import { readEmbeddingMarker } from '../../src/lib/embedding-marker';
 import { runRebackfill } from '../../src/commands/embed';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 
 // Seed two decisions, each with a stale legacy (nomic, 768-dim) embedding.
 function seedLegacyEmbeddings(): number[] {
@@ -89,5 +90,27 @@ describe('recall embed rebackfill — atomic model swap (issue #107)', () => {
     await runRebackfill();
     expect(embeddingRows().length).toBe(0);
     expect(readEmbeddingMarker(getDb())).toEqual({ model: 'qwen3-embedding:0.6b', dimensions: 1024 });
+  });
+
+  test('retains generation-backed message embeddings during re-backfill', async () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'generation-rebackfill',
+      messages: [{ role: 'assistant', content: 'generation message with enough source text' }],
+    });
+    const message = getDb().prepare(`
+      SELECT id FROM published_messages WHERE session_id = ?
+    `).get('generation-rebackfill') as { id: number };
+    getDb().prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('messages', ?, 'nomic-embed-text', 768, ?)
+    `).run(message.id, embeddingToBlob(new Array(768).fill(0.5)));
+
+    await runRebackfill();
+
+    expect(getDb().prepare(`
+      SELECT model, dimensions FROM embeddings
+      WHERE source_table = 'messages' AND source_id = ?
+    `).get(message.id)).toEqual({ model: 'qwen3-embedding:0.6b', dimensions: 1024 });
   });
 });

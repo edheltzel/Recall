@@ -76,6 +76,43 @@ CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_message_id
   ON host_ingest_generation_messages(message_id);
 `;
 
+export const HOST_INGEST_GENERATION_FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS host_ingest_generation_messages_fts USING fts5(
+  content,
+  project
+);
+CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_ai
+AFTER INSERT ON host_ingest_generation_messages
+WHEN new.content IS NOT NULL
+  AND (new.source <> 'grok' OR new.source_position IS NOT NULL) BEGIN
+  INSERT INTO host_ingest_generation_messages_fts(rowid, content, project)
+  VALUES (new.rowid, new.content, new.project);
+END;
+CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_ad
+AFTER DELETE ON host_ingest_generation_messages
+WHEN old.content IS NOT NULL
+  AND (old.source <> 'grok' OR old.source_position IS NOT NULL) BEGIN
+  DELETE FROM host_ingest_generation_messages_fts WHERE rowid = old.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_au
+AFTER UPDATE OF content, project, source_position ON host_ingest_generation_messages BEGIN
+  DELETE FROM host_ingest_generation_messages_fts WHERE rowid = old.rowid;
+  INSERT INTO host_ingest_generation_messages_fts(rowid, content, project)
+  SELECT new.rowid, new.content, new.project
+  WHERE new.content IS NOT NULL
+    AND (new.source <> 'grok' OR new.source_position IS NOT NULL);
+END;
+`;
+
+export const REBUILD_HOST_INGEST_GENERATION_FTS = `
+DELETE FROM host_ingest_generation_messages_fts;
+INSERT INTO host_ingest_generation_messages_fts(rowid, content, project)
+SELECT rowid, content, project
+FROM host_ingest_generation_messages
+WHERE content IS NOT NULL
+  AND (source <> 'grok' OR source_position IS NOT NULL);
+`;
+
 export const CREATE_TABLES = `
 -- Sessions table: tracks coding agent sessions (Claude Code, OpenCode, etc.)
 CREATE TABLE IF NOT EXISTS sessions (
@@ -342,6 +379,7 @@ CREATE TABLE IF NOT EXISTS host_ingest_messages (
 );
 
 ${HOST_INGEST_GENERATION_SCHEMA}
+${HOST_INGEST_GENERATION_FTS_SCHEMA}
 `;
 
 export const CREATE_INDEXES = `

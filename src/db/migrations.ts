@@ -13,10 +13,12 @@ import { join } from 'path';
 import { homedir } from 'os';
 import {
   FTS_SCHEMA,
+  HOST_INGEST_GENERATION_FTS_SCHEMA,
   HOST_INGEST_GENERATION_SCHEMA,
   LOA_MESSAGE_RETENTION_SCHEMA,
   LOA_MESSAGE_SOURCES_SCHEMA,
   PUBLISHED_MESSAGES_SCHEMA,
+  REBUILD_HOST_INGEST_GENERATION_FTS,
 } from './schema';
 import { claudePaths } from '../hosts/claude.js';
 
@@ -32,6 +34,33 @@ export type Migration = (db: Database) => void;
 function skipLegacyDataMigrations(): boolean {
   const v = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
   return !!v && v !== '0' && v !== 'false';
+}
+
+function clearAmbiguousEmptyLoaCursors(db: Database): void {
+  const columns = new Set(
+    (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+      .map(column => column.name)
+  );
+  if (!columns.has('snapshot_max_message_id') || !columns.has('tags') ||
+    !columns.has('message_count')) return;
+  const generatedSnapshot = columns.has('source_ids')
+    ? `AND NOT COALESCE((
+        json_extract(
+          CASE WHEN json_valid(source_ids) THEN source_ids END,
+          '$.table'
+        ) = 'host_ingest_generation_messages'
+        AND json_extract(
+          CASE WHEN json_valid(source_ids) THEN source_ids END,
+          '$.generation_id'
+        ) IS NOT NULL
+      ), 0)`
+    : '';
+  db.exec(`
+    UPDATE loa_entries SET snapshot_max_message_id = NULL
+    WHERE tags LIKE 'automatic-capture,%'
+      AND COALESCE(message_count, 0) = 0
+      ${generatedSnapshot};
+  `);
 }
 
 // ---------------------------------------------------------------------------
@@ -590,14 +619,6 @@ export const MIGRATIONS: Migration[] = [
   (_db) => {},
 
   (db) => {
-    const messageColumns = new Set(
-      (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
-        .map(column => column.name)
-    );
-    const loaColumns = new Set(
-      (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
-        .map(column => column.name)
-    );
     const stateColumns = new Set(
       (db.prepare('PRAGMA table_info(host_ingest_state)').all() as Array<{ name: string }>)
         .map(column => column.name)
@@ -607,25 +628,14 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE host_ingest_state ADD COLUMN active_generation TEXT');
     }
     db.exec(HOST_INGEST_GENERATION_SCHEMA);
-    if (messageColumns.has('id') && messageColumns.has('timestamp') &&
-      loaColumns.has('snapshot_max_message_id') && loaColumns.has('tags') &&
-      loaColumns.has('message_count') && loaColumns.has('created_at')) {
-      db.exec(`
-        UPDATE loa_entries AS loa SET snapshot_max_message_id = COALESCE((
-          SELECT MAX(message.id) FROM messages AS message
-          WHERE datetime(message.timestamp) <= datetime(loa.created_at)
-            AND (${messageColumns.has('host_ingest_token')
-              ? `message.host_ingest_token IS NULL OR EXISTS (
-                  SELECT 1 FROM host_ingest_messages AS stored
-                  WHERE stored.message_id = message.id
-                )`
-              : '1 = 1'})
-        ), 0)
-        WHERE loa.tags LIKE 'automatic-capture,%'
-          AND COALESCE(loa.message_count, 0) = 0;
-      `);
-    }
+    clearAmbiguousEmptyLoaCursors(db);
     if (hasState) db.exec(PUBLISHED_MESSAGES_SCHEMA);
+  },
+
+  (db) => {
+    db.exec(HOST_INGEST_GENERATION_FTS_SCHEMA);
+    clearAmbiguousEmptyLoaCursors(db);
+    db.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
   },
 ];
 

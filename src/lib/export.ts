@@ -24,6 +24,7 @@ import { join, extname, dirname, basename } from 'path';
 import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { getMigrationVersion } from '../db/migrations.js';
 import { VERSION } from '../version.js';
+import { publishedRecordTable } from './published-records.js';
 
 /**
  * Durable tables included in app-level (JSON/Markdown/SQL) exports: the
@@ -138,7 +139,7 @@ export function collectTableRows(
   table: ExportTable,
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ExportRow[] {
-  const sourceTable = table === 'messages' ? 'published_messages' : table;
+  const sourceTable = publishedRecordTable(table);
   const hasId = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
     .some(column => column.name === 'id');
   const cursor = hasId ? 'id' : 'rowid';
@@ -177,7 +178,7 @@ export function collectExportData(db: Database): ExportData {
 export function buildProvenanceCounts(db: Database): Record<string, Record<string, number>> {
   const counts: Record<string, Record<string, number>> = {};
   for (const table of PROVENANCE_TABLES) {
-    const sourceTable = table === 'messages' ? 'published_messages' : table;
+    const sourceTable = publishedRecordTable(table);
     const rows = db.prepare(
       `SELECT COALESCE(provenance, 'unknown') AS p, COUNT(*) AS c FROM ${sourceTable} GROUP BY COALESCE(provenance, 'unknown')`
     ).all() as Array<{ p: string; c: number }>;
@@ -196,7 +197,7 @@ export function buildManifest(
 ): ExportManifest {
   const counts: Record<string, number> = {};
   for (const table of tables) {
-    const sourceTable = table === 'messages' ? 'published_messages' : table;
+    const sourceTable = publishedRecordTable(table);
     counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${sourceTable}`).get() as { c: number }).c;
   }
   return {

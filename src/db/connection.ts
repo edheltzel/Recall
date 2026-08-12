@@ -10,6 +10,7 @@ import {
   CREATE_FTS,
   CREATE_FTS_TRIGGERS,
   CREATE_VECTOR_TABLES,
+  REBUILD_HOST_INGEST_GENERATION_FTS,
   PUBLISHED_MESSAGES_SCHEMA,
 } from './schema.js';
 import { applyMigrations } from './migrations.js';
@@ -211,12 +212,17 @@ export function ensurePublishedMessageViews(database: Database): void {
  * that to degrade gracefully; initDb lets it surface.
  */
 function ensureSchema(database: Database): void {
+  const generationFtsExists = Boolean(database.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'host_ingest_generation_messages_fts'
+  `).get());
   database.exec(CREATE_TABLES);
   const migration = applyMigrations(database);
   database.exec(CREATE_INDEXES);
   database.exec(PUBLISHED_MESSAGES_SCHEMA);
   database.exec(CREATE_FTS);
   database.exec(CREATE_FTS_TRIGGERS);
+  if (!generationFtsExists) database.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
   database.exec(CREATE_VECTOR_TABLES);
   // sqlite-vec index table (#148) — created ONLY when the extension loaded.
   // Deliberately NOT a migration: a vec0 CREATE throws where the extension is

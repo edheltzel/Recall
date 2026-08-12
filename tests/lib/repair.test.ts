@@ -18,6 +18,7 @@ import { getDb } from '../../src/db/connection';
 import { MIGRATIONS } from '../../src/db/migrations';
 import { FTS_SCHEMA } from '../../src/db/schema';
 import { embeddingToBlob, type EmbeddingResult } from '../../src/lib/embeddings';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import {
   addBreadcrumb,
   addDecision,
@@ -252,6 +253,23 @@ describe('embedding gap detection', () => {
     const config = EMBED_SOURCES.find(c => c.table === 'messages')!;
     const report = countEmbedGaps(getDb(), config);
     expect(report.missing).toBe(1);
+  });
+
+  test('repairs generation-backed message embeddings without reporting orphans', async () => {
+    const captured = ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'generation-embedding-repair',
+      messages: [{ role: 'assistant', content: CRUMB }],
+    });
+    expect(captured.inserted).toBe(1);
+    const config = EMBED_SOURCES.find(c => c.table === 'messages')!;
+    expect(countEmbedGaps(getDb(), config)).toMatchObject({ missing: 1, tooShort: 0 });
+
+    const plan = planRepair(getDb(), { table: 'messages' });
+    const result = await applyEmbedRepair(getDb(), plan, okEmbed);
+    expect(result.embedded).toBe(1);
+    expect(checkOrphans(getDb()).find(report => report.check === 'orphaned-embeddings:messages'))
+      .toBeUndefined();
   });
 
   test('marked duplicates are excluded from gaps', () => {

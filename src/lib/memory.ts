@@ -6,6 +6,7 @@ import { notMarkedDuplicateSql } from './dedup.js';
 import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { scrub } from './write-safety.js';
 import { invalidateVecIndex } from '../db/vec.js';
+import { publishedRecordTable } from './published-records.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
 
 // Choke point for redacting known-prefix secrets (and stripping invisible
@@ -351,6 +352,10 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
   const limit = options?.limit || 20;
   const results: SearchResult[] = [];
   lastSearchErrors = []; // Reset errors for this search
+  const generationFtsAvailable = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'host_ingest_generation_messages_fts'
+  `).get());
 
   const tables = options?.table
     ? [options.table]
@@ -367,6 +372,15 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           FROM messages_fts f
           JOIN published_messages m ON m.id = f.rowid
           WHERE messages_fts MATCH ?
+          ${generationFtsAvailable ? `AND NOT EXISTS (
+            SELECT 1
+            FROM host_ingest_generation_messages AS generated
+            JOIN host_ingest_state AS state
+              ON state.active_generation = generated.generation_id
+             AND state.source = generated.source
+             AND state.session_id = generated.session_id
+            WHERE generated.message_id = m.id
+          )` : ''}
           ${duplicateFilter(options, 'messages', 'm.id')}
           ${options?.project ? 'AND m.project = ?' : ''}
           ORDER BY f.rank
@@ -456,25 +470,25 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           rank: row.rank
         });
       }
-      if (table === 'messages') {
+      if (table === 'messages' && generationFtsAvailable) {
         const generationParams: Array<string | number> = [query];
         if (options?.project) generationParams.push(options.project);
         generationParams.push(limit);
         const generationRows = db.prepare(`
           SELECT generated.message_id AS id, generated.content, generated.project,
-            generated.timestamp AS created_at, generated.provenance, 0 AS rank
-          FROM host_ingest_generation_messages AS generated
+            generated.timestamp AS created_at, generated.provenance, f.rank
+          FROM host_ingest_generation_messages_fts AS f
+          JOIN host_ingest_generation_messages AS generated ON generated.rowid = f.rowid
           JOIN host_ingest_state AS state
             ON state.active_generation = generated.generation_id
            AND state.source = generated.source
            AND state.session_id = generated.session_id
-          WHERE generated.content LIKE '%' || ? || '%'
+          WHERE host_ingest_generation_messages_fts MATCH ?
             AND generated.message_id IS NOT NULL
             AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
-            AND NOT EXISTS (SELECT 1 FROM messages WHERE id = generated.message_id)
             ${duplicateFilter(options, 'messages', 'generated.message_id')}
             ${options?.project ? 'AND generated.project = ?' : ''}
-          ORDER BY generated.timestamp DESC LIMIT ?
+          ORDER BY f.rank LIMIT ?
         `).all(...generationParams) as Array<{
           id: number;
           content: string;
@@ -635,7 +649,9 @@ export function vectorRowContentProvenance(
     };
   }
   if (sourceTable === 'messages') {
-    const msg = db.prepare('SELECT content, provenance FROM published_messages WHERE id = ?').get(sourceId) as any;
+    const msg = db.prepare(
+      `SELECT content, provenance FROM ${publishedRecordTable(sourceTable)} WHERE id = ?`
+    ).get(sourceId) as any;
     if (!msg) return empty;
     return {
       content: msg.content?.slice(0, 200) || '',
