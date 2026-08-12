@@ -862,6 +862,15 @@ describe('host lifecycle ingest migration (17 to 18)', () => {
       .map(column => column.name);
     expect(keyColumns).toContain('message_key');
     expect(keyColumns).toContain('message_id');
+
+    const stateSessionFk = (
+      db.prepare('PRAGMA foreign_key_list(host_ingest_state)').all() as any[]
+    ).find(foreignKey => foreignKey.from === 'session_id');
+    const messageSessionFk = (
+      db.prepare('PRAGMA foreign_key_list(host_ingest_messages)').all() as any[]
+    ).find(foreignKey => foreignKey.from === 'session_id');
+    expect(stateSessionFk.on_delete).toBe('CASCADE');
+    expect(messageSessionFk.on_delete).toBe('CASCADE');
   });
 });
 

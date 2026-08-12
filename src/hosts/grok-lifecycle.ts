@@ -4,12 +4,13 @@ export interface ParsedGrokExport {
   messages: HostTranscriptMessage[];
 }
 
-function headingRole(line: string): 'user' | 'assistant' | undefined {
-  const heading =
-    line.match(/^#{1,6}\s*(?:message\s+\d+\s*[-:]\s*)?(user|human|assistant|grok)\s*$/i)?.[1] ??
-    line.match(/^\*\*(user|human|assistant|grok)\s*:\*\*\s*$/i)?.[1];
-  if (!heading) return undefined;
-  return /^(user|human)$/i.test(heading) ? 'user' : 'assistant';
+function headingRole(
+  line: string,
+  expectedOrdinal: number
+): 'user' | 'assistant' | undefined {
+  const heading = line.match(/^## Message (\d+) - (User|Assistant|Grok)$/i);
+  if (!heading || Number(heading[1]) !== expectedOrdinal) return undefined;
+  return /^user$/i.test(heading[2]) ? 'user' : 'assistant';
 }
 
 /** Parse the public `grok export <sessionId>` Markdown surface. */
@@ -17,6 +18,7 @@ export function parseGrokExport(markdown: string): ParsedGrokExport {
   const messages: HostTranscriptMessage[] = [];
   let role: 'user' | 'assistant' | undefined;
   let body: string[] = [];
+  let expectedOrdinal = 1;
 
   const flush = () => {
     const content = body.join('\n').trim();
@@ -25,10 +27,11 @@ export function parseGrokExport(markdown: string): ParsedGrokExport {
   };
 
   for (const line of markdown.split(/\r?\n/)) {
-    const nextRole = headingRole(line);
+    const nextRole = headingRole(line, expectedOrdinal);
     if (nextRole) {
       flush();
       role = nextRole;
+      expectedOrdinal++;
       continue;
     }
     if (role) body.push(line);
