@@ -29,6 +29,7 @@ export interface HostTranscript {
   watermark?: string;
   capturedAt?: string;
   incremental?: boolean;
+  reconcileComplete?: boolean;
   finalize?: boolean;
   batch?: HostIngestBatch;
 }
@@ -36,16 +37,18 @@ export interface HostTranscript {
 export interface HostIngestBatch {
   fallbackOccurrences: Map<string, number>;
   nextOrdinal: number;
-  positionsReset: boolean;
+  previousPositions?: Map<string, number | null>;
+  seenMessageKeys: Set<string>;
 }
 
 export function createHostIngestBatch(): HostIngestBatch {
-  return { fallbackOccurrences: new Map(), nextOrdinal: 0, positionsReset: false };
+  return { fallbackOccurrences: new Map(), nextOrdinal: 0, seenMessageKeys: new Set() };
 }
 
 export interface HostIngestResult {
   sessionId: string;
   inserted: number;
+  reconciled?: number;
   skipped: number;
   finalized: boolean;
   loaId?: number;
@@ -242,14 +245,23 @@ function insertNewMessages(
   db: Database,
   input: HostTranscript,
   prepared: PreparedTranscript
-): number {
-  if (input.source === 'grok' && !input.incremental && !input.batch?.positionsReset) {
-    db.prepare(`
-      UPDATE host_ingest_messages SET source_position = NULL
+): { inserted: number; reconciled: number } {
+  const resettingPositions = input.source === 'grok' && !input.incremental;
+  let previousPositions = input.batch?.previousPositions;
+  if (resettingPositions && !previousPositions) {
+    const rows = db.prepare(`
+      SELECT message_key, source_position FROM host_ingest_messages
       WHERE source = ? AND session_id = ?
-    `).run(input.source, input.sessionId);
-    if (input.batch) input.batch.positionsReset = true;
+    `).all(input.source, input.sessionId) as Array<{
+      message_key: string;
+      source_position: number | null;
+    }>;
+    previousPositions = new Map(
+      rows.map(row => [row.message_key, row.source_position])
+    );
+    if (input.batch) input.batch.previousPositions = previousPositions;
   }
+  const seenMessageKeys = input.batch?.seenMessageKeys ?? new Set<string>();
   const occurrences = input.batch?.fallbackOccurrences ?? new Map<string, number>();
   const latestOccurrence = db.prepare(`
     SELECT message_key FROM host_ingest_messages
@@ -278,11 +290,15 @@ function insertNewMessages(
     message.messageKey = `content:${message.identityBase}:${String(occurrence).padStart(16, '0')}`;
   }
 
-  const knownKeys = new Map<string, { messageId: number | null; content: string | null }>();
+  const knownKeys = new Map<string, {
+    messageId: number | null;
+    sourcePosition: number | null;
+    content: string | null;
+  }>();
   for (const keys of chunked(prepared.messages.map(message => message.messageKey))) {
     const rows = db
       .prepare(`
-        SELECT h.message_key, h.message_id, m.content
+        SELECT h.message_key, h.message_id, h.source_position, m.content
         FROM host_ingest_messages h
         LEFT JOIN messages m ON m.id = h.message_id
         WHERE h.source = ? AND h.session_id = ?
@@ -291,10 +307,15 @@ function insertNewMessages(
       .all(input.source, input.sessionId, ...keys) as Array<{
         message_key: string;
         message_id: number | null;
+        source_position: number | null;
         content: string | null;
       }>;
     for (const row of rows) {
-      knownKeys.set(row.message_key, { messageId: row.message_id, content: row.content });
+      knownKeys.set(row.message_key, {
+        messageId: row.message_id,
+        sourcePosition: row.source_position,
+        content: row.content,
+      });
     }
   }
   const insertMessage = db.prepare(`
@@ -309,25 +330,35 @@ function insertNewMessages(
   const updateKeyPosition = db.prepare(`
     UPDATE host_ingest_messages SET source_position = ?
     WHERE source = ? AND session_id = ? AND message_key = ?
+      AND source_position IS NOT ?
+  `);
+  const clearKeyPosition = db.prepare(`
+    UPDATE host_ingest_messages SET source_position = NULL
+    WHERE source = ? AND session_id = ? AND message_key = ?
+      AND source_position IS NOT NULL
   `);
   const updateMessage = db.prepare(`
     UPDATE messages SET content = ? WHERE id = ?
   `);
 
   let inserted = 0;
+  let reconciled = 0;
   for (const message of prepared.messages) {
+    seenMessageKeys.add(message.messageKey);
     if (knownKeys.has(message.messageKey)) {
       if (message.sourcePosition !== undefined) {
-        updateKeyPosition.run(
+        reconciled += updateKeyPosition.run(
           message.sourcePosition,
           input.source,
           input.sessionId,
-          message.messageKey
-        );
+          message.messageKey,
+          message.sourcePosition
+        ).changes;
         const known = knownKeys.get(message.messageKey);
         if (known && known.messageId !== null && known.content !== message.content) {
           updateMessage.run(message.content, known.messageId);
           invalidateRecordEmbedding(db, 'messages', known.messageId);
+          reconciled++;
         }
       }
       continue;
@@ -348,11 +379,22 @@ function insertNewMessages(
     );
     knownKeys.set(message.messageKey, {
       messageId: Number(result.lastInsertRowid),
+      sourcePosition: message.sourcePosition ?? null,
       content: message.content,
     });
     inserted++;
   }
-  return inserted;
+  if (resettingPositions && (input.reconcileComplete ?? true)) {
+    for (const [messageKey, sourcePosition] of previousPositions ?? []) {
+      if (sourcePosition === null || seenMessageKeys.has(messageKey)) continue;
+      reconciled += clearKeyPosition.run(
+        input.source,
+        input.sessionId,
+        messageKey
+      ).changes;
+    }
+  }
+  return { inserted, reconciled };
 }
 
 function getIngestState(db: Database, input: HostTranscript): IngestStateRow | undefined {
@@ -541,8 +583,9 @@ export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
       assertSessionOwnership(db, input);
       const previous = getIngestState(db, input);
       upsertSession(db, input, prepared);
-      const inserted = insertNewMessages(db, input, prepared);
-      const resumed = inserted > 0 && Boolean(previous?.finalized_at);
+      const mutations = insertNewMessages(db, input, prepared);
+      const resumed = (mutations.inserted > 0 || mutations.reconciled > 0) &&
+        Boolean(previous?.finalized_at);
       if (resumed && !input.finalize) {
         db.prepare('UPDATE sessions SET ended_at = NULL WHERE session_id = ?').run(input.sessionId);
       }
@@ -559,8 +602,9 @@ export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
 
       return {
         sessionId: input.sessionId,
-        inserted,
-        skipped: prepared.messages.length - inserted,
+        inserted: mutations.inserted,
+        reconciled: mutations.reconciled,
+        skipped: prepared.messages.length - mutations.inserted,
         finalized: terminal.finalized,
         loaId: terminal.loaId,
         redactions: [...prepared.redactions],
