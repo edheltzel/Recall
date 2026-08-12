@@ -246,6 +246,7 @@ function mergeIngestResults(
   return {
     sessionId: next.sessionId,
     inserted: current.inserted + next.inserted,
+    reconciled: (current.reconciled ?? 0) + (next.reconciled ?? 0),
     skipped: current.skipped + next.skipped,
     finalized: current.finalized || next.finalized,
     loaId: next.loaId ?? current.loaId,
@@ -417,6 +418,7 @@ function ingestStagedGrokExport(
       watermark: chunk.watermark,
       capturedAt: request.capturedAt,
       incremental,
+      reconcileComplete: !incremental && chunk.end === size,
       finalize: request.finalize && chunk.end === size,
       batch,
     }));

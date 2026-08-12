@@ -539,6 +539,57 @@ describe('host hook payload routing', () => {
     );
   });
 
+  test('refreshes finalized Grok lineage after reorder and removal reconciliation', async () => {
+    let markdown = 'Frame A\n\nFrame B\n\nFrame C';
+    const payload = { hook_event_name: 'SessionEnd', session_id: 'grok-frame-reorder' };
+    const dependencies = { exportGrok: () => markdown };
+
+    const initial = await handleGrokHostHook(payload, dependencies);
+    markdown = 'Frame C\n\nFrame A\n\nFrame B';
+    const reordered = await handleGrokHostHook(payload, dependencies);
+
+    expect(initial.ingest).toMatchObject({ inserted: 3, finalized: true });
+    expect(reordered.ingest).toMatchObject({ inserted: 0, finalized: true });
+    expect(reordered.ingest?.reconciled).toBeGreaterThan(0);
+
+    const db = getDb();
+    const reorderedIds = db.prepare(`
+      SELECT m.id FROM messages m
+      JOIN host_ingest_messages h ON h.message_id = m.id
+      WHERE m.session_id = ? AND h.source_position IS NOT NULL
+      ORDER BY h.source_position
+    `).all(payload.session_id) as Array<{ id: number }>;
+    const reorderedLoa = db.prepare(`
+      SELECT source_ids FROM loa_entries WHERE session_id = ?
+    `).get(payload.session_id) as { source_ids: string };
+    expect(JSON.parse(reorderedLoa.source_ids)).toEqual(
+      reorderedIds.map(row => ({ table: 'messages', id: row.id }))
+    );
+
+    markdown = 'Frame C\n\nFrame A';
+    const removed = await handleGrokHostHook(payload, dependencies);
+    expect(removed.ingest).toMatchObject({ inserted: 0, finalized: true });
+    expect(removed.ingest?.reconciled).toBeGreaterThan(0);
+
+    const rows = db.prepare(`
+      SELECT m.id, m.content FROM messages m
+      JOIN host_ingest_messages h ON h.message_id = m.id
+      WHERE m.session_id = ? AND h.source_position IS NOT NULL
+      ORDER BY h.source_position
+    `).all(payload.session_id) as Array<{ id: number; content: string }>;
+    const loa = db.prepare(`
+      SELECT fabric_extract, source_ids FROM loa_entries WHERE session_id = ?
+    `).get(payload.session_id) as { fabric_extract: string; source_ids: string };
+
+    expect(rows.map(row => row.content).join('')).toBe(markdown);
+    expect(JSON.parse(loa.source_ids)).toEqual(
+      rows.map(row => ({ table: 'messages', id: row.id }))
+    );
+    expect(loa.fabric_extract).toContain('Frame C');
+    expect(loa.fabric_extract).toContain('Frame A');
+    expect(loa.fabric_extract).not.toContain('Frame B');
+  });
+
   test('keeps Grok frame identity stable across incremental delimiters and reset', async () => {
     let markdown = 'Frame A\n';
     const payload = { hook_event_name: 'Stop', session_id: 'grok-delimiter-boundary' };
