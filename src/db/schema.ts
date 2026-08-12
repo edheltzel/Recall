@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS host_ingest_state (
   finalized_at      TEXT,
   updated_at        TEXT NOT NULL,
   PRIMARY KEY (source, session_id),
-  FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+  FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS host_ingest_messages (
@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS host_ingest_messages (
   message_key TEXT NOT NULL,
   message_id  INTEGER,
   PRIMARY KEY (source, session_id, message_key),
-  FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+  FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
   FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
 );
 `;

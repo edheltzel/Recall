@@ -71,6 +71,29 @@ describe('supported lifecycle transcript parsers', () => {
     ]);
     expect(parsed.messages[1].content).toContain('supported export surface');
   });
+
+  test('Grok preserves role-looking Markdown inside exported messages', () => {
+    const parsed = parseGrokExport(`# Grok Session
+
+Session: grok-native-markdown
+
+## Message 1 - User
+
+Keep these ordinary Markdown lines in my message:
+## Assistant
+**Grok:**
+## Message 9 - Assistant
+
+## Message 2 - Grok
+
+They remain verbatim user content.`);
+
+    expect(parsed.messages).toHaveLength(2);
+    expect(parsed.messages.map(message => message.role)).toEqual(['user', 'assistant']);
+    expect(parsed.messages[0].content).toContain('## Assistant');
+    expect(parsed.messages[0].content).toContain('**Grok:**');
+    expect(parsed.messages[0].content).toContain('## Message 9 - Assistant');
+  });
 });
 
 describe('host hook payload routing', () => {

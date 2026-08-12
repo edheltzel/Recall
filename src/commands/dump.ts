@@ -76,7 +76,7 @@ export function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: 
   })();
 }
 
-function deleteSession(sessionId: string): number {
+function clearSessionMessages(sessionId: string): number {
   const db = getDb();
 
   const deleteAll = db.transaction(() => {
@@ -97,7 +97,6 @@ function deleteSession(sessionId: string): number {
     }
 
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-    db.prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
 
     return count;
   });
@@ -131,21 +130,36 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     }
   }
 
-  // Delete existing session if re-importing
-  if (sessionExists(session.sessionId)) {
-    deleteSession(session.sessionId);
-  }
+  const replacingSession = sessionExists(session.sessionId);
+  if (replacingSession) clearSessionMessages(session.sessionId);
 
   // Import messages to SQLite FIRST (fast, always succeeds)
   const timestamps = session.messages.map(m => m.timestamp).sort();
-  createSession({
-    session_id: session.sessionId,
-    started_at: timestamps[0],
-    ended_at: timestamps[timestamps.length - 1],
-    project: options.project || session.project,
-    summary: `Dumped: ${title}`,
-    source: session.source,
-  });
+  const project = options.project || session.project;
+  if (replacingSession) {
+    getDb().prepare(`
+      UPDATE sessions SET
+        started_at = ?, ended_at = ?, summary = ?, project = ?,
+        cwd = NULL, git_branch = NULL, model = NULL, source = ?
+      WHERE session_id = ?
+    `).run(
+      timestamps[0],
+      timestamps[timestamps.length - 1],
+      `Dumped: ${title}`,
+      project ?? null,
+      session.source,
+      session.sessionId
+    );
+  } else {
+    createSession({
+      session_id: session.sessionId,
+      started_at: timestamps[0],
+      ended_at: timestamps[timestamps.length - 1],
+      project,
+      summary: `Dumped: ${title}`,
+      source: session.source,
+    });
+  }
 
   // Raw conversation capture is verbatim (ADR-0001).
   const importedCount = addMessagesBatch(session.messages.map(m => ({ ...m, provenance: 'verbatim' as const })));

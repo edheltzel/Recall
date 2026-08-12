@@ -409,7 +409,7 @@ export const MIGRATIONS: Migration[] = [
         finalized_at      TEXT,
         updated_at        TEXT NOT NULL,
         PRIMARY KEY (source, session_id),
-        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
       );
       CREATE TABLE IF NOT EXISTS host_ingest_messages (
         source      TEXT NOT NULL,
@@ -417,7 +417,7 @@ export const MIGRATIONS: Migration[] = [
         message_key TEXT NOT NULL,
         message_id  INTEGER,
         PRIMARY KEY (source, session_id, message_key),
-        FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
         FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
       );
       CREATE INDEX IF NOT EXISTS idx_host_ingest_message_id
