@@ -95,8 +95,8 @@ export interface LoaEntry {
   message_count?: number;
   importance?: number;
   provenance?: Provenance | null;
-  // Source lineage: JSON array of {table, id} records this entry was built
-  // from. Nullable when exact lineage is unavailable (ADR-0001).
+  // Source lineage: JSON references to records this entry was built from.
+  // Nullable when exact lineage is unavailable (ADR-0001).
   source_ids?: string | null;
 }
 

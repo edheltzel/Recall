@@ -17,6 +17,7 @@ import { parseGrokExport } from '../hosts/grok-lifecycle.js';
 import {
   createHostIngestBatch,
   HostIngestCheckpointConflictError,
+  assertHostDeadline,
   ingestHostTranscriptBatch,
   ingestHostTranscript,
   getHostIngestCheckpoint,
@@ -148,7 +149,7 @@ function digestPrefix(
   const digest: [number, number] = [ROLLING_SEEDS[0], ROLLING_SEEDS[1]];
   let cursor = 0;
   while (cursor < end) {
-    assertGrokDeadline(deadline);
+    assertHostDeadline(deadline);
     const length = Math.min(HASH_READ_BYTES, end - cursor);
     const raw = read(cursor, length);
     if (raw.length !== length) throw new Error('Transcript read returned incomplete data');
@@ -202,7 +203,7 @@ function* boundedTranscriptChunks(
 ): Generator<{ start: number; end: number; raw: Buffer; watermark: string }> {
   let cursor = start;
   while (cursor < size) {
-    assertGrokDeadline(deadline);
+    assertHostDeadline(deadline);
     const length = Math.min(MAX_TRANSCRIPT_BYTES, size - cursor);
     let raw = read(cursor, length);
     if (raw.length !== length) throw new Error('Transcript read returned incomplete data');
@@ -351,17 +352,11 @@ function grokExportStream(
 }
 
 function grokExportAttemptTimeout(deadline: number, attemptsRemaining: number): number {
+  assertHostDeadline(deadline - GROK_FINALIZATION_MARGIN_MS);
   const available = deadline - Date.now() - GROK_FINALIZATION_MARGIN_MS;
-  if (available <= 0) throw new Error('Grok lifecycle capture deadline exhausted');
   return Math.min(GROK_EXPORT_ATTEMPT_MAX_MS, Math.max(1, Math.floor(
     available / attemptsRemaining
   )));
-}
-
-function assertGrokDeadline(deadline?: number): void {
-  if (deadline !== undefined && Date.now() >= deadline) {
-    throw new Error('Grok lifecycle capture deadline exhausted');
-  }
 }
 
 async function stageGrokExport(
@@ -375,7 +370,7 @@ async function stageGrokExport(
   try {
     rmSync(path);
     for await (const value of source) {
-      assertGrokDeadline(deadline);
+      assertHostDeadline(deadline);
       const raw = asBuffer(value);
       if (!Number.isSafeInteger(size + raw.length)) {
         throw new Error('Grok export is too large to capture safely');
@@ -386,7 +381,7 @@ async function stageGrokExport(
       }
       size += raw.length;
     }
-    assertGrokDeadline(deadline);
+    assertHostDeadline(deadline);
     return { directory, fd, size };
   } catch (error) {
     closeSync(fd);
@@ -401,7 +396,7 @@ function ingestStagedGrokExport(
   staged: { fd: number; size: number },
   deadline: number
 ): HostHookResult {
-  assertGrokDeadline(deadline);
+  assertHostDeadline(deadline);
   const transcriptRef = 'grok export';
   const ingest = dependencies.ingest ?? ingestHostTranscript;
   const ingestBatch: typeof ingestHostTranscriptBatch = dependencies.ingestBatch ??
@@ -409,7 +404,7 @@ function ingestStagedGrokExport(
     ? (inputs: Iterable<HostTranscript>, _expectation, ingestDeadline) => {
         let aggregate: HostIngestResult | undefined;
         for (const input of inputs) {
-          assertGrokDeadline(ingestDeadline);
+          assertHostDeadline(ingestDeadline);
           aggregate = mergeHostIngestResults(aggregate, ingest(input));
         }
         if (!aggregate) throw new Error('Host transcript batch must not be empty');
@@ -418,7 +413,7 @@ function ingestStagedGrokExport(
     : ingestHostTranscriptBatch);
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
   const previous = checkpoint('grok', request.sessionId);
-  assertGrokDeadline(deadline);
+  assertHostDeadline(deadline);
   const size = staged.size;
   const read = (start: number, length: number) => {
     const bytes = Math.max(0, Math.min(length, size - start));
@@ -474,7 +469,7 @@ function ingestStagedGrokExport(
       grokFrameBoundary,
       deadline
     )) {
-      assertGrokDeadline(deadline);
+      assertHostDeadline(deadline);
       const parsed = parseGrokExport(chunk.raw.toString('utf-8'), {
         sourceOffset: chunk.start,
       });
@@ -493,7 +488,7 @@ function ingestStagedGrokExport(
       };
     }
   };
-  assertGrokDeadline(deadline);
+  assertHostDeadline(deadline);
   return {
     ingest: ingestBatch(inputs(), {
       source: 'grok',
