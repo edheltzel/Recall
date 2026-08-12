@@ -25,6 +25,20 @@ let previousDbPath: string | undefined;
 let previousSkip: string | undefined;
 let previousIncludeSubagents: string | undefined;
 
+function expectLifecycleSelector(
+  raw: string,
+  source: 'codex' | 'grok' | 'jcode',
+  sessionId: string,
+  maxMessageId: number | null
+): void {
+  expect(JSON.parse(raw)).toEqual({
+    table: 'host_ingest_messages',
+    source,
+    session_id: sessionId,
+    max_message_id: maxMessageId,
+  });
+}
+
 beforeEach(() => {
   previousDbPath = process.env.RECALL_DB_PATH;
   previousSkip = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
@@ -549,8 +563,11 @@ describe('host hook payload routing', () => {
     const loa = getDb()
       .prepare('SELECT source_ids FROM loa_entries WHERE session_id = ?')
       .get(payload.session_id) as { source_ids: string };
-    expect(JSON.parse(loa.source_ids)).toEqual(
-      rows.map(row => ({ table: 'messages', id: row.id }))
+    expectLifecycleSelector(
+      loa.source_ids,
+      'grok',
+      payload.session_id,
+      Math.max(...rows.map(row => row.id))
     );
   });
 
@@ -577,8 +594,11 @@ describe('host hook payload routing', () => {
     const reorderedLoa = db.prepare(`
       SELECT source_ids FROM loa_entries WHERE session_id = ?
     `).get(payload.session_id) as { source_ids: string };
-    expect(JSON.parse(reorderedLoa.source_ids)).toEqual(
-      reorderedIds.map(row => ({ table: 'messages', id: row.id }))
+    expectLifecycleSelector(
+      reorderedLoa.source_ids,
+      'grok',
+      payload.session_id,
+      Math.max(...reorderedIds.map(row => row.id))
     );
 
     markdown = 'Frame C\n\nFrame A';
@@ -597,8 +617,11 @@ describe('host hook payload routing', () => {
     `).get(payload.session_id) as { fabric_extract: string; source_ids: string };
 
     expect(rows.map(row => row.content).join('')).toBe(markdown);
-    expect(JSON.parse(loa.source_ids)).toEqual(
-      rows.map(row => ({ table: 'messages', id: row.id }))
+    expectLifecycleSelector(
+      loa.source_ids,
+      'grok',
+      payload.session_id,
+      Math.max(...rows.map(row => row.id))
     );
     expect(loa.fabric_extract).toContain('Frame C');
     expect(loa.fabric_extract).toContain('Frame A');
@@ -644,7 +667,7 @@ describe('host hook payload routing', () => {
       expect(loa.message_range_start).toBeNull();
       expect(loa.message_range_end).toBeNull();
       expect(loa.message_count).toBe(0);
-      expect(JSON.parse(loa.source_ids)).toEqual([]);
+      expectLifecycleSelector(loa.source_ids, 'grok', sessionId, null);
       expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
         finalized: true,
       });
@@ -859,8 +882,11 @@ describe('host-neutral immediate SQLite ingest', () => {
       ['Frame A\n\n', 0],
       ['Frame B', 9],
     ]);
-    expect(JSON.parse(originalLoa.source_ids)).toEqual(
-      originalRows.map(row => ({ table: 'messages', id: row.id }))
+    expectLifecycleSelector(
+      originalLoa.source_ids,
+      'grok',
+      sessionId,
+      Math.max(...originalRows.map(row => row.id))
     );
     expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
       watermark: 'bytes:16:rolling:1111111122222222',
@@ -891,8 +917,11 @@ describe('host-neutral immediate SQLite ingest', () => {
       .get(sessionId) as { source_ids: string };
 
     expect(rows.map(row => row.content)).toEqual(['Frame B']);
-    expect(JSON.parse(loa.source_ids)).toEqual(
-      rows.map(row => ({ table: 'messages', id: row.id }))
+    expectLifecycleSelector(
+      loa.source_ids,
+      'grok',
+      sessionId,
+      Math.max(...rows.map(row => row.id))
     );
     expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
       watermark: 'bytes:7:rolling:5555555566666666',

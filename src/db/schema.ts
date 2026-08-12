@@ -105,9 +105,9 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   message_count INTEGER,
   importance INTEGER DEFAULT 8 CHECK (importance BETWEEN 1 AND 10),
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
-  -- Source lineage: JSON array of {table, id} records this entry was built
-  -- from. parent_loa_id chains LoA→LoA. Nullable when exact lineage is
-  -- unavailable (ADR-0001).
+  -- Source lineage: JSON references to records this entry was built from.
+  -- parent_loa_id chains LoA→LoA. Nullable when exact lineage is unavailable
+  -- (ADR-0001).
   source_ids TEXT,
   access_count INTEGER DEFAULT 0,
   last_accessed DATETIME,
