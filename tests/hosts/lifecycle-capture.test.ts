@@ -17,7 +17,7 @@ import {
   type HostTranscript,
 } from '../../src/lib/host-ingest';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
-import { getLoaMessages, getMessagesSinceLastLoa } from '../../src/lib/memory';
+import { getLoaMessages, getMessagesSinceLastLoa, search } from '../../src/lib/memory';
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, '..', 'fixtures', 'host-lifecycle', name), 'utf-8');
@@ -28,13 +28,23 @@ let previousSkip: string | undefined;
 let previousIncludeSubagents: string | undefined;
 
 function expectLifecycleSources(raw: string, messageIds: number[]): void {
-  const source = JSON.parse(raw) as { table: string; loa_id: number };
-  expect(source.table).toBe('loa_message_sources');
-  expect(Number.isSafeInteger(source.loa_id)).toBe(true);
-  const stored = getDb().prepare(`
-    SELECT message_id FROM loa_message_sources
-    WHERE loa_id = ? ORDER BY ordinal
-  `).all(source.loa_id) as Array<{ message_id: number }>;
+  const source = JSON.parse(raw) as {
+    table: string;
+    loa_id?: number;
+    generation_id?: string;
+  };
+  const stored = source.table === 'host_ingest_generation_messages'
+    ? getDb().prepare(`
+        SELECT message_id FROM host_ingest_generation_messages
+        WHERE generation_id = ? AND content IS NOT NULL
+          AND (source <> 'grok' OR source_position IS NOT NULL)
+        ORDER BY CASE WHEN source = 'grok' THEN source_position END,
+          CASE WHEN source <> 'grok' THEN timestamp END, message_id
+      `).all(source.generation_id) as Array<{ message_id: number }>
+    : getDb().prepare(`
+        SELECT message_id FROM loa_message_sources
+        WHERE loa_id = ? ORDER BY ordinal
+      `).all(source.loa_id) as Array<{ message_id: number }>;
   expect(stored.map(row => row.message_id)).toEqual(messageIds);
 }
 
@@ -261,7 +271,7 @@ describe('host hook payload routing', () => {
     expect(
       (
         getDb()
-          .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND content = ?')
+          .prepare('SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ? AND content = ?')
           .get(sessionId, repeatedContent) as { count: number }
       ).count
     ).toBe(2);
@@ -550,8 +560,8 @@ describe('host hook payload routing', () => {
 
     const rows = getDb()
       .prepare(`
-        SELECT m.id, m.content, h.source_position FROM messages m
-        JOIN host_ingest_messages h ON h.message_id = m.id
+        SELECT m.id, m.content, h.source_position FROM published_messages m
+        JOIN active_host_ingest_messages h ON h.message_id = m.id
         WHERE m.session_id = ? AND h.source_position IS NOT NULL
         ORDER BY h.source_position
       `)
@@ -580,8 +590,8 @@ describe('host hook payload routing', () => {
 
     const db = getDb();
     const reorderedIds = db.prepare(`
-      SELECT m.id FROM messages m
-      JOIN host_ingest_messages h ON h.message_id = m.id
+      SELECT m.id FROM published_messages m
+      JOIN active_host_ingest_messages h ON h.message_id = m.id
       WHERE m.session_id = ? AND h.source_position IS NOT NULL
       ORDER BY h.source_position
     `).all(payload.session_id) as Array<{ id: number }>;
@@ -596,8 +606,8 @@ describe('host hook payload routing', () => {
     expect(removed.ingest?.reconciled).toBeGreaterThan(0);
 
     const rows = db.prepare(`
-      SELECT m.id, m.content FROM messages m
-      JOIN host_ingest_messages h ON h.message_id = m.id
+      SELECT m.id, m.content FROM published_messages m
+      JOIN active_host_ingest_messages h ON h.message_id = m.id
       WHERE m.session_id = ? AND h.source_position IS NOT NULL
       ORDER BY h.source_position
     `).all(payload.session_id) as Array<{ id: number; content: string }>;
@@ -631,7 +641,7 @@ describe('host hook payload routing', () => {
 
       const db = getDb();
       const active = db.prepare(`
-        SELECT COUNT(*) AS count FROM host_ingest_messages
+        SELECT COUNT(*) AS count FROM active_host_ingest_messages
         WHERE source = 'grok' AND session_id = ? AND source_position IS NOT NULL
       `).get(sessionId) as { count: number };
       const loa = db.prepare(`
@@ -680,8 +690,8 @@ describe('host hook payload routing', () => {
 
     const rows = getDb()
       .prepare(`
-        SELECT m.content FROM messages m
-        JOIN host_ingest_messages h ON h.message_id = m.id
+        SELECT m.content FROM published_messages m
+        JOIN active_host_ingest_messages h ON h.message_id = m.id
         WHERE m.session_id = ? AND h.source_position IS NOT NULL
         ORDER BY h.source_position
       `)
@@ -821,14 +831,14 @@ describe('host-neutral immediate SQLite ingest', () => {
     }]);
 
     const current = db.prepare(`
-      SELECT message.id FROM messages AS message
-      JOIN host_ingest_messages AS stored ON stored.message_id = message.id
+      SELECT message.id FROM published_messages AS message
+      JOIN active_host_ingest_messages AS stored ON stored.message_id = message.id
       WHERE stored.session_id = ?
     `).get('sqlite-allocated-message') as { id: number };
     expect(current.id).toBeGreaterThan(Number(retired.lastInsertRowid));
   });
 
-  test('materializes staged messages in bounded pages with SQLite ID mapping', () => {
+  test('materializes staged mappings outside live messages and FTS', () => {
     const sessionId = 'set-wise-generation';
     const messages = Array.from({ length: SQLITE_SAFE_CHUNK_SIZE + 1 }, (_, index) => ({
       role: 'system' as const,
@@ -846,42 +856,92 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     const stored = getDb().prepare(`
       SELECT COUNT(*) AS count, COUNT(DISTINCT stored.message_id) AS distinct_ids,
-        COUNT(message.host_ingest_token) AS generation_tokens
-      FROM host_ingest_messages AS stored
-      JOIN messages AS message ON message.id = stored.message_id
+        COUNT(DISTINCT stored.generation_id) AS generations
+      FROM host_ingest_generation_messages AS stored
+      JOIN host_ingest_state AS state ON state.active_generation = stored.generation_id
       WHERE stored.session_id = ?
-    `).get(sessionId) as { count: number; distinct_ids: number; generation_tokens: number };
+    `).get(sessionId) as { count: number; distinct_ids: number; generations: number };
     expect(stored).toEqual({
       count: messages.length,
       distinct_ids: messages.length,
-      generation_tokens: messages.length,
+      generations: 1,
     });
+    expect(getDb().prepare(`
+      SELECT COUNT(*) AS count FROM messages WHERE session_id = ?
+    `).get(sessionId)).toEqual({ count: 0 });
+    expect(getDb().prepare(`
+      SELECT COUNT(*) AS count FROM messages_fts_docsize WHERE id IN (
+        SELECT message_id FROM host_ingest_generation_messages WHERE session_id = ?
+      )
+    `).get(sessionId)).toEqual({ count: 0 });
+    expect(search('Frame 500', { table: 'messages' }).map(result => result.content))
+      .toContain('Frame 500');
   });
 
   test('hides shadow rows until their lifecycle keys are published', () => {
     const db = getDb();
     db.prepare(`
-      INSERT INTO sessions (session_id, started_at, source)
-      VALUES ('shadow-visibility', '2026-08-12T10:00:00.000Z', 'grok')
+      INSERT INTO host_ingest_generations
+        (generation_id, source, session_id, created_at, status)
+      VALUES ('pending:1', 'grok', 'shadow-visibility', ?, 'pending')
+    `).run(new Date().toISOString());
+    db.prepare(`
+      INSERT INTO host_ingest_generation_messages (
+        generation_id, ordinal, source, session_id, message_key, message_id,
+        timestamp, role, content, provenance, source_position
+      ) VALUES ('pending:1', 1, 'grok', 'shadow-visibility', 'native:pending',
+        9000001, '2026-08-12T10:00:00.000Z', 'system', 'pending frame', 'verbatim', 0)
     `).run();
-    const pending = db.prepare(`
-      INSERT INTO messages (
-        session_id, timestamp, role, content, provenance, host_ingest_token
-      ) VALUES (?, ?, 'system', 'pending frame', 'verbatim', 'pending:1')
-    `).run('shadow-visibility', '2026-08-12T10:00:00.000Z');
 
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get('shadow-visibility')).toEqual({ count: 0 });
 
     db.prepare(`
-      INSERT INTO host_ingest_messages
-        (source, session_id, message_key, message_id, source_position)
-      VALUES ('grok', ?, 'native:pending', ?, 0)
-    `).run('shadow-visibility', pending.lastInsertRowid);
+      INSERT INTO sessions (session_id, started_at, source)
+      VALUES ('shadow-visibility', '2026-08-12T10:00:00.000Z', 'grok')
+    `).run();
+    db.prepare(`
+      INSERT INTO host_ingest_state (
+        source, session_id, transcript_digest, active_generation, updated_at
+      ) VALUES ('grok', 'shadow-visibility', 'digest', 'pending:1', ?)
+    `).run(new Date().toISOString());
+    db.prepare(`
+      UPDATE host_ingest_generations SET status = 'active'
+      WHERE generation_id = 'pending:1'
+    `).run();
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get('shadow-visibility')).toEqual({ count: 1 });
+  });
+
+  test('sweeps stale unpublished generations across sessions', () => {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO host_ingest_generations
+        (generation_id, source, session_id, created_at, status)
+      VALUES ('stale:other', 'grok', 'abandoned-session', '2000-01-01T00:00:00.000Z', 'pending')
+    `).run();
+    db.prepare(`
+      INSERT INTO host_ingest_generation_messages (
+        generation_id, ordinal, source, session_id, message_key, message_id,
+        timestamp, role, content, provenance, source_position
+      ) VALUES ('stale:other', 1, 'grok', 'abandoned-session', 'native:stale',
+        9000002, '2000-01-01T00:00:00.000Z', 'system', 'stale frame', 'verbatim', 0)
+    `).run();
+
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'stale-generation-sweeper',
+      messages: [{ role: 'user', content: 'sweep now' }],
+    });
+
+    expect(db.prepare(`
+      SELECT 1 FROM host_ingest_generations WHERE generation_id = 'stale:other'
+    `).get()).toBeNull();
+    expect(db.prepare(`
+      SELECT 1 FROM host_ingest_generation_messages WHERE generation_id = 'stale:other'
+    `).get()).toBeNull();
   });
 
   test('discards a shadow generation when checkpoint activation loses', () => {
@@ -899,6 +959,9 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     expect(getDb().prepare('SELECT 1 FROM messages WHERE session_id = ?').get(sessionId))
       .toBeNull();
+    expect(getDb().prepare(`
+      SELECT 1 FROM host_ingest_generations WHERE session_id = ?
+    `).get(sessionId)).toBeNull();
     expect(getDb().prepare('SELECT 1 FROM sessions WHERE session_id = ?').get(sessionId))
       .toBeNull();
   });
@@ -913,6 +976,18 @@ describe('host-neutral immediate SQLite ingest', () => {
       INSERT INTO messages (session_id, timestamp, role, content, provenance)
       VALUES ('prior-session', '2026-08-12T09:00:00.000Z', 'user', 'prior', 'verbatim')
     `).run();
+    db.prepare(`
+      INSERT INTO host_ingest_generations
+        (generation_id, source, session_id, created_at, status)
+      VALUES ('pending:high-water', 'grok', 'pending-session', ?, 'pending')
+    `).run(new Date().toISOString());
+    db.prepare(`
+      INSERT INTO host_ingest_generation_messages (
+        generation_id, ordinal, source, session_id, message_key, message_id,
+        timestamp, role, content, provenance, source_position
+      ) VALUES ('pending:high-water', 1, 'grok', 'pending-session', 'native:pending',
+        ?, '2026-08-12T09:30:00.000Z', 'system', 'pending', 'verbatim', 0)
+    `).run(Number(prior.lastInsertRowid) + 1000);
 
     const result = ingestHostTranscriptBatch([{
       source: 'grok',
@@ -974,8 +1049,8 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     expect(reconciled.reconciled).toBeGreaterThan(0);
     const active = getDb().prepare(`
-      SELECT message.content FROM messages AS message
-      JOIN host_ingest_messages AS stored ON stored.message_id = message.id
+      SELECT message.content FROM published_messages AS message
+      JOIN active_host_ingest_messages AS stored ON stored.message_id = message.id
       WHERE stored.source = 'grok' AND stored.session_id = ?
         AND stored.source_position IS NOT NULL
       ORDER BY stored.source_position
@@ -1039,8 +1114,8 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     const db = getDb();
     const originalRows = db.prepare(`
-      SELECT m.id, m.content, h.source_position FROM messages m
-      JOIN host_ingest_messages h ON h.message_id = m.id
+      SELECT m.id, m.content, h.source_position FROM published_messages m
+      JOIN active_host_ingest_messages h ON h.message_id = m.id
       WHERE h.source = 'grok' AND h.session_id = ? AND h.source_position IS NOT NULL
       ORDER BY h.source_position
     `).all(sessionId) as Array<{ id: number; content: string; source_position: number }>;
@@ -1072,8 +1147,8 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(retry).toMatchObject({ inserted: 0, finalized: true });
 
     const rows = db.prepare(`
-      SELECT m.id, m.content FROM messages m
-      JOIN host_ingest_messages h ON h.message_id = m.id
+      SELECT m.id, m.content FROM published_messages m
+      JOIN active_host_ingest_messages h ON h.message_id = m.id
       WHERE h.source = 'grok' AND h.session_id = ? AND h.source_position IS NOT NULL
       ORDER BY h.source_position
     `).all(sessionId) as Array<{ id: number; content: string }>;
@@ -1124,7 +1199,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     })).toThrow(HostIngestCheckpointConflictError);
 
     const rows = getDb()
-      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare('SELECT content FROM published_messages WHERE session_id = ? ORDER BY id')
       .all(sessionId) as Array<{ content: string }>;
     expect(rows.map(row => row.content)).toEqual(['Frame A', '\n\nFrame B']);
   });
@@ -1144,7 +1219,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(ingestHostTranscript(input)).toMatchObject({ inserted: 1 });
 
     const rows = getDb()
-      .prepare('SELECT timestamp FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare('SELECT timestamp FROM published_messages WHERE session_id = ? ORDER BY id')
       .all(input.sessionId) as Array<{ timestamp: string }>;
     expect(rows).toHaveLength(2);
     expect(rows[1].timestamp > rows[0].timestamp).toBe(true);
@@ -1178,7 +1253,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     })).toMatchObject({ inserted: 0, skipped: 2 });
 
     const rows = getDb()
-      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare('SELECT content FROM published_messages WHERE session_id = ? ORDER BY id')
       .all(sessionId) as Array<{ content: string }>;
     expect(rows.map(row => row.content)).toEqual([
       first.content,
@@ -1202,7 +1277,7 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     const db = getDb();
     const rows = db
-      .prepare('SELECT content, provenance FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare('SELECT content, provenance FROM published_messages WHERE session_id = ? ORDER BY id')
       .all('grok-native-456') as Array<{ content: string; provenance: string }>;
     expect(first.ingest).toMatchObject({ inserted: rows.length, finalized: true });
     expect(replay.skipped).toBe('unchanged-transcript');
@@ -1260,7 +1335,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(session.ended_at).not.toBeNull();
 
     const messages = db
-      .prepare('SELECT content, provenance FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare('SELECT content, provenance FROM published_messages WHERE session_id = ? ORDER BY id')
       .all(input.sessionId) as Array<{ content: string; provenance: string }>;
     expect(messages).toHaveLength(2);
     expect(messages[0].content).toContain('[REDACTED:generic-assignment]');
@@ -1282,7 +1357,7 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(
       (
         db
-          .prepare('SELECT COUNT(*) AS count FROM host_ingest_messages WHERE session_id = ?')
+          .prepare('SELECT COUNT(*) AS count FROM active_host_ingest_messages WHERE session_id = ?')
           .get(input.sessionId) as { count: number }
       ).count
     ).toBe(2);
@@ -1310,19 +1385,26 @@ describe('host-neutral immediate SQLite ingest', () => {
 
     const db = getDb();
     const pruned = db.prepare(`
-      SELECT id FROM messages WHERE session_id = ? AND content = ?
+      SELECT id FROM published_messages WHERE session_id = ? AND content = ?
     `).get(input.sessionId, input.messages[1].content) as { id: number };
-    db.prepare('DELETE FROM messages WHERE id = ?').run(pruned.id);
+    db.prepare(`
+      UPDATE host_ingest_generation_messages SET content = NULL WHERE message_id = ?
+    `).run(pruned.id);
     const key = db
-      .prepare('SELECT message_id FROM host_ingest_messages WHERE session_id = ? AND message_id IS NULL')
-      .get(input.sessionId) as { message_id: number | null };
-    expect(key.message_id).toBeNull();
+      .prepare(`
+        SELECT message_id, content FROM host_ingest_generation_messages
+        WHERE session_id = ? AND message_id = ? ORDER BY generation_id DESC LIMIT 1
+      `)
+      .get(input.sessionId, pruned.id) as { message_id: number; content: string | null };
+    expect(key).toEqual({ message_id: pruned.id, content: null });
     const audit = db.prepare(`
-      SELECT message_id, content FROM loa_message_sources
-      WHERE loa_id = ? AND message_id = ?
-    `).get(finalized.loaId!, pruned.id) as { message_id: number; content: string };
+      SELECT message_id, content FROM host_ingest_generation_messages
+      WHERE generation_id = json_extract(
+        (SELECT source_ids FROM loa_entries WHERE id = ?), '$.generation_id'
+      ) AND message_id = ?
+    `).get(finalized.loaId!, pruned.id) as { message_id: number; content: string | null };
     expect(audit.message_id).toBe(pruned.id);
-    expect(audit.content).toBe('');
+    expect(audit.content).toBeNull();
     expect(getLoaMessages(finalized.loaId!).map(message => message.content)).toEqual([
       input.messages[0].content,
       input.messages[2].content,
@@ -1343,9 +1425,11 @@ describe('host-neutral immediate SQLite ingest', () => {
       finalize: true,
     });
     const db = getDb();
-    const rows = db.prepare('SELECT id, content FROM messages WHERE session_id = ? ORDER BY id')
+    const rows = db.prepare('SELECT id, content FROM published_messages WHERE session_id = ? ORDER BY id')
       .all(sessionId) as Array<{ id: number; content: string }>;
-    db.prepare('DELETE FROM messages WHERE id = ?').run(rows[1].id);
+    db.prepare(`
+      UPDATE host_ingest_generation_messages SET content = NULL WHERE message_id = ?
+    `).run(rows[1].id);
     db.prepare(`
       INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
       VALUES ('loa_entries', ?, 'test', 1, ?)

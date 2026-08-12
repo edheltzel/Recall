@@ -85,8 +85,10 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | Table | Purpose | FTS5 Indexed |
 |-------|---------|:---:|
 | sessions | Cross-host session metadata (ID, timestamps, project, branch, source) | No |
-| host_ingest_state | Per-host transcript reference, digest, watermark, and terminal state | No |
+| host_ingest_state | Per-host transcript reference, digest, watermark, active generation, and terminal state | No |
 | host_ingest_messages | Persistent lifecycle message keys linked to inserted message rows | No |
+| host_ingest_generations | Lifecycle generation identity and publication status | No |
+| host_ingest_generation_messages | Scrubbed generation records activated by one checkpoint pointer | No |
 | loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
 | loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
@@ -102,8 +104,10 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 All FTS5-indexed tables have automatic sync triggers.
 
 Portable JSON, Markdown, and SQL exports contain the seven durable memory and
-deduplication tables plus `host_ingest_state`, `host_ingest_messages`, and
-`loa_message_sources`. SQLite exports contain the full database.
+deduplication tables plus `host_ingest_generations`,
+`host_ingest_generation_messages`, `host_ingest_state`,
+`host_ingest_messages`, and `loa_message_sources`. SQLite exports contain the
+full database.
 
 The `importance` column was added in schema migration 7→8 (v0.7.0) on four
 tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1

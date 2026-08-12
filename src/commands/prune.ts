@@ -62,7 +62,7 @@ export function runPrune(options: PruneOptions): void {
   // 2. Sessions: delete orphaned sessions (no messages, no LoA) older than N days
   const sessionCount = countRows(db,
     `SELECT COUNT(*) as count FROM sessions
-     WHERE session_id NOT IN (SELECT DISTINCT session_id FROM messages WHERE session_id IS NOT NULL)
+     WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
      AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
      AND started_at < ${cutoff}`
   );
@@ -139,6 +139,10 @@ export function runPrune(options: PruneOptions): void {
 
   // Execute deletes
   if (messageCount > 0) {
+    db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
+      WHERE message_id IN (
+        SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
+      )`).run();
     db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}
       AND (host_ingest_token IS NULL OR EXISTS (
         SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
@@ -148,7 +152,7 @@ export function runPrune(options: PruneOptions): void {
   if (sessionCount > 0) {
     db.prepare(
       `DELETE FROM sessions
-       WHERE session_id NOT IN (SELECT DISTINCT session_id FROM messages WHERE session_id IS NOT NULL)
+       WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
        AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
        AND started_at < ${cutoff}`
     ).run();

@@ -206,6 +206,12 @@ export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
         for (const chunk of chunked(ids)) {
           const placeholders = chunk.map(() => '?').join(', ');
           db.prepare(`DELETE FROM ${report.table} WHERE id IN (${placeholders})`).run(...chunk);
+          if (report.table === 'messages') {
+            db.prepare(`
+              UPDATE host_ingest_generation_messages SET content = NULL
+              WHERE message_id IN (${placeholders})
+            `).run(...chunk);
+          }
           db.prepare(
             `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`
           ).run(report.table, ...chunk);

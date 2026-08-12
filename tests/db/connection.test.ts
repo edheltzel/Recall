@@ -4,7 +4,14 @@ import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
-import { getDbPath, getDb, initDb, closeDb, getDbStats } from '../../src/db/connection';
+import {
+  getDbPath,
+  getDb,
+  initDb,
+  closeDb,
+  getDbStats,
+  ensurePublishedMessageViews,
+} from '../../src/db/connection';
 import { MIGRATIONS, applyMigrations } from '../../src/db/migrations';
 
 describe('connection', () => {
@@ -196,6 +203,45 @@ describe('connection', () => {
     test('returns a valid Database instance after init', () => {
       const database = getDb();
       expect(database).toBeInstanceOf(Database);
+    });
+
+    test('installs a read-compatible published view without schema writes', () => {
+      const directory = mkdtempSync(join(tmpdir(), 'recall-published-view-'));
+      const path = join(directory, 'legacy.db');
+      const writable = new Database(path);
+      writable.exec(`
+        CREATE TABLE messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          timestamp TEXT NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          host_ingest_token TEXT
+        );
+        CREATE TABLE host_ingest_messages (
+          source TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          message_key TEXT NOT NULL,
+          message_id INTEGER,
+          source_position INTEGER
+        );
+        INSERT INTO messages (session_id, timestamp, role, content)
+        VALUES ('legacy', '2026-08-12T00:00:00.000Z', 'user', 'readable');
+        INSERT INTO messages (session_id, timestamp, role, content, host_ingest_token)
+        VALUES ('legacy', '2026-08-12T00:00:01.000Z', 'system', 'pending', 'shadow');
+        CREATE VIEW published_messages AS SELECT * FROM unavailable_messages;
+      `);
+      writable.close();
+      const readonly = new Database(path, { readonly: true });
+      try {
+        ensurePublishedMessageViews(readonly);
+        expect(readonly.prepare(`
+          SELECT content FROM published_messages
+        `).get()).toEqual({ content: 'readable' });
+      } finally {
+        readonly.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
     });
   });
 

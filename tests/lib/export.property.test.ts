@@ -38,6 +38,8 @@ const ALL_TABLES = [
   'sessions',
   ...PROV_TABLES,
   'dedup_lineage',
+  'host_ingest_generations',
+  'host_ingest_generation_messages',
   'host_ingest_state',
   'host_ingest_messages',
   'loa_message_sources',
@@ -139,6 +141,8 @@ function expectedCount(corpus: GenCorpus, table: string): number {
   if (table === 'dedup_lineage') return corpus.lineage;
   if (
     table === 'host_ingest_state' ||
+    table === 'host_ingest_generations' ||
+    table === 'host_ingest_generation_messages' ||
     table === 'host_ingest_messages' ||
     table === 'loa_message_sources'
   ) return 0;

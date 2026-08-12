@@ -162,14 +162,16 @@ describe('messages — delete (absorbs #38)', () => {
       ],
     });
     const original = getDb().prepare(`
-      SELECT id FROM messages WHERE session_id = ? ORDER BY id
+      SELECT id FROM published_messages WHERE session_id = ? ORDER BY id
     `).all(sessionId) as Array<{ id: number }>;
-    getDb().prepare('UPDATE messages SET importance = 10 WHERE id = ?').run(original[1].id);
+    getDb().prepare(`
+      UPDATE host_ingest_generation_messages SET importance = 10 WHERE message_id = ?
+    `).run(original[1].id);
 
     runAge({ execute: true, table: 'messages' });
 
     const retained = getDb().prepare(`
-      SELECT id FROM messages WHERE session_id = ? ORDER BY id
+      SELECT id FROM published_messages WHERE session_id = ? ORDER BY id
     `).all(sessionId) as Array<{ id: number }>;
     expect(retained).toEqual([{ id: original[1].id }]);
     expect(getDb().prepare(`
@@ -190,7 +192,7 @@ describe('messages — delete (absorbs #38)', () => {
       messages: [{ role: 'assistant', content: 'resumed current turn' }],
     });
     const resumedMessage = getDb().prepare(`
-      SELECT id FROM messages WHERE session_id = ? AND content = ?
+      SELECT id FROM published_messages WHERE session_id = ? AND content = ?
     `).get(sessionId, 'resumed current turn') as { id: number };
 
     expect(resumed.loaId).toBe(initial.loaId);
