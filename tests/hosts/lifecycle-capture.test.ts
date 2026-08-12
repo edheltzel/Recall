@@ -10,7 +10,9 @@ import { parseGrokExport } from '../../src/hosts/grok-lifecycle';
 import {
   createHostIngestBatch,
   getHostIngestCheckpoint,
+  ingestHostTranscriptBatch,
   ingestHostTranscript,
+  mergeHostIngestResults,
   type HostTranscript,
 } from '../../src/lib/host-ingest';
 
@@ -390,6 +392,7 @@ describe('host hook payload routing', () => {
     const grokFinalization: boolean[] = [];
     const grokIncremental: boolean[] = [];
     const grokReconciliation: Array<boolean | undefined> = [];
+    let grokBatchCalls = 0;
     const grokBatches: Array<HostTranscript['batch']> = [];
     const grokChunkSizes: number[] = [];
     const grokSourcePositions: number[] = [];
@@ -405,27 +408,34 @@ describe('host hook payload routing', () => {
           }
           yield Buffer.from(`${'second Grok frame '.repeat(8192)}\n`);
         },
-        ingest: input => {
-          grokFinalization.push(Boolean(input.finalize));
-          grokIncremental.push(Boolean(input.incremental));
-          grokReconciliation.push(input.reconcileComplete);
-          grokBatches.push(input.batch);
-          for (const message of input.messages) {
-            grokChunkSizes.push(Buffer.byteLength(message.content));
-            grokSourcePositions.push(message.sourcePosition ?? -1);
+        ingestBatch: inputs => {
+          grokBatchCalls++;
+          let aggregate: ReturnType<typeof ingestHostTranscript> | undefined;
+          for (const input of inputs) {
+            grokFinalization.push(Boolean(input.finalize));
+            grokIncremental.push(Boolean(input.incremental));
+            grokReconciliation.push(input.reconcileComplete);
+            grokBatches.push(input.batch);
+            for (const message of input.messages) {
+              grokChunkSizes.push(Buffer.byteLength(message.content));
+              grokSourcePositions.push(message.sourcePosition ?? -1);
+            }
+            aggregate = mergeHostIngestResults(aggregate, {
+              sessionId: input.sessionId,
+              inserted: input.messages.length,
+              skipped: 0,
+              finalized: Boolean(input.finalize),
+              redactions: [],
+              digest: `${input.messages.length}`,
+            });
           }
-          return {
-            sessionId: input.sessionId,
-            inserted: input.messages.length,
-            skipped: 0,
-            finalized: Boolean(input.finalize),
-            redactions: [],
-            digest: `${input.messages.length}`,
-          };
+          if (!aggregate) throw new Error('Expected Grok batch inputs');
+          return aggregate;
         },
       }
     );
     expect(grok.ingest).toMatchObject({ inserted: 2, finalized: true });
+    expect(grokBatchCalls).toBe(1);
     expect(grokFinalization).toEqual([false, true]);
     expect(grokIncremental).toEqual([false, false]);
     expect(grokReconciliation).toEqual([false, true]);
@@ -689,7 +699,7 @@ describe('host hook payload routing', () => {
 });
 
 describe('host-neutral immediate SQLite ingest', () => {
-  test('defers reset checkpoints until Grok reconciliation completes', () => {
+  test('rolls back every Grok reset mutation when its batch is interrupted', () => {
     const sessionId = 'grok-interrupted-reset';
     const transcriptRef = 'grok export';
     const initialBatch = createHostIngestBatch();
@@ -709,22 +719,54 @@ describe('host-neutral immediate SQLite ingest', () => {
     });
     expect(initial).toMatchObject({ inserted: 2, finalized: true });
 
-    ingestHostTranscript({
-      source: 'grok',
-      sessionId,
-      transcriptRef,
-      watermark: 'bytes:7:rolling:3333333344444444',
-      messages: [{ role: 'system', content: 'Frame B', sourcePosition: 0 }],
-      incremental: false,
-      reconcileComplete: false,
-      batch: createHostIngestBatch(),
-    });
+    const interruptedBatch = createHostIngestBatch();
+    const interruptedReset = function* (): Generator<HostTranscript> {
+      yield {
+        source: 'grok',
+        sessionId,
+        transcriptRef,
+        watermark: 'bytes:14:rolling:3333333344444444',
+        messages: [
+          {
+            role: 'system',
+            content: 'Frame B updated',
+            identityContent: 'Frame B',
+            sourcePosition: 0,
+          },
+          { role: 'system', content: 'Frame C', sourcePosition: 7 },
+        ],
+        incremental: false,
+        reconcileComplete: false,
+        batch: interruptedBatch,
+      };
+      throw new Error('reset interrupted');
+    };
+    expect(() => ingestHostTranscriptBatch(interruptedReset())).toThrow('reset interrupted');
+
+    const db = getDb();
+    const originalRows = db.prepare(`
+      SELECT m.id, m.content, h.source_position FROM messages m
+      JOIN host_ingest_messages h ON h.message_id = m.id
+      WHERE h.source = 'grok' AND h.session_id = ? AND h.source_position IS NOT NULL
+      ORDER BY h.source_position
+    `).all(sessionId) as Array<{ id: number; content: string; source_position: number }>;
+    const originalLoa = db.prepare('SELECT source_ids FROM loa_entries WHERE session_id = ?')
+      .get(sessionId) as { source_ids: string };
+
+    expect(originalRows.map(row => [row.content, row.source_position])).toEqual([
+      ['Frame A\n\n', 0],
+      ['Frame B', 9],
+    ]);
+    expect(JSON.parse(originalLoa.source_ids)).toEqual(
+      originalRows.map(row => ({ table: 'messages', id: row.id }))
+    );
     expect(getHostIngestCheckpoint('grok', sessionId)).toMatchObject({
       watermark: 'bytes:16:rolling:1111111122222222',
       finalized: true,
     });
 
-    const retry = ingestHostTranscript({
+    const retryBatch = createHostIngestBatch();
+    const retry = ingestHostTranscriptBatch([{
       source: 'grok',
       sessionId,
       transcriptRef,
@@ -733,11 +775,10 @@ describe('host-neutral immediate SQLite ingest', () => {
       incremental: false,
       reconcileComplete: true,
       finalize: true,
-      batch: createHostIngestBatch(),
-    });
+      batch: retryBatch,
+    }]);
     expect(retry).toMatchObject({ inserted: 0, finalized: true });
 
-    const db = getDb();
     const rows = db.prepare(`
       SELECT m.id, m.content FROM messages m
       JOIN host_ingest_messages h ON h.message_id = m.id

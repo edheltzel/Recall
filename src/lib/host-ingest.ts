@@ -56,6 +56,23 @@ export interface HostIngestResult {
   digest: string;
 }
 
+export function mergeHostIngestResults(
+  current: HostIngestResult | undefined,
+  next: HostIngestResult
+): HostIngestResult {
+  if (!current) return next;
+  return {
+    sessionId: next.sessionId,
+    inserted: current.inserted + next.inserted,
+    reconciled: (current.reconciled ?? 0) + (next.reconciled ?? 0),
+    skipped: current.skipped + next.skipped,
+    finalized: current.finalized || next.finalized,
+    loaId: next.loaId ?? current.loaId,
+    redactions: [...new Set([...current.redactions, ...next.redactions])],
+    digest: next.digest,
+  };
+}
+
 export interface HostIngestCheckpoint {
   transcriptRef?: string;
   watermark?: string;
@@ -584,54 +601,77 @@ function persistIngestState(
  * before hashing or writing, preserves native session IDs, records source and
  * project attribution, and makes repeated overlapping hooks idempotent.
  */
-export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
+function ingestHostTranscriptInTransaction(
+  db: Database,
+  input: HostTranscript
+): HostIngestResult {
   assertSessionId(input.sessionId);
   const prepared = prepareTranscript(input);
-  const db = getDb();
+  assertSessionOwnership(db, input);
+  const previous = getIngestState(db, input);
+  upsertSession(db, input, prepared);
+  const mutations = insertNewMessages(db, input, prepared);
+  const reconciliationComplete = input.source === 'grok' &&
+    !input.incremental &&
+    (input.reconcileComplete ?? true);
+  const emptyReconciliation = reconciliationComplete &&
+    (input.batch?.seenMessageKeys.size ?? prepared.messages.length) === 0;
+  const resumed = (
+    mutations.inserted > 0 || mutations.reconciled > 0 || reconciliationComplete
+  ) &&
+    Boolean(previous?.finalized_at);
+  const checkpointReady = input.reconcileComplete !== false;
+  if (resumed && !input.finalize && checkpointReady) {
+    db.prepare('UPDATE sessions SET ended_at = NULL WHERE session_id = ?').run(input.sessionId);
+  }
+  const session = db
+    .prepare('SELECT project FROM sessions WHERE session_id = ?')
+    .get(input.sessionId) as { project: string | null };
+  const terminal = finalizeSession(
+    db,
+    input,
+    session.project ?? undefined,
+    !previous?.finalized_at || resumed,
+    emptyReconciliation
+  );
+  if (checkpointReady) {
+    persistIngestState(db, input, prepared, previous, terminal.finalized, resumed);
+  }
 
+  return {
+    sessionId: input.sessionId,
+    inserted: mutations.inserted,
+    reconciled: mutations.reconciled,
+    skipped: prepared.messages.length - mutations.inserted,
+    finalized: terminal.finalized,
+    loaId: terminal.loaId,
+    redactions: [...prepared.redactions],
+    digest: prepared.digest,
+  };
+}
+
+export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
+  const db = getDb();
+  return db
+    .transaction(() => ingestHostTranscriptInTransaction(db, input))
+    .immediate();
+}
+
+export function ingestHostTranscriptBatch(
+  inputs: Iterable<HostTranscript>
+): HostIngestResult {
+  const db = getDb();
   return db
     .transaction(() => {
-      assertSessionOwnership(db, input);
-      const previous = getIngestState(db, input);
-      upsertSession(db, input, prepared);
-      const mutations = insertNewMessages(db, input, prepared);
-      const reconciliationComplete = input.source === 'grok' &&
-        !input.incremental &&
-        (input.reconcileComplete ?? true);
-      const emptyReconciliation = reconciliationComplete &&
-        (input.batch?.seenMessageKeys.size ?? prepared.messages.length) === 0;
-      const resumed = (
-        mutations.inserted > 0 || mutations.reconciled > 0 || reconciliationComplete
-      ) &&
-        Boolean(previous?.finalized_at);
-      const checkpointReady = input.reconcileComplete !== false;
-      if (resumed && !input.finalize && checkpointReady) {
-        db.prepare('UPDATE sessions SET ended_at = NULL WHERE session_id = ?').run(input.sessionId);
+      let aggregate: HostIngestResult | undefined;
+      for (const input of inputs) {
+        aggregate = mergeHostIngestResults(
+          aggregate,
+          ingestHostTranscriptInTransaction(db, input)
+        );
       }
-      const session = db
-        .prepare('SELECT project FROM sessions WHERE session_id = ?')
-        .get(input.sessionId) as { project: string | null };
-      const terminal = finalizeSession(
-        db,
-        input,
-        session.project ?? undefined,
-        !previous?.finalized_at || resumed,
-        emptyReconciliation
-      );
-      if (checkpointReady) {
-        persistIngestState(db, input, prepared, previous, terminal.finalized, resumed);
-      }
-
-      return {
-        sessionId: input.sessionId,
-        inserted: mutations.inserted,
-        reconciled: mutations.reconciled,
-        skipped: prepared.messages.length - mutations.inserted,
-        finalized: terminal.finalized,
-        loaId: terminal.loaId,
-        redactions: [...prepared.redactions],
-        digest: prepared.digest,
-      };
+      if (!aggregate) throw new Error('Host transcript batch must not be empty');
+      return aggregate;
     })
     .immediate();
 }
