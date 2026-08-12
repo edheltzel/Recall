@@ -10,6 +10,7 @@ import { parseGrokExport } from '../../src/hosts/grok-lifecycle';
 import {
   createHostIngestBatch,
   getHostIngestCheckpoint,
+  HostIngestCheckpointConflictError,
   ingestHostTranscriptBatch,
   ingestHostTranscript,
   mergeHostIngestResults,
@@ -658,9 +659,15 @@ describe('host hook payload routing', () => {
     expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 1 });
     markdown = 'Frame A\n\nFrame B';
     expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 1 });
+    getDb().prepare(`
+      UPDATE host_ingest_state SET watermark = ? WHERE source = 'grok' AND session_id = ?
+    `).run(
+      `bytes:${Buffer.byteLength(markdown)}:rolling:0000000000000000`,
+      payload.session_id
+    );
     expect((await handleGrokHostHook(
       { ...payload, hook_event_name: 'PreCompact' },
-      { ...dependencies, checkpoint: () => undefined }
+      dependencies
     )).ingest).toMatchObject({ inserted: 0, skipped: 2 });
 
     const rows = getDb()
@@ -696,9 +703,64 @@ describe('host hook payload routing', () => {
     expect(loa.fabric_extract).toContain('Frame B');
     expect(loa.fabric_extract).not.toContain('Frame A');
   });
+
+  test('recomputes Grok capture after a checkpoint conflict', async () => {
+    const markdown = 'Frame A\n\nFrame B';
+    await handleGrokHostHook(
+      { hook_event_name: 'SessionEnd', session_id: 'grok-checkpoint-source' },
+      { exportGrok: () => markdown }
+    );
+    const advanced = getHostIngestCheckpoint('grok', 'grok-checkpoint-source');
+    let checkpointReads = 0;
+    let batchCalls = 0;
+    let exports = 0;
+
+    const result = await handleGrokHostHook(
+      { hook_event_name: 'Stop', session_id: 'grok-checkpoint-retry' },
+      {
+        exportGrok: () => {
+          exports++;
+          return markdown;
+        },
+        checkpoint: () => checkpointReads++ === 0 ? undefined : advanced,
+        ingestBatch: () => {
+          batchCalls++;
+          throw new HostIngestCheckpointConflictError('grok', 'grok-checkpoint-retry');
+        },
+      }
+    );
+
+    expect(result).toEqual({ skipped: 'unchanged-transcript' });
+    expect(exports).toBe(2);
+    expect(checkpointReads).toBe(2);
+    expect(batchCalls).toBe(1);
+  });
 });
 
 describe('host-neutral immediate SQLite ingest', () => {
+  test('prepares scrubbed host batches before acquiring the write lock', () => {
+    const db = getDb();
+    let contentReads = 0;
+    const message = {
+      role: 'system' as const,
+      get content() {
+        contentReads++;
+        expect(db.inTransaction).toBe(false);
+        return 'password=abcdefghijk';
+      },
+    };
+
+    const result = ingestHostTranscriptBatch([{
+      source: 'grok',
+      sessionId: 'grok-prepared-before-lock',
+      messages: [message],
+      batch: createHostIngestBatch(),
+    }]);
+
+    expect(contentReads).toBeGreaterThan(0);
+    expect(result.redactions).toContain('generic-assignment');
+  });
+
   test('rolls back every Grok reset mutation when its batch is interrupted', () => {
     const sessionId = 'grok-interrupted-reset';
     const transcriptRef = 'grok export';
@@ -720,8 +782,8 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(initial).toMatchObject({ inserted: 2, finalized: true });
 
     const interruptedBatch = createHostIngestBatch();
-    const interruptedReset = function* (): Generator<HostTranscript> {
-      yield {
+    const interruptedReset: HostTranscript[] = [
+      {
         source: 'grok',
         sessionId,
         transcriptRef,
@@ -738,10 +800,16 @@ describe('host-neutral immediate SQLite ingest', () => {
         incremental: false,
         reconcileComplete: false,
         batch: interruptedBatch,
-      };
-      throw new Error('reset interrupted');
-    };
-    expect(() => ingestHostTranscriptBatch(interruptedReset())).toThrow('reset interrupted');
+      },
+      {
+        source: 'codex',
+        sessionId,
+        transcriptRef,
+        watermark: 'bytes:14:rolling:3333333344444444',
+        messages: [],
+      },
+    ];
+    expect(() => ingestHostTranscriptBatch(interruptedReset)).toThrow('already owned by grok');
 
     const db = getDb();
     const originalRows = db.prepare(`
@@ -796,6 +864,47 @@ describe('host-neutral immediate SQLite ingest', () => {
       watermark: 'bytes:7:rolling:5555555566666666',
       finalized: true,
     });
+  });
+
+  test('rejects a stale Grok checkpoint before publishing duplicate suffixes', () => {
+    const sessionId = 'grok-stale-checkpoint';
+    const transcriptRef = 'grok export';
+    ingestHostTranscript({
+      source: 'grok',
+      sessionId,
+      transcriptRef,
+      watermark: 'bytes:7:rolling:1111111122222222',
+      messages: [{ role: 'system', content: 'Frame A', sourcePosition: 0 }],
+      incremental: false,
+      reconcileComplete: true,
+      batch: createHostIngestBatch(),
+    });
+    const stale = getHostIngestCheckpoint('grok', sessionId);
+    const suffix = (): HostTranscript => ({
+      source: 'grok',
+      sessionId,
+      transcriptRef,
+      watermark: 'bytes:16:rolling:3333333344444444',
+      messages: [{ role: 'system', content: '\n\nFrame B', sourcePosition: 7 }],
+      incremental: true,
+      batch: createHostIngestBatch(),
+    });
+
+    expect(ingestHostTranscriptBatch([suffix()], {
+      source: 'grok',
+      sessionId,
+      checkpoint: stale,
+    })).toMatchObject({ inserted: 1 });
+    expect(() => ingestHostTranscriptBatch([suffix()], {
+      source: 'grok',
+      sessionId,
+      checkpoint: stale,
+    })).toThrow(HostIngestCheckpointConflictError);
+
+    const rows = getDb()
+      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(sessionId) as Array<{ content: string }>;
+    expect(rows.map(row => row.content)).toEqual(['Frame A', '\n\nFrame B']);
   });
 
   test('shares fallback occurrences across reset batch chunks', () => {

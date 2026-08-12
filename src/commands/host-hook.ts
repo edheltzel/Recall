@@ -16,6 +16,7 @@ import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport } from '../hosts/grok-lifecycle.js';
 import {
   createHostIngestBatch,
+  HostIngestCheckpointConflictError,
   ingestHostTranscriptBatch,
   ingestHostTranscript,
   getHostIngestCheckpoint,
@@ -30,6 +31,7 @@ const MAX_HOOK_INPUT_BYTES = 1024 * 1024;
 const MAX_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
 const HASH_READ_BYTES = 1024 * 1024;
 const GROK_EXPORT_TIMEOUT_MS = 45_000;
+const GROK_CHECKPOINT_ATTEMPTS = 3;
 const ROLLING_SEEDS = [0x811c9dc5, 0x9e3779b9] as const;
 const ROLLING_FACTORS = [0x01000193, 0x27d4eb2d] as const;
 
@@ -367,7 +369,8 @@ function ingestStagedGrokExport(
 ): HostHookResult {
   const transcriptRef = 'grok export';
   const ingest = dependencies.ingest ?? ingestHostTranscript;
-  const ingestBatch = dependencies.ingestBatch ?? (dependencies.ingest
+  const ingestBatch: typeof ingestHostTranscriptBatch = dependencies.ingestBatch ??
+    (dependencies.ingest
     ? (inputs: Iterable<HostTranscript>) => {
         let aggregate: HostIngestResult | undefined;
         for (const input of inputs) {
@@ -410,7 +413,11 @@ function ingestStagedGrokExport(
       batch,
     };
     return {
-      ingest: incremental ? ingest(input) : ingestBatch([input]),
+      ingest: ingestBatch([input], {
+        source: 'grok',
+        sessionId: request.sessionId,
+        checkpoint: previous,
+      }),
     };
   }
 
@@ -440,13 +447,13 @@ function ingestStagedGrokExport(
       };
     }
   };
-  if (!incremental) return { ingest: ingestBatch(inputs()) };
-
-  let aggregate: HostIngestResult | undefined;
-  for (const input of inputs()) {
-    aggregate = mergeHostIngestResults(aggregate, ingest(input));
-  }
-  return { ingest: aggregate };
+  return {
+    ingest: ingestBatch(inputs(), {
+      source: 'grok',
+      sessionId: request.sessionId,
+      checkpoint: previous,
+    }),
+  };
 }
 
 export async function handleGrokHostHook(
@@ -456,13 +463,21 @@ export async function handleGrokHostHook(
   if (payloadIsSubagent(payload) && !includeSubagents()) return { skipped: 'subagent' };
   const request = grokHookRequest(payload);
   if ('skipped' in request) return request;
-  const staged = await stageGrokExport(grokExportStream(request.sessionId, dependencies));
-  try {
-    return ingestStagedGrokExport(request, dependencies, staged);
-  } finally {
-    closeSync(staged.fd);
-    rmSync(staged.directory, { recursive: true, force: true });
+  for (let attempt = 0; attempt < GROK_CHECKPOINT_ATTEMPTS; attempt++) {
+    const staged = await stageGrokExport(grokExportStream(request.sessionId, dependencies));
+    try {
+      return ingestStagedGrokExport(request, dependencies, staged);
+    } catch (error) {
+      if (!(error instanceof HostIngestCheckpointConflictError) ||
+        attempt === GROK_CHECKPOINT_ATTEMPTS - 1) {
+        throw error;
+      }
+    } finally {
+      closeSync(staged.fd);
+      rmSync(staged.directory, { recursive: true, force: true });
+    }
   }
+  throw new Error('Grok checkpoint retry exhausted');
 }
 
 function renderRecallContext(): string {
