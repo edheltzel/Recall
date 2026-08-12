@@ -216,7 +216,7 @@ The current Claude lifecycle adapter tries Claude Haiku first and falls back to 
 
 - **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `recall decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
 - **Breadcrumb sweep** — at session start, the `RecallStart` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
-- **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window, breadcrumbs below an importance threshold, and orphaned embeddings with no parent row. Prune is always dry-run by default; pass `--execute` to commit changes.
+- **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window and breadcrumbs below an importance threshold, with transactional embedding cleanup for deleted sources. Legacy orphan embeddings are handled by `recall repair --execute`. Prune is always dry-run by default; pass `--execute` to commit changes.
 
 - **WAL mode** for concurrent reads (no locking during MCP queries)
 - **FTS5** full-text search with automatic sync triggers

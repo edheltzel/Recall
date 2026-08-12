@@ -65,6 +65,32 @@ function rowExists(table: string, id: number): boolean {
 }
 
 describe('prune respects dedup survivors (#80)', () => {
+  test('retains lifecycle-owned sessions with active generations', () => {
+    const db = getDb();
+    const sessionId = 'old-active-lifecycle-session';
+    const generationId = 'active-generation-for-old-session';
+    createSession({ session_id: sessionId, started_at: OLD, source: 'grok' });
+    db.prepare(`
+      INSERT INTO host_ingest_generations (
+        generation_id, source, session_id, created_at, ready, status
+      ) VALUES (?, 'grok', ?, ?, 1, 'active')
+    `).run(generationId, sessionId, OLD);
+    db.prepare(`
+      INSERT INTO host_ingest_state (
+        source, session_id, transcript_digest, active_generation, updated_at
+      ) VALUES ('grok', ?, 'empty-export', ?, ?)
+    `).run(sessionId, generationId, OLD);
+
+    runPrune({ execute: true });
+
+    expect(db.prepare('SELECT 1 AS present FROM sessions WHERE session_id = ?').get(sessionId))
+      .toEqual({ present: 1 });
+    expect(db.prepare('SELECT active_generation FROM host_ingest_state WHERE session_id = ?')
+      .get(sessionId)).toEqual({ active_generation: generationId });
+    expect(db.prepare('SELECT status FROM host_ingest_generations WHERE generation_id = ?')
+      .get(generationId)).toEqual({ status: 'active' });
+  });
+
   test('prunes automatic lifecycle range endpoints and scrubs exact lineage', () => {
     const sessionId = 'old-lifecycle-session';
     const result = ingestHostTranscript({

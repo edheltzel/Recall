@@ -242,4 +242,59 @@ describe('portable explicit session dump', () => {
       ).count
     ).toBe(1);
   });
+
+  test('rolls back explicit LoA updates when embedding invalidation fails', async () => {
+    const sessionId = 'codex-explicit-atomic-update';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [{ role: 'user', content: 'Keep this explicit snapshot atomic.' }],
+    });
+    const options = {
+      skipFabric: true,
+      skipEmbed: true,
+      session: {
+        source: 'codex' as const,
+        sessionId,
+        project: 'recall-test',
+        filePath: `mcp://codex/${sessionId}`,
+        messages: [{
+          session_id: sessionId,
+          timestamp: '2026-08-12T12:00:00.000Z',
+          role: 'assistant' as const,
+          content: 'Explicit content whose LoA is embedded.',
+          project: 'recall-test',
+        }],
+      },
+    };
+    const first = await coreDump('Original explicit title', options);
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('loa_entries', ?, 'test', 1, ?)
+    `).run(first.loaId!, Buffer.alloc(4));
+    db.exec(`
+      CREATE TRIGGER reject_explicit_loa_embedding_delete
+      BEFORE DELETE ON embeddings
+      WHEN old.source_table = 'loa_entries' AND old.source_id = ${first.loaId!}
+      BEGIN
+        SELECT RAISE(ABORT, 'embedding invalidation rejected');
+      END;
+    `);
+
+    try {
+      await expect(coreDump('Replacement explicit title', options)).rejects.toThrow(
+        'embedding invalidation rejected'
+      );
+    } finally {
+      db.exec('DROP TRIGGER reject_explicit_loa_embedding_delete');
+    }
+
+    expect(db.prepare('SELECT title FROM loa_entries WHERE id = ?').get(first.loaId!))
+      .toEqual({ title: 'Original explicit title' });
+    expect(db.prepare(`
+      SELECT 1 AS present FROM embeddings
+      WHERE source_table = 'loa_entries' AND source_id = ?
+    `).get(first.loaId!)).toEqual({ present: 1 });
+  });
 });

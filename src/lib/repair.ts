@@ -9,8 +9,8 @@
 // - Repair never changes Record Provenance — no repair statement writes a
 //   source-table column. FTS rebuild regenerates index shadow tables from
 //   the source rows; re-embed only inserts into the embeddings table.
-// - Repair never hard-deletes rows. Orphan/invariant findings are
-//   report-only — every check is named in code and covered by tests.
+// - Repair never hard-deletes source records. Orphan embeddings are safe to
+//   remove because their referenced record no longer exists.
 // - Initial repair scope is limited to unambiguous maintenance: FTS5
 //   rebuild (including recreating a missing index from the canonical
 //   schema DDL) and re-embedding rows missing embeddings. No heuristic
@@ -34,7 +34,11 @@ import {
   type LifecycleSearchReadiness,
 } from './lifecycle-search.js';
 import { tableExists } from '../db/introspection.js';
-import { upsertEmbedding } from './embedding-store.js';
+import { isVecAvailable, reindexVec } from '../db/vec.js';
+import {
+  deleteEmbeddingsByWhereInTransaction,
+  upsertEmbedding,
+} from './embedding-store.js';
 
 /** Source tables carrying an FTS5 index — derived from the schema map. */
 export const FTS_SOURCES = Object.keys(FTS_SCHEMA);
@@ -294,7 +298,7 @@ export function countEmbedGaps(db: Database, config: EmbedSourceConfig): EmbedGa
 }
 
 // ---------------------------------------------------------------------------
-// Orphan / invariant checks — report-only, never repaired automatically
+// Orphan / invariant checks and explicit orphan-embedding cleanup
 // ---------------------------------------------------------------------------
 
 export interface OrphanReport {
@@ -323,9 +327,7 @@ function orphanCheckDefs(): OrphanCheckDef[] {
 
   // Embeddings whose source row no longer exists.
   for (const table of FTS_SOURCES) {
-    const sourceTable = publishedRecordTable(table);
-    const where = `e.source_table = '${table}'
-      AND NOT EXISTS (SELECT 1 FROM ${sourceTable} t WHERE t.id = e.source_id)`;
+    const where = orphanedEmbeddingWhere(table, 'e');
     defs.push({
       check: `orphaned-embeddings:${table}`,
       description: `embeddings rows pointing at deleted ${table} rows`,
@@ -399,6 +401,57 @@ function orphanCheckDefs(): OrphanCheckDef[] {
   });
 
   return defs;
+}
+
+function orphanedEmbeddingWhere(table: string, alias: string): string {
+  const sourceTable = publishedRecordTable(table);
+  return `${alias}.source_table = '${table}'
+      AND NOT EXISTS (SELECT 1 FROM ${sourceTable} t WHERE t.id = ${alias}.source_id)`;
+}
+
+function repairableOrphanEmbeddingWhere(table?: string): string {
+  if (table) return orphanedEmbeddingWhere(table, 'embeddings');
+  const knownList = FTS_SOURCES.map(source => `'${source}'`).join(', ');
+  const missingSources = FTS_SOURCES.map(source =>
+    `(${orphanedEmbeddingWhere(source, 'embeddings')})`
+  ).join(' OR ');
+  return `(${missingSources}) OR embeddings.source_table NOT IN (${knownList})`;
+}
+
+export interface OrphanEmbeddingRepairResult {
+  removed: number;
+  vectorReindexed: boolean;
+  vectorRows: number | null;
+  vectorError?: string;
+}
+
+export function applyOrphanEmbeddingRepair(
+  db: Database,
+  table?: string
+): OrphanEmbeddingRepairResult {
+  const removed = db.transaction(() =>
+    deleteEmbeddingsByWhereInTransaction(
+      db,
+      repairableOrphanEmbeddingWhere(table)
+    )
+  )();
+  if (removed === 0 || !isVecAvailable()) {
+    return { removed, vectorReindexed: false, vectorRows: null };
+  }
+  try {
+    return {
+      removed,
+      vectorReindexed: true,
+      vectorRows: reindexVec(db),
+    };
+  } catch (error) {
+    return {
+      removed,
+      vectorReindexed: false,
+      vectorRows: null,
+      vectorError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function checkOrphans(db: Database): OrphanReport[] {

@@ -18,11 +18,13 @@ import {
 import {
   applyEmbedRepair,
   applyFtsRepair,
+  applyOrphanEmbeddingRepair,
   FTS_SOURCES,
   planRepair,
   type EmbedFn,
   type EmbedRepairResult,
   type FtsRepairResult,
+  type OrphanEmbeddingRepairResult,
   type RepairPlan,
 } from '../lib/repair.js';
 
@@ -49,6 +51,7 @@ export interface RepairRunResult {
   /** Why the embedding pass did not run, or null if it ran. */
   embedSkipped: string | null;
   lifecycle: LifecycleSearchReadiness | null;
+  orphanEmbeddings: OrphanEmbeddingRepairResult | null;
 }
 
 const DEFAULT_DEPS: RepairDeps = { checkService: checkEmbeddingService, embedFn: embed };
@@ -168,8 +171,27 @@ export async function runRepair(
   }
   console.log('');
 
-  // ── Orphans / invariants (report-only) ───────────────────────
-  console.log('Orphans / invariants (report-only, never repaired automatically):');
+  const orphanEmbeddingWork = plan.orphans
+    .filter(orphan =>
+      !orphan.error && (
+        orphan.check === `orphaned-embeddings:${target}` ||
+        (target === 'all' && (
+          orphan.check.startsWith('orphaned-embeddings:') ||
+          orphan.check === 'unknown-embedding-source'
+        ))
+      )
+    )
+    .reduce((sum, orphan) => sum + orphan.count, 0);
+  let orphanEmbeddings: OrphanEmbeddingRepairResult | null = null;
+  if (execute && orphanEmbeddingWork > 0) {
+    orphanEmbeddings = applyOrphanEmbeddingRepair(
+      db,
+      target === 'all' ? undefined : target
+    );
+  }
+
+  // ── Orphans / invariants ─────────────────────────────────────
+  console.log('Orphans / invariants:');
   if (plan.orphans.length === 0) {
     console.log('  None found.');
   } else {
@@ -179,6 +201,21 @@ export async function runRepair(
       } else {
         const sample = orphan.sample.length > 0 ? ` — ${orphan.sample.join(', ')}` : '';
         console.log(`  ${orphan.check}: ${orphan.count} (${orphan.description})${sample}`);
+      }
+    }
+  }
+  if (orphanEmbeddingWork > 0) {
+    if (!execute) {
+      console.log(`  ${orphanEmbeddingWork} orphan embedding(s) would be removed.`);
+    } else if (orphanEmbeddings) {
+      console.log(`  Removed ${orphanEmbeddings.removed} orphan embedding(s).`);
+      if (orphanEmbeddings.vectorError) {
+        console.error(`  FAILED vector reindex: ${orphanEmbeddings.vectorError}`);
+        process.exitCode = 1;
+      } else if (orphanEmbeddings.vectorReindexed) {
+        console.log(`  Reindexed ${orphanEmbeddings.vectorRows} vector row(s).`);
+      } else {
+        console.log('  Vector index marked for rebuild on the next available vector query.');
       }
     }
   }
@@ -199,12 +236,19 @@ export async function runRepair(
     const ftsWork = plan.fts.filter(f => f.action === 'rebuild' || f.action === 'create-and-rebuild').length;
     const embedWork = plan.embedGaps.reduce((sum, g) => sum + (g.missing - g.tooShort), 0);
     const lifecycleWork = lifecycle?.status === 'retryable';
-    if (ftsWork > 0 || embedWork > 0 || lifecycleWork) {
+    if (ftsWork > 0 || embedWork > 0 || lifecycleWork || orphanEmbeddingWork > 0) {
       console.log("Re-run with --execute to apply repairs. Recommended: 'recall export --backup' first.");
     } else {
       console.log('Nothing to repair.');
     }
   }
 
-  return { plan, fts: ftsResult, embeddings: embedResult, embedSkipped, lifecycle };
+  return {
+    plan,
+    fts: ftsResult,
+    embeddings: embedResult,
+    embedSkipped,
+    lifecycle,
+    orphanEmbeddings,
+  };
 }

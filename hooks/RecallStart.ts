@@ -102,9 +102,44 @@ function sweepExpiredBreadcrumbs(): void {
     const dbPath = getDbPath();
     if (!existsSync(dbPath)) return;
     const db = new Database(dbPath);
-    db.prepare('PRAGMA journal_mode = WAL').run();
-    db.prepare("DELETE FROM breadcrumbs WHERE expires_at IS NOT NULL AND expires_at < datetime('now')").run();
-    db.close();
+    try {
+      db.prepare('PRAGMA journal_mode = WAL').run();
+      db.prepare('PRAGMA busy_timeout = 5000').run();
+      const sweep = db.transaction(() => {
+        const expiredWhere = `expires_at IS NOT NULL AND expires_at < datetime('now')`;
+        const tables = new Set(
+          (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>)
+            .map(row => row.name)
+        );
+        if (tables.has('embeddings')) {
+          const removed = db.prepare(`
+            DELETE FROM embeddings
+            WHERE source_table = 'breadcrumbs'
+              AND source_id IN (
+                SELECT id FROM breadcrumbs
+                WHERE ${expiredWhere}
+              )
+          `).run().changes;
+          if (removed > 0 && tables.has('schema_meta') && !db.prepare(
+            `SELECT 1 FROM schema_meta WHERE key = 'vec_index_dirty'`
+          ).get()) {
+            db.prepare(`
+              INSERT INTO schema_meta (key, value) VALUES
+                ('vec_index_dirty', '1'), ('vec_index_generation', '1')
+              ON CONFLICT(key) DO UPDATE SET value = CASE
+                WHEN key = 'vec_index_generation'
+                  THEN CAST(schema_meta.value AS INTEGER) + 1
+                ELSE '1'
+              END
+            `).run();
+          }
+        }
+        db.prepare(`DELETE FROM breadcrumbs WHERE ${expiredWhere}`).run();
+      });
+      sweep.immediate();
+    } finally {
+      db.close();
+    }
   } catch {
     // Non-fatal best-effort cleanup
   }

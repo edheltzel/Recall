@@ -75,6 +75,18 @@ export function deleteRecordEmbeddingsBySelectionInTransaction(
   return finishEmbeddingDeletion(db, changes);
 }
 
+export function deleteEmbeddingsByWhereInTransaction(
+  db: Database,
+  whereSql: string,
+  params: Array<string | number> = []
+): number {
+  ensureEmbeddingCleanupReady(db);
+  const removed = db.prepare(
+    `DELETE FROM embeddings WHERE ${whereSql} RETURNING id`
+  ).all(...params).length;
+  return finishEmbeddingDeletion(db, removed);
+}
+
 function acknowledgeLifecycleInvalidation(
   db: Database,
   sourceTable: string,
