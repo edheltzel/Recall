@@ -142,11 +142,13 @@ function updateByteDigest(digest: [number, number], raw: Buffer): void {
 
 function digestPrefix(
   end: number,
-  read: (start: number, length: number) => Buffer
+  read: (start: number, length: number) => Buffer,
+  deadline?: number
 ): [number, number] {
   const digest: [number, number] = [ROLLING_SEEDS[0], ROLLING_SEEDS[1]];
   let cursor = 0;
   while (cursor < end) {
+    assertGrokDeadline(deadline);
     const length = Math.min(HASH_READ_BYTES, end - cursor);
     const raw = read(cursor, length);
     if (raw.length !== length) throw new Error('Transcript read returned incomplete data');
@@ -166,7 +168,8 @@ function byteCapture(
   transcriptRef: string,
   size: number,
   read: (start: number, length: number) => Buffer,
-  validatePrefix: boolean
+  validatePrefix: boolean,
+  deadline?: number
 ): { start: number; digest: [number, number]; reset: boolean } {
   const previous = byteCheckpoint(checkpoint, transcriptRef);
   if (previous && previous.size <= size) {
@@ -177,7 +180,7 @@ function byteCapture(
         reset: false,
       };
     }
-    const digest = digestPrefix(previous.size, read);
+    const digest = digestPrefix(previous.size, read, deadline);
     if (digest[0] === previous.digest[0] && digest[1] === previous.digest[1]) {
       return { start: previous.size, digest, reset: false };
     }
@@ -194,10 +197,12 @@ function* boundedTranscriptChunks(
   size: number,
   read: (start: number, length: number) => Buffer,
   digest: [number, number],
-  boundary: (raw: Buffer) => number = raw => raw.lastIndexOf(0x0a) + 1
+  boundary: (raw: Buffer) => number = raw => raw.lastIndexOf(0x0a) + 1,
+  deadline?: number
 ): Generator<{ start: number; end: number; raw: Buffer; watermark: string }> {
   let cursor = start;
   while (cursor < size) {
+    assertGrokDeadline(deadline);
     const length = Math.min(MAX_TRANSCRIPT_BYTES, size - cursor);
     let raw = read(cursor, length);
     if (raw.length !== length) throw new Error('Transcript read returned incomplete data');
@@ -353,8 +358,15 @@ function grokExportAttemptTimeout(deadline: number, attemptsRemaining: number): 
   )));
 }
 
+function assertGrokDeadline(deadline?: number): void {
+  if (deadline !== undefined && Date.now() >= deadline) {
+    throw new Error('Grok lifecycle capture deadline exhausted');
+  }
+}
+
 async function stageGrokExport(
-  source: AsyncIterable<string | Buffer>
+  source: AsyncIterable<string | Buffer>,
+  deadline: number
 ): Promise<{ directory: string; fd: number; size: number }> {
   const directory = mkdtempSync(join(tmpdir(), 'recall-grok-export-'));
   const path = join(directory, 'export.md');
@@ -363,6 +375,7 @@ async function stageGrokExport(
   try {
     rmSync(path);
     for await (const value of source) {
+      assertGrokDeadline(deadline);
       const raw = asBuffer(value);
       if (!Number.isSafeInteger(size + raw.length)) {
         throw new Error('Grok export is too large to capture safely');
@@ -373,6 +386,7 @@ async function stageGrokExport(
       }
       size += raw.length;
     }
+    assertGrokDeadline(deadline);
     return { directory, fd, size };
   } catch (error) {
     closeSync(fd);
@@ -384,15 +398,18 @@ async function stageGrokExport(
 function ingestStagedGrokExport(
   request: GrokHookRequest,
   dependencies: HostHookDependencies,
-  staged: { fd: number; size: number }
+  staged: { fd: number; size: number },
+  deadline: number
 ): HostHookResult {
+  assertGrokDeadline(deadline);
   const transcriptRef = 'grok export';
   const ingest = dependencies.ingest ?? ingestHostTranscript;
   const ingestBatch: typeof ingestHostTranscriptBatch = dependencies.ingestBatch ??
     (dependencies.ingest
-    ? (inputs: Iterable<HostTranscript>) => {
+    ? (inputs: Iterable<HostTranscript>, _expectation, ingestDeadline) => {
         let aggregate: HostIngestResult | undefined;
         for (const input of inputs) {
+          assertGrokDeadline(ingestDeadline);
           aggregate = mergeHostIngestResults(aggregate, ingest(input));
         }
         if (!aggregate) throw new Error('Host transcript batch must not be empty');
@@ -401,6 +418,7 @@ function ingestStagedGrokExport(
     : ingestHostTranscriptBatch);
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
   const previous = checkpoint('grok', request.sessionId);
+  assertGrokDeadline(deadline);
   const size = staged.size;
   const read = (start: number, length: number) => {
     const bytes = Math.max(0, Math.min(length, size - start));
@@ -408,7 +426,14 @@ function ingestStagedGrokExport(
     const read = readSync(staged.fd, buffer, 0, bytes, start);
     return read === bytes ? buffer : buffer.subarray(0, read);
   };
-  const capture = byteCapture(previous, transcriptRef, size, read, request.validatePrefix);
+  const capture = byteCapture(
+    previous,
+    transcriptRef,
+    size,
+    read,
+    request.validatePrefix,
+    deadline
+  );
   const start = capture.start;
   const incremental = start > 0;
   const batch = createHostIngestBatch();
@@ -427,7 +452,7 @@ function ingestStagedGrokExport(
         : previous?.watermark ?? byteWatermark(size, capture.digest),
       capturedAt: request.capturedAt,
       incremental,
-      reconcileComplete: !incremental,
+      reconcileComplete: true,
       finalize: request.finalize,
       batch,
     };
@@ -436,7 +461,7 @@ function ingestStagedGrokExport(
         source: 'grok',
         sessionId: request.sessionId,
         checkpoint: previous,
-      }),
+      }, deadline),
     };
   }
 
@@ -446,8 +471,10 @@ function ingestStagedGrokExport(
       size,
       read,
       capture.digest,
-      grokFrameBoundary
+      grokFrameBoundary,
+      deadline
     )) {
+      assertGrokDeadline(deadline);
       const parsed = parseGrokExport(chunk.raw.toString('utf-8'), {
         sourceOffset: chunk.start,
       });
@@ -466,12 +493,13 @@ function ingestStagedGrokExport(
       };
     }
   };
+  assertGrokDeadline(deadline);
   return {
     ingest: ingestBatch(inputs(), {
       source: 'grok',
       sessionId: request.sessionId,
       checkpoint: previous,
-    }),
+    }, deadline),
   };
 }
 
@@ -489,10 +517,11 @@ export async function handleGrokHostHook(
       GROK_CHECKPOINT_ATTEMPTS - attempt
     );
     const staged = await stageGrokExport(
-      grokExportStream(request.sessionId, dependencies, timeoutMs)
+      grokExportStream(request.sessionId, dependencies, timeoutMs),
+      deadline
     );
     try {
-      return ingestStagedGrokExport(request, dependencies, staged);
+      return ingestStagedGrokExport(request, dependencies, staged, deadline);
     } catch (error) {
       if (!(error instanceof HostIngestCheckpointConflictError) ||
         attempt === GROK_CHECKPOINT_ATTEMPTS - 1) {
