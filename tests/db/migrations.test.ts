@@ -444,7 +444,7 @@ describe('source-lineage column migration (12 to 13)', () => {
     // Mutation guard: dropping the 12 → 13 entry shrinks MIGRATIONS.length to
     // 12, so user_version would land at 12 and the column would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(19);
+    expect(MIGRATIONS.length).toBe(20);
     const cols = (db.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
     expect(cols).toContain('source_ids');
   });
@@ -528,7 +528,7 @@ describe('access-tracking columns migration (13 to 14)', () => {
     // Mutation guard: dropping the 13 → 14 entry shrinks MIGRATIONS.length to 13,
     // so user_version would land at 13 and the columns would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(19);
+    expect(MIGRATIONS.length).toBe(20);
     for (const table of ACCESS_TABLES) {
       const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => c.name);
       expect(cols).toContain('access_count');
@@ -628,7 +628,7 @@ describe('FTS trigger scoping migration (14 to 15)', () => {
     // Mutation guard: dropping the 14 → 15 entry shrinks MIGRATIONS.length to 14,
     // so user_version would land at 14 with the triggers still bare → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(19);
+    expect(MIGRATIONS.length).toBe(20);
     for (const name of MEMORY_AU_TRIGGERS) {
       const sql = triggerSql(db, name);
       expect(sql).not.toBeNull();
@@ -764,7 +764,7 @@ describe('code-KG rollback migration (16 to 17)', () => {
     // Mutation guard: dropping the 16 → 17 entry shrinks MIGRATIONS.length to 16,
     // so user_version lands at 16 → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(19);
+    expect(MIGRATIONS.length).toBe(20);
 
     for (const table of KG_TABLES) {
       const tbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table) as any;
@@ -799,8 +799,8 @@ describe('code-KG rollback migration (16 to 17)', () => {
 
       const result = applyMigrations(legacyDb);
       expect(result.from).toBe(16);
-      expect(result.to).toBe(19);
-      expect(getMigrationVersion(legacyDb)).toBe(19);
+      expect(result.to).toBe(20);
+      expect(getMigrationVersion(legacyDb)).toBe(20);
 
       // All four objects + triggers dropped.
       for (const table of KG_TABLES) {
@@ -829,7 +829,7 @@ describe('code-KG rollback migration (16 to 17)', () => {
 
       const result = applyMigrations(legacyDb);
       expect(result.from).toBe(16);
-      expect(getMigrationVersion(legacyDb)).toBe(19);
+      expect(getMigrationVersion(legacyDb)).toBe(20);
     } finally {
       legacyDb.close();
       rmSync(legacyDir, { recursive: true, force: true });
@@ -851,7 +851,7 @@ describe('host lifecycle ingest migration (17 to 19)', () => {
 
     const result = applyMigrations(db);
     expect(result.from).toBe(17);
-    expect(result.to).toBe(19);
+    expect(result.to).toBe(20);
 
     const stateColumns = (db.prepare('PRAGMA table_info(host_ingest_state)').all() as any[])
       .map(column => column.name);
@@ -898,7 +898,7 @@ describe('host lifecycle ingest migration (17 to 19)', () => {
     `).run('legacy-grok-order', 'second', second.lastInsertRowid);
     db.prepare('PRAGMA user_version = 18').run();
 
-    expect(applyMigrations(db).to).toBe(19);
+    expect(applyMigrations(db).to).toBe(20);
     const positions = db.prepare(`
       SELECT source_position FROM host_ingest_messages
       WHERE session_id = ? ORDER BY source_position
@@ -906,6 +906,60 @@ describe('host lifecycle ingest migration (17 to 19)', () => {
     expect(positions).toHaveLength(2);
     expect(positions[0].source_position).toBeLessThan(positions[1].source_position);
     expect(positions[1].source_position).toBeLessThan(0);
+  });
+});
+
+describe('pinned automatic LoA sources migration (19 to 20)', () => {
+  test('pins legacy lifecycle selectors to exact message snapshots', () => {
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, source) VALUES (?, ?, 'grok')
+    `).run('legacy-selector', '2026-08-12T10:00:00.000Z');
+    const first = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES (?, ?, 'system', 'first', 'verbatim')
+    `).run('legacy-selector', '2026-08-12T10:00:00.000Z');
+    const second = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES (?, ?, 'system', 'second', 'verbatim')
+    `).run('legacy-selector', '2026-08-12T10:00:01.000Z');
+    db.prepare(`
+      INSERT INTO host_ingest_messages
+        (source, session_id, message_key, message_id, source_position)
+      VALUES ('grok', ?, 'first', ?, 0), ('grok', ?, 'second', ?, 10)
+    `).run(
+      'legacy-selector',
+      first.lastInsertRowid,
+      'legacy-selector',
+      second.lastInsertRowid
+    );
+    const selector = JSON.stringify({
+      table: 'host_ingest_messages',
+      source: 'grok',
+      session_id: 'legacy-selector',
+      max_message_id: Number(second.lastInsertRowid),
+    });
+    const loa = db.prepare(`
+      INSERT INTO loa_entries (title, fabric_extract, session_id, source_ids)
+      VALUES ('legacy', 'summary', 'legacy-selector', ?)
+    `).run(selector);
+    db.exec('DROP TABLE loa_message_sources');
+    db.prepare('PRAGMA user_version = 19').run();
+
+    expect(applyMigrations(db).to).toBe(20);
+    const snapshots = db.prepare(`
+      SELECT message_id, content FROM loa_message_sources
+      WHERE loa_id = ? ORDER BY ordinal
+    `).all(loa.lastInsertRowid) as Array<{ message_id: number; content: string }>;
+    expect(snapshots).toEqual([
+      { message_id: Number(first.lastInsertRowid), content: 'first' },
+      { message_id: Number(second.lastInsertRowid), content: 'second' },
+    ]);
+    const migrated = db.prepare('SELECT source_ids FROM loa_entries WHERE id = ?')
+      .get(loa.lastInsertRowid) as { source_ids: string };
+    expect(JSON.parse(migrated.source_ids)).toEqual([
+      { table: 'messages', id: Number(first.lastInsertRowid) },
+      { table: 'messages', id: Number(second.lastInsertRowid) },
+    ]);
   });
 });
 
@@ -922,7 +976,8 @@ describe('MIGRATIONS array', () => {
     // 15 → 16: native code knowledge graph schema (epic #196, issue #197) — tombstoned
     // 16 → 17: roll back the native code knowledge graph (issue #214)
     // 17 to 19: host lifecycle ingest watermarks, message keys, and source positions
-    expect(MIGRATIONS.length).toBe(19);
+    // 19 → 20: pinned automatic LoA message sources
+    expect(MIGRATIONS.length).toBe(20);
   });
 
   test('all entries are functions', () => {

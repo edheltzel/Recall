@@ -1,6 +1,24 @@
 // Database schema for RECALL
 // Version tracking uses PRAGMA user_version (see migrations.ts)
 
+export const LOA_MESSAGE_SOURCES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS loa_message_sources (
+  loa_id INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  message_id INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  timestamp DATETIME NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+  content TEXT NOT NULL,
+  project TEXT,
+  importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
+  provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
+  PRIMARY KEY (loa_id, ordinal),
+  UNIQUE (loa_id, message_id),
+  FOREIGN KEY (loa_id) REFERENCES loa_entries(id) ON DELETE CASCADE
+);
+`;
+
 export const CREATE_TABLES = `
 -- Sessions table: tracks coding agent sessions (Claude Code, OpenCode, etc.)
 CREATE TABLE IF NOT EXISTS sessions (
@@ -115,6 +133,8 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   FOREIGN KEY (message_range_start) REFERENCES messages(id),
   FOREIGN KEY (message_range_end) REFERENCES messages(id)
 );
+
+${LOA_MESSAGE_SOURCES_SCHEMA}
 
 -- TELOS entries: Purpose framework sections (Problems, Missions, Goals, Challenges, Strategies)
 CREATE TABLE IF NOT EXISTS telos (

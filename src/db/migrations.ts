@@ -11,7 +11,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { FTS_SCHEMA } from './schema';
+import { FTS_SCHEMA, LOA_MESSAGE_SOURCES_SCHEMA } from './schema';
 import { claudePaths } from '../hosts/claude.js';
 
 export type Migration = (db: Database) => void;
@@ -451,6 +451,72 @@ export const MIGRATIONS: Migration[] = [
       )
       WHERE source = 'grok' AND source_position IS NULL
     `);
+  },
+
+  // Migration 19 to 20: pinned automatic LoA message sources.
+  (db) => {
+    db.exec(LOA_MESSAGE_SOURCES_SCHEMA);
+    const requiredColumns: Record<string, string[]> = {
+      messages: [
+        'id', 'session_id', 'timestamp', 'role', 'content', 'project',
+        'importance', 'provenance',
+      ],
+      host_ingest_messages: [
+        'source', 'session_id', 'message_id', 'source_position',
+      ],
+      loa_entries: ['id', 'session_id', 'source_ids'],
+    };
+    for (const [table, required] of Object.entries(requiredColumns)) {
+      const columns = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+          .map(column => column.name)
+      );
+      if (required.some(column => !columns.has(column))) return;
+    }
+
+    db.exec(`
+      INSERT OR IGNORE INTO loa_message_sources (
+        loa_id, ordinal, message_id, session_id, timestamp, role, content,
+        project, importance, provenance
+      )
+      SELECT loa.id,
+        ROW_NUMBER() OVER (
+          PARTITION BY loa.id
+          ORDER BY
+            CASE WHEN stored.source = 'grok' THEN stored.source_position END,
+            CASE WHEN stored.source <> 'grok' THEN message.timestamp END,
+            message.id
+        ) - 1,
+        message.id, message.session_id, message.timestamp, message.role,
+        message.content, message.project, message.importance, message.provenance
+      FROM loa_entries AS loa
+      JOIN host_ingest_messages AS stored
+        ON stored.session_id = loa.session_id
+       AND stored.source = json_extract(loa.source_ids, '$.source')
+      JOIN messages AS message ON message.id = stored.message_id
+      WHERE json_valid(loa.source_ids)
+        AND json_extract(loa.source_ids, '$.table') = 'host_ingest_messages'
+        AND message.id <= json_extract(loa.source_ids, '$.max_message_id')
+        AND (stored.source <> 'grok' OR stored.source_position IS NOT NULL)
+    `);
+
+    const selectors = db.prepare(`
+      SELECT id FROM loa_entries
+      WHERE json_valid(source_ids)
+        AND json_extract(source_ids, '$.table') = 'host_ingest_messages'
+    `).all() as Array<{ id: number }>;
+    const sourceIds = db.prepare(`
+      SELECT json_group_array(json_object('table', 'messages', 'id', message_id)) AS value
+      FROM (
+        SELECT message_id FROM loa_message_sources
+        WHERE loa_id = ? ORDER BY ordinal
+      )
+    `);
+    const update = db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?');
+    for (const selector of selectors) {
+      const row = sourceIds.get(selector.id) as { value: string };
+      update.run(row.value, selector.id);
+    }
   },
 ];
 

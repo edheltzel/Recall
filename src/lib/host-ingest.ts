@@ -610,33 +610,47 @@ function publishGenerationMessages(
           AND stored.message_key = generation.message_key
       )
   `).run();
-  const baseId = (db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM messages').get() as
-    { id: number }).id;
-  const inserted = (db.prepare(`
-    SELECT COUNT(*) AS count FROM host_ingest_stage.generation_messages WHERE existing_key = 0
-  `).get() as { count: number }).count;
-  db.prepare(`
-    WITH publish AS (
-      SELECT ROW_NUMBER() OVER (ORDER BY ordinal) AS offset,
-        session_id, timestamp, role, content, project
-      FROM host_ingest_stage.generation_messages WHERE existing_key = 0
-    )
+  const insertMessage = db.prepare(`
     INSERT INTO messages
-      (id, session_id, timestamp, role, content, project, importance, provenance)
-    SELECT ? + offset, session_id, timestamp, role, content, project, 5, 'verbatim'
-    FROM publish ORDER BY offset
-  `).run(baseId);
+      (session_id, timestamp, role, content, project, importance, provenance)
+    VALUES (?, ?, ?, ?, ?, 5, 'verbatim')
+  `);
+  const setMessageId = db.prepare(`
+    UPDATE host_ingest_stage.generation_messages SET message_id = ? WHERE ordinal = ?
+  `);
+  const pending = db.prepare(`
+    SELECT ordinal, session_id, timestamp, role, content, project
+    FROM host_ingest_stage.generation_messages
+    WHERE existing_key = 0 ORDER BY ordinal
+  `).iterate() as IterableIterator<{
+    ordinal: number;
+    session_id: string;
+    timestamp: string;
+    role: HostMessage['role'];
+    content: string;
+    project: string | null;
+  }>;
+  let inserted = 0;
+  for (const message of pending) {
+    assertHostDeadline(deadline);
+    const result = insertMessage.run(
+      message.session_id,
+      message.timestamp,
+      message.role,
+      message.content,
+      message.project
+    );
+    setMessageId.run(Number(result.lastInsertRowid), message.ordinal);
+    inserted++;
+  }
   db.prepare(`
-    WITH publish AS (
-      SELECT ROW_NUMBER() OVER (ORDER BY ordinal) AS offset,
-        source, session_id, message_key, source_position
-      FROM host_ingest_stage.generation_messages WHERE existing_key = 0
-    )
     INSERT INTO host_ingest_messages
       (source, session_id, message_key, message_id, source_position)
-    SELECT source, session_id, message_key, ? + offset, source_position
-    FROM publish ORDER BY offset
-  `).run(baseId);
+    SELECT source, session_id, message_key, message_id, source_position
+    FROM host_ingest_stage.generation_messages
+    WHERE existing_key = 0 AND message_id IS NOT NULL
+    ORDER BY ordinal
+  `).run();
 
   const positionChanges = db.prepare(`
     UPDATE host_ingest_messages SET source_position = (
@@ -1032,6 +1046,63 @@ function frameSummaryStats(db: Database, input: HostTranscript, afterMessageId?:
   };
 }
 
+function replaceLoaMessageSources(
+  db: Database,
+  loaId: number,
+  input: HostTranscript,
+  preserveExisting: boolean,
+  afterMessageId?: number
+): void {
+  if (!preserveExisting) {
+    db.prepare('DELETE FROM loa_message_sources WHERE loa_id = ?').run(loaId);
+  }
+  const ordinalStart = preserveExisting
+    ? ((db.prepare(`
+        SELECT COALESCE(MAX(ordinal) + 1, 0) AS ordinal
+        FROM loa_message_sources WHERE loa_id = ?
+      `).get(loaId) as { ordinal: number }).ordinal)
+    : 0;
+  db.prepare(`
+    INSERT INTO loa_message_sources (
+      loa_id, ordinal, message_id, session_id, timestamp, role, content,
+      project, importance, provenance
+    )
+    SELECT ?, ? + ROW_NUMBER() OVER (
+        ORDER BY
+          CASE WHEN stored.source = 'grok' THEN stored.source_position END,
+          CASE WHEN stored.source <> 'grok' THEN message.timestamp END,
+          message.id
+      ) - 1,
+      message.id, message.session_id, message.timestamp, message.role,
+      message.content, message.project, message.importance, message.provenance
+    FROM messages AS message
+    JOIN host_ingest_messages AS stored ON stored.message_id = message.id
+    WHERE stored.source = ? AND stored.session_id = ?
+      AND (? IS NULL OR message.id > ?)
+      AND (stored.source <> 'grok' OR stored.source_position IS NOT NULL)
+    ORDER BY
+      CASE WHEN stored.source = 'grok' THEN stored.source_position END,
+      CASE WHEN stored.source <> 'grok' THEN message.timestamp END,
+      message.id
+  `).run(
+    loaId,
+    ordinalStart,
+    input.source,
+    input.sessionId,
+    afterMessageId ?? null,
+    afterMessageId ?? null
+  );
+  const sourceIds = db.prepare(`
+    SELECT json_group_array(json_object('table', 'messages', 'id', message_id)) AS value
+    FROM (
+      SELECT message_id FROM loa_message_sources
+      WHERE loa_id = ? ORDER BY ordinal
+    )
+  `).get(loaId) as { value: string };
+  db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?')
+    .run(sourceIds.value, loaId);
+}
+
 function finalizeSession(
   db: Database,
   input: HostTranscript,
@@ -1050,12 +1121,6 @@ function finalizeSession(
   const title = `${input.source[0].toUpperCase()}${input.source.slice(1)} session ${input.sessionId}`;
   const description = `Automatic terminal extraction from ${input.source} lifecycle capture.`;
   const tags = `automatic-capture,${input.source}`;
-  const sourceIds = JSON.stringify({
-    table: 'host_ingest_messages',
-    source: input.source,
-    session_id: input.sessionId,
-    max_message_id: stats.rangeEnd,
-  });
   const existing = db
     .prepare(`
       SELECT id, fabric_extract, message_range_end AS previous_message_id
@@ -1095,7 +1160,7 @@ function finalizeSession(
     db.prepare(`
       UPDATE loa_entries SET
         title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
-        project = ?, message_count = ?, source_ids = ?, created_at = CURRENT_TIMESTAMP
+        project = ?, message_count = ?, source_ids = '[]', created_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       title,
@@ -1104,7 +1169,6 @@ function finalizeSession(
       stats.rangeEnd,
       project ?? null,
       emptyReconciliation ? 0 : stats.total,
-      sourceIds,
       existing.id
     );
     if (existing.fabric_extract !== fabricExtract) {
@@ -1116,7 +1180,7 @@ function finalizeSession(
       INSERT INTO loa_entries
         (title, description, fabric_extract, message_range_start, message_range_end,
          session_id, project, tags, message_count, importance, provenance, source_ids)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 8, 'extracted', ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 8, 'extracted', '[]')
     `).run(
       title,
       description,
@@ -1126,11 +1190,17 @@ function finalizeSession(
       input.sessionId,
       project ?? null,
       tags,
-      emptyReconciliation ? 0 : stats.total,
-      sourceIds
+      emptyReconciliation ? 0 : stats.total
     );
     loaId = Number(result.lastInsertRowid);
   }
+  replaceLoaMessageSources(
+    db,
+    loaId,
+    input,
+    preserveExisting,
+    preserveExisting ? (existing?.previous_message_id ?? undefined) : undefined
+  );
   db.prepare('UPDATE sessions SET summary = ? WHERE session_id = ?').run(title, input.sessionId);
   return { finalized: true, loaId };
 }
