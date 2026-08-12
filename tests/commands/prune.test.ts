@@ -12,6 +12,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runPrune } from '../../src/commands/prune';
 import { getDb } from '../../src/db/connection';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
+import { getLoaMessages } from '../../src/lib/memory';
 import {
   createSession,
   addMessage,
@@ -62,6 +64,38 @@ function rowExists(table: string, id: number): boolean {
 }
 
 describe('prune respects dedup survivors (#80)', () => {
+  test('prunes automatic lifecycle range endpoints and scrubs exact lineage', () => {
+    const sessionId = 'old-lifecycle-session';
+    const result = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      capturedAt: OLD,
+      finalize: true,
+      messages: [
+        { role: 'user', content: 'old lifecycle prompt' },
+        { role: 'assistant', content: 'old lifecycle response' },
+      ],
+    });
+
+    runPrune({ execute: true });
+
+    const db = getDb();
+    expect((db.prepare(`
+      SELECT COUNT(*) AS count FROM messages WHERE session_id = ?
+    `).get(sessionId) as { count: number }).count).toBe(0);
+    expect(db.prepare(`
+      SELECT message_range_start, message_range_end FROM loa_entries WHERE id = ?
+    `).get(result.loaId!)).toEqual({
+      message_range_start: null,
+      message_range_end: null,
+    });
+    expect(getLoaMessages(result.loaId!)).toEqual([]);
+    expect((db.prepare(`
+      SELECT COUNT(*) AS count FROM loa_message_sources
+      WHERE loa_id = ? AND content <> ''
+    `).get(result.loaId!) as { count: number }).count).toBe(0);
+  });
+
   test('protects a recorded survivor message and still prunes a non-survivor', () => {
     // s1 is consolidated (has a LoA entry) → its old messages are prune-eligible.
     createSession({ session_id: 's1', started_at: OLD });

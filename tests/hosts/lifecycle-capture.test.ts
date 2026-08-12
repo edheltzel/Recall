@@ -16,6 +16,7 @@ import {
   mergeHostIngestResults,
   type HostTranscript,
 } from '../../src/lib/host-ingest';
+import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 import { getLoaMessages } from '../../src/lib/memory';
 
 const fixture = (name: string) =>
@@ -825,6 +826,29 @@ describe('host-neutral immediate SQLite ingest', () => {
       WHERE stored.session_id = ?
     `).get('sqlite-allocated-message') as { id: number };
     expect(current.id).toBeGreaterThan(Number(retired.lastInsertRowid));
+  });
+
+  test('publishes staged messages across bounded pages', () => {
+    const sessionId = 'bounded-generation-pages';
+    const messages = Array.from({ length: SQLITE_SAFE_CHUNK_SIZE + 1 }, (_, index) => ({
+      role: 'system' as const,
+      content: `Frame ${index}`,
+      nativeId: `frame-${index}`,
+      sourcePosition: index,
+    }));
+
+    expect(ingestHostTranscriptBatch([{
+      source: 'grok',
+      sessionId,
+      messages,
+      batch: createHostIngestBatch(),
+    }])).toMatchObject({ inserted: messages.length });
+
+    const stored = getDb().prepare(`
+      SELECT COUNT(*) AS count, COUNT(DISTINCT message_id) AS distinct_ids
+      FROM host_ingest_messages WHERE session_id = ?
+    `).get(sessionId) as { count: number; distinct_ids: number };
+    expect(stored).toEqual({ count: messages.length, distinct_ids: messages.length });
   });
 
   test('pins finalized LoA evidence across non-terminal reconciliation', () => {
