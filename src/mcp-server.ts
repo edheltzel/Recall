@@ -79,7 +79,7 @@ import {
 import {
 	isVecAvailable,
 	knnSearch,
-	withConsistentDatabaseRead,
+	withReadSnapshot,
 	withConsistentVecIndex,
 } from "./db/vec.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
@@ -128,8 +128,8 @@ function bruteForceVectorScan(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
 	limit: number,
-): VectorSearchHit[] | null {
-	return withConsistentDatabaseRead(db, () => {
+): VectorSearchHit[] {
+	return withReadSnapshot(db, () => {
 		const embeddings = db
 			.prepare(`
           SELECT source_table, source_id, embedding FROM embeddings
@@ -194,32 +194,37 @@ function vectorSearch(
 ): VectorSearchOutcome {
 	if (isVecAvailable()) {
 		try {
-			const hits = withConsistentVecIndex(db, () =>
-				materializeCurrentVectorHits(
+			const snapshot = withConsistentVecIndex(db, () => {
+				const candidates = knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
+					source_table: h.source_table,
+					source_id: h.source_id,
+					similarity: 1 - h.distance,
+				}));
+				const hits = materializeCurrentVectorHits(
 					db,
-					knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
-						source_table: h.source_table,
-						source_id: h.source_id,
-						similarity: 1 - h.distance,
-					})),
-				).slice(0, limit * 2),
-			);
-			if (hits === null) throw new Error("vec index synchronization unconfirmed");
+					candidates,
+				).slice(0, limit * 2);
+				return { hits, complete: hits.length === candidates.length };
+			});
+			if (snapshot === null) throw new Error("vec index synchronization unconfirmed");
+			const { hits } = snapshot;
 			// #217 ruling: an empty KNN result over a non-empty canonical
 			// embeddings table is a FAILURE (e.g. a failed self-heal left the vec
 			// index empty — knnSearch returns [] rather than throwing), not a valid
 			// knn run. Fall through to brute-force so semantic search still works
 			// and the label stays truthful.
-			if (hits.length > 0) return { hits, semanticBackend: "knn" };
-			const embCount = (db
-				.prepare("SELECT COUNT(*) AS c FROM embeddings")
-				.get() as { c: number }).c;
-			if (embCount === 0) return { hits, semanticBackend: "knn" };
-			if (!vecFallbackLogged) {
-				vecFallbackLogged = true;
-				console.error(
-					`[recall] vec index returned no hits while ${embCount} embeddings exist — falling back to brute-force scan`,
-				);
+			if (snapshot.complete) {
+				if (hits.length > 0) return { hits, semanticBackend: "knn" };
+				const embCount = (db
+					.prepare("SELECT COUNT(*) AS c FROM embeddings")
+					.get() as { c: number }).c;
+				if (embCount === 0) return { hits, semanticBackend: "knn" };
+				if (!vecFallbackLogged) {
+					vecFallbackLogged = true;
+					console.error(
+						`[recall] vec index returned no hits while ${embCount} embeddings exist — falling back to brute-force scan`,
+					);
+				}
 			}
 		} catch (err) {
 			// vec query failed — fall back to the brute-force scan.
@@ -232,7 +237,6 @@ function vectorSearch(
 		}
 	}
 	const hits = bruteForceVectorScan(db, queryEmbedding, limit);
-	if (hits === null) throw new Error("canonical embedding snapshot changed during search");
 	// "Which backend ran" semantics (#217 ruling): the scan executed, so report
 	// "bruteforce" even on zero hits — "none" is reserved for the semantic tier
 	// never executing at all.

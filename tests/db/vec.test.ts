@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
@@ -10,7 +9,7 @@ import {
   ensureVecIndexSynced,
   invalidateVecIndex,
   resetVecSyncCache,
-  withConsistentDatabaseRead,
+  withReadSnapshot,
   withConsistentVecIndex,
 } from '../../src/db/vec';
 import {
@@ -45,6 +44,27 @@ function insertEmbedding(id: number, v: number[]): void {
     `INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
      VALUES ('decisions', ?, 'qwen3-embedding:0.6b', ?, ?)`
   ).run(id, v.length, embeddingToBlob(v));
+}
+
+function writeSchemaMetaFromPeer(key: string, value: string): void {
+  const result = Bun.spawnSync(
+    ['bun', '-e', `
+      import { Database } from 'bun:sqlite';
+      const db = new Database(process.env.RECALL_PEER_DB);
+      db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+        .run(process.env.RECALL_PEER_KEY, process.env.RECALL_PEER_VALUE);
+      db.close();
+    `],
+    {
+      env: {
+        ...process.env,
+        RECALL_PEER_DB: process.env.RECALL_DB_PATH!,
+        RECALL_PEER_KEY: key,
+        RECALL_PEER_VALUE: value,
+      },
+    },
+  );
+  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
 }
 
 /** Brute-force reference ranking — the path KNN must match. */
@@ -139,51 +159,41 @@ describe('sqlite-vec index (issue #148)', () => {
       .toEqual({ value: '2' });
   });
 
-  test('retries when the database publication version changes during a KNN read', () => {
+  test('keeps a KNN read stable across an unrelated writer commit', () => {
     if (!isVecAvailable()) return;
     const db = getDb();
     insertEmbedding(1, vec(1));
     reindexVec(db);
-    const peer = new Database(process.env.RECALL_DB_PATH!);
     let calls = 0;
 
-    try {
-      const result = withConsistentVecIndex(db, () => {
-        calls += 1;
-        if (calls === 1) {
-          peer.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
-            .run('vec_publication_test', '1');
-        }
-        return knnSearch(db, vec(1), 1);
-      });
+    const result = withConsistentVecIndex(db, () => {
+      calls += 1;
+      if (calls === 1) writeSchemaMetaFromPeer('vec_publication_test', '1');
+      return knnSearch(db, vec(1), 1);
+    });
 
-      expect(calls).toBe(2);
-      expect(result?.[0]?.distance).toBeLessThan(0.001);
-    } finally {
-      peer.close();
-    }
+    expect(calls).toBe(1);
+    expect(result?.[0]?.distance).toBeLessThan(0.001);
   });
 
-  test('retries a canonical read when the database publication version changes', () => {
+  test('keeps a stable WAL snapshot across an unrelated writer commit', () => {
     const db = getDb();
-    const peer = new Database(process.env.RECALL_DB_PATH!);
-    let calls = 0;
+    db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+      .run('canonical_publication_test', 'before');
 
-    try {
-      const result = withConsistentDatabaseRead(db, () => {
-        calls += 1;
-        if (calls === 1) {
-          peer.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
-            .run('canonical_publication_test', '1');
-        }
-        return calls;
-      });
+    const result = withReadSnapshot(db, () => {
+      const before = db.prepare('SELECT value FROM schema_meta WHERE key = ?')
+        .get('canonical_publication_test');
+      writeSchemaMetaFromPeer('canonical_publication_test', 'after');
+      const after = db.prepare('SELECT value FROM schema_meta WHERE key = ?')
+        .get('canonical_publication_test');
+      return { before, after };
+    });
 
-      expect(calls).toBe(2);
-      expect(result).toBe(2);
-    } finally {
-      peer.close();
-    }
+    expect(result.before).toEqual({ value: 'before' });
+    expect(result.after).toEqual({ value: 'before' });
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?')
+      .get('canonical_publication_test')).toEqual({ value: 'after' });
   });
 
   test('KNN ordering matches the brute-force cosine ranking (parity)', () => {
