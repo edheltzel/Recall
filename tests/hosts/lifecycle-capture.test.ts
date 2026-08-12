@@ -68,7 +68,9 @@ describe('supported lifecycle transcript parsers', () => {
   test('Grok parses the public Markdown export surface', () => {
     const markdown = fixture('grok-export.md');
     const parsed = parseGrokExport(markdown);
-    expect(parsed.messages).toEqual([{ role: 'system', content: markdown }]);
+    expect(parsed.messages.length).toBeGreaterThan(1);
+    expect(parsed.messages.every(message => message.role === 'system')).toBe(true);
+    expect(parsed.messages.map(message => message.content).join('')).toBe(markdown);
   });
 
   test('Grok preserves role-looking Markdown inside exported messages', () => {
@@ -88,7 +90,8 @@ Keep these ordinary Markdown lines in my message:
 They remain verbatim user content.`;
     const parsed = parseGrokExport(markdown);
 
-    expect(parsed.messages).toEqual([{ role: 'system', content: markdown }]);
+    expect(parsed.messages.every(message => message.role === 'system')).toBe(true);
+    expect(parsed.messages.map(message => message.content).join('')).toBe(markdown);
   });
 });
 
@@ -217,7 +220,7 @@ describe('host hook payload routing', () => {
     expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
     starts.length = 0;
     expect(handleHostHook('codex', payload, dependencies).skipped).toBe('unchanged-transcript');
-    expect(starts).not.toContain(0);
+    expect(starts).toContain(0);
 
     const previousSize = transcript.length;
     transcript = Buffer.concat([
@@ -236,7 +239,7 @@ describe('host hook payload routing', () => {
     starts.length = 0;
     expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
     expect(starts).toContain(previousSize);
-    expect(starts).not.toContain(0);
+    expect(starts).toContain(0);
     expect(
       (
         getDb()
@@ -250,9 +253,14 @@ describe('host hook payload routing', () => {
     expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(0);
     expect(starts).toContain(0);
 
-    transcript[transcript.length - 2] = transcript[transcript.length - 2] === 120 ? 121 : 120;
+    const rewriteIndex = transcript.indexOf('xxx', meta.length);
+    expect(rewriteIndex).toBeGreaterThanOrEqual(0);
+    expect(rewriteIndex).toBeLessThan(transcript.length - 4096);
+    transcript[rewriteIndex] = transcript[rewriteIndex] === 120 ? 121 : 120;
     starts.length = 0;
-    handleHostHook('codex', payload, dependencies);
+    const rewritten = handleHostHook('codex', payload, dependencies);
+    expect(rewritten.skipped).toBeUndefined();
+    expect(rewritten.ingest).toBeDefined();
     expect(starts).toContain(0);
   });
 
@@ -301,7 +309,7 @@ describe('host hook payload routing', () => {
     expect(exported).toBe('grok-native-456');
     expect(received?.source).toBe('grok');
     expect(received?.finalize).toBe(true);
-    expect(result.ingest?.inserted).toBe(1);
+    expect(result.ingest?.inserted).toBe(parseGrokExport(fixture('grok-export.md')).messages.length);
   });
 
   test('captures oversized Codex and streamed Grok transcripts in bounded chunks', async () => {
@@ -381,11 +389,12 @@ describe('host hook payload routing', () => {
       {
         exportGrokStream: async function* () {
           let emitted = 0;
-          while (emitted <= maxChunk + 1024) {
+          while (emitted + grokBlock.length < maxChunk - 1024) {
             yield grokBlock;
             emitted += grokBlock.length;
           }
-          yield Buffer.from('Grok oversized final content.\n');
+          yield Buffer.from('\n');
+          yield Buffer.from(`${'second Grok frame '.repeat(8192)}\n`);
         },
         ingest: input => {
           grokFinalization.push(Boolean(input.finalize));
@@ -436,6 +445,30 @@ describe('host hook payload routing', () => {
       }
     )).rejects.toThrow('export failed');
     expect(ingests).toBe(0);
+  });
+
+  test('reconciles inserted Grok frames without overlapping snapshots', async () => {
+    let markdown = 'Frame A\n\nFrame B';
+    const payload = { hook_event_name: 'Stop', session_id: 'grok-frame-rewrite' };
+    const dependencies = { exportGrok: () => markdown };
+
+    expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({ inserted: 2 });
+    markdown = 'New frame\n\nFrame A\n\nFrame B';
+    expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({
+      inserted: 1,
+      skipped: 2,
+    });
+
+    const rows = getDb()
+      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(payload.session_id) as Array<{ content: string }>;
+    expect(rows).toHaveLength(3);
+    expect(rows.map(row => row.content).sort()).toEqual([
+      'Frame A\n\n',
+      'Frame B',
+      'New frame\n\n',
+    ].sort());
+    expect(rows.some(row => row.content.includes('New frame\n\nFrame A'))).toBe(false);
   });
 });
 
@@ -513,12 +546,12 @@ describe('host-neutral immediate SQLite ingest', () => {
     const rows = db
       .prepare('SELECT content, provenance FROM messages WHERE session_id = ? ORDER BY id')
       .all('grok-native-456') as Array<{ content: string; provenance: string }>;
-    expect(first.ingest).toMatchObject({ inserted: 1, finalized: true });
+    expect(first.ingest).toMatchObject({ inserted: rows.length, finalized: true });
     expect(replay.skipped).toBe('unchanged-transcript');
     expect(replay.ingest).toBeUndefined();
 
-    expect(rows).toHaveLength(1);
-    expect(rows[0].content).toContain('[REDACTED:generic-assignment]');
+    expect(rows).toHaveLength(parseGrokExport(fixture('grok-export.md')).messages.length);
+    expect(rows.some(row => row.content.includes('[REDACTED:generic-assignment]'))).toBe(true);
     expect(rows.every(row => row.provenance === 'verbatim')).toBe(true);
     const summary = db
       .prepare('SELECT fabric_extract FROM loa_entries WHERE session_id = ?')
