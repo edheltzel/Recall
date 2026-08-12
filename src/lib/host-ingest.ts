@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import { getDb } from '../db/connection.js';
 import { chunked } from './chunk.js';
 import { detectProject } from './project.js';
-import { generateBasicSummary } from './extraction.js';
+import { generateBasicSummary, generateFrameSummary } from './extraction.js';
 import { scrub } from './write-safety.js';
 
 export type LifecycleHost = 'codex' | 'grok' | 'jcode';
@@ -25,6 +25,7 @@ export interface HostTranscript {
   transcriptRef?: string;
   watermark?: string;
   capturedAt?: string;
+  messageOffset?: number;
   finalize?: boolean;
 }
 
@@ -41,6 +42,7 @@ export interface HostIngestResult {
 export interface HostIngestCheckpoint {
   transcriptRef?: string;
   watermark?: string;
+  messageCount: number;
   finalized: boolean;
 }
 
@@ -93,9 +95,9 @@ function normalizedTimestamp(value: string | undefined, fallback: string, ordina
 function prepareMessages(
   messages: HostTranscriptMessage[],
   capturedAt: string,
+  messageOffset: number,
   redactions: Set<string>
 ): PreparedMessage[] {
-  const occurrences = new Map<string, number>();
   const prepared: PreparedMessage[] = [];
 
   for (const [ordinal, message] of messages.entries()) {
@@ -107,11 +109,9 @@ function prepareMessages(
     if (!cleaned.text.trim()) continue;
 
     const base = `${message.role}\u0000${cleaned.text}`;
-    const occurrence = (occurrences.get(base) ?? 0) + 1;
-    occurrences.set(base, occurrence);
     const identity = message.nativeId
       ? `native\u0000${message.nativeId}`
-      : `content\u0000${base}\u0000${occurrence}`;
+      : `position\u0000${messageOffset + prepared.length}\u0000${base}`;
 
     prepared.push({
       ...message,
@@ -127,7 +127,11 @@ function prepareMessages(
 function prepareTranscript(input: HostTranscript): PreparedTranscript {
   const capturedAt = normalizedTimestamp(input.capturedAt, new Date().toISOString(), 0);
   const redactions = new Set<string>();
-  const messages = prepareMessages(input.messages, capturedAt, redactions);
+  const messageOffset = input.messageOffset ?? 0;
+  if (!Number.isSafeInteger(messageOffset) || messageOffset < 0) {
+    throw new Error('Lifecycle hook supplied an invalid message offset');
+  }
+  const messages = prepareMessages(input.messages, capturedAt, messageOffset, redactions);
   const cwdResult = input.cwd ? scrub(input.cwd) : undefined;
   const detectedProject = input.project ?? detectProject(input.cwd);
   const projectResult = detectedProject ? scrub(detectedProject) : undefined;
@@ -252,14 +256,18 @@ export function getHostIngestCheckpoint(
   assertSessionId(sessionId);
   const row = getDb()
     .prepare(`
-      SELECT transcript_ref, watermark, finalized_at FROM host_ingest_state
+      SELECT transcript_ref, watermark, finalized_at,
+        (SELECT COUNT(*) FROM host_ingest_messages messages
+         WHERE messages.source = state.source AND messages.session_id = state.session_id) AS message_count
+      FROM host_ingest_state state
       WHERE source = ? AND session_id = ?
     `)
-    .get(source, sessionId) as IngestStateRow | undefined;
+    .get(source, sessionId) as (IngestStateRow & { message_count: number }) | undefined;
   if (!row) return undefined;
   return {
     transcriptRef: row.transcript_ref ?? undefined,
     watermark: row.watermark ?? undefined,
+    messageCount: row.message_count,
     finalized: Boolean(row.finalized_at),
   };
 }
@@ -291,7 +299,9 @@ function finalizeSession(
     .run(
       title,
       `Automatic terminal extraction from ${input.source} lifecycle capture.`,
-      generateBasicSummary(messages),
+      input.source === 'grok'
+        ? generateFrameSummary(messages, 'Grok export')
+        : generateBasicSummary(messages),
       messages[0].id,
       messages.at(-1)!.id,
       input.sessionId,

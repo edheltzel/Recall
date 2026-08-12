@@ -186,12 +186,13 @@ describe('host hook payload routing', () => {
       payload: { id: sessionId, cwd: '/work/Recall' },
     })}\n`;
     const filler = `${JSON.stringify({ type: 'event_msg', payload: { text: 'x'.repeat(5000) } })}\n`;
+    const repeatedContent = 'repeat watermark message';
     const firstMessage = `${JSON.stringify({
       type: 'response_item',
       payload: {
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: 'first watermark message' }],
+        content: [{ type: 'input_text', text: repeatedContent }],
       },
     })}\n`;
     let transcript = Buffer.from(meta + filler + firstMessage);
@@ -222,8 +223,8 @@ describe('host hook payload routing', () => {
           type: 'response_item',
           payload: {
             type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'appended watermark message' }],
+            role: 'user',
+            content: [{ type: 'input_text', text: repeatedContent }],
           },
         })}\n`
       ),
@@ -232,6 +233,13 @@ describe('host hook payload routing', () => {
     expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
     expect(starts).toContain(previousSize);
     expect(starts).not.toContain(0);
+    expect(
+      (
+        getDb()
+          .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND content = ?')
+          .get(sessionId, repeatedContent) as { count: number }
+      ).count
+    ).toBe(2);
 
     transcript = Buffer.from(meta + filler + firstMessage);
     starts.length = 0;
@@ -311,6 +319,11 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].content).toContain('[REDACTED:generic-assignment]');
     expect(rows.every(row => row.provenance === 'verbatim')).toBe(true);
+    const summary = db
+      .prepare('SELECT fabric_extract FROM loa_entries WHERE session_id = ?')
+      .get('grok-native-456') as { fabric_extract: string };
+    expect(summary.fabric_extract).toContain('Recall will redact the credential before writing.');
+    expect(summary.fabric_extract).not.toContain('No user messages');
   });
 
   test('scrubs, attributes, deduplicates, watermarks, and finalizes once', () => {

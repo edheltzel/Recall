@@ -30,6 +30,29 @@ Session with ${messages.length} messages.
 `;
 }
 
+export function generateFrameSummary(
+  messages: Array<Pick<Message, 'role' | 'content'>>,
+  label: string
+): string {
+  const frames = messages.filter(message => message.role === 'system');
+  const firstFrame = frames[0]?.content.trim().slice(0, 200) || 'No captured frames';
+  const latestFrame = frames.at(-1)?.content.trim().slice(-200) || 'No captured frames';
+
+  return `## ONE SENTENCE SUMMARY
+
+Session captured in ${frames.length} ${label} frame${frames.length === 1 ? '' : 's'}.
+
+## MAIN IDEAS
+
+- Export started with: ${firstFrame}${firstFrame.length >= 200 ? '...' : ''}
+- Latest captured content: ${latestFrame}${latestFrame.length >= 200 ? '...' : ''}
+
+## TOPICS
+
+- ${frames.length} total verbatim ${label} frame${frames.length === 1 ? '' : 's'}
+`;
+}
+
 /**
  * Render messages in the same simple bracketed transcript format used by dump.
  */

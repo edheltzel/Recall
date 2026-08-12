@@ -81,8 +81,13 @@ describe('portable explicit session dump', () => {
       },
     };
 
-    expect((await coreDump('First replacement', options)).success).toBe(true);
-    expect((await coreDump('Second replacement', options)).success).toBe(true);
+    const first = await coreDump('First replacement', options);
+    expect(first).toMatchObject({ success: true, messageCount: 1 });
+    options.session.messages[0].timestamp = '2026-08-12T12:00:02.000Z';
+    expect(await coreDump('Second replacement', options)).toMatchObject({
+      success: true,
+      messageCount: 0,
+    });
 
     const db = getDb();
     const state = db
@@ -95,17 +100,30 @@ describe('portable explicit session dump', () => {
     expect(key.message_id).toBeNumber();
     expect(ingestHostTranscript(lifecycle)).toMatchObject({ inserted: 0, skipped: 1 });
     const messages = db
-      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
-      .all(sessionId) as Array<{ content: string }>;
+      .prepare('SELECT id, content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(sessionId) as Array<{ id: number; content: string }>;
     expect(messages.map(message => message.content)).toEqual([lifecycleContent, explicitContent]);
     const loa = db
       .prepare(`
-        SELECT description, tags FROM loa_entries
+        SELECT description, tags, message_range_start, message_range_end, message_count
+        FROM loa_entries
         WHERE session_id = ? ORDER BY id
       `)
-      .all(sessionId) as Array<{ description: string | null; tags: string | null }>;
+      .all(sessionId) as Array<{
+        description: string | null;
+        tags: string | null;
+        message_range_start: number;
+        message_range_end: number;
+        message_count: number;
+      }>;
     expect(loa).toHaveLength(2);
     expect(loa.filter(entry => entry.tags?.includes('automatic-capture'))).toHaveLength(1);
-    expect(loa.filter(entry => entry.description === 'Explicit memory dump.')).toHaveLength(1);
+    const explicitLoa = loa.filter(entry => entry.description === 'Explicit memory dump.');
+    expect(explicitLoa).toHaveLength(1);
+    expect(explicitLoa[0]).toMatchObject({
+      message_range_start: messages[1].id,
+      message_range_end: messages[1].id,
+      message_count: 1,
+    });
   });
 });

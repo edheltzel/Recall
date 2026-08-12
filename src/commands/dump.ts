@@ -24,6 +24,14 @@ interface DumpOptions {
 
 const EXPLICIT_DUMP_DESCRIPTION = 'Explicit memory dump.';
 
+interface DumpMessageRow {
+  id: number;
+  content: string;
+  role: 'user' | 'assistant' | 'system';
+  timestamp: string;
+  project: string | null;
+}
+
 // ============ Internal Helpers ============
 
 async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: string): Promise<void> {
@@ -114,22 +122,44 @@ function lifecycleOwnsSession(sessionId: string): boolean {
   );
 }
 
-function messagesMissingFromSession(session: ParsedSession): ParsedSession['messages'] {
-  const existing = new Map<string, number>();
+function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 'project'>): string {
+  return JSON.stringify([message.role, message.content, message.project]);
+}
+
+function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
   const rows = getDb()
-    .prepare('SELECT timestamp, role, content FROM messages WHERE session_id = ?')
-    .all(session.sessionId) as Array<{ timestamp: string; role: string; content: string }>;
-  for (const message of rows) {
-    const key = JSON.stringify([message.timestamp, message.role, message.content]);
-    existing.set(key, (existing.get(key) ?? 0) + 1);
+    .prepare(`
+      SELECT m.id, m.content, m.role, m.timestamp, m.project
+      FROM messages m
+      WHERE m.session_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM host_ingest_messages h WHERE h.message_id = m.id
+        )
+      ORDER BY m.id
+    `)
+    .all(session.sessionId) as DumpMessageRow[];
+  const expectedKeys = session.messages.map(message =>
+    explicitSnapshotKey({
+      role: message.role,
+      content: message.content,
+      project: message.project ?? session.project ?? null,
+    })
+  );
+
+  for (let start = rows.length - expectedKeys.length; start >= 0; start--) {
+    const snapshot = rows.slice(start, start + expectedKeys.length);
+    const contiguous = snapshot.every((message, index) =>
+      index === 0 || message.id === snapshot[index - 1].id + 1
+    );
+    if (
+      contiguous &&
+      snapshot.every((message, index) => explicitSnapshotKey(message) === expectedKeys[index])
+    ) {
+      return snapshot;
+    }
   }
-  return session.messages.filter(message => {
-    const key = JSON.stringify([message.timestamp, message.role, message.content]);
-    const count = existing.get(key) ?? 0;
-    if (count === 0) return true;
-    existing.set(key, count - 1);
-    return false;
-  });
+
+  return undefined;
 }
 
 function clearExplicitDumpLoa(sessionId: string): void {
@@ -168,6 +198,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   const replacingSession = sessionExists(session.sessionId);
   const lifecycleOwned = replacingSession && lifecycleOwnsSession(session.sessionId);
   if (replacingSession && !lifecycleOwned) clearSessionMessages(session.sessionId);
+  const existingSnapshot = lifecycleOwned ? findExplicitSnapshot(session) : undefined;
   if (lifecycleOwned) clearExplicitDumpLoa(session.sessionId);
 
   // Import messages to SQLite FIRST (fast, always succeeds)
@@ -199,22 +230,23 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   }
 
   // Raw conversation capture is verbatim (ADR-0001).
-  const messagesToImport = lifecycleOwned ? messagesMissingFromSession(session) : session.messages;
+  const messagesToImport = existingSnapshot ? [] : session.messages;
   const importedCount = addMessagesBatch(
     messagesToImport.map(message => ({ ...message, provenance: 'verbatim' as const }))
   );
 
-  // Get imported message IDs for LoA
   const db = getDb();
-  const importedMessages = db.prepare(`
-    SELECT id, content, role, timestamp
-    FROM messages
-    WHERE session_id = ?
-    ORDER BY timestamp
-    ${options.limit ? 'LIMIT ?' : ''}
-  `).all(session.sessionId, ...(options.limit ? [options.limit] : [])) as Array<{
-    id: number; content: string; role: 'user' | 'assistant' | 'system'; timestamp: string;
-  }>;
+  const snapshotMessages = lifecycleOwned
+    ? (existingSnapshot ?? findExplicitSnapshot(session) ?? [])
+    : db.prepare(`
+        SELECT id, content, role, timestamp, project
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY timestamp
+      `).all(session.sessionId) as DumpMessageRow[];
+  const importedMessages = options.limit
+    ? snapshotMessages.slice(0, options.limit)
+    : snapshotMessages;
 
   if (importedMessages.length === 0) {
     return { success: true, sessionId: session.sessionId, messageCount: importedCount, source: session.source };
@@ -226,13 +258,13 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   // Try Fabric, fall back to basic summary
   let fabricExtract: string;
   if (options.skipFabric) {
-    fabricExtract = generateBasicSummary(session.messages);
+    fabricExtract = generateBasicSummary(importedMessages);
   } else {
     try {
       const conversationText = formatMessagesForExtraction(importedMessages);
       fabricExtract = runFabricExtract(conversationText);
     } catch {
-      fabricExtract = generateBasicSummary(session.messages);
+      fabricExtract = generateBasicSummary(importedMessages);
     }
   }
 
