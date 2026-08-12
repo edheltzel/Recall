@@ -34,7 +34,14 @@ type Prov = 'user_authored' | 'verbatim' | 'extracted' | 'derived' | null;
 // src/types: a regression that drops a table from PROVENANCE_TABLES or
 // EXPORT_TABLES must fail here instead of silently weakening the oracle.
 const PROV_TABLES = ['messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries'] as const;
-const ALL_TABLES = ['sessions', ...PROV_TABLES, 'dedup_lineage'] as const;
+const ALL_TABLES = [
+  'sessions',
+  ...PROV_TABLES,
+  'dedup_lineage',
+  'host_ingest_state',
+  'host_ingest_messages',
+  'loa_message_sources',
+] as const;
 type ProvTable = typeof PROV_TABLES[number];
 
 // Which column carries the generated text per table.
@@ -130,6 +137,11 @@ function insertCorpus(db: Database, corpus: GenCorpus): void {
 function expectedCount(corpus: GenCorpus, table: string): number {
   if (table === 'sessions') return corpus.sessions;
   if (table === 'dedup_lineage') return corpus.lineage;
+  if (
+    table === 'host_ingest_state' ||
+    table === 'host_ingest_messages' ||
+    table === 'loa_message_sources'
+  ) return 0;
   return corpus[table as ProvTable].length;
 }
 
@@ -241,8 +253,12 @@ describe('export properties', () => {
             // dump ∘ restore is the identity on every exported table's rows
             // (the source rows came from the generator's inserts).
             for (const table of ALL_TABLES) {
-              const src = db.prepare(`SELECT * FROM ${table} ORDER BY id`).all();
-              const back = restored.prepare(`SELECT * FROM ${table} ORDER BY id`).all();
+              const hasId = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+                name: string;
+              }>).some(column => column.name === 'id');
+              const order = hasId ? 'id' : 'rowid';
+              const src = db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
+              const back = restored.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
               expect(back).toEqual(src);
               expect(back.length).toBe(expectedCount(corpus, table));
             }

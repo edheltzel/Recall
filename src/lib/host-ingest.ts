@@ -581,6 +581,37 @@ function upsertGeneratedSession(
   );
 }
 
+function createGenerationPublisher(db: Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS temp.host_ingest_publish_messages_insert;
+    DROP VIEW IF EXISTS temp.host_ingest_publish_messages;
+    DROP TABLE IF EXISTS temp.host_ingest_publish_ids;
+    CREATE TEMP TABLE host_ingest_publish_ids (
+      ordinal INTEGER PRIMARY KEY,
+      message_id INTEGER NOT NULL
+    );
+    CREATE TEMP VIEW host_ingest_publish_messages AS
+      SELECT NULL AS ordinal, NULL AS session_id, NULL AS timestamp,
+        NULL AS role, NULL AS content, NULL AS project WHERE 0;
+    CREATE TEMP TRIGGER host_ingest_publish_messages_insert
+    INSTEAD OF INSERT ON host_ingest_publish_messages BEGIN
+      INSERT INTO messages
+        (session_id, timestamp, role, content, project, importance, provenance)
+      VALUES (new.session_id, new.timestamp, new.role, new.content, new.project, 5, 'verbatim');
+      INSERT INTO host_ingest_publish_ids (ordinal, message_id)
+      VALUES (new.ordinal, last_insert_rowid());
+    END;
+  `);
+}
+
+function dropGenerationPublisher(db: Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS temp.host_ingest_publish_messages_insert;
+    DROP VIEW IF EXISTS temp.host_ingest_publish_messages;
+    DROP TABLE IF EXISTS temp.host_ingest_publish_ids;
+  `);
+}
+
 function publishGenerationMessages(
   db: Database,
   generation: PreparedBatchGeneration,
@@ -610,39 +641,25 @@ function publishGenerationMessages(
           AND stored.message_key = generation.message_key
       )
   `).run();
-  const insertMessage = db.prepare(`
-    INSERT INTO messages
-      (session_id, timestamp, role, content, project, importance, provenance)
-    VALUES (?, ?, ?, ?, ?, 5, 'verbatim')
-  `);
-  const setMessageId = db.prepare(`
-    UPDATE host_ingest_stage.generation_messages SET message_id = ? WHERE ordinal = ?
-  `);
-  const pending = db.prepare(`
+  db.exec('DELETE FROM temp.host_ingest_publish_ids');
+  db.prepare(`
+    INSERT INTO temp.host_ingest_publish_messages
+      (ordinal, session_id, timestamp, role, content, project)
     SELECT ordinal, session_id, timestamp, role, content, project
     FROM host_ingest_stage.generation_messages
     WHERE existing_key = 0 ORDER BY ordinal
-  `).iterate() as IterableIterator<{
-    ordinal: number;
-    session_id: string;
-    timestamp: string;
-    role: HostMessage['role'];
-    content: string;
-    project: string | null;
-  }>;
-  let inserted = 0;
-  for (const message of pending) {
-    assertHostDeadline(deadline);
-    const result = insertMessage.run(
-      message.session_id,
-      message.timestamp,
-      message.role,
-      message.content,
-      message.project
-    );
-    setMessageId.run(Number(result.lastInsertRowid), message.ordinal);
-    inserted++;
-  }
+  `).run();
+  db.prepare(`
+    UPDATE host_ingest_stage.generation_messages AS generation
+    SET message_id = (
+      SELECT published.message_id FROM temp.host_ingest_publish_ids AS published
+      WHERE published.ordinal = generation.ordinal
+    )
+    WHERE existing_key = 0
+  `).run();
+  const inserted = (db.prepare(`
+    SELECT COUNT(*) AS count FROM temp.host_ingest_publish_ids
+  `).get() as { count: number }).count;
   db.prepare(`
     INSERT INTO host_ingest_messages
       (source, session_id, message_key, message_id, source_position)
@@ -1092,15 +1109,8 @@ function replaceLoaMessageSources(
     afterMessageId ?? null,
     afterMessageId ?? null
   );
-  const sourceIds = db.prepare(`
-    SELECT json_group_array(json_object('table', 'messages', 'id', message_id)) AS value
-    FROM (
-      SELECT message_id FROM loa_message_sources
-      WHERE loa_id = ? ORDER BY ordinal
-    )
-  `).get(loaId) as { value: string };
   db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?')
-    .run(sourceIds.value, loaId);
+    .run(JSON.stringify({ table: 'loa_message_sources', loa_id: loaId }), loaId);
 }
 
 function finalizeSession(
@@ -1377,6 +1387,7 @@ export function ingestHostTranscriptBatch(
     stageOpen = false;
     db.prepare('ATTACH DATABASE ? AS host_ingest_stage').run(stage.path);
     attached = true;
+    createGenerationPublisher(db);
     return db
       .transaction(() => {
         return ingestBatchGenerationInTransaction(db, generation, expectation, deadline);
@@ -1384,7 +1395,10 @@ export function ingestHostTranscriptBatch(
       .immediate();
   } finally {
     try {
-      if (attached) db.exec('DETACH DATABASE host_ingest_stage');
+      if (attached) {
+        dropGenerationPublisher(db);
+        db.exec('DETACH DATABASE host_ingest_stage');
+      }
     } finally {
       if (stageOpen) stage.db.close();
       rmSync(stage.directory, { recursive: true, force: true });

@@ -27,9 +27,14 @@ let previousSkip: string | undefined;
 let previousIncludeSubagents: string | undefined;
 
 function expectLifecycleSources(raw: string, messageIds: number[]): void {
-  expect(JSON.parse(raw)).toEqual(
-    messageIds.map(id => ({ table: 'messages', id }))
-  );
+  const source = JSON.parse(raw) as { table: string; loa_id: number };
+  expect(source.table).toBe('loa_message_sources');
+  expect(Number.isSafeInteger(source.loa_id)).toBe(true);
+  const stored = getDb().prepare(`
+    SELECT message_id FROM loa_message_sources
+    WHERE loa_id = ? ORDER BY ordinal
+  `).all(source.loa_id) as Array<{ message_id: number }>;
+  expect(stored.map(row => row.message_id)).toEqual(messageIds);
 }
 
 beforeEach(() => {
@@ -1185,17 +1190,35 @@ describe('host-neutral immediate SQLite ingest', () => {
     const input: HostTranscript = {
       source: 'codex',
       sessionId: 'codex-pruned-session',
-      messages: [{ role: 'user', content: 'retain this lifecycle watermark after pruning' }],
+      messages: [
+        { role: 'user', content: 'retained before pruning' },
+        { role: 'assistant', content: 'remove this lifecycle body during pruning' },
+        { role: 'user', content: 'retained after pruning' },
+      ],
     };
-    expect(ingestHostTranscript(input).inserted).toBe(1);
+    const finalized = ingestHostTranscript({ ...input, finalize: true });
+    expect(finalized.inserted).toBe(3);
 
     const db = getDb();
-    db.prepare('DELETE FROM messages WHERE session_id = ?').run(input.sessionId);
+    const pruned = db.prepare(`
+      SELECT id FROM messages WHERE session_id = ? AND content = ?
+    `).get(input.sessionId, input.messages[1].content) as { id: number };
+    db.prepare('DELETE FROM messages WHERE id = ?').run(pruned.id);
     const key = db
-      .prepare('SELECT message_id FROM host_ingest_messages WHERE session_id = ?')
+      .prepare('SELECT message_id FROM host_ingest_messages WHERE session_id = ? AND message_id IS NULL')
       .get(input.sessionId) as { message_id: number | null };
     expect(key.message_id).toBeNull();
-    expect(ingestHostTranscript(input)).toMatchObject({ inserted: 0, skipped: 1 });
+    const audit = db.prepare(`
+      SELECT message_id, content FROM loa_message_sources
+      WHERE loa_id = ? AND message_id = ?
+    `).get(finalized.loaId!, pruned.id) as { message_id: number; content: string };
+    expect(audit.message_id).toBe(pruned.id);
+    expect(audit.content).toBe('');
+    expect(getLoaMessages(finalized.loaId!).map(message => message.content)).toEqual([
+      input.messages[0].content,
+      input.messages[2].content,
+    ]);
+    expect(ingestHostTranscript(input)).toMatchObject({ inserted: 0, skipped: 3 });
   });
 
   test('preserves pruned terminal summaries and invalidates stale embeddings on resume', () => {

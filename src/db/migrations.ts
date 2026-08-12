@@ -11,7 +11,11 @@ import { Database } from 'bun:sqlite';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { FTS_SCHEMA, LOA_MESSAGE_SOURCES_SCHEMA } from './schema';
+import {
+  FTS_SCHEMA,
+  LOA_MESSAGE_RETENTION_SCHEMA,
+  LOA_MESSAGE_SOURCES_SCHEMA,
+} from './schema';
 import { claudePaths } from '../hosts/claude.js';
 
 export type Migration = (db: Database) => void;
@@ -473,6 +477,7 @@ export const MIGRATIONS: Migration[] = [
       );
       if (required.some(column => !columns.has(column))) return;
     }
+    db.exec(LOA_MESSAGE_RETENTION_SCHEMA);
 
     db.exec(`
       INSERT OR IGNORE INTO loa_message_sources (
@@ -500,23 +505,40 @@ export const MIGRATIONS: Migration[] = [
         AND (stored.source <> 'grok' OR stored.source_position IS NOT NULL)
     `);
 
-    const selectors = db.prepare(`
-      SELECT id FROM loa_entries
+    db.exec(`
+      UPDATE loa_entries
+      SET source_ids = json_object('table', 'loa_message_sources', 'loa_id', id)
       WHERE json_valid(source_ids)
         AND json_extract(source_ids, '$.table') = 'host_ingest_messages'
-    `).all() as Array<{ id: number }>;
-    const sourceIds = db.prepare(`
-      SELECT json_group_array(json_object('table', 'messages', 'id', message_id)) AS value
-      FROM (
-        SELECT message_id FROM loa_message_sources
-        WHERE loa_id = ? ORDER BY ordinal
-      )
     `);
-    const update = db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?');
-    for (const selector of selectors) {
-      const row = sourceIds.get(selector.id) as { value: string };
-      update.run(row.value, selector.id);
-    }
+  },
+
+  (db) => {
+    db.exec(LOA_MESSAGE_SOURCES_SCHEMA);
+    const messageColumns = new Set(
+      (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const loaColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    if (
+      !messageColumns.has('id') ||
+      !loaColumns.has('source_ids') ||
+      !loaColumns.has('tags')
+    ) return;
+    db.exec(LOA_MESSAGE_RETENTION_SCHEMA);
+    db.exec(`
+      UPDATE loa_message_sources SET content = ''
+      WHERE content <> ''
+        AND NOT EXISTS (SELECT 1 FROM messages WHERE id = message_id);
+      UPDATE loa_entries
+      SET source_ids = json_object('table', 'loa_message_sources', 'loa_id', id)
+      WHERE EXISTS (
+        SELECT 1 FROM loa_message_sources WHERE loa_id = loa_entries.id
+      ) OR tags LIKE 'automatic-capture,%';
+    `);
   },
 ];
 

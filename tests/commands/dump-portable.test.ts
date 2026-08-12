@@ -188,10 +188,10 @@ describe('portable explicit session dump', () => {
     const automaticLoa = loa.filter(entry => entry.tags?.includes('automatic-capture'));
     expect(automaticLoa).toHaveLength(1);
     expect(automaticLoa[0]).toMatchObject({ message_count: 2, project: 'recall-test' });
-    expect(JSON.parse(automaticLoa[0].source_ids ?? 'null')).toEqual([
-      { table: 'messages', id: messages[0].id },
-      { table: 'messages', id: messages[2].id },
-    ]);
+    expect(JSON.parse(automaticLoa[0].source_ids ?? 'null')).toEqual({
+      table: 'loa_message_sources',
+      loa_id: automaticLoa[0].id,
+    });
     expect(getLoaMessages(automaticLoa[0].id).map(message => message.content)).toEqual([
       lifecycleContent,
       resumedContent,
