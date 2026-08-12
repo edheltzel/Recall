@@ -582,6 +582,9 @@ stream_max_retries = 0
       });
       if (update.isError) throw new Error(resultText(update));
 
+      const explicitUser = 'Verify the native Codex plugin against an isolated database.';
+      const explicitAssistant =
+        'The explicit MCP dump remains available while plugin hooks own automatic capture.';
       const dumpArguments = {
         title: 'Codex portable dump e2e',
         project: 'Recall-e2e',
@@ -589,11 +592,10 @@ stream_max_retries = 0
         source: 'codex',
         skip_fabric: true,
         messages: [
-          { role: 'user', content: 'Verify the native Codex plugin against an isolated database.' },
+          { role: 'user', content: explicitUser },
           {
             role: 'assistant',
-            content:
-              'The explicit MCP dump remains available while plugin hooks own automatic capture.',
+            content: explicitAssistant,
           },
         ],
       };
@@ -610,21 +612,40 @@ stream_max_retries = 0
           SELECT
             (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS first_prompt,
             (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS second_prompt,
+            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS explicit_user,
+            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS explicit_assistant,
             (SELECT COUNT(*) FROM loa_entries
-             WHERE session_id = ? AND tags LIKE 'automatic-capture,%') AS automatic_extracts
+             WHERE session_id = ? AND tags LIKE 'automatic-capture,%') AS automatic_extracts,
+            (SELECT message_count FROM loa_entries
+             WHERE session_id = ? AND description = 'Explicit memory dump.') AS explicit_message_count
         `)
         .get(
           sessionId,
           firstPrompt,
           sessionId,
           secondPrompt,
+          sessionId,
+          explicitUser,
+          sessionId,
+          explicitAssistant,
+          sessionId,
           sessionId
-        ) as { first_prompt: number; second_prompt: number; automatic_extracts: number };
+        ) as {
+          first_prompt: number;
+          second_prompt: number;
+          explicit_user: number;
+          explicit_assistant: number;
+          automatic_extracts: number;
+          explicit_message_count: number;
+        };
       preservationDb.close();
       if (
         preserved.first_prompt !== 1 ||
         preserved.second_prompt !== 1 ||
-        preserved.automatic_extracts !== 1
+        preserved.explicit_user !== 1 ||
+        preserved.explicit_assistant !== 1 ||
+        preserved.automatic_extracts !== 1 ||
+        preserved.explicit_message_count !== 2
       ) {
         throw new Error(`Explicit MCP dump replaced lifecycle capture: ${JSON.stringify(preserved)}`);
       }

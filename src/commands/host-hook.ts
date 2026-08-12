@@ -235,6 +235,7 @@ export function handleHostHook(
         transcriptRef: transcriptPath,
         watermark: range.watermark,
         capturedAt,
+        messageOffset: range.start > 0 ? previous?.messageCount ?? 0 : 0,
         finalize,
       }),
     };
@@ -274,6 +275,7 @@ export function handleHostHook(
         transcriptRef,
         watermark: range.watermark,
         capturedAt,
+        messageOffset: range.start > 0 ? previous?.messageCount ?? 0 : 0,
         finalize,
       }),
     };
