@@ -187,6 +187,30 @@ function materializeCurrentVectorHits(
 	return materialized;
 }
 
+function boundedCurrentKnnHits(
+	db: ReturnType<typeof getDb>,
+	queryEmbedding: number[],
+	limit: number,
+): { hits: VectorSearchHit[]; candidatesSeen: number } {
+	const target = Math.max(1, limit * 2);
+	const maxPages = 4;
+	const hits: VectorSearchHit[] = [];
+	let candidatesSeen = 0;
+	for (let page = 1; page <= maxPages && hits.length < target; page++) {
+		const requested = target * page;
+		const candidates = knnSearch(db, queryEmbedding, requested).map((hit) => ({
+			source_table: hit.source_table,
+			source_id: hit.source_id,
+			similarity: 1 - hit.distance,
+		}));
+		const unseen = candidates.slice(candidatesSeen);
+		candidatesSeen = candidates.length;
+		hits.push(...materializeCurrentVectorHits(db, unseen));
+		if (candidates.length < requested) break;
+	}
+	return { hits: hits.slice(0, target), candidatesSeen };
+}
+
 function vectorSearch(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
@@ -194,37 +218,29 @@ function vectorSearch(
 ): VectorSearchOutcome {
 	if (isVecAvailable()) {
 		try {
-			const snapshot = withConsistentVecIndex(db, () => {
-				const candidates = knnSearch(db, queryEmbedding, limit * 2).map((h) => ({
-					source_table: h.source_table,
-					source_id: h.source_id,
-					similarity: 1 - h.distance,
-				}));
-				const hits = materializeCurrentVectorHits(
-					db,
-					candidates,
-				).slice(0, limit * 2);
-				return { hits, complete: hits.length === candidates.length };
-			});
+			const snapshot = withConsistentVecIndex(db, () =>
+				boundedCurrentKnnHits(db, queryEmbedding, limit),
+			);
 			if (snapshot === null) throw new Error("vec index synchronization unconfirmed");
-			const { hits } = snapshot;
+			const { hits, candidatesSeen } = snapshot;
 			// #217 ruling: an empty KNN result over a non-empty canonical
 			// embeddings table is a FAILURE (e.g. a failed self-heal left the vec
 			// index empty — knnSearch returns [] rather than throwing), not a valid
 			// knn run. Fall through to brute-force so semantic search still works
 			// and the label stays truthful.
-			if (snapshot.complete) {
-				if (hits.length > 0) return { hits, semanticBackend: "knn" };
-				const embCount = (db
-					.prepare("SELECT COUNT(*) AS c FROM embeddings")
-					.get() as { c: number }).c;
-				if (embCount === 0) return { hits, semanticBackend: "knn" };
-				if (!vecFallbackLogged) {
-					vecFallbackLogged = true;
-					console.error(
-						`[recall] vec index returned no hits while ${embCount} embeddings exist — falling back to brute-force scan`,
-					);
-				}
+			if (hits.length > 0 || candidatesSeen > 0) {
+				return { hits, semanticBackend: "knn" };
+			}
+			const embCount = (db
+				.prepare(`SELECT COUNT(*) AS c FROM embeddings
+					WHERE ${publishedEmbeddingSql(db, "source_table", "embeddings.source_id")}`)
+				.get() as { c: number }).c;
+			if (embCount === 0) return { hits, semanticBackend: "knn" };
+			if (!vecFallbackLogged) {
+				vecFallbackLogged = true;
+				console.error(
+					`[recall] vec index returned no hits while ${embCount} embeddings exist — falling back to brute-force scan`,
+				);
 			}
 		} catch (err) {
 			// vec query failed — fall back to the brute-force scan.

@@ -802,6 +802,39 @@ CREATE TABLE IF NOT EXISTS embeddings (
 -- Index for efficient lookups
 CREATE INDEX IF NOT EXISTS idx_embeddings_source ON embeddings(source_table, source_id);
 CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
+
+CREATE TRIGGER IF NOT EXISTS embeddings_ad
+AFTER DELETE ON embeddings BEGIN
+  INSERT INTO schema_meta (key, value) VALUES ('vec_index_generation', '1')
+  ON CONFLICT(key) DO UPDATE SET value = CAST(schema_meta.value AS INTEGER) + 1;
+  INSERT INTO schema_meta (key, value) VALUES ('vec_index_dirty', '1')
+  ON CONFLICT(key) DO UPDATE SET value = '1';
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_embedding_ad
+AFTER DELETE ON messages BEGIN
+  DELETE FROM embeddings WHERE source_table = 'messages' AND source_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS decisions_embedding_ad
+AFTER DELETE ON decisions BEGIN
+  DELETE FROM embeddings WHERE source_table = 'decisions' AND source_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS learnings_embedding_ad
+AFTER DELETE ON learnings BEGIN
+  DELETE FROM embeddings WHERE source_table = 'learnings' AND source_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS breadcrumbs_embedding_ad
+AFTER DELETE ON breadcrumbs BEGIN
+  DELETE FROM embeddings WHERE source_table = 'breadcrumbs' AND source_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS loa_entries_embedding_ad
+AFTER DELETE ON loa_entries BEGIN
+  DELETE FROM embeddings WHERE source_table = 'loa_entries' AND source_id = old.id;
+END;
 `;
 
 // Note: sqlite-vec virtual tables are created dynamically after loading the extension
