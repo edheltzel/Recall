@@ -295,6 +295,43 @@ describe('host hook payload routing', () => {
 });
 
 describe('host-neutral immediate SQLite ingest', () => {
+  test('reconciles fallback keys across append-only and reset captures', () => {
+    const sessionId = 'codex-fallback-reconciliation';
+    const first = { role: 'user' as const, content: 'First retained turn.' };
+    const second = { role: 'assistant' as const, content: 'Second retained turn.' };
+
+    expect(ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [first, second],
+    })).toMatchObject({ inserted: 2 });
+    expect(ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [second],
+    })).toMatchObject({ inserted: 0, skipped: 1 });
+    expect(ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [second],
+      incremental: true,
+    })).toMatchObject({ inserted: 1 });
+    expect(ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [second, second],
+    })).toMatchObject({ inserted: 0, skipped: 2 });
+
+    const rows = getDb()
+      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(sessionId) as Array<{ content: string }>;
+    expect(rows.map(row => row.content)).toEqual([
+      first.content,
+      second.content,
+      second.content,
+    ]);
+  });
+
   test('Grok export capture writes automatic rows immediately and deduplicates replay', () => {
     const payload = {
       hookEventName: 'SessionEnd',

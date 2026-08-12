@@ -673,8 +673,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
   // so a careless caller cannot demote curated knowledge below neutral.
   const importance = Math.max(5, clampImportance(entry.importance, 8));
   const stmt = db.prepare(`
-    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance, provenance)
-    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance)
+    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance, provenance, source_ids)
+    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance, $source_ids)
   `);
   const result = stmt.run({
     $title: entry.title,
@@ -688,7 +688,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
     $tags: entry.tags || null,
     $message_count: entry.message_count || null,
     $importance: importance,
-    $provenance: entry.provenance ?? null
+    $provenance: entry.provenance ?? null,
+    $source_ids: entry.source_ids ?? null
   });
   return result.lastInsertRowid as number;
 }
@@ -706,11 +707,50 @@ export function getLastLoaEntry(): LoaEntry | undefined {
 export function getLoaMessages(loaId: number): Message[] {
   const db = getDb();
   const loa = getLoaEntry(loaId);
-  if (!loa || !loa.message_range_start || !loa.message_range_end) {
+  if (!loa) return [];
+
+  if (loa.source_ids) {
+    try {
+      const sources = JSON.parse(loa.source_ids) as unknown;
+      if (
+        Array.isArray(sources) &&
+        sources.every(source =>
+          typeof source === 'object' && source !== null &&
+          (source as { table?: unknown }).table === 'messages' &&
+          Number.isSafeInteger((source as { id?: unknown }).id)
+        )
+      ) {
+        const ids = sources.map(source => (source as { id: number }).id);
+        const messages: Message[] = [];
+        for (const idChunk of chunked(ids)) {
+          messages.push(...db.prepare(`
+            SELECT * FROM messages WHERE id IN (${idChunk.map(() => '?').join(',')})
+          `).all(...idChunk) as Message[]);
+        }
+        const order = new Map(ids.map((id, index) => [id, index]));
+        return messages.sort((left, right) =>
+          (order.get(left.id!) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.id!) ?? Number.MAX_SAFE_INTEGER)
+        );
+      }
+    } catch {
+      return [];
+    }
+  }
+
+  if (!loa.message_range_start || !loa.message_range_end) {
     return [];
   }
-  return db.prepare('SELECT * FROM messages WHERE id >= ? AND id <= ? ORDER BY timestamp')
-    .all(loa.message_range_start, loa.message_range_end) as Message[];
+  if (loa.session_id) {
+    return db.prepare(`
+      SELECT * FROM messages
+      WHERE id >= ? AND id <= ? AND session_id = ?
+      ORDER BY timestamp
+    `).all(loa.message_range_start, loa.message_range_end, loa.session_id) as Message[];
+  }
+  return db.prepare(`
+    SELECT * FROM messages WHERE id >= ? AND id <= ? ORDER BY timestamp
+  `).all(loa.message_range_start, loa.message_range_end) as Message[];
 }
 
 export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; startId: number | null; endId: number | null } {

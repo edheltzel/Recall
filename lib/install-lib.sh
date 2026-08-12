@@ -967,11 +967,18 @@ recall_do_restore() {
     [[ "$filename" == "manifest.txt" ]] && continue
 
     local target
-    if [[ "$filename" == ".claude.json" ]]; then
-      target="$HOME/.claude.json"
-    else
-      target="$CLAUDE_DIR/$filename"
-    fi
+    case "$filename" in
+      .claude.json)
+        target="$HOME/.claude.json"
+        ;;
+      RecallLifecycle.json)
+        target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
+        ;;
+      *)
+        target="$CLAUDE_DIR/$filename"
+        ;;
+    esac
+    mkdir -p "$(dirname "$target")"
     cp "$file" "$target"
     log_success "Restored: $filename → $target"
     restored=$((restored + 1))
