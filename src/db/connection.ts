@@ -18,6 +18,7 @@ import { applyMigrations } from './migrations.js';
 // at module load — BEFORE any Database is opened below, as setCustomSQLite
 // requires (it is process-global). See src/db/vec.ts.
 import { loadVecExtension, isVecAvailable, createVecTable } from './vec.js';
+import { repairLifecycleSearchIndex } from '../lib/lifecycle-search.js';
 
 const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
@@ -123,6 +124,10 @@ export function getDb(): Database {
       // Degrade gracefully — read-only / locked DB. No new throw on the read path.
     }
     ensurePublishedMessageViews(db);
+    try {
+      repairLifecycleSearchIndex(db, { maxPages: 1 });
+    } catch {
+    }
 
     return db;
   } catch (error) {
@@ -257,6 +262,10 @@ export function initDb(): { created: boolean; path: string } {
 
   ensureSchema(db);
   ensurePublishedMessageViews(db);
+  try {
+    repairLifecycleSearchIndex(db, { maxPages: 1 });
+  } catch {
+  }
 
   // SECURITY: Set restrictive permissions (owner read/write only)
   // Prevents other users on system from reading conversation history

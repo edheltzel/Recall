@@ -11,6 +11,8 @@ import {
   generateFrameSummaryFromStats,
 } from './extraction.js';
 import { invalidateRecordEmbedding } from './memory.js';
+import { invalidateVecIndex } from '../db/vec.js';
+import { repairLifecycleSearchGenerationPage } from './lifecycle-search.js';
 import { scrub } from './write-safety.js';
 
 export type LifecycleHost = 'codex' | 'grok' | 'jcode';
@@ -542,6 +544,7 @@ function prepareBatchGeneration(
   const existingPage = db.prepare(`
     SELECT stored.message_key, stored.message_id, stored.source_position,
       generated.message_key IS NOT NULL AS generation_backed,
+      COALESCE(generated.fts_pending, 0) AS fts_pending,
       CASE WHEN generated.message_key IS NOT NULL THEN generated.timestamp
         ELSE message.timestamp END AS timestamp,
       CASE WHEN generated.message_key IS NOT NULL THEN generated.role
@@ -596,6 +599,7 @@ function prepareBatchGeneration(
       message_id: number | null;
       source_position: number | null;
       generation_backed: number;
+      fts_pending: number;
       timestamp: string | null;
       role: HostMessageRole | null;
       content: string | null;
@@ -618,7 +622,8 @@ function prepareBatchGeneration(
             (first.source !== 'grok' || row.source_position !== null);
           const nextVisible = row.message_id !== null && nextContent !== null &&
             (first.source !== 'grok' || current.source_position !== null);
-          const searchChanged = (nextVisible && !Boolean(row.generation_backed)) ||
+          const searchChanged = Boolean(row.fts_pending) ||
+            (nextVisible && !Boolean(row.generation_backed)) ||
             oldVisible !== nextVisible ||
             (oldVisible && nextVisible &&
               (nextContent !== row.content || current.project !== row.project));
@@ -643,7 +648,8 @@ function prepareBatchGeneration(
           (first.source !== 'grok' || sourcePosition !== null);
         const oldVisible = row.message_id !== null && row.content !== null &&
           (first.source !== 'grok' || row.source_position !== null);
-        const searchChanged = (nextVisible && !Boolean(row.generation_backed)) ||
+        const searchChanged = Boolean(row.fts_pending) ||
+          (nextVisible && !Boolean(row.generation_backed)) ||
           nextVisible !== oldVisible;
         if (sourcePosition !== row.source_position) reconciled++;
         insertExisting.run(
@@ -981,94 +987,6 @@ function persistPreparedGeneration(
   }).immediate();
 }
 
-function isPublishedGeneration(db: Database, generationId: string): boolean {
-  return Boolean(db.prepare(`
-    SELECT 1 FROM host_ingest_generations AS generation
-    JOIN host_ingest_state AS state
-      ON state.active_generation = generation.generation_id
-     AND state.source = generation.source
-     AND state.session_id = generation.session_id
-    WHERE generation.generation_id = ? AND generation.status = 'active'
-  `).get(generationId));
-}
-
-function repairPublishedGenerationSearchPage(
-  db: Database,
-  generationId: string,
-  deadline?: number
-): boolean {
-  const generation = db.prepare(`
-    SELECT generation.fts_ready
-    FROM host_ingest_generations AS generation
-    JOIN host_ingest_state AS state
-      ON state.active_generation = generation.generation_id
-     AND state.source = generation.source
-     AND state.session_id = generation.session_id
-    WHERE generation.generation_id = ? AND generation.status = 'active'
-  `).get(generationId) as { fts_ready: number } | undefined;
-  if (!generation || generation.fts_ready === 1) return true;
-  const page = db.prepare(`
-    SELECT ordinal, source, message_id, content, project, source_position
-    FROM host_ingest_generation_messages
-    WHERE generation_id = ? AND fts_pending = 1
-    ORDER BY ordinal LIMIT ?
-  `);
-  const remove = db.prepare(`
-    DELETE FROM host_ingest_generation_messages_fts WHERE rowid = ?
-  `);
-  const insert = db.prepare(`
-    INSERT INTO host_ingest_generation_messages_fts(
-      rowid, content, project, generation_id
-    ) VALUES (?, ?, ?, ?)
-  `);
-  const complete = db.prepare(`
-    UPDATE host_ingest_generation_messages SET fts_pending = 0
-    WHERE generation_id = ? AND ordinal = ?
-  `);
-  assertHostDeadline(deadline);
-  const rows = page.all(generationId, SQLITE_SAFE_CHUNK_SIZE) as Array<{
-    ordinal: number;
-    source: LifecycleHost;
-    message_id: number | null;
-    content: string | null;
-    project: string | null;
-    source_position: number | null;
-  }>;
-  if (rows.length > 0) {
-    const indexed = db.transaction(() => {
-      if (!isPublishedGeneration(db, generationId)) return false;
-      for (const row of rows) {
-        if (row.message_id !== null) {
-          remove.run(row.message_id);
-          if (row.content !== null &&
-            (row.source !== 'grok' || row.source_position !== null)) {
-            insert.run(row.message_id, row.content, row.project, generationId);
-          }
-        }
-        complete.run(generationId, row.ordinal);
-      }
-      return true;
-    }).immediate();
-    if (!indexed) return true;
-    if (db.prepare(`
-      SELECT 1 FROM host_ingest_generation_messages
-      WHERE generation_id = ? AND fts_pending = 1 LIMIT 1
-    `).get(generationId)) return false;
-  }
-  db.transaction(() => {
-    db.prepare(`
-      UPDATE host_ingest_generations SET fts_ready = 1
-      WHERE generation_id = ? AND status = 'active' AND EXISTS (
-        SELECT 1 FROM host_ingest_state AS state
-        WHERE state.active_generation = host_ingest_generations.generation_id
-          AND state.source = host_ingest_generations.source
-          AND state.session_id = host_ingest_generations.session_id
-      )
-    `).run(generationId);
-  }).immediate();
-  return true;
-}
-
 function repairPublishedGenerationSearch(
   db: Database,
   generationId: string,
@@ -1076,7 +994,8 @@ function repairPublishedGenerationSearch(
   maxPages = Number.POSITIVE_INFINITY
 ): boolean {
   for (let page = 0; page < maxPages; page++) {
-    if (repairPublishedGenerationSearchPage(db, generationId, deadline)) return true;
+    assertHostDeadline(deadline);
+    if (repairLifecycleSearchGenerationPage(db, generationId)) return true;
   }
   return false;
 }
@@ -1272,6 +1191,39 @@ function sameIngestState(
       left.finalized_at === right.finalized_at;
 }
 
+function invalidateChangedGenerationEmbeddings(
+  db: Database,
+  generationId: string,
+  previousGenerationId?: string
+): void {
+  const result = db.prepare(`
+    DELETE FROM embeddings
+    WHERE source_table = 'messages' AND source_id IN (
+      SELECT next.message_id
+      FROM host_ingest_generation_messages AS next
+      LEFT JOIN host_ingest_generation_messages AS previous
+        ON previous.generation_id = ?
+       AND previous.message_key = next.message_key
+      LEFT JOIN messages AS physical ON physical.id = next.message_id
+      WHERE next.generation_id = ? AND next.message_id IS NOT NULL
+        AND (
+          next.content IS NULL
+          OR (next.source = 'grok' AND next.source_position IS NULL)
+          OR (
+            previous.message_key IS NOT NULL
+            AND (previous.content IS NOT next.content OR previous.project IS NOT next.project)
+          )
+          OR (
+            previous.message_key IS NULL
+            AND physical.id IS NOT NULL
+            AND (physical.content IS NOT next.content OR physical.project IS NOT next.project)
+          )
+        )
+    )
+  `).run(previousGenerationId ?? null, generationId);
+  if (result.changes > 0) invalidateVecIndex(db);
+}
+
 function activatePreparedGeneration(
   db: Database,
   generation: PreparedBatchGeneration,
@@ -1372,6 +1324,11 @@ function activatePreparedGeneration(
     UPDATE host_ingest_generations SET status = 'active'
     WHERE generation_id = ? AND status = 'pending'
   `).run(generation.publishToken);
+  invalidateChangedGenerationEmbeddings(
+    db,
+    generation.publishToken,
+    previous?.active_generation ?? undefined
+  );
   const finalizedAt = terminal
     ? prepared.capturedAt
     : resumed
