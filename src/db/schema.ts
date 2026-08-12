@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS loa_message_sources (
 );
 `;
 
+export const LOA_MESSAGE_RETENTION_SCHEMA = `
+CREATE TRIGGER IF NOT EXISTS loa_message_sources_messages_ad
+AFTER DELETE ON messages BEGIN
+  UPDATE loa_message_sources SET content = '' WHERE message_id = old.id;
+END;
+`;
+
 export const CREATE_TABLES = `
 -- Sessions table: tracks coding agent sessions (Claude Code, OpenCode, etc.)
 CREATE TABLE IF NOT EXISTS sessions (
@@ -135,6 +142,7 @@ CREATE TABLE IF NOT EXISTS loa_entries (
 );
 
 ${LOA_MESSAGE_SOURCES_SCHEMA}
+${LOA_MESSAGE_RETENTION_SCHEMA}
 
 -- TELOS entries: Purpose framework sections (Problems, Missions, Goals, Challenges, Strategies)
 CREATE TABLE IF NOT EXISTS telos (

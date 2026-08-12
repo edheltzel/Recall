@@ -3,7 +3,7 @@
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
 import { notMarkedDuplicateSql } from './dedup.js';
-import { chunked } from './chunk.js';
+import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { scrub } from './write-safety.js';
 import { invalidateVecIndex } from '../db/vec.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
@@ -717,21 +717,46 @@ export function getLastLoaEntry(): LoaEntry | undefined {
   return db.prepare('SELECT * FROM loa_entries ORDER BY created_at DESC LIMIT 1').get() as LoaEntry | undefined;
 }
 
+function getPinnedLoaMessages(loaId: number): Message[] {
+  const db = getDb();
+  const statement = db.prepare(`
+    SELECT message_id AS id, session_id, timestamp, role, content, project,
+      importance, provenance, ordinal
+    FROM loa_message_sources
+    WHERE loa_id = ? AND ordinal > ? AND content <> ''
+    ORDER BY ordinal LIMIT ?
+  `);
+  const messages: Message[] = [];
+  let ordinal = -1;
+  for (;;) {
+    const batch = statement.all(loaId, ordinal, SQLITE_SAFE_CHUNK_SIZE) as Array<
+      Message & { ordinal: number }
+    >;
+    if (batch.length === 0) break;
+    for (const message of batch) {
+      ordinal = message.ordinal;
+      const { ordinal: _ordinal, ...source } = message;
+      messages.push(source);
+    }
+  }
+  return messages;
+}
+
 export function getLoaMessages(loaId: number): Message[] {
   const db = getDb();
   const loa = getLoaEntry(loaId);
   if (!loa) return [];
 
-  const pinned = db.prepare(`
-    SELECT message_id AS id, session_id, timestamp, role, content, project,
-      importance, provenance
-    FROM loa_message_sources WHERE loa_id = ? ORDER BY ordinal
-  `).all(loaId) as Message[];
-  if (pinned.length > 0) return pinned;
-
   if (loa.source_ids) {
     try {
       const sources = JSON.parse(loa.source_ids) as unknown;
+      if (
+        typeof sources === 'object' && sources !== null &&
+        (sources as { table?: unknown }).table === 'loa_message_sources' &&
+        (sources as { loa_id?: unknown }).loa_id === loaId
+      ) {
+        return getPinnedLoaMessages(loaId);
+      }
       if (
         Array.isArray(sources) &&
         sources.every(source =>
