@@ -87,6 +87,7 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | sessions | Cross-host session metadata (ID, timestamps, project, branch, source) | No |
 | host_ingest_state | Per-host transcript reference, digest, watermark, and terminal state | No |
 | host_ingest_messages | Persistent lifecycle message keys linked to inserted message rows | No |
+| loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) column | Yes |
 | loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) column | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
@@ -99,6 +100,10 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | dedup_lineage | Duplicate lineage audit trail from `recall dedup` (survivor, duplicate, reason, similarity, status) | No |
 
 All FTS5-indexed tables have automatic sync triggers.
+
+Portable JSON, Markdown, and SQL exports contain the seven durable memory and
+deduplication tables plus `host_ingest_state`, `host_ingest_messages`, and
+`loa_message_sources`. SQLite exports contain the full database.
 
 The `importance` column was added in schema migration 7→8 (v0.7.0) on four
 tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1

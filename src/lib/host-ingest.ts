@@ -4,7 +4,7 @@ import { closeSync, mkdtempSync, openSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { getDb } from '../db/connection.js';
-import { chunked } from './chunk.js';
+import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { detectProject } from './project.js';
 import { invalidateVecIndex } from '../db/vec.js';
 import {
@@ -642,31 +642,46 @@ function publishGenerationMessages(
       )
   `).run();
   db.exec('DELETE FROM temp.host_ingest_publish_ids');
-  db.prepare(`
+  const nextPage = db.prepare(`
+    SELECT MAX(ordinal) AS ordinal FROM (
+      SELECT ordinal FROM host_ingest_stage.generation_messages
+      WHERE existing_key = 0 AND ordinal > ?
+      ORDER BY ordinal LIMIT ?
+    )
+  `);
+  const publishPage = db.prepare(`
     INSERT INTO temp.host_ingest_publish_messages
       (ordinal, session_id, timestamp, role, content, project)
     SELECT ordinal, session_id, timestamp, role, content, project
     FROM host_ingest_stage.generation_messages
-    WHERE existing_key = 0 ORDER BY ordinal
-  `).run();
-  db.prepare(`
-    UPDATE host_ingest_stage.generation_messages AS generation
-    SET message_id = (
-      SELECT published.message_id FROM temp.host_ingest_publish_ids AS published
-      WHERE published.ordinal = generation.ordinal
-    )
-    WHERE existing_key = 0
-  `).run();
+    WHERE existing_key = 0 AND ordinal > ? AND ordinal <= ?
+    ORDER BY ordinal
+  `);
+  let publishCursor = -1;
+  for (;;) {
+    assertHostDeadline(deadline);
+    const page = nextPage.get(publishCursor, SQLITE_SAFE_CHUNK_SIZE) as {
+      ordinal: number | null;
+    };
+    if (page.ordinal === null) break;
+    publishPage.run(publishCursor, page.ordinal);
+    publishCursor = page.ordinal;
+    assertHostDeadline(deadline);
+  }
   const inserted = (db.prepare(`
     SELECT COUNT(*) AS count FROM temp.host_ingest_publish_ids
   `).get() as { count: number }).count;
+  assertHostDeadline(deadline);
   db.prepare(`
     INSERT INTO host_ingest_messages
       (source, session_id, message_key, message_id, source_position)
-    SELECT source, session_id, message_key, message_id, source_position
-    FROM host_ingest_stage.generation_messages
-    WHERE existing_key = 0 AND message_id IS NOT NULL
-    ORDER BY ordinal
+    SELECT generation.source, generation.session_id, generation.message_key,
+      published.message_id, generation.source_position
+    FROM host_ingest_stage.generation_messages AS generation
+    JOIN temp.host_ingest_publish_ids AS published
+      ON published.ordinal = generation.ordinal
+    WHERE generation.existing_key = 0
+    ORDER BY generation.ordinal
   `).run();
 
   const positionChanges = db.prepare(`

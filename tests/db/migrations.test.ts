@@ -910,6 +910,14 @@ describe('host lifecycle ingest migration (17 to 19)', () => {
 });
 
 describe('pinned automatic LoA sources migration (19 to 20)', () => {
+  test('indexes retention cleanup by message id', () => {
+    const index = db.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_loa_message_sources_message_id'
+    `).get() as { sql: string };
+    expect(index.sql).toContain('loa_message_sources(message_id)');
+  });
+
   test('pins legacy lifecycle selectors to exact message snapshots', () => {
     db.prepare(`
       INSERT INTO sessions (session_id, started_at, source) VALUES (?, ?, 'grok')

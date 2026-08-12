@@ -17,9 +17,19 @@ CREATE TABLE IF NOT EXISTS loa_message_sources (
   UNIQUE (loa_id, message_id),
   FOREIGN KEY (loa_id) REFERENCES loa_entries(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_loa_message_sources_message_id
+ON loa_message_sources(message_id);
 `;
 
 export const LOA_MESSAGE_RETENTION_SCHEMA = `
+CREATE TRIGGER IF NOT EXISTS loa_automatic_message_ranges_bd
+BEFORE DELETE ON messages BEGIN
+  UPDATE loa_entries SET
+    message_range_start = CASE WHEN message_range_start = old.id THEN NULL ELSE message_range_start END,
+    message_range_end = CASE WHEN message_range_end = old.id THEN NULL ELSE message_range_end END
+  WHERE tags LIKE 'automatic-capture,%'
+    AND (message_range_start = old.id OR message_range_end = old.id);
+END;
 CREATE TRIGGER IF NOT EXISTS loa_message_sources_messages_ad
 AFTER DELETE ON messages BEGIN
   UPDATE loa_message_sources SET content = '' WHERE message_id = old.id;
@@ -321,6 +331,8 @@ CREATE INDEX IF NOT EXISTS idx_loa_project ON loa_entries(project);
 CREATE INDEX IF NOT EXISTS idx_loa_created ON loa_entries(created_at);
 CREATE INDEX IF NOT EXISTS idx_loa_parent ON loa_entries(parent_loa_id);
 CREATE INDEX IF NOT EXISTS idx_loa_importance ON loa_entries(importance);
+CREATE INDEX IF NOT EXISTS idx_loa_range_start ON loa_entries(message_range_start);
+CREATE INDEX IF NOT EXISTS idx_loa_range_end ON loa_entries(message_range_end);
 
 -- Importance indexes for tiered loading (L1 assembly)
 CREATE INDEX IF NOT EXISTS idx_messages_importance ON messages(importance);

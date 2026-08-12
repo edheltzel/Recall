@@ -272,7 +272,9 @@ Formats:
 
 - **json / markdown** — app-level export of the durable memory tables
   (`sessions`, `messages`, `decisions`, `learnings`, `breadcrumbs`,
-  `loa_entries`, `dedup_lineage`). Every row of a provenance-bearing table carries an explicit
+  `loa_entries`, `dedup_lineage`, `host_ingest_state`,
+  `host_ingest_messages`, `loa_message_sources`). Every row of a
+  provenance-bearing table carries an explicit
   `provenance` field; legacy `NULL` provenance is exported as the literal
   `unknown` — never omitted, never guessed (see Record Provenance above).
   Embeddings are excluded.
