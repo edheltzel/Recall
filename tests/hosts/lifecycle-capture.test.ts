@@ -828,8 +828,8 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(current.id).toBeGreaterThan(Number(retired.lastInsertRowid));
   });
 
-  test('publishes staged messages across bounded pages', () => {
-    const sessionId = 'bounded-generation-pages';
+  test('publishes staged messages set-wise with SQLite ID mapping', () => {
+    const sessionId = 'set-wise-generation';
     const messages = Array.from({ length: SQLITE_SAFE_CHUNK_SIZE + 1 }, (_, index) => ({
       role: 'system' as const,
       content: `Frame ${index}`,
@@ -845,10 +845,17 @@ describe('host-neutral immediate SQLite ingest', () => {
     }])).toMatchObject({ inserted: messages.length });
 
     const stored = getDb().prepare(`
-      SELECT COUNT(*) AS count, COUNT(DISTINCT message_id) AS distinct_ids
-      FROM host_ingest_messages WHERE session_id = ?
-    `).get(sessionId) as { count: number; distinct_ids: number };
-    expect(stored).toEqual({ count: messages.length, distinct_ids: messages.length });
+      SELECT COUNT(*) AS count, COUNT(DISTINCT stored.message_id) AS distinct_ids,
+        COUNT(message.host_ingest_token) AS pending_tokens
+      FROM host_ingest_messages AS stored
+      JOIN messages AS message ON message.id = stored.message_id
+      WHERE stored.session_id = ?
+    `).get(sessionId) as { count: number; distinct_ids: number; pending_tokens: number };
+    expect(stored).toEqual({
+      count: messages.length,
+      distinct_ids: messages.length,
+      pending_tokens: 0,
+    });
   });
 
   test('pins finalized LoA evidence across non-terminal reconciliation', () => {

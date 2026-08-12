@@ -150,7 +150,9 @@ interface PreparedBatchGeneration {
   startedAt: string;
   endedAt: string | null;
   messageCount: number;
+  newMessageCount: number;
   expectedKeyCount: number;
+  publishToken: string;
 }
 
 function hash(value: string): string {
@@ -497,6 +499,42 @@ function prepareBatchGeneration(
   const expectedKeyCount = (db.prepare(`
     SELECT COUNT(*) AS count FROM host_ingest_messages WHERE source = ? AND session_id = ?
   `).get(first.source, first.session_id) as { count: number }).count;
+  const stagedMessages = stage.db.prepare(`
+    SELECT ordinal, message_key FROM generation_messages
+    WHERE ordinal > ? ORDER BY ordinal LIMIT ?
+  `);
+  const markExisting = stage.db.prepare(`
+    UPDATE generation_messages SET existing_key = 1, message_id = ?
+    WHERE ordinal = ?
+  `);
+  let cursor = -1;
+  for (;;) {
+    assertHostDeadline(deadline);
+    const page = stagedMessages.all(cursor, SQLITE_SAFE_CHUNK_SIZE) as Array<{
+      ordinal: number;
+      message_key: string;
+    }>;
+    if (page.length === 0) break;
+    const keys = page.map(row => row.message_key);
+    const existing = db.prepare(`
+      SELECT message_key, message_id FROM host_ingest_messages
+      WHERE source = ? AND session_id = ?
+        AND message_key IN (${keys.map(() => '?').join(',')})
+    `).all(first.source, first.session_id, ...keys) as Array<{
+      message_key: string;
+      message_id: number | null;
+    }>;
+    const ordinals = new Map(page.map(row => [row.message_key, row.ordinal]));
+    stage.db.transaction(() => {
+      for (const row of existing) {
+        markExisting.run(row.message_id, ordinals.get(row.message_key)!);
+      }
+    })();
+    cursor = page.at(-1)!.ordinal;
+  }
+  const newMessageCount = (stage.db.prepare(`
+    SELECT COUNT(*) AS count FROM generation_messages WHERE existing_key = 0
+  `).get() as { count: number }).count;
   const input: HostTranscript = {
     source: last.source,
     sessionId: last.session_id,
@@ -520,7 +558,9 @@ function prepareBatchGeneration(
     startedAt: timeRange.first_timestamp ?? first.captured_at,
     endedAt: input.finalize ? (timeRange.last_timestamp ?? last.captured_at) : null,
     messageCount: timeRange.count,
+    newMessageCount,
     expectedKeyCount,
+    publishToken: hash(`${stage.path}\u0000${first.source}\u0000${first.session_id}`),
   };
 }
 
@@ -581,37 +621,6 @@ function upsertGeneratedSession(
   );
 }
 
-function createGenerationPublisher(db: Database): void {
-  db.exec(`
-    DROP TRIGGER IF EXISTS temp.host_ingest_publish_messages_insert;
-    DROP VIEW IF EXISTS temp.host_ingest_publish_messages;
-    DROP TABLE IF EXISTS temp.host_ingest_publish_ids;
-    CREATE TEMP TABLE host_ingest_publish_ids (
-      ordinal INTEGER PRIMARY KEY,
-      message_id INTEGER NOT NULL
-    );
-    CREATE TEMP VIEW host_ingest_publish_messages AS
-      SELECT NULL AS ordinal, NULL AS session_id, NULL AS timestamp,
-        NULL AS role, NULL AS content, NULL AS project WHERE 0;
-    CREATE TEMP TRIGGER host_ingest_publish_messages_insert
-    INSTEAD OF INSERT ON host_ingest_publish_messages BEGIN
-      INSERT INTO messages
-        (session_id, timestamp, role, content, project, importance, provenance)
-      VALUES (new.session_id, new.timestamp, new.role, new.content, new.project, 5, 'verbatim');
-      INSERT INTO host_ingest_publish_ids (ordinal, message_id)
-      VALUES (new.ordinal, last_insert_rowid());
-    END;
-  `);
-}
-
-function dropGenerationPublisher(db: Database): void {
-  db.exec(`
-    DROP TRIGGER IF EXISTS temp.host_ingest_publish_messages_insert;
-    DROP VIEW IF EXISTS temp.host_ingest_publish_messages;
-    DROP TABLE IF EXISTS temp.host_ingest_publish_ids;
-  `);
-}
-
 function publishGenerationMessages(
   db: Database,
   generation: PreparedBatchGeneration,
@@ -626,63 +635,36 @@ function publishGenerationMessages(
     throw new HostIngestCheckpointConflictError(input.source, input.sessionId);
   }
   db.prepare(`
-    UPDATE host_ingest_stage.generation_messages AS generation
-    SET
-      existing_key = EXISTS (
-        SELECT 1 FROM host_ingest_messages AS stored
-        WHERE stored.source = generation.source
-          AND stored.session_id = generation.session_id
-          AND stored.message_key = generation.message_key
-      ),
-      message_id = (
-        SELECT stored.message_id FROM host_ingest_messages AS stored
-        WHERE stored.source = generation.source
-          AND stored.session_id = generation.session_id
-          AND stored.message_key = generation.message_key
-      )
-  `).run();
-  db.exec('DELETE FROM temp.host_ingest_publish_ids');
-  const nextPage = db.prepare(`
-    SELECT MAX(ordinal) AS ordinal FROM (
-      SELECT ordinal FROM host_ingest_stage.generation_messages
-      WHERE existing_key = 0 AND ordinal > ?
-      ORDER BY ordinal LIMIT ?
+    INSERT INTO messages (
+      session_id, timestamp, role, content, project, importance, provenance,
+      host_ingest_token
     )
-  `);
-  const publishPage = db.prepare(`
-    INSERT INTO temp.host_ingest_publish_messages
-      (ordinal, session_id, timestamp, role, content, project)
-    SELECT ordinal, session_id, timestamp, role, content, project
+    SELECT session_id, timestamp, role, content, project, 5, 'verbatim',
+      ? || ':' || printf('%016d', ordinal)
     FROM host_ingest_stage.generation_messages
-    WHERE existing_key = 0 AND ordinal > ? AND ordinal <= ?
+    WHERE existing_key = 0
     ORDER BY ordinal
-  `);
-  let publishCursor = -1;
-  for (;;) {
-    assertHostDeadline(deadline);
-    const page = nextPage.get(publishCursor, SQLITE_SAFE_CHUNK_SIZE) as {
-      ordinal: number | null;
-    };
-    if (page.ordinal === null) break;
-    publishPage.run(publishCursor, page.ordinal);
-    publishCursor = page.ordinal;
-    assertHostDeadline(deadline);
-  }
-  const inserted = (db.prepare(`
-    SELECT COUNT(*) AS count FROM temp.host_ingest_publish_ids
-  `).get() as { count: number }).count;
-  assertHostDeadline(deadline);
+  `).run(generation.publishToken);
+  const inserted = generation.newMessageCount;
   db.prepare(`
     INSERT INTO host_ingest_messages
       (source, session_id, message_key, message_id, source_position)
     SELECT generation.source, generation.session_id, generation.message_key,
-      published.message_id, generation.source_position
+      published.id, generation.source_position
     FROM host_ingest_stage.generation_messages AS generation
-    JOIN temp.host_ingest_publish_ids AS published
-      ON published.ordinal = generation.ordinal
+    JOIN messages AS published
+      ON published.host_ingest_token = ? || ':' || printf('%016d', generation.ordinal)
     WHERE generation.existing_key = 0
     ORDER BY generation.ordinal
-  `).run();
+  `).run(generation.publishToken);
+  db.prepare(`
+    UPDATE messages SET host_ingest_token = NULL
+    WHERE EXISTS (
+      SELECT 1 FROM host_ingest_stage.generation_messages AS generation
+      WHERE generation.existing_key = 0
+        AND messages.host_ingest_token = ? || ':' || printf('%016d', generation.ordinal)
+    )
+  `).run(generation.publishToken);
 
   const positionChanges = db.prepare(`
     UPDATE host_ingest_messages SET source_position = (
@@ -1148,7 +1130,7 @@ function finalizeSession(
   const tags = `automatic-capture,${input.source}`;
   const existing = db
     .prepare(`
-      SELECT id, fabric_extract, message_range_end AS previous_message_id
+      SELECT id, fabric_extract, snapshot_max_message_id AS previous_message_id
       FROM loa_entries
       WHERE session_id = ? AND description = ? AND tags = ?
       ORDER BY id DESC LIMIT 1
@@ -1179,19 +1161,25 @@ function finalizeSession(
       ? `${existing!.fabric_extract}\n\n## RESUMED SESSION UPDATE\n\n${currentExtract}`
       : existing!.fabric_extract
     : currentExtract;
+  const snapshotMaxMessageId = Math.max(
+    existing?.previous_message_id ?? 0,
+    stats.rangeEnd ?? 0
+  ) || null;
   assertHostDeadline(deadline);
   let loaId: number;
   if (existing) {
     db.prepare(`
       UPDATE loa_entries SET
         title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
-        project = ?, message_count = ?, source_ids = '[]', created_at = CURRENT_TIMESTAMP
+        snapshot_max_message_id = ?, project = ?, message_count = ?, source_ids = '[]',
+        created_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       title,
       fabricExtract,
       stats.rangeStart,
       stats.rangeEnd,
+      snapshotMaxMessageId,
       project ?? null,
       emptyReconciliation ? 0 : stats.total,
       existing.id
@@ -1204,14 +1192,16 @@ function finalizeSession(
     const result = db.prepare(`
       INSERT INTO loa_entries
         (title, description, fabric_extract, message_range_start, message_range_end,
-         session_id, project, tags, message_count, importance, provenance, source_ids)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 8, 'extracted', '[]')
+         snapshot_max_message_id, session_id, project, tags, message_count,
+         importance, provenance, source_ids)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 8, 'extracted', '[]')
     `).run(
       title,
       description,
       fabricExtract,
       stats.rangeStart,
       stats.rangeEnd,
+      snapshotMaxMessageId,
       input.sessionId,
       project ?? null,
       tags,
@@ -1397,12 +1387,13 @@ export function ingestHostTranscriptBatch(
   let stageOpen = true;
   let attached = false;
   try {
-    const generation = prepareBatchGeneration(stage, db, deadline);
+    const generation = db
+      .transaction(() => prepareBatchGeneration(stage, db, deadline))
+      .deferred();
     stage.db.close();
     stageOpen = false;
     db.prepare('ATTACH DATABASE ? AS host_ingest_stage').run(stage.path);
     attached = true;
-    createGenerationPublisher(db);
     return db
       .transaction(() => {
         return ingestBatchGenerationInTransaction(db, generation, expectation, deadline);
@@ -1411,7 +1402,6 @@ export function ingestHostTranscriptBatch(
   } finally {
     try {
       if (attached) {
-        dropGenerationPublisher(db);
         db.exec('DETACH DATABASE host_ingest_stage');
       }
     } finally {

@@ -16,6 +16,7 @@ import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runAge } from '../../src/commands/age';
 import { runLoaQuote } from '../../src/commands/loa';
 import { getDb } from '../../src/db/connection';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import {
   createSession,
   addMessage,
@@ -23,6 +24,8 @@ import {
   addLearning,
   addBreadcrumb,
   createLoaEntry,
+  getLoaMessages,
+  getMessagesSinceLastLoa,
 } from '../../src/lib/memory';
 import type { LineageStatus } from '../../src/lib/dedup';
 
@@ -143,6 +146,65 @@ describe('messages — delete (absorbs #38)', () => {
     const line = logged.find(l => l.startsWith('messages:'));
     expect(line).toContain('deleted 1');
     expect(line).toContain('withheld');
+  });
+
+  test('ages automatic endpoints while preserving the immutable resume cursor', () => {
+    const sessionId = 'aged-lifecycle-cursor';
+    const initial = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      capturedAt: OLD,
+      finalize: true,
+      messages: [
+        { role: 'user', content: 'old first' },
+        { role: 'assistant', content: 'old pinned middle' },
+        { role: 'user', content: 'old last' },
+      ],
+    });
+    const original = getDb().prepare(`
+      SELECT id FROM messages WHERE session_id = ? ORDER BY id
+    `).all(sessionId) as Array<{ id: number }>;
+    getDb().prepare('UPDATE messages SET importance = 10 WHERE id = ?').run(original[1].id);
+
+    runAge({ execute: true, table: 'messages' });
+
+    const retained = getDb().prepare(`
+      SELECT id FROM messages WHERE session_id = ? ORDER BY id
+    `).all(sessionId) as Array<{ id: number }>;
+    expect(retained).toEqual([{ id: original[1].id }]);
+    expect(getDb().prepare(`
+      SELECT message_range_start, message_range_end, snapshot_max_message_id
+      FROM loa_entries WHERE id = ?
+    `).get(initial.loaId!)).toEqual({
+      message_range_start: null,
+      message_range_end: null,
+      snapshot_max_message_id: original[2].id,
+    });
+
+    const resumed = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      capturedAt: '2099-01-01T00:00:00.000Z',
+      incremental: true,
+      finalize: true,
+      messages: [{ role: 'assistant', content: 'resumed current turn' }],
+    });
+    const resumedMessage = getDb().prepare(`
+      SELECT id FROM messages WHERE session_id = ? AND content = ?
+    `).get(sessionId, 'resumed current turn') as { id: number };
+
+    expect(resumed.loaId).toBe(initial.loaId);
+    expect(getLoaMessages(initial.loaId!).map(message => message.content)).toEqual([
+      'old pinned middle',
+      'resumed current turn',
+    ]);
+    expect(getDb().prepare(`
+      SELECT snapshot_max_message_id FROM loa_entries WHERE id = ?
+    `).get(initial.loaId!)).toEqual({ snapshot_max_message_id: resumedMessage.id });
+    getDb().prepare(`
+      UPDATE loa_entries SET created_at = '2099-01-01 00:00:00' WHERE id = ?
+    `).run(initial.loaId!);
+    expect(getMessagesSinceLastLoa().messages).toEqual([]);
   });
 });
 

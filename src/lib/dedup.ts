@@ -401,17 +401,17 @@ export function loadEmbeddings(db: Database, table: ProvenanceTable): Map<number
 }
 
 /**
- * Ids in `table` that other rows reference via foreign keys (loa_entries
- * message ranges, loa parent links). With foreign_keys=ON these cannot be
- * hard-deleted; destructive mode downgrades them to 'marked' instead of
- * failing the whole transaction.
+ * Ids in `table` that other rows reference via foreign keys (explicit
+ * loa_entries message ranges, loa parent links). Automatic lifecycle ranges
+ * are released by the retention trigger before deletion.
  */
 export function fkProtectedIds(db: Database, table: ProvenanceTable): Set<number> {
   const ids = new Set<number>();
   if (table === 'messages') {
     const rows = db.prepare(
       `SELECT message_range_start AS s, message_range_end AS e FROM loa_entries
-       WHERE message_range_start IS NOT NULL OR message_range_end IS NOT NULL`
+       WHERE (tags IS NULL OR tags NOT LIKE 'automatic-capture,%')
+         AND (message_range_start IS NOT NULL OR message_range_end IS NOT NULL)`
     ).all() as Array<{ s: number | null; e: number | null }>;
     for (const row of rows) {
       if (row.s !== null) ids.add(row.s);

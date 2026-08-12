@@ -88,6 +88,7 @@ export interface LoaEntry {
   fabric_extract: string;
   message_range_start?: number;
   message_range_end?: number;
+  snapshot_max_message_id?: number | null;
   parent_loa_id?: number;
   session_id?: string;
   project?: string;
