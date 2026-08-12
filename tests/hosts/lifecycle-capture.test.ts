@@ -292,6 +292,92 @@ describe('host hook payload routing', () => {
     expect(received?.finalize).toBe(true);
     expect(result.ingest?.inserted).toBe(1);
   });
+
+  test('captures oversized Codex and Grok transcripts in bounded chunks', () => {
+    const maxChunk = 25 * 1024 * 1024;
+    const paddingLine = `${JSON.stringify({
+      type: 'event_msg',
+      payload: { text: 'x'.repeat(64 * 1024) },
+    })}\n`;
+    const padding = paddingLine.repeat(Math.ceil((maxChunk + 1024) / paddingLine.length));
+    const codexSessionId = 'codex-oversized-session';
+    const transcript = Buffer.from(
+      `${JSON.stringify({ type: 'session_meta', payload: { id: codexSessionId } })}\n` +
+      `${JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'first oversized message' }],
+        },
+      })}\n` +
+      padding +
+      `${JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'last oversized message' }],
+        },
+      })}\n`
+    );
+    const codexLengths: number[] = [];
+    const codexFinalization: boolean[] = [];
+    const codex = handleHostHook(
+      'codex',
+      {
+        hook_event_name: 'SessionEnd',
+        session_id: codexSessionId,
+        transcript_path: '/supplied/oversized.jsonl',
+      },
+      {
+        transcriptSize: () => transcript.length,
+        readTranscript: (_path, start = 0, length = transcript.length - start) => {
+          codexLengths.push(length);
+          return transcript.subarray(start, start + length);
+        },
+        ingest: input => {
+          codexFinalization.push(Boolean(input.finalize));
+          return {
+            sessionId: input.sessionId,
+            inserted: input.messages.length,
+            skipped: 0,
+            finalized: Boolean(input.finalize),
+            redactions: [],
+            digest: `${input.messages.length}`,
+          };
+        },
+      }
+    );
+    expect(codex.ingest).toMatchObject({ inserted: 2, finalized: true });
+    expect(codexFinalization).toEqual([false, true]);
+    expect(Math.max(...codexLengths)).toBeLessThanOrEqual(maxChunk);
+
+    const grokMarkdown = `${'grok export padding\n'.repeat(
+      Math.ceil((maxChunk + 1024) / 'grok export padding\n'.length)
+    )}Grok oversized final content.\n`;
+    const grokFinalization: boolean[] = [];
+    const grok = handleHostHook(
+      'grok',
+      { hook_event_name: 'SessionEnd', session_id: 'grok-oversized-session' },
+      {
+        exportGrok: () => grokMarkdown,
+        ingest: input => {
+          grokFinalization.push(Boolean(input.finalize));
+          return {
+            sessionId: input.sessionId,
+            inserted: input.messages.length,
+            skipped: 0,
+            finalized: Boolean(input.finalize),
+            redactions: [],
+            digest: `${input.messages.length}`,
+          };
+        },
+      }
+    );
+    expect(grok.ingest).toMatchObject({ inserted: 2, finalized: true });
+    expect(grokFinalization).toEqual([false, true]);
+  });
 });
 
 describe('host-neutral immediate SQLite ingest', () => {
@@ -451,6 +537,54 @@ describe('host-neutral immediate SQLite ingest', () => {
       .get(input.sessionId) as { message_id: number | null };
     expect(key.message_id).toBeNull();
     expect(ingestHostTranscript(input)).toMatchObject({ inserted: 0, skipped: 1 });
+  });
+
+  test('preserves pruned terminal summaries and invalidates stale embeddings on resume', () => {
+    const sessionId = 'codex-pruned-resume';
+    const first = { role: 'user' as const, content: 'Initial retained request.' };
+    const pruned = { role: 'assistant' as const, content: 'Pruned answer preserved by summary.' };
+    const boundary = { role: 'system' as const, content: 'Initial terminal boundary.' };
+    const resumed = { role: 'assistant' as const, content: 'Resumed terminal answer.' };
+    const initial = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [first, pruned, boundary],
+      finalize: true,
+    });
+    const db = getDb();
+    const rows = db.prepare('SELECT id, content FROM messages WHERE session_id = ? ORDER BY id')
+      .all(sessionId) as Array<{ id: number; content: string }>;
+    db.prepare('DELETE FROM messages WHERE id = ?').run(rows[1].id);
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('loa_entries', ?, 'test', 1, ?)
+    `).run(initial.loaId!, Buffer.alloc(4));
+
+    const refreshed = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [first, pruned, boundary, resumed],
+      finalize: true,
+    });
+
+    expect(refreshed).toMatchObject({ inserted: 1, finalized: true, loaId: initial.loaId });
+    const loa = db.prepare(`
+      SELECT fabric_extract, message_count FROM loa_entries WHERE id = ?
+    `).get(initial.loaId!) as { fabric_extract: string; message_count: number };
+    expect(loa.message_count).toBe(4);
+    expect(loa.fabric_extract).toContain(pruned.content);
+    expect(loa.fabric_extract).toContain(resumed.content);
+    expect(
+      (
+        db.prepare(`
+          SELECT COUNT(*) AS count FROM embeddings
+          WHERE source_table = 'loa_entries' AND source_id = ?
+        `).get(initial.loaId!) as { count: number }
+      ).count
+    ).toBe(0);
+    expect(
+      db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty')
+    ).toEqual({ value: '1' });
   });
 
   test('rejects a native session ID already owned by another host', () => {

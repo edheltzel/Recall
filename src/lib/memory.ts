@@ -5,6 +5,7 @@ import { existsSync, statSync } from 'fs';
 import { notMarkedDuplicateSql } from './dedup.js';
 import { chunked } from './chunk.js';
 import { scrub } from './write-safety.js';
+import { invalidateVecIndex } from '../db/vec.js';
 import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
 
 // Choke point for redacting known-prefix secrets (and stripping invisible
@@ -692,6 +693,16 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
     $source_ids: entry.source_ids ?? null
   });
   return result.lastInsertRowid as number;
+}
+
+export function invalidateRecordEmbedding(
+  db: ReturnType<typeof getDb>,
+  sourceTable: string,
+  sourceId: number
+): void {
+  db.prepare('DELETE FROM embeddings WHERE source_table = ? AND source_id = ?')
+    .run(sourceTable, sourceId);
+  invalidateVecIndex(db);
 }
 
 export function getLoaEntry(id: number): LoaEntry | undefined {

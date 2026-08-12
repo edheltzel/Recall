@@ -6,6 +6,8 @@ import {
   reindexVec,
   knnSearch,
   createVecTable,
+  ensureVecIndexSynced,
+  invalidateVecIndex,
   resetVecSyncCache,
 } from '../../src/db/vec';
 import {
@@ -70,6 +72,22 @@ describe('sqlite-vec index (issue #148)', () => {
     expect(reindexVec(getDb())).toBe(5);
     const count = (getDb().prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
     expect(count).toBe(5);
+  });
+
+  test('rebuilds an invalidated index when canonical row counts stay equal', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+
+    db.prepare("DELETE FROM embeddings WHERE source_table = 'decisions' AND source_id = 1").run();
+    invalidateVecIndex(db);
+    insertEmbedding(1, vec(2));
+    ensureVecIndexSynced(db);
+
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toBeNull();
+    expect(knnSearch(db, vec(2), 1)[0].distance).toBeLessThan(0.001);
   });
 
   test('KNN ordering matches the brute-force cosine ranking (parity)', () => {

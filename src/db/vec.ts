@@ -60,6 +60,7 @@ function ensureCustomSqlite(): void {
 ensureCustomSqlite();
 
 let vecAvailable = false;
+const VEC_INDEX_DIRTY_KEY = 'vec_index_dirty';
 
 /**
  * Attempt to load sqlite-vec into an open DB connection. Per-connection (the
@@ -128,6 +129,7 @@ export function reindexVec(db: Database): number {
       `INSERT INTO vec_embeddings (source_table, source_id, embedding)
        SELECT source_table, source_id, vec_normalize(embedding) FROM embeddings WHERE dimensions = ?`
     ).run(EMBEDDING_DIMENSIONS);
+    db.prepare('DELETE FROM schema_meta WHERE key = ?').run(VEC_INDEX_DIRTY_KEY);
   });
   rebuild();
   return (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
@@ -135,6 +137,15 @@ export function reindexVec(db: Database): number {
 
 let syncedThisProcess = false;
 let syncInFlight = false;
+
+export function invalidateVecIndex(db: Database): void {
+  db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+    .run(VEC_INDEX_DIRTY_KEY, '1');
+  try {
+    db.exec('DELETE FROM vec_embeddings');
+  } catch {}
+  syncedThisProcess = false;
+}
 
 /**
  * Ensure the vec index reflects the canonical BLOBs. Runs the (O(n)) rebuild
@@ -153,7 +164,10 @@ export function ensureVecIndexSynced(db: Database): void {
     createVecTable(db);
     const want = (db.prepare('SELECT COUNT(*) AS c FROM embeddings WHERE dimensions = ?').get(EMBEDDING_DIMENSIONS) as { c: number }).c;
     const have = (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
-    if (have !== want) {
+    const dirty = Boolean(
+      db.prepare('SELECT 1 FROM schema_meta WHERE key = ?').get(VEC_INDEX_DIRTY_KEY)
+    );
+    if (dirty || have !== want) {
       // One-time O(n) rebuild (~4s @100k) inside the first vector query after
       // an upgrade — say so on stderr so an agent host doesn't read it as a hang.
       console.error(`[recall] vec index out of sync (${have}/${want} rows) — rebuilding from canonical embeddings...`);

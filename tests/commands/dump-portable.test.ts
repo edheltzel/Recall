@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { coreDump } from '../../src/commands/dump';
 import { getDb } from '../../src/db/connection';
-import { getLoaMessages } from '../../src/lib/memory';
+import { createLoaEntry, getLoaMessages } from '../../src/lib/memory';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 
@@ -86,11 +86,34 @@ describe('portable explicit session dump', () => {
 
     const first = await coreDump('First replacement', options);
     expect(first).toMatchObject({ success: true, messageCount: 1 });
+    const childLoaId = createLoaEntry({
+      title: 'Explicit dump continuation',
+      fabric_extract: 'Knowledge that continues from the explicit dump.',
+      parent_loa_id: first.loaId,
+      provenance: 'extracted',
+    });
+    getDb().prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('loa_entries', ?, 'test', 1, ?)
+    `).run(first.loaId!, Buffer.alloc(4));
     options.session.messages[0].timestamp = '2026-08-12T12:00:02.000Z';
-    expect(await coreDump('Second replacement', options)).toMatchObject({
+    const second = await coreDump('Second replacement', options);
+    expect(second).toMatchObject({
       success: true,
       messageCount: 0,
+      loaId: first.loaId,
     });
+    expect(
+      getDb().prepare('SELECT parent_loa_id FROM loa_entries WHERE id = ?').get(childLoaId)
+    ).toEqual({ parent_loa_id: first.loaId });
+    expect(
+      (
+        getDb().prepare(`
+          SELECT COUNT(*) AS count FROM embeddings
+          WHERE source_table = 'loa_entries' AND source_id = ?
+        `).get(first.loaId!) as { count: number }
+      ).count
+    ).toBe(0);
 
     const db = getDb();
     const state = db
