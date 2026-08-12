@@ -43,11 +43,15 @@ import {
 const originalLog = console.log;
 const originalError = console.error;
 const originalExitCode = process.exitCode;
+let logged: string[] = [];
+let errored: string[] = [];
 
 beforeEach(() => {
   setupTestDb();
-  console.log = () => {};
-  console.error = () => {};
+  logged = [];
+  errored = [];
+  console.log = (...args: unknown[]) => { logged.push(args.join(' ')); };
+  console.error = (...args: unknown[]) => { errored.push(args.join(' ')); };
 });
 
 afterEach(() => {
@@ -90,6 +94,30 @@ function embeddingsCount(): number {
 }
 
 describe('dry-run vs execute', () => {
+  test('repairable orphan check failures remain retryable and incomplete', async () => {
+    const db = getDb();
+    db.exec(`
+      DROP VIEW IF EXISTS temp.published_messages;
+      DROP VIEW IF EXISTS main.published_messages;
+    `);
+
+    const dryRun = (await runRepair({ table: 'messages', embed: false }))!;
+    expect(dryRun.orphanEmbeddingErrors.map(error => error.check))
+      .toEqual(['orphaned-embeddings:messages']);
+    expect(logged).not.toContain('Nothing to repair.');
+    expect(errored.some(line => line.includes('RETRYABLE:'))).toBe(true);
+    expect(process.exitCode).toBe(1);
+
+    process.exitCode = 0;
+    logged = [];
+    errored = [];
+    const executed = (await runRepair({ execute: true, table: 'messages', embed: false }))!;
+    expect(executed.orphanEmbeddingErrors.map(error => error.check))
+      .toEqual(['orphaned-embeddings:messages']);
+    expect(executed.orphanEmbeddings).toBeNull();
+    expect(process.exitCode).toBe(1);
+  });
+
   test('keeps incomplete lifecycle repair in the plan, result, and exit status', async () => {
     ingestHostTranscript({
       source: 'codex',

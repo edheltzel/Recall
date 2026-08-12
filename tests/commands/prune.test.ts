@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runPrune } from '../../src/commands/prune';
-import { getDb } from '../../src/db/connection';
+import { ensurePublishedMessageViews, getDb } from '../../src/db/connection';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import { getLoaMessages } from '../../src/lib/memory';
 import {
@@ -32,12 +32,14 @@ const originalExitCode = process.exitCode;
 const OLD = '2020-01-01 00:00:00';
 
 let logged: string[] = [];
+let errored: string[] = [];
 
 beforeEach(() => {
   setupTestDb();
   logged = [];
+  errored = [];
   console.log = (...args: unknown[]) => { logged.push(args.join(' ')); };
-  console.error = () => {};
+  console.error = (...args: unknown[]) => { errored.push(args.join(' ')); };
 });
 
 afterEach(() => {
@@ -65,6 +67,29 @@ function rowExists(table: string, id: number): boolean {
 }
 
 describe('prune respects dedup survivors (#80)', () => {
+  test('fails closed with retryable readiness when lifecycle schema is unavailable', () => {
+    const db = getDb();
+    const sessionId = 'old-session-with-deferred-schema';
+    createSession({ session_id: sessionId, started_at: OLD });
+    db.exec(`
+      DROP VIEW IF EXISTS temp.published_messages;
+      DROP VIEW IF EXISTS main.published_messages;
+      DROP TABLE host_ingest_state;
+    `);
+    ensurePublishedMessageViews(db);
+
+    runPrune({});
+
+    expect(db.prepare('SELECT 1 AS present FROM sessions WHERE session_id = ?').get(sessionId))
+      .toEqual({ present: 1 });
+    expect(logged.find(line => line.includes('sessions:')))
+      .toContain('Deferred until lifecycle schema is ready');
+    expect(errored).toContain(
+      "RETRYABLE: Lifecycle prune schema is not ready; run 'recall init' and retry."
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   test('retains lifecycle-owned sessions with active generations', () => {
     const db = getDb();
     const sessionId = 'old-active-lifecycle-session';

@@ -52,9 +52,18 @@ export interface RepairRunResult {
   embedSkipped: string | null;
   lifecycle: LifecycleSearchReadiness | null;
   orphanEmbeddings: OrphanEmbeddingRepairResult | null;
+  orphanEmbeddingErrors: Array<{ check: string; error: string }>;
 }
 
 const DEFAULT_DEPS: RepairDeps = { checkService: checkEmbeddingService, embedFn: embed };
+
+function isRepairableOrphanEmbeddingCheck(check: string, target: string): boolean {
+  return check === `orphaned-embeddings:${target}` ||
+    (target === 'all' && (
+      check.startsWith('orphaned-embeddings:') ||
+      check === 'unknown-embedding-source'
+    ));
+}
 
 export async function runRepair(
   options: RepairOptions = {},
@@ -171,19 +180,17 @@ export async function runRepair(
   }
   console.log('');
 
-  const orphanEmbeddingWork = plan.orphans
-    .filter(orphan =>
-      !orphan.error && (
-        orphan.check === `orphaned-embeddings:${target}` ||
-        (target === 'all' && (
-          orphan.check.startsWith('orphaned-embeddings:') ||
-          orphan.check === 'unknown-embedding-source'
-        ))
-      )
-    )
+  const repairableOrphanEmbeddingReports = plan.orphans.filter(orphan =>
+    isRepairableOrphanEmbeddingCheck(orphan.check, target)
+  );
+  const orphanEmbeddingErrors = repairableOrphanEmbeddingReports.flatMap(orphan =>
+    orphan.error ? [{ check: orphan.check, error: orphan.error }] : []
+  );
+  const orphanEmbeddingWork = repairableOrphanEmbeddingReports
+    .filter(orphan => !orphan.error)
     .reduce((sum, orphan) => sum + orphan.count, 0);
   let orphanEmbeddings: OrphanEmbeddingRepairResult | null = null;
-  if (execute && orphanEmbeddingWork > 0) {
+  if (execute && orphanEmbeddingWork > 0 && orphanEmbeddingErrors.length === 0) {
     orphanEmbeddings = applyOrphanEmbeddingRepair(
       db,
       target === 'all' ? undefined : target
@@ -203,6 +210,12 @@ export async function runRepair(
         console.log(`  ${orphan.check}: ${orphan.count} (${orphan.description})${sample}`);
       }
     }
+  }
+  if (orphanEmbeddingErrors.length > 0) {
+    console.error(
+      `  RETRYABLE: ${orphanEmbeddingErrors.length} orphan embedding repair check(s) failed; cleanup is incomplete.`
+    );
+    process.exitCode = 1;
   }
   if (orphanEmbeddingWork > 0) {
     if (!execute) {
@@ -236,7 +249,10 @@ export async function runRepair(
     const ftsWork = plan.fts.filter(f => f.action === 'rebuild' || f.action === 'create-and-rebuild').length;
     const embedWork = plan.embedGaps.reduce((sum, g) => sum + (g.missing - g.tooShort), 0);
     const lifecycleWork = lifecycle?.status === 'retryable';
-    if (ftsWork > 0 || embedWork > 0 || lifecycleWork || orphanEmbeddingWork > 0) {
+    if (
+      ftsWork > 0 || embedWork > 0 || lifecycleWork || orphanEmbeddingWork > 0 ||
+      orphanEmbeddingErrors.length > 0
+    ) {
       console.log("Re-run with --execute to apply repairs. Recommended: 'recall export --backup' first.");
     } else {
       console.log('Nothing to repair.');
@@ -250,5 +266,6 @@ export async function runRepair(
     embedSkipped,
     lifecycle,
     orphanEmbeddings,
+    orphanEmbeddingErrors,
   };
 }
