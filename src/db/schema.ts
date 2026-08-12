@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS messages (
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   access_count INTEGER DEFAULT 0,
   last_accessed DATETIME,
+  host_ingest_token TEXT,
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -133,6 +134,7 @@ CREATE TABLE IF NOT EXISTS loa_entries (
   fabric_extract TEXT NOT NULL,
   message_range_start INTEGER,
   message_range_end INTEGER,
+  snapshot_max_message_id INTEGER,
   parent_loa_id INTEGER,
   session_id TEXT,
   project TEXT,
@@ -309,6 +311,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_project ON messages(project);
 CREATE INDEX IF NOT EXISTS idx_host_ingest_message_id ON host_ingest_messages(message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_host_ingest_token
+  ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL;
 
 -- Decision indexes
 CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project);

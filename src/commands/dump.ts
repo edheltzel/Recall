@@ -293,12 +293,14 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     db.prepare(`
       UPDATE loa_entries SET
         title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
-        project = ?, tags = ?, message_count = ?, created_at = CURRENT_TIMESTAMP
+        snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?,
+        created_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       title,
       fabricExtract,
       startId,
+      endId,
       endId,
       options.project || session.project,
       options.tags ?? null,

@@ -540,6 +540,50 @@ export const MIGRATIONS: Migration[] = [
       ) OR tags LIKE 'automatic-capture,%';
     `);
   },
+
+  (db) => {
+    const messageColumns = new Set(
+      (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    if (messageColumns.size > 0 && !messageColumns.has('host_ingest_token')) {
+      db.exec('ALTER TABLE messages ADD COLUMN host_ingest_token TEXT');
+    }
+    const loaColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    if (loaColumns.size > 0 && !loaColumns.has('snapshot_max_message_id')) {
+      db.exec('ALTER TABLE loa_entries ADD COLUMN snapshot_max_message_id INTEGER');
+    }
+    const sourceColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_message_sources)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const snapshotSource = loaColumns.has('id') &&
+      sourceColumns.has('loa_id') && sourceColumns.has('message_id')
+      ? '(SELECT MAX(message_id) FROM loa_message_sources WHERE loa_id = loa_entries.id)'
+      : undefined;
+    const cursorSources = [
+      snapshotSource,
+      loaColumns.has('message_range_end') ? 'message_range_end' : undefined,
+    ].filter((source): source is string => source !== undefined);
+    if (loaColumns.size > 0 && cursorSources.length > 0) {
+      const cursorExpression = cursorSources.length === 1
+        ? cursorSources[0]
+        : `COALESCE(${cursorSources.join(', ')})`;
+      db.exec(`
+        UPDATE loa_entries SET snapshot_max_message_id = ${cursorExpression}
+        WHERE snapshot_max_message_id IS NULL
+      `);
+    }
+    if (messageColumns.size > 0) {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_host_ingest_token
+          ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL
+      `);
+    }
+  },
 ];
 
 // ---------------------------------------------------------------------------

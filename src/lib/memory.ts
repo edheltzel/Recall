@@ -674,8 +674,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
   // so a careless caller cannot demote curated knowledge below neutral.
   const importance = Math.max(5, clampImportance(entry.importance, 8));
   const stmt = db.prepare(`
-    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance, provenance, source_ids)
-    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance, $source_ids)
+    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, snapshot_max_message_id, parent_loa_id, session_id, project, tags, message_count, importance, provenance, source_ids)
+    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $snapshot_max_message_id, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance, $source_ids)
   `);
   const result = stmt.run({
     $title: entry.title,
@@ -683,6 +683,7 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
     $fabric_extract: entry.fabric_extract,
     $message_range_start: entry.message_range_start || null,
     $message_range_end: entry.message_range_end || null,
+    $snapshot_max_message_id: entry.snapshot_max_message_id ?? entry.message_range_end ?? null,
     $parent_loa_id: entry.parent_loa_id || null,
     $session_id: entry.session_id || null,
     $project: entry.project || null,
@@ -805,11 +806,12 @@ export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; 
   let sql: string;
   let params: number[];
 
-  if (lastLoa?.message_range_end) {
+  const cursor = lastLoa?.snapshot_max_message_id ?? lastLoa?.message_range_end;
+  if (cursor) {
     sql = limit
       ? 'SELECT * FROM messages WHERE id > ? ORDER BY timestamp LIMIT ?'
       : 'SELECT * FROM messages WHERE id > ? ORDER BY timestamp';
-    params = limit ? [lastLoa.message_range_end, limit] : [lastLoa.message_range_end];
+    params = limit ? [cursor, limit] : [cursor];
   } else {
     sql = limit
       ? 'SELECT * FROM messages ORDER BY timestamp LIMIT ?'

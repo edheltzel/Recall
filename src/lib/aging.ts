@@ -146,8 +146,8 @@ function planTable(
     `SELECT id, importance FROM ${table} WHERE ${where} AND ${guardSql(table)} ORDER BY id`
   ).all() as Array<{ id: number; importance: number }>;
 
-  // FK protection: a message referenced by a loa_entries range cannot be
-  // hard-deleted under foreign_keys=ON. Withhold it (reuse the dedup precedent).
+  // FK protection withholds explicit LoA ranges. Automatic lifecycle ranges
+  // are released by the retention trigger so their raw endpoints can age out.
   const fkIds = config.fkProtect ? fkProtectedIds(db, table) : new Set<number>();
 
   const eligible: AgeCandidate[] = [];

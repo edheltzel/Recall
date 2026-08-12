@@ -88,8 +88,8 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | host_ingest_state | Per-host transcript reference, digest, watermark, and terminal state | No |
 | host_ingest_messages | Persistent lifecycle message keys linked to inserted message rows | No |
 | loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
-| messages | Conversation turns (user + assistant content); includes `importance` (1-10) column | Yes |
-| loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) column | Yes |
+| messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
+| loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
 | learnings | Problems solved and patterns discovered; includes `confidence` (high/medium/low) and `importance` (1-10) columns | Yes |
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |
