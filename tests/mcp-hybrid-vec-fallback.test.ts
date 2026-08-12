@@ -41,6 +41,7 @@ let embedThrows = false;
 const realIsVecAvailable = vecReal.isVecAvailable;
 const realEnsureVecIndexSynced = vecReal.ensureVecIndexSynced;
 const realKnnSearch = vecReal.knnSearch;
+const realWithConsistentVecIndex = vecReal.withConsistentVecIndex;
 const realEmbed = embeddingsReal.embed;
 const realCheckEmbeddingService = embeddingsReal.checkEmbeddingService;
 
@@ -66,6 +67,14 @@ mock.module('../src/db/vec', () => ({
     knnCalls.push({ queryEmbedding, k });
     if (knnHits instanceof Error) throw knnHits;
     return knnHits;
+  },
+  withConsistentVecIndex: <T>(
+    db: Parameters<typeof realKnnSearch>[0],
+    search: () => T,
+  ): T | null => {
+    if (!mockEngaged) return realWithConsistentVecIndex(db, search);
+    ensureVecIndexSyncedCalls += 1;
+    return vecSynced ? search() : null;
   },
 }));
 mock.module('../src/lib/embeddings', () => ({
