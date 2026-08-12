@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'crypto';
 import { getDb } from '../db/connection.js';
+import { chunked } from './chunk.js';
 import { detectProject } from './project.js';
 import { generateBasicSummary } from './extraction.js';
 import { scrub } from './write-safety.js';
@@ -37,6 +38,12 @@ export interface HostIngestResult {
   digest: string;
 }
 
+export interface HostIngestCheckpoint {
+  transcriptRef?: string;
+  watermark?: string;
+  finalized: boolean;
+}
+
 interface PreparedMessage extends HostTranscriptMessage {
   content: string;
   timestamp: string;
@@ -55,6 +62,8 @@ interface PreparedTranscript {
 }
 
 interface IngestStateRow {
+  transcript_ref: string | null;
+  watermark: string | null;
   finalized_at: string | null;
 }
 
@@ -190,16 +199,17 @@ function insertNewMessages(
   input: HostTranscript,
   prepared: PreparedTranscript
 ): number {
-  const knownKeys = new Set(
-    (
-      db
-        .prepare(`
-          SELECT message_key FROM host_ingest_messages
-          WHERE source = ? AND session_id = ?
-        `)
-        .all(input.source, input.sessionId) as Array<{ message_key: string }>
-    ).map(row => row.message_key)
-  );
+  const knownKeys = new Set<string>();
+  for (const keys of chunked(prepared.messages.map(message => message.messageKey))) {
+    const rows = db
+      .prepare(`
+        SELECT message_key FROM host_ingest_messages
+        WHERE source = ? AND session_id = ?
+          AND message_key IN (${keys.map(() => '?').join(',')})
+      `)
+      .all(input.source, input.sessionId, ...keys) as Array<{ message_key: string }>;
+    for (const row of rows) knownKeys.add(row.message_key);
+  }
   const insertMessage = db.prepare(`
     INSERT INTO messages (session_id, timestamp, role, content, project, importance, provenance)
     VALUES (?, ?, ?, ?, ?, 5, 'verbatim')
@@ -229,10 +239,29 @@ function insertNewMessages(
 function getIngestState(db: Database, input: HostTranscript): IngestStateRow | undefined {
   return db
     .prepare(`
-      SELECT finalized_at FROM host_ingest_state
+      SELECT transcript_ref, watermark, finalized_at FROM host_ingest_state
       WHERE source = ? AND session_id = ?
     `)
     .get(input.source, input.sessionId) as IngestStateRow | undefined;
+}
+
+export function getHostIngestCheckpoint(
+  source: LifecycleHost,
+  sessionId: string
+): HostIngestCheckpoint | undefined {
+  assertSessionId(sessionId);
+  const row = getDb()
+    .prepare(`
+      SELECT transcript_ref, watermark, finalized_at FROM host_ingest_state
+      WHERE source = ? AND session_id = ?
+    `)
+    .get(source, sessionId) as IngestStateRow | undefined;
+  if (!row) return undefined;
+  return {
+    transcriptRef: row.transcript_ref ?? undefined,
+    watermark: row.watermark ?? undefined,
+    finalized: Boolean(row.finalized_at),
+  };
 }
 
 function finalizeSession(

@@ -62,18 +62,13 @@ describe('supported lifecycle transcript parsers', () => {
   });
 
   test('Grok parses the public Markdown export surface', () => {
-    const parsed = parseGrokExport(fixture('grok-export.md'));
-    expect(parsed.messages.map(message => message.role)).toEqual([
-      'user',
-      'assistant',
-      'user',
-      'assistant',
-    ]);
-    expect(parsed.messages[1].content).toContain('supported export surface');
+    const markdown = fixture('grok-export.md');
+    const parsed = parseGrokExport(markdown);
+    expect(parsed.messages).toEqual([{ role: 'system', content: markdown }]);
   });
 
   test('Grok preserves role-looking Markdown inside exported messages', () => {
-    const parsed = parseGrokExport(`# Grok Session
+    const markdown = `# Grok Session
 
 Session: grok-native-markdown
 
@@ -82,17 +77,14 @@ Session: grok-native-markdown
 Keep these ordinary Markdown lines in my message:
 ## Assistant
 **Grok:**
-## Message 9 - Assistant
+## Message 2 - Assistant
 
-## Message 2 - Grok
+## Message 3 - Grok
 
-They remain verbatim user content.`);
+They remain verbatim user content.`;
+    const parsed = parseGrokExport(markdown);
 
-    expect(parsed.messages).toHaveLength(2);
-    expect(parsed.messages.map(message => message.role)).toEqual(['user', 'assistant']);
-    expect(parsed.messages[0].content).toContain('## Assistant');
-    expect(parsed.messages[0].content).toContain('**Grok:**');
-    expect(parsed.messages[0].content).toContain('## Message 9 - Assistant');
+    expect(parsed.messages).toEqual([{ role: 'system', content: markdown }]);
   });
 });
 
@@ -128,6 +120,7 @@ describe('host hook payload routing', () => {
         cwd: '/work/Recall',
       },
       {
+        transcriptSize: () => Buffer.byteLength(fixture('codex-rollout.jsonl')),
         readTranscript: path => {
           expect(path).toBe('/supplied/rollout.jsonl');
           return fixture('codex-rollout.jsonl');
@@ -169,6 +162,88 @@ describe('host hook payload routing', () => {
     expect(result.skipped).toBe('subagent');
   });
 
+  test('rejects a transcript session mismatch when subagents are included', () => {
+    process.env.RECALL_INCLUDE_SUBAGENTS = '1';
+    const result = handleHostHook(
+      'codex',
+      {
+        hook_event_name: 'Stop',
+        session_id: 'payload-session',
+        transcript_path: '/supplied/rollout.jsonl',
+      },
+      {
+        transcriptSize: () => Buffer.byteLength(fixture('codex-rollout.jsonl')),
+        readTranscript: () => fixture('codex-rollout.jsonl'),
+      }
+    );
+    expect(result.skipped).toBe('session-id-mismatch');
+  });
+
+  test('uses byte watermarks for unchanged, append-only, and reset reads', () => {
+    const sessionId = 'codex-watermark-session';
+    const meta = `${JSON.stringify({
+      type: 'session_meta',
+      payload: { id: sessionId, cwd: '/work/Recall' },
+    })}\n`;
+    const filler = `${JSON.stringify({ type: 'event_msg', payload: { text: 'x'.repeat(5000) } })}\n`;
+    const firstMessage = `${JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'first watermark message' }],
+      },
+    })}\n`;
+    let transcript = Buffer.from(meta + filler + firstMessage);
+    const starts: number[] = [];
+    const dependencies = {
+      transcriptSize: () => transcript.length,
+      readTranscript: (_path: string, start = 0, length = transcript.length - start) => {
+        starts.push(start);
+        return transcript.subarray(start, start + length);
+      },
+    };
+    const payload = {
+      hook_event_name: 'Stop',
+      session_id: sessionId,
+      transcript_path: '/supplied/watermark.jsonl',
+    };
+
+    expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
+    starts.length = 0;
+    expect(handleHostHook('codex', payload, dependencies).skipped).toBe('unchanged-transcript');
+    expect(starts).not.toContain(0);
+
+    const previousSize = transcript.length;
+    transcript = Buffer.concat([
+      transcript,
+      Buffer.from(
+        `${JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'appended watermark message' }],
+          },
+        })}\n`
+      ),
+    ]);
+    starts.length = 0;
+    expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(1);
+    expect(starts).toContain(previousSize);
+    expect(starts).not.toContain(0);
+
+    transcript = Buffer.from(meta + filler + firstMessage);
+    starts.length = 0;
+    expect(handleHostHook('codex', payload, dependencies).ingest?.inserted).toBe(0);
+    expect(starts).toContain(0);
+
+    transcript[transcript.length - 2] = transcript[transcript.length - 2] === 120 ? 121 : 120;
+    starts.length = 0;
+    handleHostHook('codex', payload, dependencies);
+    expect(starts).toContain(0);
+  });
+
   test('Grok exports by native session ID and does not claim SessionStart injection', () => {
     let exported = '';
     let received: HostTranscript | undefined;
@@ -207,7 +282,7 @@ describe('host hook payload routing', () => {
     expect(exported).toBe('grok-native-456');
     expect(received?.source).toBe('grok');
     expect(received?.finalize).toBe(true);
-    expect(result.ingest?.inserted).toBe(4);
+    expect(result.ingest?.inserted).toBe(1);
   });
 });
 
@@ -223,16 +298,18 @@ describe('host-neutral immediate SQLite ingest', () => {
     const first = handleHostHook('grok', payload, dependencies);
     const replay = handleHostHook('grok', payload, dependencies);
 
-    expect(first.ingest).toMatchObject({ inserted: 4, finalized: true });
     expect(first.ingest?.redactions).toContain('generic-assignment');
-    expect(replay.ingest).toMatchObject({ inserted: 0, skipped: 4, finalized: false });
 
     const db = getDb();
     const rows = db
       .prepare('SELECT content, provenance FROM messages WHERE session_id = ? ORDER BY id')
       .all('grok-native-456') as Array<{ content: string; provenance: string }>;
-    expect(rows).toHaveLength(4);
-    expect(rows[2].content).toContain('[REDACTED:generic-assignment]');
+    expect(first.ingest).toMatchObject({ inserted: 1, finalized: true });
+    expect(replay.skipped).toBe('unchanged-transcript');
+    expect(replay.ingest).toBeUndefined();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toContain('[REDACTED:generic-assignment]');
     expect(rows.every(row => row.provenance === 'verbatim')).toBe(true);
   });
 

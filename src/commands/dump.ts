@@ -22,6 +22,8 @@ interface DumpOptions {
   skipEmbed?: boolean;
 }
 
+const EXPLICIT_DUMP_DESCRIPTION = 'Explicit memory dump.';
+
 // ============ Internal Helpers ============
 
 async function autoEmbedLoaEntry(id: number, title: string, fabricExtract: string): Promise<void> {
@@ -104,6 +106,39 @@ function clearSessionMessages(sessionId: string): number {
   return deleteAll();
 }
 
+function lifecycleOwnsSession(sessionId: string): boolean {
+  return Boolean(
+    getDb()
+      .prepare('SELECT 1 FROM host_ingest_state WHERE session_id = ? LIMIT 1')
+      .get(sessionId)
+  );
+}
+
+function messagesMissingFromSession(session: ParsedSession): ParsedSession['messages'] {
+  const existing = new Map<string, number>();
+  const rows = getDb()
+    .prepare('SELECT timestamp, role, content FROM messages WHERE session_id = ?')
+    .all(session.sessionId) as Array<{ timestamp: string; role: string; content: string }>;
+  for (const message of rows) {
+    const key = JSON.stringify([message.timestamp, message.role, message.content]);
+    existing.set(key, (existing.get(key) ?? 0) + 1);
+  }
+  return session.messages.filter(message => {
+    const key = JSON.stringify([message.timestamp, message.role, message.content]);
+    const count = existing.get(key) ?? 0;
+    if (count === 0) return true;
+    existing.set(key, count - 1);
+    return false;
+  });
+}
+
+function clearExplicitDumpLoa(sessionId: string): void {
+  const ids = getDb()
+    .prepare('SELECT id FROM loa_entries WHERE session_id = ? AND description = ?')
+    .all(sessionId, EXPLICIT_DUMP_DESCRIPTION) as Array<{ id: number }>;
+  deleteLoaEntriesRecursive(getDb(), ids.map(row => row.id));
+}
+
 // ============ Core Dump Logic (shared by CLI and MCP) ============
 
 /**
@@ -131,12 +166,14 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   }
 
   const replacingSession = sessionExists(session.sessionId);
-  if (replacingSession) clearSessionMessages(session.sessionId);
+  const lifecycleOwned = replacingSession && lifecycleOwnsSession(session.sessionId);
+  if (replacingSession && !lifecycleOwned) clearSessionMessages(session.sessionId);
+  if (lifecycleOwned) clearExplicitDumpLoa(session.sessionId);
 
   // Import messages to SQLite FIRST (fast, always succeeds)
   const timestamps = session.messages.map(m => m.timestamp).sort();
   const project = options.project || session.project;
-  if (replacingSession) {
+  if (replacingSession && !lifecycleOwned) {
     getDb().prepare(`
       UPDATE sessions SET
         started_at = ?, ended_at = ?, summary = ?, project = ?,
@@ -150,7 +187,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
       session.source,
       session.sessionId
     );
-  } else {
+  } else if (!replacingSession) {
     createSession({
       session_id: session.sessionId,
       started_at: timestamps[0],
@@ -162,7 +199,10 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   }
 
   // Raw conversation capture is verbatim (ADR-0001).
-  const importedCount = addMessagesBatch(session.messages.map(m => ({ ...m, provenance: 'verbatim' as const })));
+  const messagesToImport = lifecycleOwned ? messagesMissingFromSession(session) : session.messages;
+  const importedCount = addMessagesBatch(
+    messagesToImport.map(message => ({ ...message, provenance: 'verbatim' as const }))
+  );
 
   // Get imported message IDs for LoA
   const db = getDb();
@@ -198,10 +238,12 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
 
   const loaId = createLoaEntry({
     title,
+    description: lifecycleOwned ? EXPLICIT_DUMP_DESCRIPTION : undefined,
     fabric_extract: fabricExtract,
     message_range_start: startId,
     message_range_end: endId,
     parent_loa_id: options.continues,
+    session_id: lifecycleOwned ? session.sessionId : undefined,
     project: options.project || session.project,
     tags: options.tags,
     message_count: importedMessages.length,
