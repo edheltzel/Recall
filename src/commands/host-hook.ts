@@ -16,10 +16,13 @@ import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport } from '../hosts/grok-lifecycle.js';
 import {
   createHostIngestBatch,
+  ingestHostTranscriptBatch,
   ingestHostTranscript,
   getHostIngestCheckpoint,
+  mergeHostIngestResults,
   type HostIngestCheckpoint,
   type HostIngestResult,
+  type HostTranscript,
   type LifecycleHost,
 } from '../lib/host-ingest.js';
 
@@ -54,6 +57,7 @@ export interface HostHookDependencies {
   exportGrokStream?: (sessionId: string) => AsyncIterable<string | Buffer>;
   renderContext?: () => string;
   ingest?: typeof ingestHostTranscript;
+  ingestBatch?: typeof ingestHostTranscriptBatch;
   checkpoint?: (source: LifecycleHost, sessionId: string) => HostIngestCheckpoint | undefined;
 }
 
@@ -246,23 +250,6 @@ function grokFrameBoundary(raw: Buffer): number {
   return boundary || fallback;
 }
 
-function mergeIngestResults(
-  current: HostIngestResult | undefined,
-  next: HostIngestResult
-): HostIngestResult {
-  if (!current) return next;
-  return {
-    sessionId: next.sessionId,
-    inserted: current.inserted + next.inserted,
-    reconciled: (current.reconciled ?? 0) + (next.reconciled ?? 0),
-    skipped: current.skipped + next.skipped,
-    finalized: current.finalized || next.finalized,
-    loaId: next.loaId ?? current.loaId,
-    redactions: [...new Set([...current.redactions, ...next.redactions])],
-    digest: next.digest,
-  };
-}
-
 interface GrokHookRequest {
   sessionId: string;
   cwd?: string;
@@ -380,6 +367,16 @@ function ingestStagedGrokExport(
 ): HostHookResult {
   const transcriptRef = 'grok export';
   const ingest = dependencies.ingest ?? ingestHostTranscript;
+  const ingestBatch = dependencies.ingestBatch ?? (dependencies.ingest
+    ? (inputs: Iterable<HostTranscript>) => {
+        let aggregate: HostIngestResult | undefined;
+        for (const input of inputs) {
+          aggregate = mergeHostIngestResults(aggregate, ingest(input));
+        }
+        if (!aggregate) throw new Error('Host transcript batch must not be empty');
+        return aggregate;
+      }
+    : ingestHostTranscriptBatch);
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
   const previous = checkpoint('grok', request.sessionId);
   const size = staged.size;
@@ -397,42 +394,57 @@ function ingestStagedGrokExport(
     return { skipped: 'unchanged-transcript' };
   }
   if (start === size) {
-    return {
-      ingest: ingest({
-        source: 'grok',
-        sessionId: request.sessionId,
-        messages: [],
-        cwd: request.cwd,
-        transcriptRef,
-        watermark: capture.reset
-          ? byteWatermark(size, capture.digest)
-          : previous?.watermark ?? byteWatermark(size, capture.digest),
-        capturedAt: request.capturedAt,
-        incremental,
-        reconcileComplete: !incremental,
-        finalize: request.finalize,
-        batch,
-      }),
-    };
-  }
-  let aggregate: HostIngestResult | undefined;
-  for (const chunk of boundedTranscriptChunks(start, size, read, capture.digest, grokFrameBoundary)) {
-    const parsed = parseGrokExport(chunk.raw.toString('utf-8'), {
-      sourceOffset: chunk.start,
-    });
-    aggregate = mergeIngestResults(aggregate, ingest({
+    const input: HostTranscript = {
       source: 'grok',
       sessionId: request.sessionId,
-      messages: parsed.messages,
+      messages: [],
       cwd: request.cwd,
       transcriptRef,
-      watermark: chunk.watermark,
+      watermark: capture.reset
+        ? byteWatermark(size, capture.digest)
+        : previous?.watermark ?? byteWatermark(size, capture.digest),
       capturedAt: request.capturedAt,
       incremental,
-      reconcileComplete: !incremental && chunk.end === size,
-      finalize: request.finalize && chunk.end === size,
+      reconcileComplete: !incremental,
+      finalize: request.finalize,
       batch,
-    }));
+    };
+    return {
+      ingest: incremental ? ingest(input) : ingestBatch([input]),
+    };
+  }
+
+  const inputs = function* (): Generator<HostTranscript> {
+    for (const chunk of boundedTranscriptChunks(
+      start,
+      size,
+      read,
+      capture.digest,
+      grokFrameBoundary
+    )) {
+      const parsed = parseGrokExport(chunk.raw.toString('utf-8'), {
+        sourceOffset: chunk.start,
+      });
+      yield {
+        source: 'grok',
+        sessionId: request.sessionId,
+        messages: parsed.messages,
+        cwd: request.cwd,
+        transcriptRef,
+        watermark: chunk.watermark,
+        capturedAt: request.capturedAt,
+        incremental,
+        reconcileComplete: !incremental && chunk.end === size,
+        finalize: request.finalize && chunk.end === size,
+        batch,
+      };
+    }
+  };
+  if (!incremental) return { ingest: ingestBatch(inputs()) };
+
+  let aggregate: HostIngestResult | undefined;
+  for (const input of inputs()) {
+    aggregate = mergeHostIngestResults(aggregate, ingest(input));
   }
   return { ingest: aggregate };
 }
@@ -564,7 +576,7 @@ export function handleHostHook(
         return { skipped: 'session-id-mismatch' };
       }
       if (parsed.isSubagent && !includeSubagents()) return { skipped: 'subagent' };
-      aggregate = mergeIngestResults(aggregate, ingest({
+      aggregate = mergeHostIngestResults(aggregate, ingest({
         source: 'codex',
         sessionId,
         messages: parsed.messages,
