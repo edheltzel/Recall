@@ -19,8 +19,21 @@ export function publishedEmbeddingSql(
         WHERE invalidation.message_id = ${sourceId}
       )`
     : '';
-  return `(${sourceTable} <> 'messages' OR (
-    EXISTS (SELECT 1 FROM published_messages WHERE id = ${sourceId})
-    ${invalidationGate}
-  ))`;
+  return `(
+    (${sourceTable} = 'loa_entries' AND EXISTS (
+      SELECT 1 FROM loa_entries WHERE id = ${sourceId}
+    )) OR
+    (${sourceTable} = 'decisions' AND EXISTS (
+      SELECT 1 FROM decisions WHERE id = ${sourceId}
+    )) OR
+    (${sourceTable} = 'learnings' AND EXISTS (
+      SELECT 1 FROM learnings WHERE id = ${sourceId}
+    )) OR
+    (${sourceTable} = 'breadcrumbs' AND EXISTS (
+      SELECT 1 FROM breadcrumbs WHERE id = ${sourceId}
+    )) OR
+    (${sourceTable} = 'messages' AND EXISTS (
+      SELECT 1 FROM published_messages WHERE id = ${sourceId}
+    ) ${invalidationGate})
+  )`;
 }
