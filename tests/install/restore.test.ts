@@ -156,6 +156,7 @@ describe('installer restore (rollback)', () => {
     expect(readFileSync(join(backupDir, 'RecallLifecycle.json.symlink-target'), 'utf-8').trim())
       .toBe(canonical);
 
+    writeFileSync(canonical, '{"updated":true}');
     rmSync(target);
     writeFileSync(target, '{"temporary":true}');
     const restored = sh(`_confirm() { return 0; }\nrecall_do_restore "${stamp}"`, {
@@ -167,6 +168,31 @@ describe('installer restore (rollback)', () => {
     expect(lstatSync(target).isSymbolicLink()).toBe(true);
     expect(readlinkSync(target)).toBe(canonical);
     expect(readFileSync(target, 'utf-8')).toBe('{"managed":true}');
+  });
+
+  test('restores a foreign Grok symlink without overwriting its target', () => {
+    const stamp = '20260404120000';
+    const backupDir = join(backupBase, stamp);
+    const target = join(grokDir, 'hooks', 'RecallLifecycle.json');
+    const foreign = join(root, 'foreign-grok-hook.json');
+    writeFileSync(foreign, '{"foreign":"original"}');
+    symlinkSync(foreign, target);
+
+    const created = sh('recall_create_backup', { TIMESTAMP: stamp, BACKUP_DIR: backupDir });
+    expect(created.status).toBe(0);
+    writeFileSync(foreign, '{"foreign":"current"}');
+    rmSync(target);
+    writeFileSync(target, '{"temporary":true}');
+
+    const restored = sh(`_confirm() { return 0; }\nrecall_do_restore "${stamp}"`, {
+      TIMESTAMP: stamp,
+      BACKUP_DIR: backupDir,
+    });
+
+    expect(restored.status).toBe(0);
+    expect(lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(target)).toBe(foreign);
+    expect(readFileSync(foreign, 'utf-8')).toBe('{"foreign":"current"}');
   });
 
   test('an unknown timestamp fails without touching current files', () => {
