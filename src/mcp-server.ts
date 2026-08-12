@@ -79,6 +79,7 @@ import {
 import {
 	isVecAvailable,
 	knnSearch,
+	withConsistentDatabaseRead,
 	withConsistentVecIndex,
 } from "./db/vec.js";
 import { notMarkedDuplicateSql } from "./lib/dedup.js";
@@ -127,40 +128,29 @@ function bruteForceVectorScan(
 	db: ReturnType<typeof getDb>,
 	queryEmbedding: number[],
 	limit: number,
-): VectorSearchHit[] {
-	// Marked duplicates (recall dedup, issue #45) keep their embeddings but are
-	// hidden from the vector path, matching the FTS5 default.
-	const embeddings = db
-		.prepare(`
-        SELECT source_table, source_id, embedding FROM embeddings
-        WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
-          AND ${publishedEmbeddingSql(db, "source_table", "embeddings.source_id")}
-      `)
-		.all() as Array<{
-		source_table: string;
-		source_id: number;
-		embedding: Buffer;
-	}>;
+): VectorSearchHit[] | null {
+	return withConsistentDatabaseRead(db, () => {
+		const embeddings = db
+			.prepare(`
+          SELECT source_table, source_id, embedding FROM embeddings
+          WHERE ${notMarkedDuplicateSql("source_table", "source_id")}
+            AND ${publishedEmbeddingSql(db, "source_table", "embeddings.source_id")}
+        `)
+			.all() as Array<{
+			source_table: string;
+			source_id: number;
+			embedding: Buffer;
+		}>;
 
-	const out: VectorSearchHit[] = [];
-	for (const row of embeddings) {
-		const similarity = cosineSimilarity(queryEmbedding, blobToEmbedding(row.embedding));
-		const { content, provenance } = vectorRowContentProvenance(
-			row.source_table,
-			row.source_id,
-		);
-		if (content) {
-			out.push({
-				source_table: row.source_table,
-				source_id: row.source_id,
-				similarity,
-				content,
-				provenance,
-			});
-		}
-	}
-	out.sort((a, b) => b.similarity - a.similarity);
-	return out.slice(0, limit * 2);
+		const ranked = embeddings.map((row) => ({
+			source_table: row.source_table,
+			source_id: row.source_id,
+			similarity: cosineSimilarity(queryEmbedding, blobToEmbedding(row.embedding)),
+		}));
+		ranked.sort((a, b) => b.similarity - a.similarity);
+		return materializeCurrentVectorHits(db, ranked.slice(0, limit * 4))
+			.slice(0, limit * 2);
+	});
 }
 
 /**
@@ -242,6 +232,7 @@ function vectorSearch(
 		}
 	}
 	const hits = bruteForceVectorScan(db, queryEmbedding, limit);
+	if (hits === null) throw new Error("canonical embedding snapshot changed during search");
 	// "Which backend ran" semantics (#217 ruling): the scan executed, so report
 	// "bruteforce" even on zero hits — "none" is reserved for the semantic tier
 	// never executing at all.

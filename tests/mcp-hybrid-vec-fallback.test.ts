@@ -23,6 +23,7 @@ let knnCalls: Array<{ queryEmbedding: number[]; k: number }> = [];
 // knn→bruteforce catch fallback).
 let knnHits: VecHit[] | Error = [];
 let afterConsistentSearch: (() => void) | undefined;
+let afterConsistentDatabaseRead: (() => void) | undefined;
 
 // bun's mock.module is PROCESS-GLOBAL and applies to every test file sharing
 // the run, so BOTH mocks below must delegate to the real module unless this
@@ -42,6 +43,7 @@ let embedThrows = false;
 const realIsVecAvailable = vecReal.isVecAvailable;
 const realEnsureVecIndexSynced = vecReal.ensureVecIndexSynced;
 const realKnnSearch = vecReal.knnSearch;
+const realWithConsistentDatabaseRead = vecReal.withConsistentDatabaseRead;
 const realWithConsistentVecIndex = vecReal.withConsistentVecIndex;
 const realEmbed = embeddingsReal.embed;
 const realCheckEmbeddingService = embeddingsReal.checkEmbeddingService;
@@ -53,6 +55,7 @@ function resetVecMock(): void {
   knnCalls = [];
   knnHits = [];
   afterConsistentSearch = undefined;
+  afterConsistentDatabaseRead = undefined;
   embedThrows = false;
 }
 
@@ -69,6 +72,15 @@ mock.module('../src/db/vec', () => ({
     knnCalls.push({ queryEmbedding, k });
     if (knnHits instanceof Error) throw knnHits;
     return knnHits;
+  },
+  withConsistentDatabaseRead: <T>(
+    db: Parameters<typeof realKnnSearch>[0],
+    read: () => T,
+  ): T | null => {
+    if (!mockEngaged) return realWithConsistentDatabaseRead(db, read);
+    const result = read();
+    afterConsistentDatabaseRead?.();
+    return result;
   },
   withConsistentVecIndex: <T>(
     db: Parameters<typeof realKnnSearch>[0],
@@ -142,6 +154,25 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
     expect(hit).toBeDefined();
     expect(['vec', 'both']).toContain(hit!.source);
+  });
+
+  test('materializes canonical fallback content inside the guarded read', async () => {
+    resetVecMock();
+    afterConsistentDatabaseRead = () => {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('replacement content published after canonical search', bruteForceDecisionId);
+    };
+
+    try {
+      const { results, semanticBackend } = await hybridSearch('canonicalguardquery109', { limit: 5 });
+
+      expect(semanticBackend).toBe('bruteforce');
+      const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
+      expect(hit?.content).toContain('wibblefrotz zharkon decision');
+    } finally {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('wibblefrotz zharkon decision', bruteForceDecisionId);
+    }
   });
 
   test('reports knn backend while preserving the sqlite-vec KNN result', async () => {
