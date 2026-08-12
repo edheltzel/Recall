@@ -63,6 +63,44 @@ function clearAmbiguousEmptyLoaCursors(db: Database): void {
   `);
 }
 
+function ensureGenerationFtsReadyColumn(db: Database): void {
+  const generationColumns = new Set(
+    (db.prepare('PRAGMA table_info(host_ingest_generations)').all() as Array<{ name: string }>)
+      .map(column => column.name)
+  );
+  if (!generationColumns.has('fts_ready')) {
+    db.exec(`
+      ALTER TABLE host_ingest_generations
+      ADD COLUMN fts_ready INTEGER NOT NULL DEFAULT 0 CHECK (fts_ready IN (0, 1))
+    `);
+  }
+}
+
+function recreateGenerationFts(db: Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS host_ingest_generation_messages_fts_ai;
+    DROP TRIGGER IF EXISTS host_ingest_generation_messages_fts_ad;
+    DROP TRIGGER IF EXISTS host_ingest_generation_messages_fts_au;
+    DROP TABLE IF EXISTS host_ingest_generation_messages_fts;
+  `);
+  db.exec(HOST_INGEST_GENERATION_FTS_SCHEMA);
+}
+
+function rebuildGenerationFts(db: Database): void {
+  const hasState = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'host_ingest_state'
+  `).get());
+  if (hasState) {
+    db.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
+  } else {
+    db.exec(`
+      DELETE FROM host_ingest_generation_messages_fts;
+      UPDATE host_ingest_generations SET fts_ready = 0;
+    `);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Migration definitions
 // ---------------------------------------------------------------------------
@@ -633,9 +671,16 @@ export const MIGRATIONS: Migration[] = [
   },
 
   (db) => {
-    db.exec(HOST_INGEST_GENERATION_FTS_SCHEMA);
+    ensureGenerationFtsReadyColumn(db);
+    recreateGenerationFts(db);
     clearAmbiguousEmptyLoaCursors(db);
-    db.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
+    rebuildGenerationFts(db);
+  },
+
+  (db) => {
+    ensureGenerationFtsReadyColumn(db);
+    recreateGenerationFts(db);
+    rebuildGenerationFts(db);
   },
 ];
 

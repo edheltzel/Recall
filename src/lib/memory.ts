@@ -347,15 +347,89 @@ export function getLastSearchErrors(): string[] {
   return lastSearchErrors;
 }
 
+type RankedSearchRow = {
+  id: number;
+  content: string;
+  project: string | null;
+  created_at: string;
+  provenance: Provenance | null;
+  rank: number;
+};
+
+function asSearchResult(table: string, row: RankedSearchRow): SearchResult {
+  return {
+    table,
+    id: row.id,
+    content: row.content,
+    project: row.project || undefined,
+    created_at: row.created_at,
+    provenance: row.provenance ?? null,
+    rank: row.rank,
+  };
+}
+
+function fuseMessageSearchGroups(groups: RankedSearchRow[][]): SearchResult[] {
+  const populated = groups.filter(group => group.length > 0);
+  if (populated.length <= 1) {
+    return (populated[0] ?? []).map(row => asSearchResult('messages', row));
+  }
+  const scores = new Map<number, number>();
+  const rows = new Map<number, RankedSearchRow>();
+  for (const group of populated) {
+    group.forEach((row, index) => {
+      rows.set(row.id, row);
+      scores.set(row.id, (scores.get(row.id) ?? 0) + 1 / (60 + index + 1));
+    });
+  }
+  const ranked = [...rows.values()].sort((left, right) =>
+    (scores.get(right.id) ?? 0) - (scores.get(left.id) ?? 0) ||
+    right.created_at.localeCompare(left.created_at) || left.id - right.id
+  );
+  const rawRanks = ranked.map(row => row.rank).sort((left, right) => left - right);
+  const best = rawRanks[0] ?? -Number.EPSILON;
+  const worst = rawRanks.at(-1) ?? best;
+  return ranked.map((row, index) => ({
+    ...asSearchResult('messages', row),
+    rank: ranked.length === 1
+      ? best
+      : best + ((worst - best) * index) / (ranked.length - 1),
+  }));
+}
+
+function fallbackSearchTerms(query: string): string[] {
+  const operators = new Set(['AND', 'OR', 'NOT', 'NEAR']);
+  const matches = query.match(/"[^"]+"|[\p{L}\p{N}_-]+/gu) ?? [];
+  return [...new Set(matches
+    .map(term => term.replace(/^"|"$/g, '').trim())
+    .filter(term => term.length > 0 && !operators.has(term.toUpperCase())))]
+    .slice(0, 16);
+}
+
 export function search(query: string, options?: MemorySearchOptions): SearchResult[] {
   const db = getDb();
   const limit = options?.limit || 20;
   const results: SearchResult[] = [];
   lastSearchErrors = []; // Reset errors for this search
-  const generationFtsAvailable = Boolean(db.prepare(`
-    SELECT 1 FROM sqlite_master
-    WHERE type = 'table' AND name = 'host_ingest_generation_messages_fts'
-  `).get());
+  const schemaTables = new Set((db.prepare(`
+    SELECT name FROM sqlite_master WHERE type = 'table'
+  `).all() as Array<{ name: string }>).map(row => row.name));
+  const generationStorageAvailable = [
+    'host_ingest_generations',
+    'host_ingest_generation_messages',
+    'host_ingest_state',
+  ].every(table => schemaTables.has(table));
+  const generationFtsColumns = schemaTables.has('host_ingest_generation_messages_fts')
+    ? new Set((db.prepare(`
+        PRAGMA table_info(host_ingest_generation_messages_fts)
+      `).all() as Array<{ name: string }>).map(column => column.name))
+    : new Set<string>();
+  const generationFtsAvailable = generationFtsColumns.has('generation_id');
+  const generationColumns = generationStorageAvailable
+    ? new Set((db.prepare(`
+        PRAGMA table_info(host_ingest_generations)
+      `).all() as Array<{ name: string }>).map(column => column.name))
+    : new Set<string>();
+  const generationFtsReadinessAvailable = generationColumns.has('fts_ready');
 
   const tables = options?.table
     ? [options.table]
@@ -372,7 +446,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           FROM messages_fts f
           JOIN published_messages m ON m.id = f.rowid
           WHERE messages_fts MATCH ?
-          ${generationFtsAvailable ? `AND NOT EXISTS (
+          ${generationStorageAvailable ? `AND NOT EXISTS (
             SELECT 1
             FROM host_ingest_generation_messages AS generated
             JOIN host_ingest_state AS state
@@ -450,26 +524,12 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
       // connection, so repeat searches skip recompilation. There are a bounded
       // number of shapes (per table × with/without project/duplicate filters);
       // each is cached on first use. Identical SQL + params → identical output.
-      const rows = db.query(sql).all(...params) as Array<{
-        id: number;
-        content: string;
-        project: string | null;
-        created_at: string;
-        provenance: Provenance | null;
-        rank: number;
-      }>;
-
-      for (const row of rows) {
-        results.push({
-          table,
-          id: row.id,
-          content: row.content,
-          project: row.project || undefined,
-          created_at: row.created_at,
-          provenance: row.provenance ?? null,
-          rank: row.rank
-        });
+      const rows = db.query(sql).all(...params) as RankedSearchRow[];
+      if (table !== 'messages') {
+        for (const row of rows) results.push(asSearchResult(table, row));
+        continue;
       }
+      const messageGroups = [rows];
       if (table === 'messages' && generationFtsAvailable) {
         const generationParams: Array<string | number> = [query];
         if (options?.project) generationParams.push(options.project);
@@ -478,7 +538,13 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
           SELECT generated.message_id AS id, generated.content, generated.project,
             generated.timestamp AS created_at, generated.provenance, f.rank
           FROM host_ingest_generation_messages_fts AS f
-          JOIN host_ingest_generation_messages AS generated ON generated.rowid = f.rowid
+          JOIN host_ingest_generation_messages AS generated
+            ON generated.message_id = f.rowid
+           AND generated.generation_id = f.generation_id
+          JOIN host_ingest_generations AS generation
+            ON generation.generation_id = generated.generation_id
+           AND generation.status = 'active'
+           ${generationFtsReadinessAvailable ? 'AND generation.fts_ready = 1' : 'AND 0'}
           JOIN host_ingest_state AS state
             ON state.active_generation = generated.generation_id
            AND state.source = generated.source
@@ -489,26 +555,53 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
             ${duplicateFilter(options, 'messages', 'generated.message_id')}
             ${options?.project ? 'AND generated.project = ?' : ''}
           ORDER BY f.rank LIMIT ?
-        `).all(...generationParams) as Array<{
-          id: number;
-          content: string;
-          project: string | null;
-          created_at: string;
-          provenance: Provenance | null;
-          rank: number;
-        }>;
-        for (const row of generationRows) {
-          results.push({
-            table,
-            id: row.id,
-            content: row.content,
-            project: row.project || undefined,
-            created_at: row.created_at,
-            provenance: row.provenance ?? null,
-            rank: row.rank,
-          });
-        }
+        `).all(...generationParams) as RankedSearchRow[];
+        messageGroups.push(generationRows);
       }
+      if (generationStorageAvailable &&
+        (!generationFtsAvailable || !generationFtsReadinessAvailable ||
+          Boolean(db.prepare(`
+            SELECT 1 FROM host_ingest_generations AS generation
+            JOIN host_ingest_state AS state
+              ON state.active_generation = generation.generation_id
+            WHERE generation.status = 'active' AND generation.fts_ready = 0
+            LIMIT 1
+          `).get()))) {
+        const fallbackParams: Array<string | number> = [
+          JSON.stringify(fallbackSearchTerms(query)),
+        ];
+        if (options?.project) fallbackParams.push(options.project);
+        fallbackParams.push(limit);
+        const fallbackRows = db.prepare(`
+          SELECT generated.message_id AS id, generated.content, generated.project,
+            generated.timestamp AS created_at, generated.provenance, 0 AS rank
+          FROM host_ingest_generation_messages AS generated
+          JOIN host_ingest_generations AS generation
+            ON generation.generation_id = generated.generation_id
+           AND generation.status = 'active'
+          JOIN host_ingest_state AS state
+            ON state.active_generation = generated.generation_id
+           AND state.source = generated.source
+           AND state.session_id = generated.session_id
+          WHERE generated.message_id IS NOT NULL AND generated.content IS NOT NULL
+            AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+            ${generationFtsAvailable && generationFtsReadinessAvailable
+              ? 'AND generation.fts_ready = 0' : ''}
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(?) AS term
+              WHERE instr(
+                lower(generated.content),
+                lower(CAST(term.value AS TEXT))
+              ) = 0
+            )
+            ${duplicateFilter(options, 'messages', 'generated.message_id')}
+            ${options?.project ? 'AND generated.project = ?' : ''}
+          ORDER BY generated.timestamp DESC, generated.message_id DESC
+          LIMIT ?
+        `).all(...fallbackParams) as RankedSearchRow[];
+        messageGroups.push(fallbackRows);
+      }
+      results.push(...fuseMessageSearchGroups(messageGroups));
     } catch (err) {
       // FIX #7: Record errors instead of silently swallowing
       const errorMsg = err instanceof Error ? err.message : String(err);

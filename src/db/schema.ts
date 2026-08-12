@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS host_ingest_generations (
   message_count INTEGER NOT NULL DEFAULT 0,
   max_message_id INTEGER NOT NULL DEFAULT 0,
   ready         INTEGER NOT NULL DEFAULT 0 CHECK (ready IN (0, 1)),
+  fts_ready     INTEGER NOT NULL DEFAULT 0 CHECK (fts_ready IN (0, 1)),
   status        TEXT NOT NULL CHECK (status IN ('pending', 'active', 'superseded'))
 );
 
@@ -79,38 +80,59 @@ CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_message_id
 export const HOST_INGEST_GENERATION_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS host_ingest_generation_messages_fts USING fts5(
   content,
-  project
+  project,
+  generation_id UNINDEXED
 );
-CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_ai
-AFTER INSERT ON host_ingest_generation_messages
-WHEN new.content IS NOT NULL
-  AND (new.source <> 'grok' OR new.source_position IS NOT NULL) BEGIN
-  INSERT INTO host_ingest_generation_messages_fts(rowid, content, project)
-  VALUES (new.rowid, new.content, new.project);
-END;
 CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_ad
 AFTER DELETE ON host_ingest_generation_messages
-WHEN old.content IS NOT NULL
-  AND (old.source <> 'grok' OR old.source_position IS NOT NULL) BEGIN
-  DELETE FROM host_ingest_generation_messages_fts WHERE rowid = old.rowid;
+WHEN old.message_id IS NOT NULL BEGIN
+  DELETE FROM host_ingest_generation_messages_fts
+  WHERE rowid = old.message_id AND generation_id = old.generation_id;
 END;
 CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_au
-AFTER UPDATE OF content, project, source_position ON host_ingest_generation_messages BEGIN
-  DELETE FROM host_ingest_generation_messages_fts WHERE rowid = old.rowid;
-  INSERT INTO host_ingest_generation_messages_fts(rowid, content, project)
-  SELECT new.rowid, new.content, new.project
+AFTER UPDATE OF message_id, content, project, source_position
+ON host_ingest_generation_messages BEGIN
+  DELETE FROM host_ingest_generation_messages_fts
+  WHERE rowid = old.message_id AND generation_id = old.generation_id;
+  INSERT INTO host_ingest_generation_messages_fts(
+    rowid, content, project, generation_id
+  )
+  SELECT new.message_id, new.content, new.project, new.generation_id
   WHERE new.content IS NOT NULL
-    AND (new.source <> 'grok' OR new.source_position IS NOT NULL);
+    AND new.message_id IS NOT NULL
+    AND (new.source <> 'grok' OR new.source_position IS NOT NULL)
+    AND EXISTS (
+      SELECT 1 FROM host_ingest_generations AS generation
+      WHERE generation.generation_id = new.generation_id
+        AND generation.status = 'active'
+    );
 END;
 `;
 
 export const REBUILD_HOST_INGEST_GENERATION_FTS = `
+UPDATE host_ingest_generations SET fts_ready = 0;
 DELETE FROM host_ingest_generation_messages_fts;
-INSERT INTO host_ingest_generation_messages_fts(rowid, content, project)
-SELECT rowid, content, project
-FROM host_ingest_generation_messages
-WHERE content IS NOT NULL
-  AND (source <> 'grok' OR source_position IS NOT NULL);
+INSERT INTO host_ingest_generation_messages_fts(
+  rowid, content, project, generation_id
+)
+SELECT generated.message_id, generated.content, generated.project,
+  generated.generation_id
+FROM host_ingest_generation_messages AS generated
+JOIN host_ingest_generations AS generation
+  ON generation.generation_id = generated.generation_id
+ AND generation.status = 'active'
+JOIN host_ingest_state AS state
+  ON state.active_generation = generated.generation_id
+ AND state.source = generated.source
+ AND state.session_id = generated.session_id
+WHERE generated.content IS NOT NULL
+  AND generated.message_id IS NOT NULL
+  AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL);
+UPDATE host_ingest_generations SET fts_ready = 1
+WHERE status = 'active' AND EXISTS (
+  SELECT 1 FROM host_ingest_state AS state
+  WHERE state.active_generation = host_ingest_generations.generation_id
+);
 `;
 
 export const CREATE_TABLES = `
