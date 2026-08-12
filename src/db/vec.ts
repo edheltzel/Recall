@@ -155,6 +155,11 @@ type VecIndexState = {
   dirty: number;
 };
 
+function databaseVersion(db: Database): number {
+  const row = db.prepare('PRAGMA data_version').get() as { data_version: number };
+  return row.data_version;
+}
+
 function vecIndexState(db: Database): VecIndexState {
   return db.prepare(
     `SELECT
@@ -219,9 +224,15 @@ export function withConsistentVecIndex<T>(db: Database, search: () => T): T | nu
     if (!ensureVecIndexSynced(db)) return null;
     const before = vecIndexState(db);
     if (before.dirty) continue;
+    const beforeDatabaseVersion = databaseVersion(db);
     const result = search();
     const after = vecIndexState(db);
-    if (!after.dirty && after.generation === before.generation) return result;
+    const afterDatabaseVersion = databaseVersion(db);
+    if (
+      !after.dirty &&
+      after.generation === before.generation &&
+      afterDatabaseVersion === beforeDatabaseVersion
+    ) return result;
   }
   return null;
 }

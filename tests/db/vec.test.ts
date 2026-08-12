@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
@@ -135,6 +136,31 @@ describe('sqlite-vec index (issue #148)', () => {
       .toEqual({ value: '1' });
     expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
       .toEqual({ value: '2' });
+  });
+
+  test('retries when the database publication version changes during a KNN read', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    const peer = new Database(process.env.RECALL_DB_PATH!);
+    let calls = 0;
+
+    try {
+      const result = withConsistentVecIndex(db, () => {
+        calls += 1;
+        if (calls === 1) {
+          peer.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+            .run('vec_publication_test', '1');
+        }
+        return knnSearch(db, vec(1), 1);
+      });
+
+      expect(calls).toBe(2);
+      expect(result?.[0]?.distance).toBeLessThan(0.001);
+    } finally {
+      peer.close();
+    }
   });
 
   test('KNN ordering matches the brute-force cosine ranking (parity)', () => {
