@@ -402,17 +402,20 @@ What repair covers:
   missing embeddings and still exits successfully — unless another requested
   repair failed. Partial results are never hidden: embedded, skipped
   (too short), and failed counts are all reported.
-- **Orphan/invariant reporting.** Named, unambiguous integrity checks —
-  orphaned embeddings, dedup lineage pointing at missing rows, messages
-  without a session, broken LoA message ranges and parent links, pending
-  schema migrations — are **report-only**. Repair never attempts heuristic
-  data mutation; pending migrations are fixed by `recall init`.
+- **Orphan/invariant recovery.** With `--execute`, embeddings whose published
+  source record no longer exists are removed and the vector index is rebuilt
+  when sqlite-vec is available (otherwise it remains durably marked for the
+  next rebuild). Dedup lineage pointing at missing rows, messages without a
+  session, broken LoA message ranges and parent links, and pending schema
+  migrations remain **report-only**. Pending migrations are fixed by
+  `recall init`.
 
 Safety model:
 
 - **Dry-run by default.** Mutations require `--execute`. Run
   `recall export --backup` before applying repairs.
-- **Repair never hard-deletes rows.**
+- **Repair never hard-deletes source records.** Only derived orphan embedding
+  rows are removed.
 - **Repair never changes [Record Provenance](#record-provenance).** FTS
   rebuild regenerates index shadow tables; re-embedding only inserts into
   the `embeddings` table. No source-table column is written.

@@ -61,11 +61,16 @@ export function runPrune(options: PruneOptions): void {
   results.push({ table: 'messages', description: `Consolidated messages older than ${days}d`, count: messageCount, protected: messageMatched - messageCount });
 
   // 2. Sessions: delete orphaned sessions (no messages, no LoA) older than N days
-  const sessionCount = countRows(db,
-    `SELECT COUNT(*) as count FROM sessions
-     WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
+  const sessionWhere =
+    `WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
      AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-     AND started_at < ${cutoff}`
+     AND NOT EXISTS (
+       SELECT 1 FROM host_ingest_state WHERE host_ingest_state.session_id = sessions.session_id
+     )
+     AND started_at < ${cutoff}`;
+  const sessionCount = countRows(
+    db,
+    `SELECT COUNT(*) as count FROM sessions ${sessionWhere}`
   );
   results.push({ table: 'sessions', description: `Orphaned sessions older than ${days}d`, count: sessionCount });
 
@@ -158,12 +163,7 @@ export function runPrune(options: PruneOptions): void {
   }
 
   if (sessionCount > 0) {
-    db.prepare(
-      `DELETE FROM sessions
-       WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
-       AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-       AND started_at < ${cutoff}`
-    ).run();
+    db.prepare(`DELETE FROM sessions ${sessionWhere}`).run();
   }
 
   if (breadcrumbCount > 0) {

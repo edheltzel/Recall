@@ -301,26 +301,28 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     : undefined;
   let loaId: number;
   if (existingLoa) {
-    db.prepare(`
-      UPDATE loa_entries SET
-        title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
-        snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?,
-        created_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(
-      title,
-      fabricExtract,
-      startId,
-      endId,
-      endId,
-      options.project || session.project,
-      options.tags ?? null,
-      importedMessages.length,
-      existingLoa.id
-    );
-    if (existingLoa.title !== title || existingLoa.fabric_extract !== fabricExtract) {
-      invalidateRecordEmbedding(db, 'loa_entries', existingLoa.id);
-    }
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE loa_entries SET
+          title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
+          snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?,
+          created_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        title,
+        fabricExtract,
+        startId,
+        endId,
+        endId,
+        options.project || session.project,
+        options.tags ?? null,
+        importedMessages.length,
+        existingLoa.id
+      );
+      if (existingLoa.title !== title || existingLoa.fabric_extract !== fabricExtract) {
+        invalidateRecordEmbedding(db, 'loa_entries', existingLoa.id);
+      }
+    })();
     loaId = existingLoa.id;
   } else {
     loaId = createLoaEntry({

@@ -27,6 +27,7 @@ Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `
 - External text-generation commands belong behind `providers/text-generation.ts`; callers must not shell a native model CLI directly.
 - All project-path handling goes through `lib/project.ts` (`validateDirPath` injection guard) — never assemble project paths ad hoc.
 - Explicit add paths (`recall add` CLI + `memory_add` MCP) redact secrets at the choke point: `addDecision`/`addLearning`/`addBreadcrumb` in `lib/memory.ts` `scrub()` every free-text field before insert and report redacted kinds via the optional `redactionsOut` arg. A new explicit write path must route through these — never INSERT user free-text directly.
+- `recall repair --execute` may delete derived orphan embeddings and synchronize the vector index; source-record and lineage invariant findings remain report-only. Route embedding cleanup through `lib/embedding-store.ts` so canonical rows and vector readiness change transactionally.
 
 ## Work Guidance
 
