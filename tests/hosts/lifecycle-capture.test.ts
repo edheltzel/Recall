@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -389,6 +390,7 @@ describe('host hook payload routing', () => {
     const grokIncremental: boolean[] = [];
     const grokBatches: Array<HostTranscript['batch']> = [];
     const grokChunkSizes: number[] = [];
+    const grokSourcePositions: number[] = [];
     const grokBlock = Buffer.from('grok export padding\n'.repeat(4096));
     const grok = await handleGrokHostHook(
       { hook_event_name: 'SessionEnd', session_id: 'grok-oversized-session' },
@@ -407,6 +409,7 @@ describe('host hook payload routing', () => {
           grokBatches.push(input.batch);
           for (const message of input.messages) {
             grokChunkSizes.push(Buffer.byteLength(message.content));
+            grokSourcePositions.push(message.sourcePosition ?? -1);
           }
           return {
             sessionId: input.sessionId,
@@ -425,7 +428,60 @@ describe('host hook payload routing', () => {
     expect(grokBatches[0]).toBeDefined();
     expect(grokBatches[1]).toBe(grokBatches[0]);
     expect(Math.max(...grokChunkSizes)).toBeLessThanOrEqual(maxChunk);
+    expect(grokSourcePositions[0]).toBe(0);
+    expect(grokSourcePositions[1]).toBeGreaterThan(grokSourcePositions[0]);
   });
+
+  test('keeps oversized Grok boundaries stable after a prefix insertion', async () => {
+    const maxChunk = 25 * 1024 * 1024;
+    const raw = Buffer.allocUnsafe(maxChunk + 1024 * 1024);
+    let state = 0x12345678;
+    for (let index = 0; index < raw.length; index++) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      raw[index] = 33 + ((state >>> 24) % 94);
+    }
+    const body = raw.toString('ascii');
+    let markdown = body;
+
+    const capture = async () => {
+      const frames: Array<{ digest: string; position: number }> = [];
+      await handleGrokHostHook(
+        { hook_event_name: 'SessionEnd', session_id: 'grok-content-boundary' },
+        {
+          exportGrok: () => markdown,
+          checkpoint: () => undefined,
+          ingest: input => {
+            for (const message of input.messages) {
+              frames.push({
+                digest: createHash('sha256').update(message.content).digest('hex'),
+                position: message.sourcePosition ?? -1,
+              });
+            }
+            return {
+              sessionId: input.sessionId,
+              inserted: input.messages.length,
+              skipped: 0,
+              finalized: Boolean(input.finalize),
+              redactions: [],
+              digest: `${input.messages.length}`,
+            };
+          },
+        }
+      );
+      return frames;
+    };
+
+    const first = await capture();
+    markdown = `prefix${body}`;
+    const second = await capture();
+    const stable = second.find(frame => first.some(previous => previous.digest === frame.digest));
+
+    expect(first.length).toBeGreaterThan(1);
+    expect(second.length).toBeGreaterThan(1);
+    expect(stable).toBeDefined();
+    const previous = first.find(frame => frame.digest === stable!.digest)!;
+    expect(stable!.position - previous.position).toBe(6);
+  }, 15_000);
 
   test('does not ingest a partial Grok export when the exporter fails', async () => {
     let ingests = 0;
@@ -465,19 +521,26 @@ describe('host hook payload routing', () => {
     });
 
     const rows = getDb()
-      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
-      .all(payload.session_id) as Array<{ content: string }>;
+      .prepare(`
+        SELECT m.id, m.content, h.source_position FROM messages m
+        JOIN host_ingest_messages h ON h.message_id = m.id
+        WHERE m.session_id = ? AND h.source_position IS NOT NULL
+        ORDER BY h.source_position
+      `)
+      .all(payload.session_id) as Array<{ id: number; content: string }>;
     expect(rows).toHaveLength(3);
-    expect(rows.map(row => row.content).sort()).toEqual([
-      'Frame A',
-      'Frame B',
-      'New frame',
-    ].sort());
+    expect(rows.map(row => row.content).join('')).toBe(markdown);
     expect(rows.some(row => row.content.includes('New frame\n\nFrame A'))).toBe(false);
+    const loa = getDb()
+      .prepare('SELECT source_ids FROM loa_entries WHERE session_id = ?')
+      .get(payload.session_id) as { source_ids: string };
+    expect(JSON.parse(loa.source_ids)).toEqual(
+      rows.map(row => ({ table: 'messages', id: row.id }))
+    );
   });
 
   test('keeps Grok frame identity stable across incremental delimiters and reset', async () => {
-    let markdown = 'Frame A';
+    let markdown = 'Frame A\n';
     const payload = { hook_event_name: 'Stop', session_id: 'grok-delimiter-boundary' };
     const dependencies = { exportGrok: () => markdown };
 
@@ -490,9 +553,37 @@ describe('host hook payload routing', () => {
     )).ingest).toMatchObject({ inserted: 0, skipped: 2 });
 
     const rows = getDb()
-      .prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id')
+      .prepare(`
+        SELECT m.content FROM messages m
+        JOIN host_ingest_messages h ON h.message_id = m.id
+        WHERE m.session_id = ? AND h.source_position IS NOT NULL
+        ORDER BY h.source_position
+      `)
       .all(payload.session_id) as Array<{ content: string }>;
-    expect(rows.map(row => row.content)).toEqual(['Frame A', 'Frame B']);
+    expect(rows.map(row => row.content).join('')).toBe(markdown);
+    expect(rows.map(row => row.content)).toEqual(['Frame A', '\n\nFrame B']);
+  });
+
+  test('validates a terminal Grok Stop before finalizing', async () => {
+    let markdown = 'Frame A';
+    const payload = { hook_event_name: 'Stop', session_id: 'grok-terminal-stop' };
+    const dependencies = { exportGrok: () => markdown };
+
+    expect((await handleGrokHostHook(payload, dependencies)).ingest).toMatchObject({
+      inserted: 1,
+      finalized: false,
+    });
+    markdown = 'Frame B';
+    expect((await handleGrokHostHook(
+      { ...payload, reason: 'channel_closed' },
+      dependencies
+    )).ingest).toMatchObject({ inserted: 1, finalized: true });
+
+    const loa = getDb()
+      .prepare('SELECT fabric_extract FROM loa_entries WHERE session_id = ?')
+      .get(payload.session_id) as { fabric_extract: string };
+    expect(loa.fabric_extract).toContain('Frame B');
+    expect(loa.fabric_extract).not.toContain('Frame A');
   });
 });
 

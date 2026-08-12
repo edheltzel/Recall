@@ -424,6 +424,34 @@ export const MIGRATIONS: Migration[] = [
         ON host_ingest_messages(message_id);
     `);
   },
+
+  (db) => {
+    const columns = db.prepare('PRAGMA table_info(host_ingest_messages)').all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some(column => column.name === 'source_position')) {
+      db.exec('ALTER TABLE host_ingest_messages ADD COLUMN source_position INTEGER');
+    }
+    db.exec(`
+      WITH ranked AS (
+        SELECT source, session_id, message_key,
+          ROW_NUMBER() OVER (
+            PARTITION BY source, session_id
+            ORDER BY message_id, message_key
+          ) AS ordinal
+        FROM host_ingest_messages
+        WHERE source = 'grok' AND source_position IS NULL
+      )
+      UPDATE host_ingest_messages
+      SET source_position = -9007199254740991 + (
+        SELECT ordinal FROM ranked
+        WHERE ranked.source = host_ingest_messages.source
+          AND ranked.session_id = host_ingest_messages.session_id
+          AND ranked.message_key = host_ingest_messages.message_key
+      )
+      WHERE source = 'grok' AND source_position IS NULL
+    `);
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -444,7 +444,7 @@ describe('source-lineage column migration (12 to 13)', () => {
     // Mutation guard: dropping the 12 → 13 entry shrinks MIGRATIONS.length to
     // 12, so user_version would land at 12 and the column would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(18);
+    expect(MIGRATIONS.length).toBe(19);
     const cols = (db.prepare('PRAGMA table_info(loa_entries)').all() as any[]).map((c) => c.name);
     expect(cols).toContain('source_ids');
   });
@@ -528,7 +528,7 @@ describe('access-tracking columns migration (13 to 14)', () => {
     // Mutation guard: dropping the 13 → 14 entry shrinks MIGRATIONS.length to 13,
     // so user_version would land at 13 and the columns would be absent → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(18);
+    expect(MIGRATIONS.length).toBe(19);
     for (const table of ACCESS_TABLES) {
       const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => c.name);
       expect(cols).toContain('access_count');
@@ -628,7 +628,7 @@ describe('FTS trigger scoping migration (14 to 15)', () => {
     // Mutation guard: dropping the 14 → 15 entry shrinks MIGRATIONS.length to 14,
     // so user_version would land at 14 with the triggers still bare → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(18);
+    expect(MIGRATIONS.length).toBe(19);
     for (const name of MEMORY_AU_TRIGGERS) {
       const sql = triggerSql(db, name);
       expect(sql).not.toBeNull();
@@ -764,7 +764,7 @@ describe('code-KG rollback migration (16 to 17)', () => {
     // Mutation guard: dropping the 16 → 17 entry shrinks MIGRATIONS.length to 16,
     // so user_version lands at 16 → RED.
     expect(getMigrationVersion(db)).toBe(MIGRATIONS.length);
-    expect(MIGRATIONS.length).toBe(18);
+    expect(MIGRATIONS.length).toBe(19);
 
     for (const table of KG_TABLES) {
       const tbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table) as any;
@@ -799,8 +799,8 @@ describe('code-KG rollback migration (16 to 17)', () => {
 
       const result = applyMigrations(legacyDb);
       expect(result.from).toBe(16);
-      expect(result.to).toBe(18);
-      expect(getMigrationVersion(legacyDb)).toBe(18);
+      expect(result.to).toBe(19);
+      expect(getMigrationVersion(legacyDb)).toBe(19);
 
       // All four objects + triggers dropped.
       for (const table of KG_TABLES) {
@@ -829,7 +829,7 @@ describe('code-KG rollback migration (16 to 17)', () => {
 
       const result = applyMigrations(legacyDb);
       expect(result.from).toBe(16);
-      expect(getMigrationVersion(legacyDb)).toBe(18);
+      expect(getMigrationVersion(legacyDb)).toBe(19);
     } finally {
       legacyDb.close();
       rmSync(legacyDir, { recursive: true, force: true });
@@ -844,14 +844,14 @@ describe('code-KG rollback migration (16 to 17)', () => {
   });
 });
 
-describe('host lifecycle ingest migration (17 to 18)', () => {
+describe('host lifecycle ingest migration (17 to 19)', () => {
   test('upgrade path creates watermark and message-key tables', () => {
     db.exec('DROP TABLE host_ingest_messages; DROP TABLE host_ingest_state;');
     db.prepare('PRAGMA user_version = 17').run();
 
     const result = applyMigrations(db);
     expect(result.from).toBe(17);
-    expect(result.to).toBe(18);
+    expect(result.to).toBe(19);
 
     const stateColumns = (db.prepare('PRAGMA table_info(host_ingest_state)').all() as any[])
       .map(column => column.name);
@@ -862,6 +862,7 @@ describe('host lifecycle ingest migration (17 to 18)', () => {
       .map(column => column.name);
     expect(keyColumns).toContain('message_key');
     expect(keyColumns).toContain('message_id');
+    expect(keyColumns).toContain('source_position');
 
     const stateSessionFk = (
       db.prepare('PRAGMA foreign_key_list(host_ingest_state)').all() as any[]
@@ -871,6 +872,40 @@ describe('host lifecycle ingest migration (17 to 18)', () => {
     ).find(foreignKey => foreignKey.from === 'session_id');
     expect(stateSessionFk.on_delete).toBe('CASCADE');
     expect(messageSessionFk.on_delete).toBe('CASCADE');
+  });
+
+  test('backfills durable order for existing Grok keys', () => {
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, source) VALUES (?, ?, 'grok')
+    `).run('legacy-grok-order', '2026-07-01T10:00:00.000Z');
+    const first = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content)
+      VALUES (?, ?, 'system', 'first')
+    `).run('legacy-grok-order', '2026-07-01T10:00:00.000Z');
+    const second = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content)
+      VALUES (?, ?, 'system', 'second')
+    `).run('legacy-grok-order', '2026-07-01T10:00:01.000Z');
+    db.prepare(`
+      INSERT INTO host_ingest_messages
+        (source, session_id, message_key, message_id, source_position)
+      VALUES ('grok', ?, ?, ?, NULL)
+    `).run('legacy-grok-order', 'first', first.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO host_ingest_messages
+        (source, session_id, message_key, message_id, source_position)
+      VALUES ('grok', ?, ?, ?, NULL)
+    `).run('legacy-grok-order', 'second', second.lastInsertRowid);
+    db.prepare('PRAGMA user_version = 18').run();
+
+    expect(applyMigrations(db).to).toBe(19);
+    const positions = db.prepare(`
+      SELECT source_position FROM host_ingest_messages
+      WHERE session_id = ? ORDER BY source_position
+    `).all('legacy-grok-order') as Array<{ source_position: number }>;
+    expect(positions).toHaveLength(2);
+    expect(positions[0].source_position).toBeLessThan(positions[1].source_position);
+    expect(positions[1].source_position).toBeLessThan(0);
   });
 });
 
@@ -886,8 +921,8 @@ describe('MIGRATIONS array', () => {
     // 14 → 15: scope FTS AFTER UPDATE triggers to indexed columns (issue #153)
     // 15 → 16: native code knowledge graph schema (epic #196, issue #197) — tombstoned
     // 16 → 17: roll back the native code knowledge graph (issue #214)
-    // 17 to 18: host lifecycle ingest watermarks and message keys
-    expect(MIGRATIONS.length).toBe(18);
+    // 17 to 19: host lifecycle ingest watermarks, message keys, and source positions
+    expect(MIGRATIONS.length).toBe(19);
   });
 
   test('all entries are functions', () => {
