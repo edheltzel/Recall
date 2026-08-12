@@ -79,6 +79,19 @@ export interface HostIngestCheckpoint {
   finalized: boolean;
 }
 
+export interface HostIngestCheckpointExpectation {
+  source: LifecycleHost;
+  sessionId: string;
+  checkpoint?: HostIngestCheckpoint;
+}
+
+export class HostIngestCheckpointConflictError extends Error {
+  constructor(source: LifecycleHost, sessionId: string) {
+    super(`Lifecycle checkpoint advanced for ${source} session ${sessionId}`);
+    this.name = 'HostIngestCheckpointConflictError';
+  }
+}
+
 interface PreparedMessage extends HostTranscriptMessage {
   content: string;
   timestamp: string;
@@ -423,6 +436,28 @@ function getIngestState(db: Database, input: HostTranscript): IngestStateRow | u
     .get(input.source, input.sessionId) as IngestStateRow | undefined;
 }
 
+function assertExpectedCheckpoint(
+  db: Database,
+  expectation: HostIngestCheckpointExpectation
+): void {
+  const current = db
+    .prepare(`
+      SELECT transcript_ref, watermark, finalized_at FROM host_ingest_state
+      WHERE source = ? AND session_id = ?
+    `)
+    .get(expectation.source, expectation.sessionId) as IngestStateRow | null;
+  const expected = expectation.checkpoint;
+  const matches = current === null
+    ? expected === undefined
+    : expected !== undefined &&
+      (current.transcript_ref ?? undefined) === expected.transcriptRef &&
+      (current.watermark ?? undefined) === expected.watermark &&
+      Boolean(current.finalized_at) === expected.finalized;
+  if (!matches) {
+    throw new HostIngestCheckpointConflictError(expectation.source, expectation.sessionId);
+  }
+}
+
 export function getHostIngestCheckpoint(
   source: LifecycleHost,
   sessionId: string
@@ -603,10 +638,9 @@ function persistIngestState(
  */
 function ingestHostTranscriptInTransaction(
   db: Database,
-  input: HostTranscript
+  input: HostTranscript,
+  prepared: PreparedTranscript
 ): HostIngestResult {
-  assertSessionId(input.sessionId);
-  const prepared = prepareTranscript(input);
   assertSessionOwnership(db, input);
   const previous = getIngestState(db, input);
   upsertSession(db, input, prepared);
@@ -651,27 +685,45 @@ function ingestHostTranscriptInTransaction(
 }
 
 export function ingestHostTranscript(input: HostTranscript): HostIngestResult {
+  assertSessionId(input.sessionId);
+  const prepared = prepareTranscript(input);
   const db = getDb();
   return db
-    .transaction(() => ingestHostTranscriptInTransaction(db, input))
+    .transaction(() => ingestHostTranscriptInTransaction(db, input, prepared))
     .immediate();
 }
 
 export function ingestHostTranscriptBatch(
-  inputs: Iterable<HostTranscript>
+  inputs: Iterable<HostTranscript>,
+  expectation?: HostIngestCheckpointExpectation
 ): HostIngestResult {
+  const preparedInputs: Array<{ input: HostTranscript; prepared: PreparedTranscript }> = [];
+  for (const input of inputs) {
+    assertSessionId(input.sessionId);
+    if (expectation && (
+      input.source !== expectation.source || input.sessionId !== expectation.sessionId
+    )) {
+      throw new Error('Expected checkpoint must own every host transcript batch input');
+    }
+    preparedInputs.push({
+      input: { ...input, messages: [] },
+      prepared: prepareTranscript(input),
+    });
+  }
+  if (preparedInputs.length === 0) throw new Error('Host transcript batch must not be empty');
+
   const db = getDb();
   return db
     .transaction(() => {
+      if (expectation) assertExpectedCheckpoint(db, expectation);
       let aggregate: HostIngestResult | undefined;
-      for (const input of inputs) {
+      for (const { input, prepared } of preparedInputs) {
         aggregate = mergeHostIngestResults(
           aggregate,
-          ingestHostTranscriptInTransaction(db, input)
+          ingestHostTranscriptInTransaction(db, input, prepared)
         );
       }
-      if (!aggregate) throw new Error('Host transcript batch must not be empty');
-      return aggregate;
+      return aggregate!;
     })
     .immediate();
 }
