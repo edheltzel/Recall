@@ -10,6 +10,7 @@ import {
   ensureVecIndexSynced,
   invalidateVecIndex,
   resetVecSyncCache,
+  withConsistentDatabaseRead,
   withConsistentVecIndex,
 } from '../../src/db/vec';
 import {
@@ -158,6 +159,28 @@ describe('sqlite-vec index (issue #148)', () => {
 
       expect(calls).toBe(2);
       expect(result?.[0]?.distance).toBeLessThan(0.001);
+    } finally {
+      peer.close();
+    }
+  });
+
+  test('retries a canonical read when the database publication version changes', () => {
+    const db = getDb();
+    const peer = new Database(process.env.RECALL_DB_PATH!);
+    let calls = 0;
+
+    try {
+      const result = withConsistentDatabaseRead(db, () => {
+        calls += 1;
+        if (calls === 1) {
+          peer.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+            .run('canonical_publication_test', '1');
+        }
+        return calls;
+      });
+
+      expect(calls).toBe(2);
+      expect(result).toBe(2);
     } finally {
       peer.close();
     }

@@ -160,6 +160,12 @@ function databaseVersion(db: Database): number {
   return row.data_version;
 }
 
+function databaseRead<T>(db: Database, read: () => T): { result: T; stable: boolean } {
+  const before = databaseVersion(db);
+  const result = read();
+  return { result, stable: databaseVersion(db) === before };
+}
+
 function vecIndexState(db: Database): VecIndexState {
   return db.prepare(
     `SELECT
@@ -219,20 +225,29 @@ export function resetVecSyncCache(): void {
   syncedThisProcess = false;
 }
 
+export function withConsistentDatabaseRead<T>(db: Database, read: () => T): T | null {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const guarded = databaseRead(db, read);
+    if (guarded.stable) return guarded.result;
+  }
+  return null;
+}
+
 export function withConsistentVecIndex<T>(db: Database, search: () => T): T | null {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!ensureVecIndexSynced(db)) return null;
     const before = vecIndexState(db);
     if (before.dirty) continue;
-    const beforeDatabaseVersion = databaseVersion(db);
-    const result = search();
-    const after = vecIndexState(db);
-    const afterDatabaseVersion = databaseVersion(db);
+    const guarded = databaseRead(db, () => {
+      const result = search();
+      const after = vecIndexState(db);
+      return { result, after };
+    });
     if (
-      !after.dirty &&
-      after.generation === before.generation &&
-      afterDatabaseVersion === beforeDatabaseVersion
-    ) return result;
+      guarded.stable &&
+      !guarded.result.after.dirty &&
+      guarded.result.after.generation === before.generation
+    ) return guarded.result.result;
   }
   return null;
 }
