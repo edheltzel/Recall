@@ -1,6 +1,7 @@
 // recall prune command — table lifecycle management
 
 import { getDb } from '../db/connection.js';
+import { tableExists } from '../db/introspection.js';
 import { notRecordedSurvivorSql } from '../lib/dedup.js';
 import { deleteRecordEmbeddingsBySelectionInTransaction } from '../lib/embedding-store.js';
 
@@ -34,6 +35,11 @@ function countRows(db: any, sql: string, params: any[] = []): number {
 
 export function runPrune(options: PruneOptions): void {
   const db = getDb();
+  const lifecyclePruneReady = [
+    'host_ingest_state',
+    'host_ingest_messages',
+    'host_ingest_generation_messages',
+  ].every(table => tableExists(db, table));
   const dryRun = !options.execute;
   const days = parseDays(options.olderThan || '180d');
   const decisionDays = Math.min(days, 90);
@@ -64,15 +70,23 @@ export function runPrune(options: PruneOptions): void {
   const sessionWhere =
     `WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
      AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-     AND NOT EXISTS (
-       SELECT 1 FROM host_ingest_state WHERE host_ingest_state.session_id = sessions.session_id
-     )
+     ${lifecyclePruneReady
+       ? `AND NOT EXISTS (
+         SELECT 1 FROM host_ingest_state WHERE host_ingest_state.session_id = sessions.session_id
+       )`
+       : 'AND 0'}
      AND started_at < ${cutoff}`;
   const sessionCount = countRows(
     db,
     `SELECT COUNT(*) as count FROM sessions ${sessionWhere}`
   );
-  results.push({ table: 'sessions', description: `Orphaned sessions older than ${days}d`, count: sessionCount });
+  results.push({
+    table: 'sessions',
+    description: lifecyclePruneReady
+      ? `Orphaned sessions older than ${days}d`
+      : 'Deferred until lifecycle schema is ready',
+    count: sessionCount,
+  });
 
   // 3. Breadcrumbs: delete expired
   const breadcrumbWhere = `WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`;
@@ -128,6 +142,12 @@ export function runPrune(options: PruneOptions): void {
   }
 
   console.log(`\n  Total: ${totalPrunable.toLocaleString()} rows to prune`);
+
+  if (!lifecyclePruneReady) {
+    console.error("RETRYABLE: Lifecycle prune schema is not ready; run 'recall init' and retry.");
+    process.exitCode = 1;
+    return;
+  }
 
   if (dryRun) {
     if (totalPrunable > 0) {

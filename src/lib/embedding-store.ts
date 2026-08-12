@@ -81,10 +81,9 @@ export function deleteEmbeddingsByWhereInTransaction(
   params: Array<string | number> = []
 ): number {
   ensureEmbeddingCleanupReady(db);
-  const removed = db.prepare(
-    `DELETE FROM embeddings WHERE ${whereSql} RETURNING id`
-  ).all(...params).length;
-  return finishEmbeddingDeletion(db, removed);
+  db.prepare(`DELETE FROM embeddings WHERE ${whereSql}`).run(...params);
+  const removed = db.prepare('SELECT changes() AS count').get() as { count: number };
+  return finishEmbeddingDeletion(db, removed.count);
 }
 
 function acknowledgeLifecycleInvalidation(
