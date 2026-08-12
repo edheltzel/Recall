@@ -33,6 +33,7 @@
 import { createHash } from 'crypto';
 import { Database } from 'bun:sqlite';
 import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
+import { publishedRecordTable } from './published-records.js';
 import { blobToEmbedding, cosineSimilarity } from './embeddings.js';
 import {
   PROVENANCE_TABLES,
@@ -315,7 +316,7 @@ export function scanCandidates(
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ScanResult {
   const config = TABLE_SCAN_CONFIG[table];
-  const sourceTable = table === 'messages' ? 'published_messages' : table;
+  const sourceTable = publishedRecordTable(table);
   const where = [
     'id > ?',
     ...(config.extraWhere ? [config.extraWhere] : []),
@@ -694,6 +695,12 @@ export function applyDedupPlan(
     for (const [table, ids] of toDelete) {
       for (const chunk of chunked(ids)) {
         const placeholders = chunk.map(() => '?').join(', ');
+        if (table === 'messages') {
+          db.prepare(`
+            UPDATE host_ingest_generation_messages SET content = NULL
+            WHERE message_id IN (${placeholders})
+          `).run(...chunk);
+        }
         db.prepare(`DELETE FROM ${table} WHERE id IN (${placeholders})`).run(...chunk);
         db.prepare(
           `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`

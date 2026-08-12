@@ -28,6 +28,7 @@ import { MIGRATIONS, getMigrationVersion } from '../db/migrations.js';
 import { notMarkedDuplicateSql } from './dedup.js';
 import { embeddingToBlob, type EmbeddingResult } from './embeddings.js';
 import { PROVENANCE_TABLES } from '../types/index.js';
+import { publishedRecordTable } from './published-records.js';
 
 /** Source tables carrying an FTS5 index — derived from the schema map. */
 export const FTS_SOURCES = Object.keys(FTS_SCHEMA);
@@ -231,6 +232,7 @@ export interface EmbedGapReport {
 }
 
 function embedGapQuery(config: EmbedSourceConfig, excludeMarkedDuplicates: boolean): string {
+  const sourceTable = publishedRecordTable(config.table);
   const where = [
     't.id > ?',
     ...(config.extraWhere ? [config.extraWhere] : []),
@@ -244,7 +246,7 @@ function embedGapQuery(config: EmbedSourceConfig, excludeMarkedDuplicates: boole
   ].join(' AND ');
   return `
     SELECT t.id, ${config.columns.map(c => `t.${c}`).join(', ')}
-    FROM ${config.table} t
+    FROM ${sourceTable} t
     LEFT JOIN embeddings e ON e.source_table = '${config.table}' AND e.source_id = t.id
     WHERE ${where}
     ORDER BY t.id
@@ -322,8 +324,9 @@ function orphanCheckDefs(): OrphanCheckDef[] {
 
   // Embeddings whose source row no longer exists.
   for (const table of FTS_SOURCES) {
+    const sourceTable = publishedRecordTable(table);
     const where = `e.source_table = '${table}'
-      AND NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = e.source_id)`;
+      AND NOT EXISTS (SELECT 1 FROM ${sourceTable} t WHERE t.id = e.source_id)`;
     defs.push({
       check: `orphaned-embeddings:${table}`,
       description: `embeddings rows pointing at deleted ${table} rows`,
@@ -347,8 +350,9 @@ function orphanCheckDefs(): OrphanCheckDef[] {
   // 'marked' means hidden-but-intact, so both sides must still exist.
   for (const side of ['duplicate', 'survivor'] as const) {
     for (const table of PROVENANCE_TABLES) {
+      const sourceTable = publishedRecordTable(table);
       const where = `dl.status = 'marked' AND dl.${side}_table = '${table}'
-        AND NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = dl.${side}_id)`;
+        AND NOT EXISTS (SELECT 1 FROM ${sourceTable} t WHERE t.id = dl.${side}_id)`;
       defs.push({
         check: `lineage-missing-${side}:${table}`,
         description: `dedup_lineage 'marked' rows whose ${side} ${table} row no longer exists`,

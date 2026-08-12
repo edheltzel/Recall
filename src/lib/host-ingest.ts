@@ -950,7 +950,12 @@ function persistPreparedGeneration(
   }).immediate();
 }
 
-function deleteGeneration(db: Database, generationId: string, deadline?: number): void {
+function deleteGeneration(
+  db: Database,
+  generationId: string,
+  status: 'pending' | 'superseded',
+  deadline?: number
+): void {
   for (;;) {
     assertHostDeadline(deadline);
     const rows = db.prepare(`
@@ -969,8 +974,8 @@ function deleteGeneration(db: Database, generationId: string, deadline?: number)
   db.transaction(() => {
     db.prepare(`
       DELETE FROM host_ingest_generations
-      WHERE generation_id = ? AND status = 'pending'
-    `).run(generationId);
+      WHERE generation_id = ? AND status = ?
+    `).run(generationId, status);
   }).immediate();
 }
 
@@ -986,7 +991,32 @@ function discardStaleGenerations(db: Database, deadline?: number): void {
       )
     ORDER BY generation.created_at LIMIT ?
   `).all(cutoff, SQLITE_SAFE_CHUNK_SIZE) as Array<{ generation_id: string }>;
-  for (const row of stale) deleteGeneration(db, row.generation_id, deadline);
+  for (const row of stale) deleteGeneration(db, row.generation_id, 'pending', deadline);
+}
+
+function discardSupersededGenerations(db: Database, deadline?: number): void {
+  assertHostDeadline(deadline);
+  const stale = db.prepare(`
+    SELECT generation.generation_id FROM host_ingest_generations AS generation
+    WHERE generation.status = 'superseded'
+      AND NOT EXISTS (
+        SELECT 1 FROM host_ingest_state AS state
+        WHERE state.active_generation = generation.generation_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM loa_entries AS loa
+        WHERE json_extract(
+          CASE WHEN json_valid(loa.source_ids) THEN loa.source_ids END,
+          '$.table'
+        ) = 'host_ingest_generation_messages'
+          AND json_extract(
+          CASE WHEN json_valid(loa.source_ids) THEN loa.source_ids END,
+          '$.generation_id'
+        ) = generation.generation_id
+      )
+    ORDER BY generation.created_at LIMIT ?
+  `).all(SQLITE_SAFE_CHUNK_SIZE) as Array<{ generation_id: string }>;
+  for (const row of stale) deleteGeneration(db, row.generation_id, 'superseded', deadline);
 }
 
 function assertSessionOwnership(db: Database, input: HostTranscript): void {
@@ -1259,6 +1289,7 @@ export function ingestHostTranscriptBatch(
   let generation: PreparedBatchGeneration | undefined;
   try {
     discardStaleGenerations(db, deadline);
+    discardSupersededGenerations(db, deadline);
     const preparedGeneration = prepareBatchGeneration(stage, db, deadline);
     generation = preparedGeneration;
     reserveGenerationMessageIds(db, stage, preparedGeneration, deadline);
@@ -1271,11 +1302,12 @@ export function ingestHostTranscriptBatch(
       })
       .immediate();
     activated = true;
+    discardSupersededGenerations(db, deadline);
     return result;
   } finally {
     try {
       if (!activated && generation) {
-        deleteGeneration(db, generation.publishToken);
+        deleteGeneration(db, generation.publishToken, 'pending');
       }
     } finally {
       try {

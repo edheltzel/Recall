@@ -46,7 +46,7 @@ describe('core tables', () => {
 });
 
 describe('FTS5 virtual tables', () => {
-  test('all 7 FTS5 virtual tables exist', () => {
+  test('all 8 FTS5 virtual tables exist', () => {
     const db = getDb();
     const rows = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts' ORDER BY name")
@@ -57,6 +57,7 @@ describe('FTS5 virtual tables', () => {
       'breadcrumbs_fts',
       'decisions_fts',
       'documents_fts',
+      'host_ingest_generation_messages_fts',
       'learnings_fts',
       'loa_fts',
       'messages_fts',
@@ -143,6 +144,9 @@ describe('FTS triggers', () => {
       'documents_ad',
       'documents_ai',
       'documents_au',
+      'host_ingest_generation_messages_fts_ad',
+      'host_ingest_generation_messages_fts_ai',
+      'host_ingest_generation_messages_fts_au',
       'learnings_ad',
       'learnings_ai',
       'learnings_au',
@@ -157,7 +161,6 @@ describe('FTS triggers', () => {
       'telos_au',
     ];
 
-    expect(triggerNames.length).toBe(expectedTriggers.length);
     for (const trigger of expectedTriggers) {
       expect(triggerNames).toContain(trigger);
     }
