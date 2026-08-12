@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS host_ingest_generation_messages (
   importance     INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   provenance     TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   source_position INTEGER,
+  fts_pending    INTEGER NOT NULL DEFAULT 0 CHECK (fts_pending IN (0, 1)),
   PRIMARY KEY (generation_id, message_key),
   UNIQUE (generation_id, ordinal),
   FOREIGN KEY (generation_id) REFERENCES host_ingest_generations(generation_id) ON DELETE CASCADE
@@ -87,13 +88,34 @@ CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_ad
 AFTER DELETE ON host_ingest_generation_messages
 WHEN old.message_id IS NOT NULL BEGIN
   DELETE FROM host_ingest_generation_messages_fts
-  WHERE rowid = old.message_id AND generation_id = old.generation_id;
+  WHERE rowid = old.message_id AND NOT EXISTS (
+    SELECT 1
+    FROM host_ingest_generation_messages AS generated
+    JOIN host_ingest_generations AS generation
+      ON generation.generation_id = generated.generation_id
+     AND generation.status = 'active'
+    JOIN host_ingest_state AS state
+      ON state.active_generation = generated.generation_id
+     AND state.source = generated.source
+     AND state.session_id = generated.session_id
+    WHERE generated.message_id = old.message_id
+      AND generated.content IS NOT NULL
+      AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+  );
 END;
 CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_au
 AFTER UPDATE OF message_id, content, project, source_position
 ON host_ingest_generation_messages BEGIN
   DELETE FROM host_ingest_generation_messages_fts
-  WHERE rowid = old.message_id AND generation_id = old.generation_id;
+  WHERE rowid = old.message_id AND EXISTS (
+    SELECT 1 FROM host_ingest_generations AS generation
+    JOIN host_ingest_state AS state
+      ON state.active_generation = generation.generation_id
+     AND state.source = generation.source
+     AND state.session_id = generation.session_id
+    WHERE generation.generation_id = old.generation_id
+      AND generation.status = 'active'
+  );
   INSERT INTO host_ingest_generation_messages_fts(
     rowid, content, project, generation_id
   )
@@ -111,6 +133,7 @@ END;
 
 export const REBUILD_HOST_INGEST_GENERATION_FTS = `
 UPDATE host_ingest_generations SET fts_ready = 0;
+UPDATE host_ingest_generation_messages SET fts_pending = 1;
 DELETE FROM host_ingest_generation_messages_fts;
 INSERT INTO host_ingest_generation_messages_fts(
   rowid, content, project, generation_id
@@ -128,6 +151,16 @@ JOIN host_ingest_state AS state
 WHERE generated.content IS NOT NULL
   AND generated.message_id IS NOT NULL
   AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL);
+UPDATE host_ingest_generation_messages SET fts_pending = 0
+WHERE EXISTS (
+  SELECT 1 FROM host_ingest_generations AS generation
+  JOIN host_ingest_state AS state
+    ON state.active_generation = generation.generation_id
+   AND state.source = generation.source
+   AND state.session_id = generation.session_id
+  WHERE generation.generation_id = host_ingest_generation_messages.generation_id
+    AND generation.status = 'active'
+);
 UPDATE host_ingest_generations SET fts_ready = 1
 WHERE status = 'active' AND EXISTS (
   SELECT 1 FROM host_ingest_state AS state
@@ -416,6 +449,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_project ON messages(project);
 CREATE INDEX IF NOT EXISTS idx_host_ingest_message_id ON host_ingest_messages(message_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_host_ingest_token
   ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_host_ingest_generation_fts_pending
+  ON host_ingest_generation_messages(generation_id, fts_pending, ordinal);
 
 -- Decision indexes
 CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project);

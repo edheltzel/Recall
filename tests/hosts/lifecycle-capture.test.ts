@@ -17,7 +17,12 @@ import {
   type HostTranscript,
 } from '../../src/lib/host-ingest';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
-import { getLoaMessages, getMessagesSinceLastLoa, search } from '../../src/lib/memory';
+import {
+  getLastSearchErrors,
+  getLoaMessages,
+  getMessagesSinceLastLoa,
+  search,
+} from '../../src/lib/memory';
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, '..', 'fixtures', 'host-lifecycle', name), 'utf-8');
@@ -894,8 +899,10 @@ describe('host-neutral immediate SQLite ingest', () => {
       DROP TRIGGER host_ingest_generation_messages_fts_au;
       DROP TABLE host_ingest_generation_messages_fts;
     `);
-    expect(search('Frame AND 500', { table: 'messages' })
-      .map(result => result.content)).toContain('Frame 500');
+    expect(search('Frame AND 500', { table: 'messages' })).toEqual([]);
+    expect(getLastSearchErrors()).toEqual([
+      expect.stringContaining('RETRYABLE: Lifecycle message search index is not ready'),
+    ]);
   });
 
   test('hides shadow rows until their lifecycle keys are published', () => {
@@ -908,9 +915,9 @@ describe('host-neutral immediate SQLite ingest', () => {
     db.prepare(`
       INSERT INTO host_ingest_generation_messages (
         generation_id, ordinal, source, session_id, message_key, message_id,
-        timestamp, role, content, provenance, source_position
+        timestamp, role, content, provenance, source_position, fts_pending
       ) VALUES ('pending:1', 1, 'grok', 'shadow-visibility', 'native:pending',
-        9000001, '2026-08-12T10:00:00.000Z', 'system', 'pending frame', 'verbatim', 0)
+        9000001, '2026-08-12T10:00:00.000Z', 'system', 'pending frame', 'verbatim', 0, 1)
     `).run();
 
     expect(db.prepare(`
@@ -935,6 +942,7 @@ describe('host-neutral immediate SQLite ingest', () => {
       UPDATE host_ingest_generations SET status = 'active'
       WHERE generation_id = 'pending:1'
     `).run();
+    getHostIngestCheckpoint('grok', 'shadow-visibility');
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
     `).get('shadow-visibility')).toEqual({ count: 1 });
@@ -965,6 +973,84 @@ describe('host-neutral immediate SQLite ingest', () => {
       'fusiontoken physical message',
     ]);
     expect(matches.every(result => (result.rank ?? 0) < 0)).toBe(true);
+
+    db.exec(`
+      DROP TRIGGER host_ingest_generation_messages_fts_ad;
+      DROP TRIGGER host_ingest_generation_messages_fts_au;
+      DROP TABLE host_ingest_generation_messages_fts;
+    `);
+    expect(search('fusiontoken', { table: 'messages', limit: 2 })
+      .map(result => result.content)).toEqual(['fusiontoken physical message']);
+    expect(getLastSearchErrors()).toEqual([
+      expect.stringContaining('RETRYABLE: Lifecycle message search index is not ready'),
+    ]);
+  });
+
+  test('indexes only changed lifecycle messages and repairs readiness from checkpoints', () => {
+    const db = getDb();
+    const sessionId = 'generation-search-delta';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [
+        { role: 'user', content: 'unchanged delta frame', nativeId: 'frame-1' },
+        { role: 'assistant', content: 'second delta frame', nativeId: 'frame-2' },
+      ],
+    });
+    const firstGeneration = (db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId) as { active_generation: string }).active_generation;
+
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      messages: [
+        { role: 'user', content: 'unchanged delta frame', nativeId: 'frame-1' },
+        { role: 'assistant', content: 'second delta frame', nativeId: 'frame-2' },
+        { role: 'assistant', content: 'new delta frame', nativeId: 'frame-3' },
+      ],
+    });
+    const secondGeneration = (db.prepare(`
+      SELECT active_generation FROM host_ingest_state
+      WHERE source = 'codex' AND session_id = ?
+    `).get(sessionId) as { active_generation: string }).active_generation;
+    const indexed = db.prepare(`
+      SELECT generated.content, fts.generation_id
+      FROM host_ingest_generation_messages AS generated
+      JOIN host_ingest_generation_messages_fts AS fts ON fts.rowid = generated.message_id
+      WHERE generated.generation_id = ?
+      ORDER BY generated.ordinal
+    `).all(secondGeneration) as Array<{ content: string; generation_id: string }>;
+    expect(indexed).toEqual([
+      { content: 'unchanged delta frame', generation_id: firstGeneration },
+      { content: 'second delta frame', generation_id: firstGeneration },
+      { content: 'new delta frame', generation_id: secondGeneration },
+    ]);
+
+    db.prepare(`
+      DELETE FROM host_ingest_generation_messages_fts
+      WHERE rowid = (
+        SELECT message_id FROM host_ingest_generation_messages
+        WHERE generation_id = ? AND message_key = 'native:frame-3'
+      )
+    `).run(secondGeneration);
+    db.prepare(`
+      UPDATE host_ingest_generation_messages SET fts_pending = 1
+      WHERE generation_id = ? AND message_key = 'native:frame-3'
+    `).run(secondGeneration);
+    db.prepare(`
+      UPDATE host_ingest_generations SET fts_ready = 0 WHERE generation_id = ?
+    `).run(secondGeneration);
+    expect(search('new AND delta', { table: 'messages' })).toEqual([]);
+    expect(getLastSearchErrors()).toEqual([
+      expect.stringContaining('RETRYABLE: Lifecycle message search index is not ready'),
+    ]);
+
+    getHostIngestCheckpoint('codex', sessionId);
+    expect(search('new AND delta', { table: 'messages' })
+      .map(result => result.content)).toEqual(['new delta frame']);
+    expect(getLastSearchErrors()).toEqual([]);
   });
 
   test('sweeps stale unpublished generations across sessions', () => {

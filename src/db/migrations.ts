@@ -63,7 +63,7 @@ function clearAmbiguousEmptyLoaCursors(db: Database): void {
   `);
 }
 
-function ensureGenerationFtsReadyColumn(db: Database): void {
+function ensureGenerationFtsColumns(db: Database): void {
   const generationColumns = new Set(
     (db.prepare('PRAGMA table_info(host_ingest_generations)').all() as Array<{ name: string }>)
       .map(column => column.name)
@@ -72,6 +72,16 @@ function ensureGenerationFtsReadyColumn(db: Database): void {
     db.exec(`
       ALTER TABLE host_ingest_generations
       ADD COLUMN fts_ready INTEGER NOT NULL DEFAULT 0 CHECK (fts_ready IN (0, 1))
+    `);
+  }
+  const messageColumns = new Set(
+    (db.prepare('PRAGMA table_info(host_ingest_generation_messages)').all() as
+      Array<{ name: string }>).map(column => column.name)
+  );
+  if (!messageColumns.has('fts_pending')) {
+    db.exec(`
+      ALTER TABLE host_ingest_generation_messages
+      ADD COLUMN fts_pending INTEGER NOT NULL DEFAULT 0 CHECK (fts_pending IN (0, 1))
     `);
   }
 }
@@ -671,14 +681,20 @@ export const MIGRATIONS: Migration[] = [
   },
 
   (db) => {
-    ensureGenerationFtsReadyColumn(db);
+    ensureGenerationFtsColumns(db);
     recreateGenerationFts(db);
     clearAmbiguousEmptyLoaCursors(db);
     rebuildGenerationFts(db);
   },
 
   (db) => {
-    ensureGenerationFtsReadyColumn(db);
+    ensureGenerationFtsColumns(db);
+    recreateGenerationFts(db);
+    rebuildGenerationFts(db);
+  },
+
+  (db) => {
+    ensureGenerationFtsColumns(db);
     recreateGenerationFts(db);
     rebuildGenerationFts(db);
   },

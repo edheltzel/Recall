@@ -45,6 +45,8 @@ import { z } from "zod";
 import { getDb, initDb, getDbPath } from "./db/connection.js";
 import {
 	search,
+	getLastSearchErrors,
+	LIFECYCLE_SEARCH_RETRYABLE,
 	bumpAccess,
 	SEARCH_TABLES,
 	recentMessages,
@@ -441,6 +443,16 @@ server.tool(
 	async ({ query, project, table, bias_type, limit }) => {
 		try {
 			const results = search(query, { project, table, biasType: bias_type, limit });
+			const lifecycleReadiness = getLastSearchErrors().find(error =>
+				error.includes(LIFECYCLE_SEARCH_RETRYABLE)
+			);
+			if (lifecycleReadiness && results.length === 0) {
+				logMemoryUsage("memory_search", query, 0, project);
+				return {
+					content: [{ type: "text", text: lifecycleReadiness }],
+					isError: true,
+				};
+			}
 
 			// Zero keyword hits on a GLOBAL query: retry via hybrid/semantic search
 			// so a phrasing mismatch never silently returns nothing (#39). A hard
@@ -483,7 +495,7 @@ server.tool(
 				content: [
 					{
 						type: "text",
-						text: `Found ${results.length} results for "${query}":\n\n${formatted}`,
+						text: `${lifecycleReadiness ? `${lifecycleReadiness}\n\n` : ""}Found ${results.length} results for "${query}":\n\n${formatted}`,
 					},
 				],
 			};
