@@ -310,10 +310,7 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 export function writeIdentityAtomic(
   outPath: string,
   markdown: string,
-  managedPaths = {
-    claude: join(claudePaths(homedir()).memory, 'identity.md'),
-    canonical: join(getRecallHome(), 'MEMORY', 'identity.md'),
-  },
+  managedPaths = resolveManagedIdentityPaths(),
 ): void {
   const destination = outPath === managedPaths.claude
     && existsSync(outPath)
@@ -324,6 +321,17 @@ export function writeIdentityAtomic(
   const tmp = destination + '.tmp';
   writeFileSync(tmp, markdown, 'utf-8');
   renameSync(tmp, destination);
+}
+
+export function resolveManagedIdentityPaths(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): { claude: string; canonical: string } {
+  const installRoot = env.RECALL_DIR || getRecallHome(env);
+  return {
+    claude: join(claudePaths(home).memory, 'identity.md'),
+    canonical: join(installRoot, 'MEMORY', 'identity.md'),
+  };
 }
 
 export async function runOnboard(options: OnboardOptions = {}): Promise<void> {

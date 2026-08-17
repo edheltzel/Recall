@@ -21,6 +21,7 @@ import {
   splitMultiline,
   exceedsMaxL0,
   writeIdentityAtomic,
+  resolveManagedIdentityPaths,
   type IdentityAnswers,
 } from '../../src/commands/onboard';
 
@@ -199,6 +200,21 @@ describe('exceedsMaxL0', () => {
 
 // ─── Integration: atomic write via rename ────────────────────────────
 describe('identity file write (integration)', () => {
+  test('resolves installer-relocated identity ownership from RECALL_DIR', () => {
+    const paths = resolveManagedIdentityPaths(
+      {
+        RECALL_DIR: '/relocated/Recall',
+        RECALL_HOME: '/runtime/Recall',
+      },
+      '/test-home',
+    );
+
+    expect(paths).toEqual({
+      claude: '/test-home/.claude/MEMORY/identity.md',
+      canonical: '/relocated/Recall/MEMORY/identity.md',
+    });
+  });
+
   test('renaming an identity.md.tmp over identity.md yields the new content', () => {
     const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
     try {
