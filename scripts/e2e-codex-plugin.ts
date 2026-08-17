@@ -508,11 +508,11 @@ stream_max_retries = 0
     const captured = lifecycleDb
       .prepare(`
         SELECT
-          (SELECT COUNT(*) FROM messages WHERE session_id = ?) AS messages,
+          (SELECT COUNT(*) FROM published_messages WHERE session_id = ?) AS messages,
           (SELECT COUNT(*) FROM loa_entries WHERE session_id = ?) AS extracts,
           (SELECT source FROM sessions WHERE session_id = ?) AS source,
-          (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS first_prompt,
-          (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS second_prompt
+          (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS first_prompt,
+          (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS second_prompt
       `)
       .get(
         sessionId,
@@ -610,10 +610,10 @@ stream_max_retries = 0
       const preserved = preservationDb
         .prepare(`
           SELECT
-            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS first_prompt,
-            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS second_prompt,
-            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS explicit_user,
-            (SELECT COUNT(*) FROM messages WHERE session_id = ? AND content = ?) AS explicit_assistant,
+            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS first_prompt,
+            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS second_prompt,
+            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS explicit_user,
+            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS explicit_assistant,
             (SELECT COUNT(*) FROM loa_entries
              WHERE session_id = ? AND tags LIKE 'automatic-capture,%') AS automatic_extracts,
             (SELECT message_count FROM loa_entries

@@ -249,7 +249,7 @@ context_window = 16000
   const captured = db
     .prepare(`
       SELECT COUNT(*) AS count, GROUP_CONCAT(content, '\n') AS content
-      FROM messages WHERE session_id = ?
+      FROM published_messages WHERE session_id = ?
     `)
     .get(session.session_id) as { count: number; content: string };
   const firstCount = captured.count;
@@ -273,7 +273,7 @@ context_window = 16000
   const replayDb = new Database(testDb, { readonly: true });
   const replayCount = (
     replayDb
-      .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
+      .prepare('SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?')
       .get(session.session_id) as { count: number }
   ).count;
   replayDb.close();
