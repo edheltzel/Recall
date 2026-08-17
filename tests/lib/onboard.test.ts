@@ -6,12 +6,21 @@
 import { describe, test, expect } from 'bun:test';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  symlinkSync,
+  lstatSync,
+} from 'fs';
 import {
   renderIdentityMarkdown,
   resolveOutputPath,
   splitMultiline,
   exceedsMaxL0,
+  writeIdentityAtomic,
   type IdentityAnswers,
 } from '../../src/commands/onboard';
 
@@ -189,27 +198,34 @@ describe('exceedsMaxL0', () => {
 });
 
 // ─── Integration: atomic write via rename ────────────────────────────
-// This doesn't mock the interview — it drives renderIdentityMarkdown and
-// the atomic-write path indirectly by calling writeFileSync + rename the
-// same way runOnboard does. Narrow but meaningful coverage on the branch
-// that was previously zero-coverage.
-
 describe('identity file write (integration)', () => {
   test('renaming an identity.md.tmp over identity.md yields the new content', () => {
     const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
     try {
       const outPath = join(dir, 'identity.md');
-      const tmp = outPath + '.tmp';
-
       writeFileSync(outPath, '# Old\n');
-      writeFileSync(tmp, '# New\n');
+      writeIdentityAtomic(outPath, '# New\n');
 
-      // Mirrors runOnboard's atomic step.
-      const { renameSync } = require('fs');
-      renameSync(tmp, outPath);
-
-      expect(existsSync(tmp)).toBe(false);
+      expect(existsSync(outPath + '.tmp')).toBe(false);
       expect(readFileSync(outPath, 'utf-8')).toBe('# New\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('updates a symlink target without replacing the identity symlink', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const canonicalPath = join(dir, 'canonical-identity.md');
+      const claudePath = join(dir, 'identity.md');
+      writeFileSync(canonicalPath, '# Old\n');
+      symlinkSync(canonicalPath, claudePath);
+
+      writeIdentityAtomic(claudePath, '# New\n');
+
+      expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
+      expect(readFileSync(canonicalPath, 'utf-8')).toBe('# New\n');
+      expect(existsSync(canonicalPath + '.tmp')).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -17,7 +17,16 @@
 // If a file already exists, the user must explicitly confirm overwrite —
 // the previous file is backed up to identity.md.bak first.
 
-import { existsSync, mkdirSync, writeFileSync, copyFileSync, renameSync, statSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  copyFileSync,
+  renameSync,
+  statSync,
+  lstatSync,
+  realpathSync,
+} from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { claudePaths } from '../hosts/claude.js';
@@ -297,10 +306,13 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 // Guarantees the destination is either the old content or the full new
 // content — never a half-written file. Works because rename(2) is atomic
 // on the same filesystem.
-function writeIdentityAtomic(outPath: string, markdown: string): void {
-  const tmp = outPath + '.tmp';
+export function writeIdentityAtomic(outPath: string, markdown: string): void {
+  const destination = existsSync(outPath) && lstatSync(outPath).isSymbolicLink()
+    ? realpathSync(outPath)
+    : outPath;
+  const tmp = destination + '.tmp';
   writeFileSync(tmp, markdown, 'utf-8');
-  renameSync(tmp, outPath);
+  renameSync(tmp, destination);
 }
 
 export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
