@@ -221,11 +221,35 @@ describe('identity file write (integration)', () => {
       writeFileSync(canonicalPath, '# Old\n');
       symlinkSync(canonicalPath, claudePath);
 
-      writeIdentityAtomic(claudePath, '# New\n');
+      writeIdentityAtomic(claudePath, '# New\n', {
+        claude: claudePath,
+        canonical: canonicalPath,
+      });
 
       expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
       expect(readFileSync(canonicalPath, 'utf-8')).toBe('# New\n');
       expect(existsSync(canonicalPath + '.tmp')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('replaces an arbitrary symlink without overwriting its target', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const targetPath = join(dir, 'unrelated.md');
+      const projectPath = join(dir, 'identity.md');
+      writeFileSync(targetPath, '# Unrelated\n');
+      symlinkSync(targetPath, projectPath);
+
+      writeIdentityAtomic(projectPath, '# Identity\n', {
+        claude: join(dir, 'claude-identity.md'),
+        canonical: join(dir, 'canonical-identity.md'),
+      });
+
+      expect(lstatSync(projectPath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(projectPath, 'utf-8')).toBe('# Identity\n');
+      expect(readFileSync(targetPath, 'utf-8')).toBe('# Unrelated\n');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

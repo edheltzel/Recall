@@ -25,13 +25,14 @@ import {
   renameSync,
   statSync,
   lstatSync,
-  realpathSync,
+  readlinkSync,
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { claudePaths } from '../hosts/claude.js';
 import { createInterface, type Interface } from 'readline';
 import { detectProject } from '../lib/project.js';
+import { getRecallHome } from '../lib/runtime-paths.js';
 
 // L0 identity files are silently truncated at load by hooks/RecallStart.ts.
 // Mirror that constant here so the onboarding UX can warn the user before the
@@ -306,9 +307,19 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 // Guarantees the destination is either the old content or the full new
 // content — never a half-written file. Works because rename(2) is atomic
 // on the same filesystem.
-export function writeIdentityAtomic(outPath: string, markdown: string): void {
-  const destination = existsSync(outPath) && lstatSync(outPath).isSymbolicLink()
-    ? realpathSync(outPath)
+export function writeIdentityAtomic(
+  outPath: string,
+  markdown: string,
+  managedPaths = {
+    claude: join(claudePaths(homedir()).memory, 'identity.md'),
+    canonical: join(getRecallHome(), 'MEMORY', 'identity.md'),
+  },
+): void {
+  const destination = outPath === managedPaths.claude
+    && existsSync(outPath)
+    && lstatSync(outPath).isSymbolicLink()
+    && readlinkSync(outPath) === managedPaths.canonical
+    ? managedPaths.canonical
     : outPath;
   const tmp = destination + '.tmp';
   writeFileSync(tmp, markdown, 'utf-8');
