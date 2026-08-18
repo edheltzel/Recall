@@ -282,11 +282,11 @@ cd /path/to/Recall
 ### What gets removed (default)
 
 - `~/.claude/commands/Recall/` (slash commands; legacy `~/.claude/commands/recall/` is also removed if present)
+- Recall-owned Agent Skills under `~/.claude/skills/recall-*/` and `~/.omp/agent/skills/recall-*/` (unless `--skip-omp` for omp)
 - `~/.claude/Recall_GUIDE.md`
-- Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact) — other hooks are preserved
+- Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact/PostToolUse/UserPromptSubmit) — other hooks are preserved
 - `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved
-- `~/.claude/hooks/{RecallExtract,RecallBatchExtract,RecallTelosSync,RecallStart,RecallPreCompact}.ts`
-- `~/.claude/hooks/lib/{extraction-*,pid-utils}.ts` — only Recall-owned files, never the whole `hooks/lib/` directory
+- Recall-owned hook files under `~/.claude/hooks/`, including `RecallInSession.ts`, and installed TypeScript helpers under `~/.claude/hooks/lib/` — only inventoried Recall paths, never either whole directory
 - The `## MEMORY` section in `~/.claude/CLAUDE.md` only if Recall generated it (current ownership marker or a normalized exact match of the complete legacy-generated body); unmarked customized/externally owned sections and the rest of `CLAUDE.md` are preserved; a marked section remains Recall-owned even if its body was edited
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
 - OpenCode MCP entry + plugins + the shared plugin helpers Recall installs under `plugins/lib/` + agent + guide (unless `--skip-opencode`). `plugins/lib/` itself is removed only when Recall emptied it, so your own files there survive. An `opencode.json` that Recall cannot parse is reported and left untouched; the plugins, agent, and guide are still removed and the rest of the uninstall continues
@@ -311,6 +311,8 @@ cd /path/to/Recall
 | `--skip-opencode` | Leave OpenCode integration alone |
 | `--skip-pi` | Leave Pi integration alone |
 | `--skip-grok` | Leave Grok lifecycle capture alone |
+| `--skip-omp` | Leave omp Agent Skills alone |
+| `--no-gum` | Skip optional gum setup and use the bash interface for this run |
 | `--help` | Show usage |
 
 Even with `--purge`, user-authored identity and distilled memory are retained.
