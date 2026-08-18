@@ -27,7 +27,7 @@ import {
   lstatSync,
   readlinkSync,
 } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { claudePaths } from '../hosts/claude.js';
 import { createInterface, type Interface } from 'readline';
@@ -327,10 +327,24 @@ export function resolveManagedIdentityPaths(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
 ): { claude: string; canonical: string } {
+  const claude = claudePaths(home);
+  let installedCanonical: string | undefined;
+  try {
+    if (existsSync(claude.guide) && lstatSync(claude.guide).isSymbolicLink()) {
+      const guideTarget = readlinkSync(claude.guide);
+      const installRoot = dirname(dirname(guideTarget));
+      if (isAbsolute(guideTarget)
+        && guideTarget === join(installRoot, 'claude', 'Recall_GUIDE.md')) {
+        installedCanonical = join(installRoot, 'MEMORY', 'identity.md');
+      }
+    }
+  } catch {
+    installedCanonical = undefined;
+  }
   const installRoot = env.RECALL_DIR || getRecallHome(env);
   return {
-    claude: join(claudePaths(home).memory, 'identity.md'),
-    canonical: join(installRoot, 'MEMORY', 'identity.md'),
+    claude: join(claude.memory, 'identity.md'),
+    canonical: installedCanonical ?? join(installRoot, 'MEMORY', 'identity.md'),
   };
 }
 

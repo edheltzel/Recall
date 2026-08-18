@@ -9,6 +9,8 @@ import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
 import { publishedRecordTable } from './published-records.js';
 import {
   LIFECYCLE_SEARCH_RETRYABLE,
+  countActiveLifecycleGenerations,
+  getLifecycleSearchCapabilities,
   repairLifecycleSearchIndex,
   type LifecycleSearchReadiness,
 } from './lifecycle-search.js';
@@ -417,26 +419,10 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
   const results: SearchResult[] = [];
   lastSearchErrors = []; // Reset errors for this search
   lastSearchReadiness = { status: 'ready', pendingGenerations: 0 };
-  const schemaTables = new Set((db.prepare(`
-    SELECT name FROM sqlite_master WHERE type = 'table'
-  `).all() as Array<{ name: string }>).map(row => row.name));
-  const generationStorageAvailable = [
-    'host_ingest_generations',
-    'host_ingest_generation_messages',
-    'host_ingest_state',
-  ].every(table => schemaTables.has(table));
-  const generationFtsColumns = schemaTables.has('host_ingest_generation_messages_fts')
-    ? new Set((db.prepare(`
-        PRAGMA table_info(host_ingest_generation_messages_fts)
-      `).all() as Array<{ name: string }>).map(column => column.name))
-    : new Set<string>();
-  const generationFtsAvailable = generationFtsColumns.has('generation_id');
-  const generationColumns = generationStorageAvailable
-    ? new Set((db.prepare(`
-        PRAGMA table_info(host_ingest_generations)
-      `).all() as Array<{ name: string }>).map(column => column.name))
-    : new Set<string>();
-  const generationFtsReadinessAvailable = generationColumns.has('fts_ready');
+  const lifecycleCapabilities = getLifecycleSearchCapabilities(db);
+  const generationStorageAvailable = lifecycleCapabilities.storage;
+  const generationFtsAvailable = lifecycleCapabilities.fts;
+  const generationFtsReadinessAvailable = lifecycleCapabilities.readiness;
 
   const tables = options?.table
     ? [options.table]
@@ -542,22 +528,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
             project: options?.project,
             maxPages: 1,
           });
-          activeGeneration = Boolean(db.prepare(`
-            SELECT 1 FROM host_ingest_generations AS generation
-            JOIN host_ingest_state AS state
-              ON state.active_generation = generation.generation_id
-             AND state.source = generation.source
-             AND state.session_id = generation.session_id
-            WHERE generation.status = 'active'
-              ${options?.project ? `AND EXISTS (
-                SELECT 1 FROM host_ingest_generation_messages AS message
-                WHERE message.generation_id = generation.generation_id
-                  AND message.project = ?
-                  AND message.content IS NOT NULL
-                  AND (message.source <> 'grok' OR message.source_position IS NOT NULL)
-              )` : ''}
-            LIMIT 1
-          `).get(...(options?.project ? [options.project] : [])));
+          activeGeneration = countActiveLifecycleGenerations(db, options?.project) > 0;
         } catch {
           lastSearchReadiness = {
             status: 'retryable',

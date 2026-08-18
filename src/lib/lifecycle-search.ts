@@ -10,6 +10,12 @@ export type LifecycleSearchReadiness =
   | { status: 'ready'; pendingGenerations: 0 }
   | { status: 'retryable'; pendingGenerations: number; message: string };
 
+export interface LifecycleSearchCapabilities {
+  storage: boolean;
+  fts: boolean;
+  readiness: boolean;
+}
+
 interface LifecycleSearchRepairOptions {
   project?: string;
   generationId?: string;
@@ -38,7 +44,19 @@ function generationReadinessAvailable(db: Database): boolean {
   `).all() as Array<{ name: string }>).some(column => column.name === 'fts_ready');
 }
 
-function activeGenerationCount(db: Database, project?: string, unreadyOnly = false): number {
+export function getLifecycleSearchCapabilities(db: Database): LifecycleSearchCapabilities {
+  return {
+    storage: lifecycleStorageAvailable(db),
+    fts: lifecycleFtsAvailable(db),
+    readiness: generationReadinessAvailable(db),
+  };
+}
+
+export function countActiveLifecycleGenerations(
+  db: Database,
+  project?: string,
+  unreadyOnly = false
+): number {
   const invalidationPending = tableExists(db, 'host_ingest_embedding_invalidations')
     ? `OR EXISTS (
         SELECT 1 FROM host_ingest_embedding_invalidations AS invalidation
@@ -69,19 +87,20 @@ export function getLifecycleSearchReadiness(
   db: Database,
   project?: string
 ): LifecycleSearchReadiness {
-  if (!lifecycleStorageAvailable(db)) {
+  const capabilities = getLifecycleSearchCapabilities(db);
+  if (!capabilities.storage) {
     return { status: 'ready', pendingGenerations: 0 };
   }
-  const active = activeGenerationCount(db, project);
+  const active = countActiveLifecycleGenerations(db, project);
   if (active === 0) return { status: 'ready', pendingGenerations: 0 };
-  if (!lifecycleFtsAvailable(db) || !generationReadinessAvailable(db)) {
+  if (!capabilities.fts || !capabilities.readiness) {
     return {
       status: 'retryable',
       pendingGenerations: active,
       message: LIFECYCLE_SEARCH_RETRYABLE,
     };
   }
-  const pending = activeGenerationCount(db, project, true);
+  const pending = countActiveLifecycleGenerations(db, project, true);
   return pending === 0
     ? { status: 'ready', pendingGenerations: 0 }
     : {

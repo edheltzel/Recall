@@ -1,7 +1,58 @@
+import { spawn } from 'child_process';
 import type { HostTranscriptMessage } from '../lib/host-ingest.js';
+
+const MAX_GROK_EXPORT_STDERR_BYTES = 1024 * 1024;
 
 export interface ParsedGrokExport {
   messages: HostTranscriptMessage[];
+}
+
+export async function* streamGrokSessionExport(
+  sessionId: string,
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env
+): AsyncGenerator<Buffer> {
+  const command = env.GROK_BIN || 'grok';
+  const child = spawn(command, ['export', sessionId], {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  let closed = false;
+  let timedOut = false;
+  child.stderr.on('data', chunk => {
+    stderr = `${stderr}${Buffer.from(chunk).toString('utf-8')}`
+      .slice(-MAX_GROK_EXPORT_STDERR_BYTES);
+  });
+  const completion = new Promise<{ code: number | null; signal: string | null }>(
+    (resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => {
+        closed = true;
+        resolve({ code, signal });
+      });
+    }
+  );
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, timeoutMs);
+  try {
+    for await (const chunk of child.stdout) yield Buffer.from(chunk);
+    const result = await completion;
+    if (timedOut) throw new Error('grok export timed out');
+    if (result.code !== 0) {
+      throw new Error(
+        `grok export failed (${result.code ?? result.signal ?? 'unknown'}): ${stderr.trim()}`
+      );
+    }
+  } finally {
+    clearTimeout(timeout);
+    if (!closed) {
+      child.kill('SIGKILL');
+      await completion.catch(() => undefined);
+    }
+  }
 }
 
 function canonicalFrameIdentity(content: string): string {

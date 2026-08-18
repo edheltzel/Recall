@@ -5,12 +5,13 @@
 
 import { describe, test, expect } from 'bun:test';
 import { homedir, tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import {
   mkdtempSync,
   readFileSync,
   writeFileSync,
   existsSync,
+  mkdirSync,
   rmSync,
   symlinkSync,
   lstatSync,
@@ -213,6 +214,34 @@ describe('identity file write (integration)', () => {
       claude: '/test-home/.claude/MEMORY/identity.md',
       canonical: '/relocated/Recall/MEMORY/identity.md',
     });
+  });
+
+  test('discovers a relocated install from its durable Claude guide link', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const home = join(dir, 'home');
+      const claudeDir = join(home, '.claude');
+      const installRoot = join(dir, 'relocated', 'Recall');
+      const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
+      const canonical = join(installRoot, 'MEMORY', 'identity.md');
+      const identity = join(claudeDir, 'MEMORY', 'identity.md');
+      mkdirSync(dirname(guide), { recursive: true });
+      mkdirSync(dirname(canonical), { recursive: true });
+      mkdirSync(dirname(identity), { recursive: true });
+      writeFileSync(guide, '# Guide\n');
+      writeFileSync(canonical, '# Old\n');
+      symlinkSync(guide, join(claudeDir, 'Recall_GUIDE.md'));
+      symlinkSync(canonical, identity);
+
+      const paths = resolveManagedIdentityPaths({}, home);
+      writeIdentityAtomic(identity, '# New\n', paths);
+
+      expect(paths.canonical).toBe(canonical);
+      expect(lstatSync(identity).isSymbolicLink()).toBe(true);
+      expect(readFileSync(canonical, 'utf-8')).toBe('# New\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('renaming an identity.md.tmp over identity.md yields the new content', () => {
