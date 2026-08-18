@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import {
   closeSync,
   existsSync,
@@ -13,7 +13,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
-import { parseGrokExport } from '../hosts/grok-lifecycle.js';
+import { parseGrokExport, streamGrokSessionExport } from '../hosts/grok-lifecycle.js';
 import {
   createHostIngestBatch,
   HostIngestCheckpointConflictError,
@@ -289,52 +289,6 @@ function grokHookRequest(payload: HookPayload): GrokHookRequest | { skipped: str
   };
 }
 
-async function* runGrokExportStream(
-  sessionId: string,
-  timeoutMs: number
-): AsyncGenerator<Buffer> {
-  const command = process.env.GROK_BIN || 'grok';
-  const child = spawn(command, ['export', sessionId], {
-    env: process.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let stderr = '';
-  let closed = false;
-  let timedOut = false;
-  child.stderr.on('data', chunk => {
-    stderr = `${stderr}${asBuffer(chunk).toString('utf-8')}`.slice(-MAX_HOOK_INPUT_BYTES);
-  });
-  const completion = new Promise<{ code: number | null; signal: string | null }>(
-    (resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', (code, signal) => {
-        closed = true;
-        resolve({ code, signal });
-      });
-    }
-  );
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGKILL');
-  }, timeoutMs);
-  try {
-    for await (const chunk of child.stdout) yield asBuffer(chunk);
-    const result = await completion;
-    if (timedOut) throw new Error('grok export timed out');
-    if (result.code !== 0) {
-      throw new Error(
-        `grok export failed (${result.code ?? result.signal ?? 'unknown'}): ${stderr.trim()}`
-      );
-    }
-  } finally {
-    clearTimeout(timeout);
-    if (!closed) {
-      child.kill('SIGKILL');
-      await completion.catch(() => undefined);
-    }
-  }
-}
-
 function grokExportStream(
   sessionId: string,
   dependencies: HostHookDependencies,
@@ -348,7 +302,7 @@ function grokExportStream(
       yield dependencies.exportGrok!(sessionId, timeoutMs);
     })();
   }
-  return runGrokExportStream(sessionId, timeoutMs);
+  return streamGrokSessionExport(sessionId, timeoutMs);
 }
 
 function grokExportAttemptTimeout(deadline: number, attemptsRemaining: number): number {
