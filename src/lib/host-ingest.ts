@@ -4,7 +4,7 @@ import { closeSync, mkdtempSync, openSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { getDb } from '../db/connection.js';
-import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
+import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { detectProject } from './project.js';
 import {
   generateBasicSummaryFromStats,
@@ -1033,10 +1033,12 @@ function deleteGeneration(
     if (rows.length === 0) break;
     const ids = rows.map(row => row.rowid);
     db.transaction(() => {
-      db.prepare(`
-        DELETE FROM host_ingest_generation_messages
-        WHERE rowid IN (${ids.map(() => '?').join(',')})
-      `).run(...ids);
+      for (const idChunk of chunked(ids)) {
+        db.prepare(`
+          DELETE FROM host_ingest_generation_messages
+          WHERE rowid IN (${idChunk.map(() => '?').join(',')})
+        `).run(...idChunk);
+      }
     }).immediate();
   }
   db.transaction(() => {
