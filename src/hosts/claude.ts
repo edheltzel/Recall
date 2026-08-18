@@ -1,7 +1,7 @@
-import { existsSync, lstatSync, readFileSync, readlinkSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { dirname, isAbsolute, join } from 'path';
-import { getRecallHome } from '../lib/runtime-paths.js';
+import { join } from 'path';
+import { resolveManagedIdentityPaths } from '../../hooks/lib/identity-path.js';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
 
 export interface ClaudePaths {
@@ -43,18 +43,8 @@ export function resolveClaudeInstallLayout(
   env: NodeJS.ProcessEnv = process.env,
 ): ClaudeInstallLayout {
   const paths = claudePaths(home);
-  let root = env.RECALL_DIR || getRecallHome(env, home);
-  try {
-    if (existsSync(paths.guide) && lstatSync(paths.guide).isSymbolicLink()) {
-      const guideTarget = readlinkSync(paths.guide);
-      const discoveredRoot = dirname(dirname(guideTarget));
-      if (isAbsolute(guideTarget)
-        && guideTarget === join(discoveredRoot, 'claude', 'Recall_GUIDE.md')) {
-        root = discoveredRoot;
-      }
-    }
-  } catch {
-  }
+  const identity = resolveManagedIdentityPaths({ home, env });
+  const root = identity.root;
   return {
     root,
     guide: {
@@ -66,8 +56,8 @@ export function resolveClaudeInstallLayout(
       canonical: join(root, 'shared', 'extract_prompt.md'),
     },
     identity: {
-      alias: join(paths.memory, 'identity.md'),
-      canonical: join(root, 'MEMORY', 'identity.md'),
+      alias: identity.alias,
+      canonical: identity.canonical,
     },
   };
 }
