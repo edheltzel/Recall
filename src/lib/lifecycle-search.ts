@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
+import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { invalidateVecIndex } from '../db/vec.js';
 import { tableExists } from '../db/introspection.js';
 
@@ -134,22 +134,27 @@ function repairLifecycleEmbeddingInvalidationPage(
   const ids = rows.map(row => row.message_id);
   db.transaction(() => {
     if (!isPublishedGeneration(db, generationId)) return;
-    const removed = db.prepare(`
-      DELETE FROM embeddings
-      WHERE source_table = 'messages'
-        AND source_id IN (${ids.map(() => '?').join(',')})
-        AND EXISTS (
-          SELECT 1 FROM host_ingest_embedding_invalidations AS invalidation
-          WHERE invalidation.generation_id = ?
-            AND invalidation.message_id = embeddings.source_id
-        )
-    `).run(...ids, generationId);
-    db.prepare(`
-      DELETE FROM host_ingest_embedding_invalidations
-      WHERE generation_id = ?
-        AND message_id IN (${ids.map(() => '?').join(',')})
-    `).run(generationId, ...ids);
-    if (removed.changes > 0) invalidateVecIndex(db);
+    let removedEmbeddings = false;
+    for (const idChunk of chunked(ids)) {
+      const placeholders = idChunk.map(() => '?').join(',');
+      const removed = db.prepare(`
+        DELETE FROM embeddings
+        WHERE source_table = 'messages'
+          AND source_id IN (${placeholders})
+          AND EXISTS (
+            SELECT 1 FROM host_ingest_embedding_invalidations AS invalidation
+            WHERE invalidation.generation_id = ?
+              AND invalidation.message_id = embeddings.source_id
+          )
+      `).run(...idChunk, generationId);
+      db.prepare(`
+        DELETE FROM host_ingest_embedding_invalidations
+        WHERE generation_id = ?
+          AND message_id IN (${placeholders})
+      `).run(generationId, ...idChunk);
+      removedEmbeddings ||= removed.changes > 0;
+    }
+    if (removedEmbeddings) invalidateVecIndex(db);
   }).immediate();
   return !db.prepare(`
     SELECT 1 FROM host_ingest_embedding_invalidations
