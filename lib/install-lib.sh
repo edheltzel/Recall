@@ -123,8 +123,8 @@ fi
 
 
 # Files that install.sh / update.sh back up before modifying.
-# Both the legacy DB path (~/.claude/memory.db) and the new canonical path
-# (~/.agents/Recall/recall.db) are listed so a snapshot survives migration.
+# The legacy DB remains listed explicitly; the configured DB and routing state
+# are backed up dynamically by recall_backup_db_routing.
 if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
   FILES_TO_BACKUP=(
     "$CLAUDE_DIR/.mcp.json"
@@ -132,7 +132,6 @@ if [[ -z "${FILES_TO_BACKUP+x}" ]]; then
     "$CLAUDE_DIR/CLAUDE.md"
     "$CLAUDE_DIR/settings.json"
     "$CLAUDE_DIR/memory.db"
-    "$RECALL_DIR/recall.db"
     "$OPENCODE_CONFIG_DIR/opencode.json"
     "$PI_CONFIG_DIR/mcp.json"
     "$PI_CONFIG_DIR/AGENTS.md"
@@ -856,11 +855,73 @@ recall_backup_file() {
   fi
 }
 
+recall_backup_db_routing() {
+  local destination="$1"
+  local db_path ext
+  db_path="$(recall_resolve_db_path)"
+  mkdir -p "$destination"
+  printf '%s\n' "$db_path" > "$destination/recall.db.path"
+  if [[ -f "$db_path" ]]; then
+    cp -p "$db_path" "$destination/recall.db"
+    for ext in -wal -shm; do
+      [[ -f "${db_path}${ext}" ]] && cp -p "${db_path}${ext}" "$destination/recall.db${ext}"
+    done
+    RECALL_ROUTING_BACKUP_COUNT=1
+  else
+    RECALL_ROUTING_BACKUP_COUNT=0
+  fi
+  if [[ -f "$RECALL_DB_PATH_STATE" ]]; then
+    cp -p "$RECALL_DB_PATH_STATE" "$destination/.db-path"
+    rm -f "$destination/.db-path.absent"
+  else
+    : > "$destination/.db-path.absent"
+    rm -f "$destination/.db-path"
+  fi
+}
+
+recall_restore_db_routing() {
+  local source="$1"
+  local db_path ext
+  RECALL_ROUTING_RESTORED_COUNT=0
+  if [[ -f "$source/recall.db.path" ]]; then
+    IFS= read -r db_path < "$source/recall.db.path" || true
+  else
+    db_path="$RECALL_DIR/recall.db"
+  fi
+  if [[ -f "$source/recall.db" ]]; then
+    if [[ "$db_path" != /* ]] || [[ "$db_path" == "/" ]]; then
+      log_error "Refusing to restore database to invalid path: $db_path"
+      return 1
+    fi
+    mkdir -p "$(dirname "$db_path")"
+    cp -p "$source/recall.db" "$db_path"
+    for ext in -wal -shm; do
+      if [[ -f "$source/recall.db${ext}" ]]; then
+        cp -p "$source/recall.db${ext}" "${db_path}${ext}"
+      else
+        rm -f "${db_path}${ext}"
+      fi
+    done
+    log_success "Restored: recall.db → $db_path"
+    RECALL_ROUTING_RESTORED_COUNT=$((RECALL_ROUTING_RESTORED_COUNT + 1))
+  fi
+  if [[ -f "$source/.db-path" ]]; then
+    mkdir -p "$(dirname "$RECALL_DB_PATH_STATE")"
+    cp -p "$source/.db-path" "$RECALL_DB_PATH_STATE"
+    log_success "Restored: .db-path → $RECALL_DB_PATH_STATE"
+    RECALL_ROUTING_RESTORED_COUNT=$((RECALL_ROUTING_RESTORED_COUNT + 1))
+  elif [[ -f "$source/.db-path.absent" ]]; then
+    rm -f "$RECALL_DB_PATH_STATE"
+  fi
+}
+
 recall_create_backup() {
   log_info "Creating backup at: $BACKUP_DIR"
   mkdir -p "$BACKUP_DIR"
 
   local backed_up=0
+  recall_backup_db_routing "$BACKUP_DIR"
+  backed_up=$((backed_up + RECALL_ROUTING_BACKUP_COUNT))
   for file in "${FILES_TO_BACKUP[@]}"; do
     if [[ -f "$file" ]]; then
       recall_backup_file "$file" "$BACKUP_DIR"
@@ -963,6 +1024,8 @@ recall_do_restore() {
   local pre_restore_dir="$BACKUP_BASE/pre_restore_$TIMESTAMP"
   mkdir -p "$pre_restore_dir"
   local pre_backed=0
+  recall_backup_db_routing "$pre_restore_dir"
+  pre_backed=$((pre_backed + RECALL_ROUTING_BACKUP_COUNT))
   for file in "${FILES_TO_BACKUP[@]}"; do
     if [[ -f "$file" ]]; then
       recall_backup_file "$file" "$pre_restore_dir"
@@ -976,17 +1039,34 @@ recall_do_restore() {
   fi
 
   local restored=0
+  recall_restore_db_routing "$restore_dir"
+  restored=$((restored + RECALL_ROUTING_RESTORED_COUNT))
   shopt -s dotglob
   for file in "$restore_dir"/*; do
     [[ ! -f "$file" ]] && continue
     local filename=$(basename "$file")
     [[ "$filename" == "manifest.txt" ]] && continue
     [[ "$filename" == *.symlink-target ]] && continue
+    [[ "$filename" == "recall.db" ]] && continue
+    [[ "$filename" == "recall.db-wal" ]] && continue
+    [[ "$filename" == "recall.db-shm" ]] && continue
+    [[ "$filename" == "recall.db.path" ]] && continue
+    [[ "$filename" == ".db-path" ]] && continue
+    [[ "$filename" == ".db-path.absent" ]] && continue
 
     local target
     case "$filename" in
       .claude.json)
         target="$HOME/.claude.json"
+        ;;
+      opencode.json)
+        target="$OPENCODE_CONFIG_DIR/opencode.json"
+        ;;
+      mcp.json)
+        target="$PI_CONFIG_DIR/mcp.json"
+        ;;
+      AGENTS.md)
+        target="$PI_CONFIG_DIR/AGENTS.md"
         ;;
       RecallLifecycle.json)
         target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
@@ -1055,7 +1135,7 @@ recall_do_restore() {
 #
 # Functions:
 #   recall_create_install_root         — mkdir the full $RECALL_DIR tree
-#   recall_resolve_db_path             — resolve DB path honoring env vars
+#   recall_resolve_db_path             — invoke the shared dynamic DB resolver
 #   recall_copy_canonical SRC DEST     — install a canonical file (with mkdirs)
 #   recall_link TARGET CANONICAL       — create a per-file symlink with the
 #                                        collision rule (skip/replace/backup)
@@ -1075,45 +1155,31 @@ recall_create_install_root() {
     "$BACKUP_BASE"
 }
 
-# Resolve the configured DB path. Environment precedence matches
-# src/db/connection.ts and hooks/lib/db-path.ts:
-#   1. RECALL_DB_PATH
-#   2. MEM_DB_PATH (deprecated; still honored)
-#   3. installer-managed persisted path
-#   4. $RECALL_DIR/recall.db (default)
-# Expands a leading home-directory tilde without evaluating shell syntax.
 recall_resolve_db_path() {
-  local raw
-  if [[ -n "${RECALL_DB_PATH:-}" ]]; then
-    raw="$RECALL_DB_PATH"
-  elif [[ -n "${MEM_DB_PATH:-}" ]]; then
-    raw="$MEM_DB_PATH"
-  elif [[ -f "$RECALL_DB_PATH_STATE" ]]; then
-    raw=""
-    IFS= read -r raw < "$RECALL_DB_PATH_STATE" || true
-    [[ -n "$raw" ]] || raw="$RECALL_DIR/recall.db"
-  else
-    raw="$RECALL_DIR/recall.db"
-  fi
-  case "$raw" in
-    "~") printf '%s\n' "$HOME" ;;
-    "~/"*) printf '%s/%s\n' "$HOME" "${raw:2}" ;;
-    *) printf '%s\n' "$raw" ;;
-  esac
+  RECALL_DIR="$RECALL_DIR" \
+    RECALL_HOME="$RECALL_DIR" \
+    RECALL_DB_PATH_STATE="$RECALL_DB_PATH_STATE" \
+    CLAUDE_DIR="$CLAUDE_DIR" \
+    OPENCODE_CONFIG_DIR="$OPENCODE_CONFIG_DIR" \
+    PI_CONFIG_DIR="$PI_CONFIG_DIR" \
+    RECALL_DB_PATH="${RECALL_DB_PATH:-}" \
+    MEM_DB_PATH="${MEM_DB_PATH:-}" \
+    bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" resolve
 }
 
 recall_persist_db_path() {
   local resolved="${1:-}"
-  local state_dir temp
   [[ -n "$resolved" ]] || resolved="$(recall_resolve_db_path)"
-  state_dir="$(dirname "$RECALL_DB_PATH_STATE")"
-  temp="$RECALL_DB_PATH_STATE.tmp.$$"
-  mkdir -p "$state_dir"
-  (
-    umask 077
-    printf '%s\n' "$resolved" > "$temp"
-  )
-  mv -f "$temp" "$RECALL_DB_PATH_STATE"
+  RECALL_DIR="$RECALL_DIR" \
+    RECALL_HOME="$RECALL_DIR" \
+    RECALL_DB_PATH_STATE="$RECALL_DB_PATH_STATE" \
+    bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" persist "$resolved"
+}
+
+recall_activate_db_path() {
+  local resolved
+  resolved="$(recall_resolve_db_path)"
+  export RECALL_DB_PATH="$resolved"
 }
 
 # Copy a file from the repo into its canonical location under $RECALL_DIR.
@@ -1943,36 +2009,13 @@ recall_install_grok_platform() {
   local source="$RECALL_REPO_DIR/hooks/grok/RecallLifecycle.json"
   local canonical="$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
   local target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
-  local db_path_abs
 
   if [[ ! -f "$source" ]]; then
     log_warn "Grok lifecycle hook not found at $source"
     return 1
   fi
   mkdir -p "$RECALL_GROK_HOOKS_DIR" "$GROK_CONFIG_DIR/hooks"
-  db_path_abs="$(recall_resolve_db_path)"
-  if ! GROK_HOOK_SOURCE="$source" GROK_HOOK_DEST="$canonical" \
-    GROK_HOOK_DB_PATH="$db_path_abs" bun -e '
-      const fs = require("fs");
-      const source = process.env.GROK_HOOK_SOURCE;
-      const destination = process.env.GROK_HOOK_DEST;
-      const dbPath = process.env.GROK_HOOK_DB_PATH;
-      const config = JSON.parse(fs.readFileSync(source, "utf8"));
-      const single = String.fromCharCode(39);
-      const quoted = single + dbPath.split(single).join(`${single}"${single}"${single}`) + single;
-      const command = `env RECALL_DB_PATH=${quoted} recall host-hook grok`;
-      for (const groups of Object.values(config.hooks ?? {})) {
-        for (const group of groups) {
-          for (const hook of group.hooks ?? []) {
-            if (hook.type === "command") hook.command = command;
-          }
-        }
-      }
-      fs.writeFileSync(destination, JSON.stringify(config, null, 2) + "\n");
-    '; then
-    log_warn "Could not render Grok lifecycle hook"
-    return 1
-  fi
+  recall_copy_canonical "$source" "$canonical"
   recall_link "$target" "$canonical"
   log_success "Installed Grok lifecycle capture hook"
 }

@@ -4,12 +4,9 @@
 // orchestration logic that does NOT require network or a real release —
 // --check in the current repo's state and --dry-run against a scratch tree.
 //
-// Destructive paths (git pull, bun install, recall init) are validated only
-// via --dry-run narration so we never mutate the working tree.
-
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -78,6 +75,92 @@ describe('update.sh', () => {
     const r = spawnSync('bash', ['-n', UPDATE], { encoding: 'utf-8' });
     expect(r.status).toBe(0);
   });
+
+  test('re-executes the freshly pulled updater without repeating backup', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-reexec-'));
+    try {
+      const checkout = join(tempRoot, 'checkout');
+      const remote = join(tempRoot, 'remote.git');
+      const home = join(tempRoot, 'home');
+      const backupBase = join(home, 'backups');
+      const marker = join(tempRoot, 'reexec-marker');
+      const stubDir = join(tempRoot, 'bin');
+      const customDb = join(tempRoot, 'custom-db', 'memory.sqlite');
+      mkdirSync(join(checkout, 'lib'), { recursive: true });
+      mkdirSync(join(checkout, 'hooks', 'lib'), { recursive: true });
+      mkdirSync(stubDir, { recursive: true });
+      mkdirSync(join(home, '.claude'), { recursive: true });
+      mkdirSync(join(tempRoot, 'custom-db'), { recursive: true });
+      writeFileSync(customDb, 'pre-update-memory');
+      writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({
+        mcpServers: {
+          'recall-memory': { env: { RECALL_DB_PATH: customDb } },
+        },
+      }));
+      writeFileSync(join(checkout, 'update.sh'), readFileSync(UPDATE), { mode: 0o755 });
+      writeFileSync(join(checkout, 'lib', 'install-lib.sh'), readFileSync(join(REPO, 'lib', 'install-lib.sh')));
+      writeFileSync(join(checkout, 'hooks', 'lib', 'db-path.ts'), readFileSync(join(REPO, 'hooks', 'lib', 'db-path.ts')));
+      writeFileSync(join(checkout, 'hooks', 'lib', 'jsonc.ts'), readFileSync(join(REPO, 'hooks', 'lib', 'jsonc.ts')));
+      writeFileSync(join(checkout, 'package.json'), '{"version":"0.0.1"}\n');
+      writeFileSync(join(stubDir, 'gh'), '#!/bin/sh\ncase "$*" in *tagName*) echo v999.0.0;; *) echo notes;; esac\n', { mode: 0o755 });
+
+      const git = (args: string[], cwd = checkout) => spawnSync('git', args, {
+        cwd,
+        encoding: 'utf-8',
+      });
+      expect(git(['init', '-b', 'main']).status).toBe(0);
+      expect(git(['config', 'user.name', 'Recall Test']).status).toBe(0);
+      expect(git(['config', 'user.email', 'recall@example.test']).status).toBe(0);
+      expect(git(['add', '.']).status).toBe(0);
+      expect(git(['commit', '-m', 'old updater']).status).toBe(0);
+      const first = git(['rev-parse', 'HEAD']).stdout.trim();
+      expect(git(['init', '--bare', remote], tempRoot).status).toBe(0);
+      expect(git(['remote', 'add', 'origin', remote]).status).toBe(0);
+      expect(git(['push', '-u', 'origin', 'main']).status).toBe(0);
+
+      const current = readFileSync(join(checkout, 'update.sh'), 'utf-8');
+      const needle = 'step_install_and_build() {\n  log_info "Installing dependencies (bun install)..."';
+      expect(current).toContain(needle);
+      writeFileSync(join(checkout, 'update.sh'), current.replace(
+        needle,
+        'step_install_and_build() {\n  printf "%s\\n" "${RECALL_UPDATE_AFTER_PULL:-}" > "$RECALL_REEXEC_MARKER"\n  exit 0\n  log_info "Installing dependencies (bun install)..."'
+      ), { mode: 0o755 });
+      expect(git(['add', 'update.sh']).status).toBe(0);
+      expect(git(['commit', '-m', 'fresh updater']).status).toBe(0);
+      expect(git(['push', 'origin', 'main']).status).toBe(0);
+      expect(git(['reset', '--hard', first]).status).toBe(0);
+
+      const result = spawnSync('bash', [join(checkout, 'update.sh'), '--force', '--no-confirm', '--no-gum'], {
+        cwd: checkout,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: home,
+          RECALL_DIR: join(home, '.agents', 'Recall'),
+          BACKUP_BASE: backupBase,
+          RECALL_DB_PATH: '',
+          MEM_DB_PATH: '',
+          RECALL_NO_GUM: '1',
+          RECALL_REEXEC_MARKER: marker,
+          NO_COLOR: '1',
+          PATH: `${stubDir}:${process.env.PATH ?? ''}`,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(marker, 'utf-8')).toBe('1\n');
+      const backups = readdirSync(backupBase, { withFileTypes: true }).filter(entry => entry.isDirectory());
+      expect(backups).toHaveLength(1);
+      expect(readFileSync(join(backupBase, backups[0].name, 'recall.db'), 'utf-8'))
+        .toBe('pre-update-memory');
+      expect(readFileSync(join(backupBase, backups[0].name, 'recall.db.path'), 'utf-8'))
+        .toBe(`${customDb}\n`);
+      expect(readFileSync(join(home, '.agents', 'Recall', '.db-path'), 'utf-8'))
+        .toBe(`${customDb}\n`);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }, 15000);
 
   test('legacy CLI bin cleanup removes only Recall-managed symlinks', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-bin-cleanup-'));

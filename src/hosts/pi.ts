@@ -1,5 +1,6 @@
 import { join } from 'path';
 import type { NativeHostAdapter } from './types.js';
+import { resolveManagedDbConfigTargets } from '../../hooks/lib/db-path.js';
 
 export interface PiPaths {
   root: string;
@@ -20,12 +21,6 @@ export const piHost: NativeHostAdapter = {
   id: 'pi',
   displayName: 'Pi',
   mcpConfigTargets(home) {
-    const paths = piPaths(home);
-    return [{
-      host: 'pi',
-      path: paths.mcpSettings,
-      envPath: ['mcpServers', 'recall-memory', 'env'],
-      format: 'json',
-    }];
+    return resolveManagedDbConfigTargets({ home, env: {} }).filter(target => target.host === 'pi');
   },
 };

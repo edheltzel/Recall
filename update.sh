@@ -31,6 +31,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/install-lib.sh
 source "$SCRIPT_DIR/lib/install-lib.sh"
 
+UPDATE_ARGS=("$@")
+
 REPO_OWNER="edheltzel"
 REPO_NAME="Recall"
 RELEASES_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
@@ -135,8 +137,8 @@ To roll back this repository and restore the pre-update runtime files:
   ./install.sh restore $TIMESTAMP
 
 Notes:
-  - The database file (~/.agents/Recall/recall.db, or legacy ~/.claude/memory.db
-    if not yet migrated) is NOT overwritten by restore — it survives.
+  - The configured database and routing state are included in the backup and
+    restored by ./install.sh restore.
   - DB schema downgrades are NOT supported. If migrations ran and applied
     a newer schema, you cannot revert the DB via ./install.sh restore
     alone; you must delete the DB file and re-init from a pre-update
@@ -152,7 +154,7 @@ EOF
 }
 
 # Traps any failure and emits the rollback recipe before exiting.
-PRE_SHA=""
+: "${PRE_SHA:=}"
 rollback_on_failure() {
   local code=$?
   if [[ $code -ne 0 ]] && [[ -n "$PRE_SHA" ]] && [[ "$DRY_RUN" != "true" ]]; then
@@ -264,6 +266,18 @@ step_fetch_and_pull() {
     log_error "Resolve manually, then re-run ./update.sh."
     exit 1
   fi
+}
+
+step_reexec_after_pull() {
+  [[ "$DRY_RUN" == "true" ]] && return 0
+  exec env \
+    RECALL_UPDATE_AFTER_PULL=1 \
+    PRE_SHA="$PRE_SHA" \
+    TIMESTAMP="$TIMESTAMP" \
+    BACKUP_BASE="$BACKUP_BASE" \
+    BACKUP_DIR="$BACKUP_DIR" \
+    RECALL_DB_PATH="$RECALL_DB_PATH" \
+    "$SCRIPT_DIR/update.sh" "${UPDATE_ARGS[@]}"
 }
 
 step_install_and_build() {
@@ -469,28 +483,29 @@ step_report() {
 main() {
   trap rollback_on_failure ERR
 
-  # Best-effort gum install (gated on RECALL_NO_GUM=1) for consistent UX.
-  _try_install_gum
+  if [[ "${RECALL_UPDATE_AFTER_PULL:-}" != "1" ]]; then
+    _try_install_gum
 
-  echo ""
-  _banner info "Recall Update"
-  echo ""
-  echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
-  [[ "$FORCE" == "true" ]] && echo "Force: YES (will rerun even if already current)"
-  [[ "$NO_MIGRATE" == "true" ]] && echo "No-migrate: YES"
-  echo ""
+    echo ""
+    _banner info "Recall Update"
+    echo ""
+    echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
+    [[ "$FORCE" == "true" ]] && echo "Force: YES (will rerun even if already current)"
+    [[ "$NO_MIGRATE" == "true" ]] && echo "No-migrate: YES"
+    echo ""
 
-  # Surface a leftover completion sentinel from an interrupted prior
-  # install/update (warn-only; re-running converges) before we begin (#27).
-  recall_warn_if_install_incomplete
+    recall_warn_if_install_incomplete
 
-  step_version_check
-  [[ "$CHECK_ONLY" == "true" ]] && exit 0
+    step_version_check
+    [[ "$CHECK_ONLY" == "true" ]] && exit 0
 
-  step_confirm
-  step_backup
-  step_auto_migrate
-  step_fetch_and_pull
+    step_confirm
+    recall_activate_db_path
+    step_backup
+    step_auto_migrate
+    step_fetch_and_pull
+    step_reexec_after_pull
+  fi
   step_install_and_build
   step_link_global
   step_migrate

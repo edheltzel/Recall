@@ -1,5 +1,6 @@
 import { join } from 'path';
 import type { NativeHostAdapter } from './types.js';
+import { resolveManagedDbConfigTargets } from '../../hooks/lib/db-path.js';
 
 export interface OpenCodePaths {
   root: string;
@@ -20,12 +21,6 @@ export const openCodeHost: NativeHostAdapter = {
   id: 'opencode',
   displayName: 'OpenCode',
   mcpConfigTargets(home) {
-    const paths = openCodePaths(home);
-    return [{
-      host: 'opencode',
-      path: paths.settings,
-      envPath: ['mcp', 'recall-memory', 'environment'],
-      format: 'jsonc',
-    }];
+    return resolveManagedDbConfigTargets({ home, env: {} }).filter(target => target.host === 'opencode');
   },
 };
