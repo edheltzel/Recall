@@ -111,6 +111,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/extraction-semaphore.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-tracker.ts"
   "$CLAUDE_DIR/hooks/lib/insession.ts"
+  "$CLAUDE_DIR/hooks/lib/jsonc.ts"
   "$CLAUDE_DIR/hooks/lib/pid-utils.ts"
   "$CLAUDE_DIR/hooks/lib/db-path.ts"
   "$CLAUDE_DIR/hooks/lib/identity-path.ts"
@@ -159,7 +160,7 @@ print_summary() {
   _banner warn "Recall Uninstall"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
-  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy ~/.agents/Recall/ runtime tree and DB after preserving user MEMORY artifacts)"
+  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy $RECALL_DB_PATH and ~/.agents/Recall/ after preserving user MEMORY artifacts)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
@@ -183,7 +184,7 @@ print_summary() {
   echo ""
   if [[ "$PURGE" == "true" ]]; then
     echo "Will DESTROY (--purge):"
-    echo "  • ~/.agents/Recall/recall.db  (your persistent memory database)"
+    echo "  • $RECALL_DB_PATH  (your configured persistent memory database)"
     echo "  • ~/.claude/memory.db  (legacy DB, if still present)"
     echo "  • ~/.agents/Recall/  (canonical runtime files and backups)"
     echo ""
@@ -216,6 +217,7 @@ confirm_purge_or_exit() {
   fi
   echo ""
   log_warn "--purge will permanently destroy the Recall databases, runtime files, and old backups."
+  log_warn "Configured database: $RECALL_DB_PATH"
   read -p "Type 'PURGE' to confirm: " -r
   echo ""
   if [[ "$REPLY" != "PURGE" ]]; then
@@ -651,27 +653,24 @@ do_purge() {
   # under $BACKUP_BASE/pre_purge_$TIMESTAMP/, which lives outside the tree
   # we're about to delete since we capture it first).
   local pre_purge_dir="$BACKUP_BASE/pre_purge_$TIMESTAMP"
+  local configured_db="$RECALL_DB_PATH"
 
   preserve_purge_memory_artifacts "$pre_purge_dir"
 
-  # Snapshot canonical DB + sidecars (new layout).
-  local canonical_db="$RECALL_DIR/recall.db"
-  if [[ -f "$canonical_db" ]]; then
-    if [[ "$DRY_RUN" == "true" ]]; then
-      echo "  [dry-run] would snapshot $canonical_db to $pre_purge_dir/"
-    else
-      mkdir -p "$pre_purge_dir"
-      cp "$canonical_db" "$pre_purge_dir/recall.db"
-      for ext in -wal -shm; do
-        [[ -f "${canonical_db}${ext}" ]] && cp "${canonical_db}${ext}" "$pre_purge_dir/recall.db${ext}"
-      done
-      log_success "Snapshotted recall.db to $pre_purge_dir/"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "  [dry-run] would snapshot $configured_db and routing state to $pre_purge_dir/"
+  else
+    recall_backup_db_routing "$pre_purge_dir"
+    if [[ -f "$configured_db" ]]; then
+      log_success "Snapshotted configured database to $pre_purge_dir/"
     fi
+    rm -f "$configured_db" "${configured_db}-wal" "${configured_db}-shm"
+    log_success "Removed configured DB at $configured_db"
   fi
 
   # Snapshot legacy DB + sidecars if still present (pre-migration installs).
   local legacy_db="$CLAUDE_DIR/memory.db"
-  if [[ -f "$legacy_db" ]]; then
+  if [[ "$legacy_db" != "$configured_db" ]] && [[ -f "$legacy_db" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would snapshot $legacy_db to $pre_purge_dir/"
     else
@@ -731,6 +730,7 @@ do_purge() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
+  recall_activate_db_path
   print_summary
   confirm_or_exit
   confirm_purge_or_exit

@@ -1,9 +1,9 @@
 // Database connection management for RECALL	
 
 import { Database } from 'bun:sqlite';
-import { homedir } from 'os';
-import { join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
+import { join } from 'path';
+import { resolveDbPath } from '../../hooks/lib/db-path.js';
 import {
   CREATE_TABLES,
   CREATE_INDEXES,
@@ -21,8 +21,6 @@ import { applyMigrations } from './migrations.js';
 // requires (it is process-global). See src/db/vec.ts.
 import { loadVecExtension, isVecAvailable, createVecTable } from './vec.js';
 import { repairLifecycleSearchIndex } from '../lib/lifecycle-search.js';
-
-const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
 let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
@@ -59,16 +57,8 @@ function applyConnectionPragmas(database: Database): void {
   database.exec('PRAGMA temp_store = MEMORY');
 }
 
-// Precedence:
-//   1. RECALL_DB_PATH (primary)
-//   2. MEM_DB_PATH    (legacy fallback)
-//   3. DEFAULT_DB_PATH
 export function getDbPath(): string {
-  return (
-    process.env.RECALL_DB_PATH ||
-    process.env.MEM_DB_PATH ||
-    DEFAULT_DB_PATH
-  );
+  return resolveDbPath();
 }
 
 export function getDb(): Database {

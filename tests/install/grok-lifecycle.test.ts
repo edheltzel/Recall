@@ -22,8 +22,12 @@ function helper(name: string, overrides: Record<string, string> = {}) {
       RECALL_REPO_DIR: repoRoot,
       RECALL_DIR: recallDir,
       GROK_CONFIG_DIR: grokDir,
+      XDG_CONFIG_HOME: join(home, '.config'),
+      OPENCODE_CONFIG_DIR: join(home, '.config', 'opencode'),
       BACKUP_DIR: backupDir,
       NO_COLOR: '1',
+      RECALL_DB_PATH: '',
+      MEM_DB_PATH: '',
       ...overrides,
     },
   });
@@ -72,9 +76,7 @@ describe('Grok lifecycle hook ownership', () => {
     ]);
     expect(config.hooks.SessionStart).toBeUndefined();
     for (const groups of Object.values(config.hooks) as any[]) {
-      expect(groups[0].hooks[0].command).toBe(
-        `env RECALL_DB_PATH='${join(recallDir, 'recall.db')}' recall host-hook grok`
-      );
+      expect(groups[0].hooks[0].command).toBe('recall host-hook grok');
       expect(groups[0].hooks[0].timeout).toBe(90);
     }
 
@@ -83,9 +85,8 @@ describe('Grok lifecycle hook ownership', () => {
     expect(readlinkSync(target)).toBe(canonical);
   });
 
-  test('pins and safely quotes the configured database path', () => {
-    const marker = join(tempRoot, 'unexpected-command-substitution');
-    const customDb = `${join(tempRoot, "db path's")}/$(touch ${marker})/recall.db`;
+  test('uses the shared dynamic database resolver', () => {
+    const customDb = `${join(tempRoot, "db path's")}/$(not-shell)/recall.db`;
     expect(helper(
       'recall_create_install_root; recall_persist_db_path "$(recall_resolve_db_path)"; recall_install_grok_platform',
       { RECALL_DB_PATH: customDb }
@@ -98,22 +99,36 @@ describe('Grok lifecycle hook ownership', () => {
     const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
     const config = JSON.parse(readFileSync(canonical, 'utf-8'));
     const command = config.hooks.Stop[0].hooks[0].command as string;
-    const bin = join(tempRoot, 'bin');
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(
-      join(bin, 'recall'),
-      '#!/bin/sh\nprintf "%s\\n" "$RECALL_DB_PATH"\nprintf "%s\\n" "$*"\n',
-      { mode: 0o755 }
-    );
+    expect(command).toBe('recall host-hook grok');
+    const resolved = helper('recall_resolve_db_path');
+    expect(resolved.status).toBe(0);
+    expect(resolved.stdout.trim()).toBe(customDb);
+  });
 
-    const probe = spawnSync('bash', ['-c', command], {
-      cwd: tempRoot,
-      encoding: 'utf-8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
-    });
-    expect(probe.status).toBe(0);
-    expect(probe.stdout).toBe(`${customDb}\nhost-hook grok\n`);
-    expect(existsSync(marker)).toBe(false);
+  test('recovers a pre-state custom path from managed MCP configuration', () => {
+    const customDb = join(tempRoot, 'legacy-custom', 'recall.db');
+    const claudeDir = join(home, '.claude');
+    const openCodeDir = join(home, '.config', 'opencode');
+    mkdirSync(claudeDir, { recursive: true });
+    mkdirSync(openCodeDir, { recursive: true });
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({
+      mcpServers: {
+        'recall-memory': { env: { RECALL_DB_PATH: join(recallDir, 'recall.db') } },
+      },
+    }));
+    writeFileSync(join(openCodeDir, 'opencode.json'), `{
+      // Existing custom install without .db-path state.
+      "mcp": {
+        "recall-memory": {
+          "environment": { "RECALL_DB_PATH": ${JSON.stringify(customDb)} },
+        },
+      },
+    }`);
+
+    expect(existsSync(join(recallDir, '.db-path'))).toBe(false);
+    const resolved = helper('recall_resolve_db_path');
+    expect(resolved.status).toBe(0);
+    expect(resolved.stdout.trim()).toBe(customDb);
   });
 
   test('backs up a foreign collision and removes only the managed symlink', () => {

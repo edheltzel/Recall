@@ -20,7 +20,7 @@ Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `
 - Runtime is Bun. Use `bun:sqlite` directly; never a Node SQLite driver. Shebang `#!/usr/bin/env bun`.
 - Build is tsup → ESM with `--external bun:sqlite`; the build step rewrites the `node` shebang to `bun`.
 - DB lives at `~/.agents/Recall/recall.db` (override `RECALL_DB_PATH`; legacy `MEM_DB_PATH` accepted). WAL mode. FTS5 with sync triggers — keep table defs and triggers in `db/schema.ts` aligned.
-- DB-path resolution is shared with hooks via `hooks/lib/db-path.ts` so CLI and hooks agree — import that resolver, never fork the logic.
+- DB-path resolution is shared with hooks and lifecycle scripts via `hooks/lib/db-path.ts`; it recovers installer state and managed MCP configuration when environment overrides are absent. Import or invoke that resolver, never fork the logic.
 - Identity-path resolution is shared with hooks via `hooks/lib/identity-path.ts`; onboarding and Claude layout code consume that resolver instead of owning parallel relocation logic.
 - Recall-owned mutable state and logs resolve through `lib/runtime-paths.ts` (`RECALL_HOME`, default `~/.agents/Recall`) — never place generic runtime state under a native host's config directory.
 - Native host paths, transcript formats, config ownership, command lookup, and authentication assumptions belong under `hosts/`; host-neutral commands and MCP handlers depend on their interfaces rather than branching on host details.

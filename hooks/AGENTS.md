@@ -15,7 +15,7 @@ Standalone scripts that hosts run across a session lifecycle, plus cron jobs tha
 - `RecallBatchExtract.ts` — cron (batch-extract sessions missed during crashes)
 - `RecallTelosSync.ts` — cron (sync Telos goals/projects into memory)
 - `extract_prompt.md` — extraction prompt template (copied to `~/.claude/MEMORY/`)
-- `grok/RecallLifecycle.json` — installer-owned global Grok capture events; install renders the resolved database path into each `recall host-hook grok` command
+- `grok/RecallLifecycle.json` — installer-owned global Grok capture events; each `recall host-hook grok` command uses the shared dynamic database resolver
 - `lib/` — shared host-neutral hook helpers; `lib/hosts/` owns native lifecycle payloads, paths, commands, authentication, and extraction providers
 
 TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. The Grok descriptor is copied to `~/.agents/Recall/grok/hooks/` and linked into `~/.grok/hooks/`.
@@ -25,7 +25,7 @@ TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from
 - Hooks are SELF-CONTAINED: never import from `src/`. Shared hook logic lives in `lib/` here.
 - Generic hook helpers depend on `lib/events.ts`, `lib/extraction-provider.ts`, and the native-provider registry in `lib/hosts/`; native payloads, path encoding, commands, auth, and recursion guards stay in a host adapter.
 - Documented DRY exception: small utilities (e.g. bun-path resolution) are intentionally duplicated inside `RecallExtract.ts` / `RecallBatchExtract.ts` so they never reach into `src/`. Do not "DRY this up."
-- DB-path resolution is centralized in `lib/db-path.ts` — the CLI and every hook agree through it.
+- DB-path resolution is centralized in `lib/db-path.ts` — the CLI, lifecycle scripts, and every hook agree through environment, installer state, managed MCP configuration, and default-path precedence.
 - Identity-path resolution is centralized in `lib/identity-path.ts` — `recall onboard` and `RecallStart.ts` share relocation, override, project, and managed-alias precedence through it.
 - **An EXPLICIT transaction that reads before it writes must be IMMEDIATE.** SQLite fails a read-to-write upgrade inside a DEFERRED transaction with `SQLITE_BUSY` *instantly*, never consulting `busy_timeout` — so with two hosts extracting into the shared WAL database, the duplicate probe in `lib/sqlite-writers.ts` turned a peer's short transaction into a lost record. Those batches use `insertMany.immediate(...)`. Two shapes need nothing: a transaction whose first statement is a write (`consolidate-core.ts`, `RecallPreCompact.ts`), and a read-then-write pair with NO explicit transaction around it — `writeLoaEntryFromExtraction`'s probe autocommits and releases its read lock before the INSERT takes the write lock with `busy_timeout` honoured. The rule buys lock-wait behavior, NOT atomicity: two concurrent replays of the same extraction can still both pass that LoA probe and insert. Regression: `tests/hooks/sqlite-writers-concurrency.test.ts`.
 - Extraction dual-write is REPLAYED (archive crash or partial SQLite failure both leave the conversation retryable), so `dualWriteToSqlite` passes `skipDuplicates` to the plain-INSERT writers in `lib/sqlite-writers.ts`: a row already present for the same session, keyed on (session_id, content), is skipped. Content-scoped, never session-scoped: in-session windows write many different rows under one session_id. The flag is opt-in: the correction writer must keep recording repeated identical corrections.

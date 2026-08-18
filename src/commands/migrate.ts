@@ -18,21 +18,31 @@
 //       ~/.config/opencode/opencode.json, ~/.pi/agent/mcp.json
 //   - --dry-run prints the plan without touching anything.
 
-import { closeDb, getDbPath } from '../db/connection.js';
+import { closeDb } from '../db/connection.js';
 import { existsSync, mkdirSync, statSync, copyFileSync, renameSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
-import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
+import type { McpConfigTarget } from '../hosts/index.js';
+import {
+  persistDbPath,
+  resolveDbPath,
+  resolveDbPathStatePath,
+  resolveManagedDbConfigTargets,
+  resolveRecallRoot,
+} from '../../hooks/lib/db-path.js';
+import { parseJsonc } from '../../hooks/lib/jsonc.js';
 
 export interface MigrateOptions {
   to: string;
   dryRun?: boolean;
+  env?: NodeJS.ProcessEnv;
+  home?: string;
 }
 
-function expandHome(p: string): string {
-  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
-  if (p === '~') return homedir();
+function expandHome(p: string, home: string): string {
+  if (p.startsWith('~/')) return join(home, p.slice(2));
+  if (p === '~') return home;
   return p;
 }
 
@@ -50,9 +60,8 @@ function isSidecar(suffix: string): suffix is '-wal' | '-shm' {
   return suffix === '-wal' || suffix === '-shm';
 }
 
-function detectConfigs(): McpConfigTarget[] {
-  const home = homedir();
-  return configurableHosts.flatMap(host => host.mcpConfigTargets(home));
+function detectConfigs(home: string, env: NodeJS.ProcessEnv): McpConfigTarget[] {
+  return resolveManagedDbConfigTargets({ home, env });
 }
 
 function patchConfigEnv(target: McpConfigTarget, newDbPath: string, dryRun: boolean): { changed: boolean; reason?: string } {
@@ -63,12 +72,9 @@ function patchConfigEnv(target: McpConfigTarget, newDbPath: string, dryRun: bool
   } catch (e) {
     return { changed: false, reason: `read error: ${(e as Error).message}` };
   }
-  const stripped = target.format === 'jsonc'
-    ? raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
-    : raw;
   let cfg: any;
   try {
-    cfg = JSON.parse(stripped);
+    cfg = target.format === 'jsonc' ? parseJsonc(raw).value : JSON.parse(raw);
   } catch (e) {
     return { changed: false, reason: `invalid JSON: ${(e as Error).message}` };
   }
@@ -103,8 +109,12 @@ export function runMigrate(opts: MigrateOptions): void {
   }
 
   const dryRun = !!opts.dryRun;
-  const src = resolve(getDbPath());
-  const dest = resolve(expandHome(opts.to));
+  const env = opts.env ?? process.env;
+  const home = opts.home || env.HOME || env.USERPROFILE || homedir();
+  const pathOptions = { env, home };
+  const src = resolve(resolveDbPath(pathOptions));
+  const dest = resolve(expandHome(opts.to, home));
+  const statePath = resolveDbPathStatePath(pathOptions);
 
   console.log(`recall migrate${dryRun ? ' (dry-run)' : ''}`);
   console.log(`  source:      ${src}`);
@@ -144,7 +154,7 @@ export function runMigrate(opts: MigrateOptions): void {
 
   // Build the pre-migrate snapshot path under the install root.
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_').replace(/-/g, '');
-  const snapshotDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'pre-migrate');
+  const snapshotDir = join(resolveRecallRoot(pathOptions), 'backups', stamp, 'pre-migrate');
 
   console.log('Plan:');
   console.log(`  1. snapshot source + configs to ${snapshotDir}`);
@@ -152,7 +162,7 @@ export function runMigrate(opts: MigrateOptions): void {
   for (const ext of ['-wal', '-shm']) {
     if (existsSync(src + ext)) console.log(`  3. move ${src + ext} → ${dest + ext}`);
   }
-  const targets = detectConfigs();
+  const targets = detectConfigs(home, env);
   let configIdx = 4;
   for (const t of targets) {
     if (!existsSync(t.path)) continue;
@@ -175,10 +185,15 @@ export function runMigrate(opts: MigrateOptions): void {
   }
   for (const t of targets) {
     if (!existsSync(t.path)) continue;
-    const rel = t.path.startsWith(homedir() + '/') ? t.path.slice(homedir().length + 1) : t.path.replace(/^\//, '');
+    const rel = t.path.startsWith(home + '/') ? t.path.slice(home.length + 1) : t.path.replace(/^\//, '');
     const outFile = join(snapshotDir, rel);
     mkdirSync(dirname(outFile), { recursive: true });
     copyFileSync(t.path, outFile);
+  }
+  if (existsSync(statePath)) {
+    copyFileSync(statePath, join(snapshotDir, '.db-path'));
+  } else {
+    writeFileSync(join(snapshotDir, '.db-path.absent'), '');
   }
   console.log(`✓ Snapshot: ${snapshotDir}`);
 
@@ -203,6 +218,8 @@ export function runMigrate(opts: MigrateOptions): void {
       console.log(`  Skipped ${t.path} (${res.reason})`);
     }
   }
+  persistDbPath(dest, pathOptions);
+  console.log(`✓ Updated ${statePath}`);
 
   console.log('');
   console.log('Migration complete.');

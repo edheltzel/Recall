@@ -8,11 +8,12 @@
 // handles from other processes during these tests).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, statSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runMigrate } from '../../src/commands/migrate';
 import { closeDb } from '../../src/db/connection';
+import { resolveDbPath } from '../../hooks/lib/db-path';
 
 let tempDir: string;
 let srcDb: string;
@@ -65,11 +66,16 @@ describe('recall migrate', () => {
   });
 
   test('moves DB + sidecars to destination', () => {
-    runMigrate({ to: destDb });
+    runMigrate({ to: destDb, home: tempDir });
     expect(existsSync(srcDb)).toBe(false);
     expect(existsSync(destDb)).toBe(true);
     expect(existsSync(destDb + '-wal')).toBe(true);
     expect(existsSync(destDb + '-shm')).toBe(true);
+    expect(readFileSync(join(tempDir, '.agents', 'Recall', '.db-path'), 'utf-8')).toBe(`${destDb}\n`);
+    expect(resolveDbPath({
+      home: tempDir,
+      env: { HOME: tempDir, RECALL_DB_PATH: '', MEM_DB_PATH: '' },
+    })).toBe(destDb);
     // Migration log mentions the move.
     expect(captured.join('\n')).toContain('Moved DB');
   });

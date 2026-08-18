@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { resolveManagedIdentityPaths } from '../../hooks/lib/identity-path.js';
+import { resolveManagedDbConfigTargets } from '../../hooks/lib/db-path.js';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
 
 export interface ClaudePaths {
@@ -108,12 +109,7 @@ export function claudePluginState(home: string): ClaudePluginState {
 }
 
 export function claudeMcpConfigTargets(home: string): McpConfigTarget[] {
-  const paths = claudePaths(home);
-  const envPath = ['mcpServers', 'recall-memory', 'env'];
-  return [
-    { host: 'claude', path: paths.legacySettings, envPath, format: 'json' },
-    { host: 'claude', path: paths.settings, envPath, format: 'json' },
-  ];
+  return resolveManagedDbConfigTargets({ home, env: {} }).filter(target => target.host === 'claude');
 }
 
 /** Locate Claude Code without embedding that native-host rule in generic diagnostics. */

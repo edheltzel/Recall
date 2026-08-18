@@ -65,6 +65,8 @@ function runUninstall(
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir, // ~ -> tmp (avoids touching real $HOME binaries)
+        RECALL_DB_PATH: '',
+        MEM_DB_PATH: '',
         // bun unlink / npm unlink -g operate on the host's global registry
         // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
         // the developer's live `recall` link.
@@ -92,6 +94,8 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir,
+        RECALL_DB_PATH: '',
+        MEM_DB_PATH: '',
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -619,6 +623,29 @@ Preserve this.
     expect(snapshot).toBeDefined();
     expect(readFileSync(join(backupBase, snapshot!, 'MEMORY', 'identity.md'), 'utf-8'))
       .toBe('# Canonical identity');
+  });
+
+  test('--purge snapshots and destroys the configured custom database', () => {
+    const recallDir = join(claudeDir, '.agents', 'Recall');
+    const customDb = join(tempRoot, 'custom-db', 'memory.sqlite');
+    mkdirSync(dirname(customDb), { recursive: true });
+    mkdirSync(recallDir, { recursive: true });
+    writeFileSync(customDb, 'custom-memory');
+    writeFileSync(`${customDb}-wal`, 'custom-wal');
+    writeFileSync(join(recallDir, '.db-path'), `${customDb}\n`);
+
+    const result = runPurge(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(customDb);
+    expect(existsSync(customDb)).toBe(false);
+    expect(existsSync(`${customDb}-wal`)).toBe(false);
+    const snapshot = readdirSync(backupBase).find(entry => entry.startsWith('pre_purge_'));
+    expect(snapshot).toBeDefined();
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db'), 'utf-8'))
+      .toBe('custom-memory');
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db.path'), 'utf-8'))
+      .toBe(`${customDb}\n`);
   });
 
   test('--purge rejects --skip-grok before invalidating the retained hook', () => {

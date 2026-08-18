@@ -13,7 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 
@@ -53,6 +53,8 @@ describe('installer restore (rollback)', () => {
         RECALL_REPO_DIR: REPO,
         NO_CONFIRM: 'true',
         HAS_GUM: 'false',
+        RECALL_DB_PATH: '',
+        MEM_DB_PATH: '',
         ...extraEnv,
       },
     });
@@ -193,6 +195,40 @@ describe('installer restore (rollback)', () => {
     expect(lstatSync(target).isSymbolicLink()).toBe(true);
     expect(readlinkSync(target)).toBe(foreign);
     expect(readFileSync(foreign, 'utf-8')).toBe('{"foreign":"current"}');
+  });
+
+  test('restores a pre-state custom database and routing ownership', () => {
+    const stamp = '20260505120000';
+    const backupDir = join(backupBase, stamp);
+    const customDb = join(root, 'custom', 'memory.sqlite');
+    mkdirSync(dirname(customDb), { recursive: true });
+    writeFileSync(customDb, 'before-update');
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({
+      mcpServers: {
+        'recall-memory': { env: { RECALL_DB_PATH: customDb } },
+      },
+    }));
+
+    const created = sh('recall_activate_db_path; recall_create_backup', {
+      TIMESTAMP: stamp,
+      BACKUP_DIR: backupDir,
+    });
+    expect(created.status).toBe(0);
+    expect(readFileSync(join(backupDir, 'recall.db'), 'utf-8')).toBe('before-update');
+    expect(readFileSync(join(backupDir, 'recall.db.path'), 'utf-8')).toBe(`${customDb}\n`);
+    expect(existsSync(join(backupDir, '.db-path.absent'))).toBe(true);
+
+    writeFileSync(customDb, 'after-update');
+    mkdirSync(recallDir, { recursive: true });
+    writeFileSync(join(recallDir, '.db-path'), `${join(recallDir, 'recall.db')}\n`);
+
+    const restored = sh(`_confirm() { return 0; }\nrecall_do_restore "${stamp}"`, {
+      TIMESTAMP: stamp,
+      BACKUP_DIR: backupDir,
+    });
+    expect(restored.status).toBe(0);
+    expect(readFileSync(customDb, 'utf-8')).toBe('before-update');
+    expect(existsSync(join(recallDir, '.db-path'))).toBe(false);
   });
 
   test('an unknown timestamp fails without touching current files', () => {

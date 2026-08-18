@@ -5,140 +5,7 @@
 // config repair cannot require the repository's jsonc-parser installation.
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-
-type JsonObject = Record<string, unknown>;
-type Property = { key: string; keyStart: number; value: Node };
-type Node = {
-  start: number;
-  end: number;
-  value: unknown;
-  properties?: Property[];
-  contentEnd?: number;
-  trailingComma?: boolean;
-};
-
-class JsoncParser {
-  private index = 0;
-
-  constructor(private readonly text: string) {}
-
-  parse(): Node {
-    this.skipSpaceAndComments();
-    const root = this.value();
-    this.skipSpaceAndComments();
-    if (this.index !== this.text.length) throw new Error('trailing content');
-    return root;
-  }
-
-  private value(): Node {
-    this.skipSpaceAndComments();
-    const start = this.index;
-    const char = this.text[this.index];
-    if (char === '{') return this.object();
-    if (char === '[') return this.array();
-    if (char === '"') return this.string();
-
-    const match = this.text.slice(this.index).match(/^(true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
-    if (!match) throw new Error(`expected value at ${this.index}`);
-    this.index += match[0].length;
-    return { start, end: this.index, value: JSON.parse(match[0]) };
-  }
-
-  private string(): Node {
-    const start = this.index;
-    this.index++;
-    let escaped = false;
-    while (this.index < this.text.length) {
-      const char = this.text[this.index++];
-      if (escaped) {
-        escaped = false;
-      } else if (char === '\\') {
-        escaped = true;
-      } else if (char === '"') {
-        const raw = this.text.slice(start, this.index);
-        return { start, end: this.index, value: JSON.parse(raw) };
-      }
-    }
-    throw new Error('unterminated string');
-  }
-
-  private object(): Node {
-    const start = this.index++;
-    const properties: Property[] = [];
-    const value: JsonObject = {};
-    let contentEnd = this.index;
-    let trailingComma = false;
-    this.skipSpaceAndComments();
-    while (this.text[this.index] !== '}') {
-      const keyNode = this.string();
-      this.skipSpaceAndComments();
-      if (this.text[this.index++] !== ':') throw new Error(`expected colon at ${this.index}`);
-      const child = this.value();
-      properties.push({ key: keyNode.value as string, keyStart: keyNode.start, value: child });
-      value[keyNode.value as string] = child.value;
-      contentEnd = child.end;
-      trailingComma = false;
-      this.skipSpaceAndComments();
-      if (this.text[this.index] === ',') {
-        this.index++;
-        contentEnd = this.index;
-        trailingComma = true;
-        this.skipSpaceAndComments();
-        continue;
-      }
-      if (this.text[this.index] !== '}') throw new Error(`expected comma at ${this.index}`);
-    }
-    this.index++;
-    return { start, end: this.index, value, properties, contentEnd, trailingComma };
-  }
-
-  private array(): Node {
-    const start = this.index++;
-    const value: unknown[] = [];
-    this.skipSpaceAndComments();
-    while (this.text[this.index] !== ']') {
-      value.push(this.value().value);
-      this.skipSpaceAndComments();
-      if (this.text[this.index] === ',') {
-        this.index++;
-        this.skipSpaceAndComments();
-        continue;
-      }
-      if (this.text[this.index] !== ']') throw new Error(`expected comma at ${this.index}`);
-    }
-    this.index++;
-    return { start, end: this.index, value };
-  }
-
-  private skipSpaceAndComments(): void {
-    while (this.index < this.text.length) {
-      if (/\s/.test(this.text[this.index])) {
-        this.index++;
-        continue;
-      }
-      if (this.text.startsWith('//', this.index)) {
-        const end = this.text.indexOf('\n', this.index + 2);
-        this.index = end < 0 ? this.text.length : end + 1;
-        continue;
-      }
-      if (this.text.startsWith('/*', this.index)) {
-        const end = this.text.indexOf('*/', this.index + 2);
-        if (end < 0) throw new Error('unterminated comment');
-        this.index = end + 2;
-        continue;
-      }
-      return;
-    }
-  }
-}
-
-function parse(text: string): Node {
-  return new JsoncParser(text).parse();
-}
-
-function isObject(value: unknown): value is JsonObject {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+import { isJsonObject, parseJsonc, type JsonObject, type JsoncNode } from '../hooks/lib/jsonc.js';
 
 function apply(text: string, start: number, end: number, replacement: string): string {
   return text.slice(0, start) + replacement + text.slice(end);
@@ -153,7 +20,7 @@ function formatted(value: unknown, indent: string): string {
   return JSON.stringify(value, null, 2).replace(/\n/g, `\n${indent}`);
 }
 
-function insertProperty(text: string, object: Node, key: string, value: unknown): string {
+function insertProperty(text: string, object: JsoncNode, key: string, value: unknown): string {
   const close = object.end - 1;
   const anchor = object.contentEnd ?? close;
   const keyIndent = object.properties?.[0]
@@ -169,22 +36,22 @@ function insertProperty(text: string, object: Node, key: string, value: unknown)
 function merge(file: string, parentKey: string, entry: JsonObject, preserveKeys: string[]): void {
   let text = existsSync(file) ? readFileSync(file, 'utf8') : '{}';
   if (text.trim() === '') text = '{}';
-  const root = parse(text);
-  if (!isObject(root.value)) throw new Error('root is not an object');
+  const root = parseJsonc(text);
+  if (!isJsonObject(root.value)) throw new Error('root is not an object');
 
   const parent = root.properties?.find(property => property.key === parentKey);
   if (!parent) {
     writeFileSync(file, insertProperty(text, root, parentKey, { 'recall-memory': entry }));
     return;
   }
-  if (!isObject(parent.value.value)) throw new Error(`"${parentKey}" exists but is not an object`);
+  if (!isJsonObject(parent.value.value)) throw new Error(`"${parentKey}" exists but is not an object`);
 
   const container = parent.value;
   const current = container.properties?.find(property => property.key === 'recall-memory');
-  const previous = current && isObject(current.value.value) ? current.value.value : {};
+  const previous = current && isJsonObject(current.value.value) ? current.value.value : {};
   const merged: JsonObject = { ...previous, ...entry };
   for (const key of ['environment', 'env']) {
-    if (isObject(entry[key])) merged[key] = { ...(isObject(previous[key]) ? previous[key] : {}), ...entry[key] };
+    if (isJsonObject(entry[key])) merged[key] = { ...(isJsonObject(previous[key]) ? previous[key] : {}), ...entry[key] };
   }
   for (const key of preserveKeys) {
     if (Object.prototype.hasOwnProperty.call(previous, key)) merged[key] = previous[key];
@@ -200,11 +67,11 @@ function merge(file: string, parentKey: string, entry: JsonObject, preserveKeys:
 
 function remove(file: string, parentKey: string): void {
   const text = readFileSync(file, 'utf8');
-  const root = parse(text);
-  if (!isObject(root.value)) throw new Error('root is not an object');
+  const root = parseJsonc(text);
+  if (!isJsonObject(root.value)) throw new Error('root is not an object');
   const parent = root.properties?.find(property => property.key === parentKey);
   if (!parent) return;
-  if (!isObject(parent.value.value)) throw new Error(`"${parentKey}" exists but is not an object`);
+  if (!isJsonObject(parent.value.value)) throw new Error(`"${parentKey}" exists but is not an object`);
   const properties = parent.value.properties ?? [];
   const currentIndex = properties.findIndex(property => property.key === 'recall-memory');
   if (currentIndex < 0) return;

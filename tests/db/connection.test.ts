@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   getDbPath,
@@ -34,15 +34,25 @@ describe('connection', () => {
     test('returns default path when neither env var is set', () => {
       const originalRecall = process.env.RECALL_DB_PATH;
       const originalMem = process.env.MEM_DB_PATH;
+      const originalHome = process.env.HOME;
+      const originalRecallHome = process.env.RECALL_HOME;
+      const isolatedHome = mkdtempSync(join(tmpdir(), 'recall-path-default-'));
       delete process.env.RECALL_DB_PATH;
       delete process.env.MEM_DB_PATH;
+      process.env.HOME = isolatedHome;
+      process.env.RECALL_HOME = join(isolatedHome, '.agents', 'Recall');
 
       try {
-        const expected = join(homedir(), '.agents', 'Recall', 'recall.db');
+        const expected = join(isolatedHome, '.agents', 'Recall', 'recall.db');
         expect(getDbPath()).toBe(expected);
       } finally {
+        rmSync(isolatedHome, { recursive: true, force: true });
         if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
         if (originalMem !== undefined) process.env.MEM_DB_PATH = originalMem;
+        if (originalHome !== undefined) process.env.HOME = originalHome;
+        else delete process.env.HOME;
+        if (originalRecallHome !== undefined) process.env.RECALL_HOME = originalRecallHome;
+        else delete process.env.RECALL_HOME;
       }
     });
 
