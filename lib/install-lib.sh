@@ -55,6 +55,7 @@ RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${RECALL_GROK_ROOT:=$RECALL_DIR/grok}"
 : "${RECALL_GROK_HOOKS_DIR:=$RECALL_GROK_ROOT/hooks}"
 : "${RECALL_MEMORY_DIR:=$RECALL_DIR/MEMORY}"
+: "${RECALL_DB_PATH_STATE:=$RECALL_DIR/.db-path}"
 
 # Completion sentinel — written at install start, removed only after the
 # post-install self-check passes. Only install.sh marks/clears it; update.sh
@@ -775,7 +776,7 @@ recall_select_platforms() {
 # ── Interactive DB-path prompt ───────────────────────────────────────────────
 #
 # Prompts the user for a custom database location during install. Defaults to
-# $RECALL_DIR/recall.db. Sets $RECALL_DB_PATH to the chosen value (exported so
+# the configured database path. Sets $RECALL_DB_PATH to the chosen value (exported so
 # downstream install steps and auto_migrate see it), or leaves the variable
 # unset to fall through to the default.
 #
@@ -792,7 +793,8 @@ recall_prompt_db_path() {
     return 0
   fi
 
-  local default_path="$RECALL_DIR/recall.db"
+  local default_path
+  default_path="$(recall_resolve_db_path)"
   local default_short="${default_path/#$HOME/\~}"
   local chosen=""
 
@@ -1073,11 +1075,12 @@ recall_create_install_root() {
     "$BACKUP_BASE"
 }
 
-# Resolve the configured DB path. Precedence matches src/db/connection.ts
-# and hooks/lib/db-path.ts:
+# Resolve the configured DB path. Environment precedence matches
+# src/db/connection.ts and hooks/lib/db-path.ts:
 #   1. RECALL_DB_PATH
 #   2. MEM_DB_PATH (deprecated; still honored)
-#   3. $RECALL_DIR/recall.db (default)
+#   3. installer-managed persisted path
+#   4. $RECALL_DIR/recall.db (default)
 # Expands a leading home-directory tilde without evaluating shell syntax.
 recall_resolve_db_path() {
   local raw
@@ -1085,6 +1088,10 @@ recall_resolve_db_path() {
     raw="$RECALL_DB_PATH"
   elif [[ -n "${MEM_DB_PATH:-}" ]]; then
     raw="$MEM_DB_PATH"
+  elif [[ -f "$RECALL_DB_PATH_STATE" ]]; then
+    raw=""
+    IFS= read -r raw < "$RECALL_DB_PATH_STATE" || true
+    [[ -n "$raw" ]] || raw="$RECALL_DIR/recall.db"
   else
     raw="$RECALL_DIR/recall.db"
   fi
@@ -1093,6 +1100,20 @@ recall_resolve_db_path() {
     "~/"*) printf '%s/%s\n' "$HOME" "${raw:2}" ;;
     *) printf '%s\n' "$raw" ;;
   esac
+}
+
+recall_persist_db_path() {
+  local resolved="${1:-}"
+  local state_dir temp
+  [[ -n "$resolved" ]] || resolved="$(recall_resolve_db_path)"
+  state_dir="$(dirname "$RECALL_DB_PATH_STATE")"
+  temp="$RECALL_DB_PATH_STATE.tmp.$$"
+  mkdir -p "$state_dir"
+  (
+    umask 077
+    printf '%s\n' "$resolved" > "$temp"
+  )
+  mv -f "$temp" "$RECALL_DB_PATH_STATE"
 }
 
 # Copy a file from the repo into its canonical location under $RECALL_DIR.

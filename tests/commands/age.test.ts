@@ -206,7 +206,10 @@ describe('messages — delete (absorbs #38)', () => {
     getDb().prepare(`
       UPDATE loa_entries SET created_at = '2099-01-01 00:00:00' WHERE id = ?
     `).run(initial.loaId!);
-    expect(getMessagesSinceLastLoa().messages).toEqual([]);
+    expect(getMessagesSinceLastLoa().messages.map(message => message.content)).toEqual([
+      'old pinned middle',
+      'resumed current turn',
+    ]);
   });
 });
 
