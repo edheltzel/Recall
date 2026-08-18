@@ -8,7 +8,7 @@
 // through 7 short questions, then writes the file.
 //
 // Defaults:
-//   - Writes to ~/.claude/MEMORY/identity.md (global, used everywhere).
+//   - Writes to the resolved global identity path (used everywhere).
 //   - --project writes to ./.atlas-recall/identity.md (project-local override).
 //   - --print previews the rendered markdown without writing.
 //   - --yes accepts all suggested defaults non-interactively (good for CI).
@@ -24,14 +24,11 @@ import {
   copyFileSync,
   renameSync,
   statSync,
-  lstatSync,
-  readlinkSync,
 } from 'fs';
 import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { claudePaths, resolveClaudeInstallLayout } from '../hosts/claude.js';
 import { createInterface, type Interface } from 'readline';
 import { detectProject } from '../lib/project.js';
+import { resolveIdentityPath } from '../../hooks/lib/identity-path.js';
 
 // L0 identity files are silently truncated at load by hooks/RecallStart.ts.
 // Mirror that constant here so the onboarding UX can warn the user before the
@@ -165,7 +162,7 @@ function detectMachine(): string {
 
 // ───────────────────────────────────────────────────────────────────────
 // Path resolution — mirror RecallStart's identity-file lookup order.
-// Precedence: --out > RECALL_IDENTITY_PATH env > --project > global default.
+// Precedence: --out > RECALL_IDENTITY_PATH env > --project > resolved global.
 // The env var is honored because RecallStart reads it with highest
 // precedence at load; without this, a user with the env set could write
 // to one path while the hook loads from another.
@@ -174,11 +171,11 @@ export function resolveOutputPath(
   options: OnboardOptions,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  if (options.out) return options.out;
-  const envPath = env.RECALL_IDENTITY_PATH;
-  if (envPath && envPath.trim()) return envPath.trim();
-  if (options.project) return join(process.cwd(), '.atlas-recall', 'identity.md');
-  return join(claudePaths(homedir()).memory, 'identity.md');
+  return resolveIdentityPath({
+    env,
+    explicitPath: options.out,
+    project: options.project ? 'force' : 'ignore',
+  });
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -309,17 +306,10 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 export function writeIdentityAtomic(
   outPath: string,
   markdown: string,
-  managedPaths = resolveClaudeInstallLayout(homedir()).identity,
 ): void {
-  const destination = outPath === managedPaths.alias
-    && existsSync(outPath)
-    && lstatSync(outPath).isSymbolicLink()
-    && readlinkSync(outPath) === managedPaths.canonical
-    ? managedPaths.canonical
-    : outPath;
-  const tmp = destination + '.tmp';
+  const tmp = outPath + '.tmp';
   writeFileSync(tmp, markdown, 'utf-8');
-  renameSync(tmp, destination);
+  renameSync(tmp, outPath);
 }
 
 export async function runOnboard(options: OnboardOptions = {}): Promise<void> {

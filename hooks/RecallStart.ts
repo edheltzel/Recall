@@ -23,7 +23,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join, basename } from 'path';
+import { basename } from 'path';
 import { execFileSync } from 'child_process';
 
 // ─── Budget constants (derived, not cargo-culted) ───────────────────
@@ -45,24 +45,7 @@ const L1_LOA_FALLBACK_CAP = 6;          // if no high-importance non-LoA exist, 
 // DB-path resolution lives in hooks/lib/db-path.ts so the CLI and every
 // hook agree on the same precedence (RECALL_DB_PATH > MEM_DB_PATH > default).
 import { resolveDbPath as getDbPath } from './lib/db-path';
-
-function getIdentityPath(): string | undefined {
-  // Precedence: env override > project-local > global.
-  // Project-local wins over global so per-project identity can differ.
-  if (process.env.RECALL_IDENTITY_PATH) return process.env.RECALL_IDENTITY_PATH;
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  const projectLocal = join(process.cwd(), '.atlas-recall', 'identity.md');
-  if (existsSync(projectLocal)) return projectLocal;
-  if (process.env.RECALL_HOME) {
-    const configuredPath = join(process.env.RECALL_HOME, 'MEMORY', 'identity.md');
-    if (existsSync(configuredPath)) return configuredPath;
-  }
-  const claudeIdentityPath = join(home, '.claude', 'MEMORY', 'identity.md');
-  if (existsSync(claudeIdentityPath)) return claudeIdentityPath;
-  const defaultCanonicalPath = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
-  if (existsSync(defaultCanonicalPath)) return defaultCanonicalPath;
-  return undefined;
-}
+import { resolveIdentityPath } from './lib/identity-path';
 
 // ─── Project detection ──────────────────────────────────────────────
 // Uses execFileSync (no shell) with a fixed argv — safe by construction.
@@ -167,8 +150,7 @@ function hasImportanceColumn(table: string): boolean {
 
 // ─── L0: Identity ────────────────────────────────────────────────────
 export function buildL0(): string | undefined {
-  const path = getIdentityPath();
-  if (!path) return undefined;
+  const path = resolveIdentityPath({ project: 'existing' });
   try {
     const content = readFileSync(path, 'utf-8').trim();
     if (!content) return undefined;
