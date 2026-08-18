@@ -241,7 +241,11 @@ step_auto_migrate() {
     fi
     return
   fi
+  local resolved_db_path
+  resolved_db_path="$(recall_resolve_db_path)"
+  export RECALL_DB_PATH="$resolved_db_path"
   recall_create_install_root
+  recall_persist_db_path "$resolved_db_path"
   recall_auto_migrate
 }
 

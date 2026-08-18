@@ -141,6 +141,7 @@ do_install() {
 
   _step "Migrate" "Preparing install root + migrating legacy database"
   recall_create_install_root
+  recall_persist_db_path "$RESOLVED_DB_PATH"
   # Mark the install in-flight now that $RECALL_DIR exists, before any
   # artifact-mutating step. Cleared only after the self-check passes (#27).
   recall_mark_install_incomplete

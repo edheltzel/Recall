@@ -86,7 +86,15 @@ describe('Grok lifecycle hook ownership', () => {
   test('pins and safely quotes the configured database path', () => {
     const marker = join(tempRoot, 'unexpected-command-substitution');
     const customDb = `${join(tempRoot, "db path's")}/$(touch ${marker})/recall.db`;
-    expect(helper('recall_install_grok_platform', { RECALL_DB_PATH: customDb }).status).toBe(0);
+    expect(helper(
+      'recall_create_install_root; recall_persist_db_path "$(recall_resolve_db_path)"; recall_install_grok_platform',
+      { RECALL_DB_PATH: customDb }
+    ).status).toBe(0);
+    expect(readFileSync(join(recallDir, '.db-path'), 'utf-8')).toBe(`${customDb}\n`);
+    expect(helper(
+      'export RECALL_DB_PATH="$(recall_resolve_db_path)"; recall_install_grok_platform',
+      { RECALL_DB_PATH: '', MEM_DB_PATH: '' }
+    ).status).toBe(0);
     const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
     const config = JSON.parse(readFileSync(canonical, 'utf-8'));
     const command = config.hooks.Stop[0].hooks[0].command as string;
