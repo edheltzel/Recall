@@ -2,10 +2,10 @@
 #
 # Recall Uninstall Script
 #
-# Removes Recall integration from Claude Code, OpenCode, and Pi. By default
-# preserves user data (~/.agents/Recall/ tree — DB, canonical hooks/commands,
-# backups, MEMORY artifacts). Use --purge to destroy runtime state and databases
-# while retaining user-authored identity and distilled memory.
+# Removes Recall integration from Claude Code, OpenCode, Pi, Grok, and omp. By
+# default preserves user data (~/.agents/Recall/ tree — DB, canonical
+# hooks/commands, backups, MEMORY artifacts). Use --purge to destroy runtime
+# state and databases while retaining user-authored identity and distilled memory.
 #
 # Usage:
 #   ./uninstall.sh                  # preserve-everything default

@@ -868,7 +868,7 @@ program
   .allowUnknownOption(true)
   .allowExcessArguments(true)
   .helpOption(false)
-  .argument('[args...]', 'Flags forwarded to install.sh (--yes, --no-gum, --db-path, --help)')
+  .argument('[args...]', 'Flags forwarded verbatim to install.sh; run recall install --help for the canonical list')
   .action(() => {
     process.exitCode = runInstall(forwardedArgs('install'));
   });
@@ -879,18 +879,18 @@ program
   .allowUnknownOption(true)
   .allowExcessArguments(true)
   .helpOption(false)
-  .argument('[args...]', 'Flags forwarded to update.sh (--check, --dry-run, --force, --no-migrate, --no-confirm, --no-gum, --help)')
+  .argument('[args...]', 'Flags forwarded verbatim to update.sh; run recall update --help for the canonical list')
   .action(() => {
     process.exitCode = runUpdate(forwardedArgs('update'));
   });
 
 program
   .command('uninstall')
-  .description('Uninstall Recall from Claude Code / OpenCode / Pi (delegates to uninstall.sh)')
+  .description('Uninstall Recall from Claude Code / OpenCode / Pi / Grok / omp (delegates to uninstall.sh)')
   .allowUnknownOption(true)
   .allowExcessArguments(true)
   .helpOption(false)
-  .argument('[args...]', 'Flags forwarded to uninstall.sh (--dry-run, --purge, --no-confirm, --skip-opencode, --skip-pi, --no-gum, --help)')
+  .argument('[args...]', 'Flags forwarded verbatim to uninstall.sh; run recall uninstall --help for the canonical list')
   .action(() => {
     process.exitCode = runUninstall(forwardedArgs('uninstall'));
   });
