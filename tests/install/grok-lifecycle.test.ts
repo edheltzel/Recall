@@ -12,7 +12,7 @@ let recallDir = '';
 let grokDir = '';
 let backupDir = '';
 
-function helper(name: string) {
+function helper(name: string, overrides: Record<string, string> = {}) {
   return spawnSync('bash', ['-c', `source ${JSON.stringify(installLib)}; ${name}`], {
     cwd: repoRoot,
     encoding: 'utf-8',
@@ -24,6 +24,7 @@ function helper(name: string) {
       GROK_CONFIG_DIR: grokDir,
       BACKUP_DIR: backupDir,
       NO_COLOR: '1',
+      ...overrides,
     },
   });
 }
@@ -71,13 +72,40 @@ describe('Grok lifecycle hook ownership', () => {
     ]);
     expect(config.hooks.SessionStart).toBeUndefined();
     for (const groups of Object.values(config.hooks) as any[]) {
-      expect(groups[0].hooks[0].command).toBe('recall host-hook grok');
+      expect(groups[0].hooks[0].command).toBe(
+        `env RECALL_DB_PATH='${join(recallDir, 'recall.db')}' recall host-hook grok`
+      );
       expect(groups[0].hooks[0].timeout).toBe(90);
     }
 
     const second = helper('recall_install_grok_platform');
     expect(second.status).toBe(0);
     expect(readlinkSync(target)).toBe(canonical);
+  });
+
+  test('pins and safely quotes the configured database path', () => {
+    const marker = join(tempRoot, 'unexpected-command-substitution');
+    const customDb = `${join(tempRoot, "db path's")}/$(touch ${marker})/recall.db`;
+    expect(helper('recall_install_grok_platform', { RECALL_DB_PATH: customDb }).status).toBe(0);
+    const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
+    const config = JSON.parse(readFileSync(canonical, 'utf-8'));
+    const command = config.hooks.Stop[0].hooks[0].command as string;
+    const bin = join(tempRoot, 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, 'recall'),
+      '#!/bin/sh\nprintf "%s\\n" "$RECALL_DB_PATH"\nprintf "%s\\n" "$*"\n',
+      { mode: 0o755 }
+    );
+
+    const probe = spawnSync('bash', ['-c', command], {
+      cwd: tempRoot,
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+    });
+    expect(probe.status).toBe(0);
+    expect(probe.stdout).toBe(`${customDb}\nhost-hook grok\n`);
+    expect(existsSync(marker)).toBe(false);
   });
 
   test('backs up a foreign collision and removes only the managed symlink', () => {

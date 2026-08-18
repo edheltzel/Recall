@@ -966,7 +966,11 @@ export function getLoaMessages(loaId: number): Message[] {
 
 export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; startId: number | null; endId: number | null } {
   const db = getDb();
-  const lastLoa = getLastLoaEntry();
+  const lastLoa = db.prepare(`
+    SELECT * FROM loa_entries
+    WHERE tags IS NULL OR tags NOT LIKE 'automatic-capture,%'
+    ORDER BY id DESC LIMIT 1
+  `).get() as LoaEntry | undefined;
 
   let sql: string;
   let params: number[];

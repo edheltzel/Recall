@@ -11,7 +11,9 @@ import {
   CREATE_FTS_TRIGGERS,
   CREATE_VECTOR_TABLES,
   REBUILD_HOST_INGEST_GENERATION_FTS,
+  ACTIVE_HOST_INGEST_MESSAGES_VIEW_SCHEMA,
   PUBLISHED_MESSAGES_SCHEMA,
+  PUBLISHED_MESSAGES_VIEW_SCHEMA,
 } from './schema.js';
 import { applyMigrations } from './migrations.js';
 // Importing vec sets up bun:sqlite's custom (extension-capable) SQLite on macOS
@@ -197,6 +199,30 @@ export function ensurePublishedMessageViews(database: Database): void {
   }
 }
 
+function normalizedViewSchema(sql: string): string {
+  return sql
+    .replace(/\bIF\s+NOT\s+EXISTS\b/gi, '')
+    .replace(/;\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function ensurePersistentPublishedMessageViews(database: Database): void {
+  const rows = database.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'view'
+      AND name IN ('active_host_ingest_messages', 'published_messages')
+  `).all() as Array<{ name: string; sql: string }>;
+  const actual = new Map(rows.map(row => [row.name, normalizedViewSchema(row.sql)]));
+  const expected = new Map([
+    ['active_host_ingest_messages', normalizedViewSchema(ACTIVE_HOST_INGEST_MESSAGES_VIEW_SCHEMA)],
+    ['published_messages', normalizedViewSchema(PUBLISHED_MESSAGES_VIEW_SCHEMA)],
+  ]);
+  if ([...expected].every(([name, sql]) => actual.get(name) === sql)) return;
+  database.exec(PUBLISHED_MESSAGES_SCHEMA);
+}
+
 /**
  * Idempotent schema bootstrap shared by initDb (create path) and getDb (#202
  * self-heal on open). The ordering is load-bearing — see CHANGELOG 0.7.11:
@@ -224,7 +250,7 @@ function ensureSchema(database: Database): void {
   database.exec(CREATE_TABLES);
   const migration = applyMigrations(database);
   database.exec(CREATE_INDEXES);
-  database.exec(PUBLISHED_MESSAGES_SCHEMA);
+  ensurePersistentPublishedMessageViews(database);
   database.exec(CREATE_FTS);
   database.exec(CREATE_FTS_TRIGGERS);
   if (!generationFtsExists) database.exec(REBUILD_HOST_INGEST_GENERATION_FTS);

@@ -20,8 +20,10 @@ import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runExport } from '../../src/commands/export';
 import { getDb } from '../../src/db/connection';
+import { PUBLISHED_MESSAGES_SCHEMA } from '../../src/db/schema';
 import { EXPORT_TABLES, PROVENANCE_TABLES } from '../../src/lib/export';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import {
   createSession,
   addMessage,
@@ -273,6 +275,41 @@ describe('SQL dump', () => {
       expect((restored.prepare('PRAGMA user_version').get() as {
         user_version: number;
       }).user_version).toBeGreaterThan(0);
+    } finally {
+      restored.close();
+    }
+  });
+
+  test('restores physical lifecycle messages without duplicate ingest tokens', () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'sql-lifecycle',
+      messages: [
+        { role: 'user', content: 'First lifecycle message' },
+        { role: 'assistant', content: 'Second lifecycle message' },
+      ],
+      finalize: true,
+    });
+    const physicalCount = (getDb().prepare(`
+      SELECT COUNT(*) AS count FROM messages WHERE session_id = 'sql-lifecycle'
+    `).get() as { count: number }).count;
+    const file = join(outDir, 'lifecycle-roundtrip.sql');
+    runExport({ format: 'sql', output: file, now: NOW });
+
+    const restored = new Database(':memory:');
+    try {
+      restored.exec(readFileSync(file, 'utf-8'));
+      expect(restored.prepare(`
+        SELECT COUNT(*) AS count FROM messages WHERE session_id = 'sql-lifecycle'
+      `).get()).toEqual({ count: physicalCount });
+      expect(() => restored.exec(`
+        CREATE UNIQUE INDEX idx_messages_host_ingest_token
+          ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL
+      `)).not.toThrow();
+      expect(() => restored.exec(PUBLISHED_MESSAGES_SCHEMA)).not.toThrow();
+      expect(restored.prepare(`
+        SELECT COUNT(*) AS count FROM published_messages WHERE session_id = 'sql-lifecycle'
+      `).get()).toEqual({ count: 2 });
     } finally {
       restored.close();
     }

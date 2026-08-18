@@ -35,14 +35,48 @@ function messageText(content: unknown): string {
 // instructions for <cwd>` payload, plus the environment/user-instruction
 // wrappers). Recall must not store these as verbatim user memory; the typed
 // prompt survives as its own user turn (finding F2).
-const INJECTED_USER_PREFIXES = [
-  '# AGENTS.md instructions for ',
-  '<environment_context>',
-  '<user_instructions>',
+const WRAPPED_INJECTED_USER_TAGS = [
+  'recommended_plugins',
+  'environment_context',
+  'user_instructions',
 ];
 
-function isInjectedUserInstruction(text: string): boolean {
-  return INJECTED_USER_PREFIXES.some(prefix => text.startsWith(prefix));
+function consumeWrappedInstruction(text: string, offset: number): number | undefined {
+  for (const tag of WRAPPED_INJECTED_USER_TAGS) {
+    const open = `<${tag}>`;
+    if (!text.startsWith(open, offset)) continue;
+    const close = `</${tag}>`;
+    const end = text.indexOf(close, offset + open.length);
+    return end < 0 ? undefined : end + close.length;
+  }
+  return undefined;
+}
+
+function consumeAgentsInstruction(text: string, offset: number): number | undefined {
+  if (!text.startsWith('# AGENTS.md instructions for ', offset)) return undefined;
+  const headerEnd = text.indexOf('\n', offset);
+  if (headerEnd < 0) return text.length;
+  let bodyStart = headerEnd + 1;
+  while (/\s/.test(text[bodyStart] ?? '')) bodyStart++;
+  const open = '<INSTRUCTIONS>';
+  if (!text.startsWith(open, bodyStart)) return text.length;
+  const close = '</INSTRUCTIONS>';
+  const end = text.indexOf(close, bodyStart + open.length);
+  return end < 0 ? undefined : end + close.length;
+}
+
+function stripInjectedUserInstructions(text: string): string {
+  let offset = 0;
+  let stripped = false;
+  for (;;) {
+    while (/\s/.test(text[offset] ?? '')) offset++;
+    const next = consumeWrappedInstruction(text, offset) ??
+      consumeAgentsInstruction(text, offset);
+    if (next === undefined) break;
+    offset = next;
+    stripped = true;
+  }
+  return stripped ? text.slice(offset).trimStart() : text;
 }
 
 function containsSubagentMarker(value: unknown, depth = 0): boolean {
@@ -83,9 +117,9 @@ export function parseCodexRollout(raw: string): ParsedCodexRollout {
     if (row.type !== 'response_item' || !payload || payload.type !== 'message') continue;
     const role = payload.role;
     if (role !== 'user' && role !== 'assistant') continue;
-    const content = messageText(payload.content);
+    let content = messageText(payload.content);
+    if (role === 'user') content = stripInjectedUserInstructions(content);
     if (!content.trim()) continue;
-    if (role === 'user' && isInjectedUserInstruction(content)) continue;
     messages.push({
       role,
       content,

@@ -103,7 +103,15 @@ describe('supported lifecycle transcript parsers', () => {
         payload: {
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text: '<environment_context>\ncwd=/work/Recall\n</environment_context>' }],
+          content: [{
+            type: 'input_text',
+            text: `<recommended_plugins>\n- Example\n</recommended_plugins>
+# AGENTS.md instructions for /work/Recall
+
+<INSTRUCTIONS>Always use worktrees.</INSTRUCTIONS>
+<environment_context>cwd=/work/Recall</environment_context>
+Actually fix the failing test.`,
+          }],
         },
       },
       {
@@ -112,14 +120,6 @@ describe('supported lifecycle transcript parsers', () => {
           type: 'message',
           role: 'user',
           content: [{ type: 'input_text', text: '<user_instructions>\nBe terse.\n</user_instructions>' }],
-        },
-      },
-      {
-        type: 'response_item',
-        payload: {
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: 'Actually fix the failing test.' }],
         },
       },
       {
@@ -136,6 +136,7 @@ describe('supported lifecycle transcript parsers', () => {
     expect(parsed.messages.map(message => message.role)).toEqual(['user', 'assistant']);
     expect(parsed.messages[0].content).toBe('Actually fix the failing test.');
     expect(parsed.messages.some(message => message.content.startsWith('# AGENTS.md instructions'))).toBe(false);
+    expect(parsed.messages.some(message => message.content.startsWith('<recommended_plugins>'))).toBe(false);
     expect(parsed.messages.some(message => message.content.startsWith('<environment_context>'))).toBe(false);
     expect(parsed.messages.some(message => message.content.startsWith('<user_instructions>'))).toBe(false);
   });
@@ -1416,15 +1417,23 @@ describe('host-neutral immediate SQLite ingest', () => {
       .toBeNull();
   });
 
-  test('records the global high-water cursor for an empty terminal capture', () => {
+  test('keeps automatic empty-capture high-water separate from the manual LoA cursor', () => {
     const db = getDb();
     db.prepare(`
       INSERT INTO sessions (session_id, started_at, source)
       VALUES ('prior-session', '2026-08-12T09:00:00.000Z', 'mcp')
     `).run();
+    const handled = db.prepare(`
+      INSERT INTO messages (session_id, timestamp, role, content, provenance)
+      VALUES ('prior-session', '2026-08-12T09:00:00.000Z', 'user', 'handled', 'verbatim')
+    `).run();
+    db.prepare(`
+      INSERT INTO loa_entries (title, fabric_extract, snapshot_max_message_id)
+      VALUES ('manual cursor', 'handled summary', ?)
+    `).run(Number(handled.lastInsertRowid));
     const prior = db.prepare(`
       INSERT INTO messages (session_id, timestamp, role, content, provenance)
-      VALUES ('prior-session', '2026-08-12T09:00:00.000Z', 'user', 'prior', 'verbatim')
+      VALUES ('prior-session', '2026-08-12T09:15:00.000Z', 'assistant', 'prior', 'verbatim')
     `).run();
     db.prepare(`
       INSERT INTO host_ingest_generations
@@ -1451,14 +1460,15 @@ describe('host-neutral immediate SQLite ingest', () => {
     expect(db.prepare(`
       SELECT snapshot_max_message_id FROM loa_entries WHERE id = ?
     `).get(result.loaId!)).toEqual({ snapshot_max_message_id: Number(prior.lastInsertRowid) });
-    expect(getMessagesSinceLastLoa().messages).toEqual([]);
+    expect(getMessagesSinceLastLoa().messages.map(message => message.id))
+      .toEqual([Number(prior.lastInsertRowid)]);
 
     const next = db.prepare(`
       INSERT INTO messages (session_id, timestamp, role, content, provenance)
       VALUES ('prior-session', '2026-08-12T11:00:00.000Z', 'assistant', 'next', 'verbatim')
     `).run();
     expect(getMessagesSinceLastLoa().messages.map(message => message.id))
-      .toEqual([Number(next.lastInsertRowid)]);
+      .toEqual([Number(prior.lastInsertRowid), Number(next.lastInsertRowid)]);
   });
 
   test('pins finalized LoA evidence across non-terminal reconciliation', () => {

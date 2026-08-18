@@ -1078,7 +1078,7 @@ recall_create_install_root() {
 #   1. RECALL_DB_PATH
 #   2. MEM_DB_PATH (deprecated; still honored)
 #   3. $RECALL_DIR/recall.db (default)
-# Uses `eval echo` so tildes embedded in env vars expand to absolute paths.
+# Expands a leading home-directory tilde without evaluating shell syntax.
 recall_resolve_db_path() {
   local raw
   if [[ -n "${RECALL_DB_PATH:-}" ]]; then
@@ -1088,7 +1088,11 @@ recall_resolve_db_path() {
   else
     raw="$RECALL_DIR/recall.db"
   fi
-  eval echo "$raw"
+  case "$raw" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${raw:2}" ;;
+    *) printf '%s\n' "$raw" ;;
+  esac
 }
 
 # Copy a file from the repo into its canonical location under $RECALL_DIR.
@@ -1918,13 +1922,36 @@ recall_install_grok_platform() {
   local source="$RECALL_REPO_DIR/hooks/grok/RecallLifecycle.json"
   local canonical="$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
   local target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
+  local db_path_abs
 
   if [[ ! -f "$source" ]]; then
     log_warn "Grok lifecycle hook not found at $source"
     return 1
   fi
   mkdir -p "$RECALL_GROK_HOOKS_DIR" "$GROK_CONFIG_DIR/hooks"
-  recall_copy_canonical "$source" "$canonical"
+  db_path_abs="$(recall_resolve_db_path)"
+  if ! GROK_HOOK_SOURCE="$source" GROK_HOOK_DEST="$canonical" \
+    GROK_HOOK_DB_PATH="$db_path_abs" bun -e '
+      const fs = require("fs");
+      const source = process.env.GROK_HOOK_SOURCE;
+      const destination = process.env.GROK_HOOK_DEST;
+      const dbPath = process.env.GROK_HOOK_DB_PATH;
+      const config = JSON.parse(fs.readFileSync(source, "utf8"));
+      const single = String.fromCharCode(39);
+      const quoted = single + dbPath.split(single).join(`${single}"${single}"${single}`) + single;
+      const command = `env RECALL_DB_PATH=${quoted} recall host-hook grok`;
+      for (const groups of Object.values(config.hooks ?? {})) {
+        for (const group of groups) {
+          for (const hook of group.hooks ?? []) {
+            if (hook.type === "command") hook.command = command;
+          }
+        }
+      }
+      fs.writeFileSync(destination, JSON.stringify(config, null, 2) + "\n");
+    '; then
+    log_warn "Could not render Grok lifecycle hook"
+    return 1
+  fi
   recall_link "$target" "$canonical"
   log_success "Installed Grok lifecycle capture hook"
 }

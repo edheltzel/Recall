@@ -621,6 +621,22 @@ Preserve this.
       .toBe('# Canonical identity');
   });
 
+  test('--purge rejects --skip-grok before invalidating the retained hook', () => {
+    const recallDir = join(claudeDir, '.agents', 'Recall');
+    const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
+    const target = join(claudeDir, '.grok', 'hooks', 'RecallLifecycle.json');
+    mkdirSync(dirname(canonical), { recursive: true });
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(canonical, '{"managed":true}\n');
+    symlinkSync(canonical, target);
+
+    const result = runUninstall(claudeDir, backupBase, ['--purge', '--skip-grok']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--skip-grok cannot be combined with --purge');
+    expect(lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, 'utf-8')).toBe('{"managed":true}\n');
+  });
+
   test('--dry-run: narrates but does not mutate', () => {
     const r = runUninstall(claudeDir, backupBase, ['--dry-run']);
     expect(r.status).toBe(0);
