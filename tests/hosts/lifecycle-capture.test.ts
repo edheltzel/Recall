@@ -87,6 +87,59 @@ describe('supported lifecycle transcript parsers', () => {
     expect(parsed.messages.map(message => message.role)).toEqual(['user', 'assistant']);
   });
 
+  test('Codex skips injected instruction user turns and keeps the typed prompt', () => {
+    const raw = [
+      { type: 'session_meta', payload: { id: 'codex-injected', cwd: '/work/Recall' } },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '# AGENTS.md instructions for /work/Recall\n\nAlways use worktrees.' }],
+        },
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '<environment_context>\ncwd=/work/Recall\n</environment_context>' }],
+        },
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '<user_instructions>\nBe terse.\n</user_instructions>' }],
+        },
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Actually fix the failing test.' }],
+        },
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Done - the test passes now.' }],
+        },
+      },
+    ].map(row => JSON.stringify(row)).join('\n');
+
+    const parsed = parseCodexRollout(raw);
+    expect(parsed.messages.map(message => message.role)).toEqual(['user', 'assistant']);
+    expect(parsed.messages[0].content).toBe('Actually fix the failing test.');
+    expect(parsed.messages.some(message => message.content.startsWith('# AGENTS.md instructions'))).toBe(false);
+    expect(parsed.messages.some(message => message.content.startsWith('<environment_context>'))).toBe(false);
+    expect(parsed.messages.some(message => message.content.startsWith('<user_instructions>'))).toBe(false);
+  });
+
   test('Codex recognizes a subagent rollout marker', () => {
     const parsed = parseCodexRollout(
       JSON.stringify({
