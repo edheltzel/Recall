@@ -192,10 +192,14 @@ recall onboard                 # Interactive 7-question interview
 recall onboard --print --yes   # Preview what would be written (no side effects)
 ```
 
-This writes `~/.claude/MEMORY/identity.md` (global) or
-`./.atlas-recall/identity.md` (project-local with `--project`). Files
-exceeding 1200 characters are silently truncated at load; the command
-warns if your rendered output exceeds that limit.
+Global onboarding uses the same resolver as `RecallStart`. An existing
+user-owned `~/.claude/MEMORY/identity.md` remains authoritative; otherwise
+the path resolves under the installer-managed Recall root (normally
+`~/.agents/Recall/MEMORY/identity.md`, including relocated installs). A
+managed Claude link, when present, exposes that same canonical file.
+`--project` instead writes `./.atlas-recall/identity.md`. Files exceeding
+1200 characters are silently truncated at load; the command warns if your
+rendered output exceeds that limit.
 
 ---
 
@@ -234,7 +238,7 @@ crontab -e
 |----------|---------|---------|
 | `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
 | `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
-| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `recall onboard` (write). |
+| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and the installer-resolved global identity. Honored by both `RecallStart` (read) and `recall onboard` (write). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
 | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
@@ -294,7 +298,7 @@ cd /path/to/Recall
 
 - `~/.agents/Recall/recall.db` — your persistent memory database
 - `~/.claude/backups/recall/` — the backup tree written by install/update
-- `~/.claude/MEMORY/` — identity.md, DISTILLED.md, session subdirs
+- User-authored identity and distilled memory under the resolved Recall root, together with any managed Claude links or legacy files in `~/.claude/MEMORY/`
 - This source directory (remove with `rm -rf /path/to/Recall`)
 
 ### Flags
@@ -302,14 +306,16 @@ cd /path/to/Recall
 | Flag | Purpose |
 |------|---------|
 | `--dry-run` | Narrate every change, touch nothing |
-| `--purge` | Also destroy `recall.db` + backup tree. Requires interactive `PURGE` confirmation. Writes a `pre_purge_<TS>/` snapshot before deleting. |
+| `--purge` | Destroy `recall.db`, runtime files, and the old backup tree. Requires interactive `PURGE` confirmation. The `pre_purge_<TS>/` snapshot retains the database plus canonical `identity.md`/`DISTILLED.md`; those user files are also materialized into `~/.claude/MEMORY/` when that does not overwrite a foreign file. |
 | `--no-confirm` | Non-interactive (still requires PURGE confirmation for `--purge`) |
 | `--skip-opencode` | Leave OpenCode integration alone |
 | `--skip-pi` | Leave Pi integration alone |
 | `--skip-grok` | Leave Grok lifecycle capture alone |
 | `--help` | Show usage |
 
-Even with `--purge`, `~/.claude/MEMORY/` is preserved — it's user-authored content, not Recall-owned state.
+Even with `--purge`, user-authored identity and distilled memory are retained.
+An existing foreign Claude file is never overwritten; the canonical Recall
+copy remains available in the pre-purge snapshot.
 
 ---
 

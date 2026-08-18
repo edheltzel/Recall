@@ -35,7 +35,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ~/.claude/                              # Claude Code home (mostly symlinks back)
 ├── Recall_GUIDE.md                     # → ~/.agents/Recall/claude/Recall_GUIDE.md
 ├── MEMORY/
-│   ├── identity.md                     # → ~/.agents/Recall/MEMORY/identity.md
+│   ├── identity.md                     # optional managed link → ~/.agents/Recall/MEMORY/identity.md
 │   ├── DISTILLED.md                    # → ~/.agents/Recall/MEMORY/DISTILLED.md
 │   ├── HOT_RECALL.md                  # Last 10 sessions (fast context loading)
 │   ├── SESSION_INDEX.json             # Searchable session metadata lookup
@@ -55,8 +55,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ```
 
 Project-local L0 override: `./.atlas-recall/identity.md` takes precedence over
-the global `~/.claude/MEMORY/identity.md`. `RECALL_IDENTITY_PATH` overrides
-both.
+the resolved global identity. `RECALL_IDENTITY_PATH` overrides both.
 
 ## Host Boundaries
 
@@ -149,7 +148,13 @@ tools (`memory_hybrid_search`, `memory_recall`).
 Path resolution for `identity.md`:
 1. `RECALL_IDENTITY_PATH` env var (if set)
 2. `./.atlas-recall/identity.md` (project-local, if exists)
-3. `~/.claude/MEMORY/identity.md` (global default)
+3. Existing user-owned `~/.claude/MEMORY/identity.md`, if it is not the managed canonical link
+4. The canonical file under the installer-resolved root: durable Claude guide link, then `RECALL_DIR`, then `RECALL_HOME`, then `~/.agents/Recall/MEMORY/identity.md`
+
+`recall onboard` uses the same resolver, with explicit `--out` first and
+`--project` forcing step 2 even before the file exists. A managed Claude
+identity link resolves to the canonical target rather than becoming a second
+storage location.
 
 ## PreCompact hook (v0.7.0+)
 

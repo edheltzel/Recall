@@ -188,9 +188,10 @@ recall onboard --out /path/identity.md  # Write to an explicit path
 
 `recall onboard` creates the L0 tier that `RecallStart` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
-`--project` > global default (`~/.claude/MEMORY/identity.md`). If a file already
-exists, the command asks for confirmation and writes a `.bak` copy before
-overwriting.
+`--project` > the installer-resolved global identity. The global resolver preserves
+an existing user-owned Claude identity; otherwise it selects the canonical file
+under the Recall install root, including relocated installs. If a file already
+exists, the command asks for confirmation and writes a `.bak` copy before overwriting.
 
 The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `RecallStart`
 silently truncates beyond that threshold.
@@ -454,7 +455,7 @@ recall onboard --yes                    # Non-interactive (accept all defaults)
 recall onboard --dry-run                # Show the proposed identity.md, write nothing
 ```
 
-`recall onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
+`recall onboard` runs a short interview that writes the same resolved identity path `RecallStart` reads — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
 
 Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `recall onboard` (write) and the RecallStart hook (read).
 

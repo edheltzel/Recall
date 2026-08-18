@@ -105,10 +105,12 @@ re-learn the basics.
 recall onboard
 ```
 
-A 7-question interview that writes `~/.claude/MEMORY/identity.md`. Run
-it once. Re-run whenever your role, active projects, or working
-preferences change. Use `|` (not `,`) to separate values so a phrase
-like `no force-push, ever` survives as a single entry.
+A 7-question interview that writes the resolved global identity file
+(normally `~/.agents/Recall/MEMORY/identity.md`; Claude may expose the same
+file through its managed `~/.claude/MEMORY/identity.md` link). Run it once.
+Re-run whenever your role, active projects, or working preferences change.
+Use `|` (not `,`) to separate values so a phrase like `no force-push, ever`
+survives as a single entry.
 
 ### Updating
 
@@ -215,7 +217,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ### Claude Code Session Lifecycle
 
-1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your `~/.claude/MEMORY/identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
+1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your resolved global or project-local `identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
 2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`) before falling back to git history. Decisions, learnings, and breadcrumbs are recorded in real-time with `memory_add`.
 3. **End of every turn** — A `Stop` hook fires `RecallExtract.ts`, which self-spawns a background process (non-blocking). It checks `.extraction_tracker.json` and only re-extracts if the conversation has grown meaningfully since last time — so capture is incremental, not just an "on exit" event.
 4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to the `claude` CLI running Haiku (with chunking for large sessions >120K chars). Optional Ollama fallback if the CLI fails. A quality gate rejects low-quality extractions before they're stored.
@@ -246,7 +248,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **Auto-captured session memory** — Claude Code extracts incrementally; Codex and Grok write supported transcript content directly to SQLite; Pi and OpenCode use their documented host adapters
 - **MCP server (`recall-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
-- **Tiered RecallStart (v0.7.0+)** — L0 identity (`~/.claude/MEMORY/identity.md`) + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
+- **Tiered RecallStart (v0.7.0+)** — resolved L0 identity + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
 - **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `recall pin` / `recall unpin` / `recall importance backfill`
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning

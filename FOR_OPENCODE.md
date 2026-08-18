@@ -13,9 +13,10 @@ Recall is a persistent memory framework. It gives you:
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
 4. **Tiered session-start context (v0.7.0+)** — L0 identity (`identity.md`) + L1 top 12 records by importance. Review both at session start
 
-The L0 tier reads from `~/.claude/MEMORY/identity.md` (or project-local
-`./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set). If the
-user has never written one, recommend `recall onboard` via Bash to create it.
+The L0 tier reads the installer-resolved global identity (normally
+`~/.agents/Recall/MEMORY/identity.md`), a project-local
+`./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set. If the user
+has never written one, recommend `recall onboard` via Bash to create it.
 
 ## Your MCP Tools
 
@@ -159,7 +160,7 @@ OpenCode first.
 1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Context for agents** — Before spawning subagents via `@agent`, call `recall-memory_context_for_agent`
-4. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
+4. **Onboarding check** — At session start, if the L0 identity tier is empty, suggest `recall onboard` once. Do not nag on subsequent turns.
 5. **Never store secrets** — `recall-memory_memory_add` and `recall-memory_memory_dump` persist content verbatim into `recall.db` (and automatic extraction captures session text), and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 6. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
