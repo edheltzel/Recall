@@ -155,7 +155,7 @@ loa_show({ id: 1 })
 
 ## memory_dump
 
-Persist an explicitly supplied conversation session into SQLite. Claude's native adapter can discover its current transcript; other hosts must supply visible messages instead of relying on an assumed private transcript format.
+Persist an explicitly supplied conversation session into SQLite. Claude, OpenCode, and Pi have native transcript discovery; other hosts must supply visible messages instead of relying on an assumed private transcript format.
 
 **Parameters**
 
@@ -164,11 +164,11 @@ Persist an explicitly supplied conversation session into SQLite. Claude's native
 | title | string | yes | — | Descriptive title for this session dump |
 | project | string | no | — | Override the auto-detected project name |
 | session_id | string | no | generated | Stable session identifier supplied by the host |
-| source | string | no | `mcp` | Host source: `claude`, `opencode`, `pi`, `codex`, or `mcp` |
+| source | string | no | `mcp` | Host source: `claude`, `opencode`, `pi`, `codex`, `grok`, `jcode`, or `mcp` |
 | messages | array | no | — | Explicit `{ role, content, timestamp? }` messages. Required when the host has no native transcript adapter. |
 | skip_fabric | boolean | no | true | Skip Fabric processing (faster; uses a basic summary instead of `extract_wisdom`) |
 
-**Returns:** Summary of records imported: message count, decisions, learnings, and breadcrumbs extracted from the session.
+**Returns:** The session ID, source, imported message count, and LoA entry ID when a summary was created.
 
 ```js
 memory_dump({
@@ -183,6 +183,8 @@ memory_dump({
 ```
 
 `memory_dump` is an explicit operation, not lifecycle auto-capture. MCP has no portable event contract for session stop, session start, or pre-compaction.
+
+When `session_id` already belongs to lifecycle capture, a dump from the same source is supplemental: Recall preserves lifecycle-owned rows and their automatic summary. A conflicting source is rejected rather than taking over the session.
 
 ---
 

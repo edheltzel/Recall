@@ -77,6 +77,7 @@ import {
 	expectedEmbeddingMarker,
 } from "./lib/embedding-marker.js";
 import {
+	ensureVecIndexSynced,
 	isVecAvailable,
 	knnSearch,
 	withReadSnapshot,

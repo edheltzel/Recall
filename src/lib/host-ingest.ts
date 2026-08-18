@@ -835,7 +835,9 @@ function prepareBatchTerminal(
     previousMessageId: existingRow.snapshot_max_message_id,
   } : undefined;
   const preserveExisting = Boolean(!empty && existing && stats.pruned > 0);
-  const afterMessageId = preserveExisting ? existing?.previousMessageId : null;
+  const afterMessageId: number | null = preserveExisting
+    ? existing!.previousMessageId
+    : null;
   const params = [afterMessageId, afterMessageId] as const;
   let currentExtract = '';
   if (empty) {

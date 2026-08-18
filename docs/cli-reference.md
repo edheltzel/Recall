@@ -396,6 +396,11 @@ What repair covers:
   sync triggers (the classic symptom: search silently returns nothing on an
   un-migrated database) are recreated from the canonical schema DDL and then
   rebuilt.
+- **Lifecycle message publication.** Pending lifecycle generations are checked
+  separately because their searchable rows are activated by a publication
+  pointer. With `--execute`, repair advances their FTS publication and semantic
+  invalidations in bounded batches. If work remains after that bounded pass,
+  repair exits nonzero so it can be retried safely.
 - **Re-embedding.** Rows expected to carry embeddings (`loa_entries`,
   `decisions`, `learnings`, assistant `messages`) that have none are
   re-embedded when the Ollama embedding service is available and the row has
@@ -455,7 +460,7 @@ recall onboard --yes                    # Non-interactive (accept all defaults)
 recall onboard --dry-run                # Show the proposed identity.md, write nothing
 ```
 
-`recall onboard` runs a short interview that writes the same resolved identity path `RecallStart` reads — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
+`recall onboard` runs a short interview that writes the same resolved identity path `RecallStart` reads — the L0 tier of tiered RecallStart. L0 is the always-loaded slice on hosts with supported session-start injection: your role, projects, tools, and working preferences. Without it, those sessions have to re-learn the basics from search.
 
 Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `recall onboard` (write) and the RecallStart hook (read).
 
@@ -495,3 +500,6 @@ active `dedup_lineage` (status `marked`/`deleted`), even when it otherwise
 matches the retention rule above — deleting a survivor would orphan the
 duplicates marked under it. Withheld rows are counted and reported in the
 summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
+
+Prune also fails closed before mutation when the lifecycle schema is not ready.
+If it reports `RETRYABLE`, run `recall init` and retry the same command.
