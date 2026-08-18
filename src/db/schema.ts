@@ -513,10 +513,7 @@ CREATE INDEX IF NOT EXISTS idx_dedup_lineage_survivor
   ON dedup_lineage(survivor_table, survivor_id);
 `;
 
-export const PUBLISHED_MESSAGES_SCHEMA = `
-DROP VIEW IF EXISTS active_host_ingest_messages;
-DROP VIEW IF EXISTS published_messages;
-CREATE VIEW active_host_ingest_messages AS
+export const ACTIVE_HOST_INGEST_MESSAGES_VIEW_SCHEMA = `CREATE VIEW active_host_ingest_messages AS
 SELECT stored.source, stored.session_id, stored.message_key,
   stored.message_id, stored.source_position
 FROM host_ingest_messages AS stored
@@ -538,9 +535,9 @@ FROM host_ingest_generation_messages AS generated
 JOIN host_ingest_state AS state
   ON state.active_generation = generated.generation_id
  AND state.source = generated.source
- AND state.session_id = generated.session_id;
+ AND state.session_id = generated.session_id`;
 
-CREATE VIEW IF NOT EXISTS published_messages AS
+export const PUBLISHED_MESSAGES_VIEW_SCHEMA = `CREATE VIEW published_messages AS
 SELECT message.* FROM messages AS message
 WHERE (message.host_ingest_token IS NULL OR EXISTS (
     SELECT 1 FROM host_ingest_messages AS stored
@@ -567,7 +564,13 @@ JOIN host_ingest_state AS state
  AND state.session_id = generated.session_id
 WHERE generated.message_id IS NOT NULL
   AND generated.content IS NOT NULL
-  AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL);
+  AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)`;
+
+export const PUBLISHED_MESSAGES_SCHEMA = `
+DROP VIEW IF EXISTS active_host_ingest_messages;
+DROP VIEW IF EXISTS published_messages;
+${ACTIVE_HOST_INGEST_MESSAGES_VIEW_SCHEMA};
+${PUBLISHED_MESSAGES_VIEW_SCHEMA};
 `;
 
 // Per-source-table FTS5 DDL. Single source of truth: the CREATE_FTS /

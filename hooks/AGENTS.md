@@ -15,7 +15,7 @@ Standalone scripts that hosts run across a session lifecycle, plus cron jobs tha
 - `RecallBatchExtract.ts` — cron (batch-extract sessions missed during crashes)
 - `RecallTelosSync.ts` — cron (sync Telos goals/projects into memory)
 - `extract_prompt.md` — extraction prompt template (copied to `~/.claude/MEMORY/`)
-- `grok/RecallLifecycle.json` — installer-owned global Grok capture events; invokes the built `recall host-hook grok` command
+- `grok/RecallLifecycle.json` — installer-owned global Grok capture events; install renders the resolved database path into each `recall host-hook grok` command
 - `lib/` — shared host-neutral hook helpers; `lib/hosts/` owns native lifecycle payloads, paths, commands, authentication, and extraction providers
 
 TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. The Grok descriptor is copied to `~/.agents/Recall/grok/hooks/` and linked into `~/.grok/hooks/`.

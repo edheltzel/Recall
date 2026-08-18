@@ -150,11 +150,18 @@ printf '%s' "$payload" | bun ${JSON.stringify(join(repoRoot, 'dist', 'index.js')
   runLifecycleHelper('recall_install_grok_platform', env);
   const installedHook = join(testGrokHome, 'hooks', 'RecallLifecycle.json');
   if (!existsSync(installedHook)) throw new Error('Recall Grok lifecycle hook was not installed');
+  const hookConfig = JSON.parse(readFileSync(installedHook, 'utf-8')) as {
+    hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> };
+  };
+  const hookCommand = hookConfig.hooks.Stop[0].hooks[0].command;
+  if (!hookCommand.includes('RECALL_DB_PATH=')) {
+    throw new Error(`Recall Grok hook did not pin its database path: ${hookCommand}`);
+  }
   const inspect = parseJson<{
     hooks?: Array<{ event?: string; target?: string; source?: { type?: string; path?: string } }>;
   }>(runGrok(['inspect', '--json'], env), 'grok inspect');
   const installedHooks = inspect.hooks?.filter(hook =>
-    hook.target === 'recall host-hook grok'
+    hook.target === hookCommand
       && hook.source?.type === 'user'
       && hook.source.path === join(testGrokHome, 'hooks')
   ) ?? [];
@@ -185,7 +192,7 @@ context_window = 16000
       hooks?: Array<{ target?: string; source?: { path?: string } }>;
     }>(runGrok(['inspect', '--json'], env), 'grok inspect before headless run');
     if (!effective.hooks?.some(hook =>
-      hook.target === 'recall host-hook grok' && hook.source?.path === join(testGrokHome, 'hooks')
+      hook.target === hookCommand && hook.source?.path === join(testGrokHome, 'hooks')
     )) {
       throw new Error(`Recall Grok hook was absent in the run configuration: ${JSON.stringify(effective.hooks)}`);
     }
@@ -288,7 +295,7 @@ context_window = 16000
   );
   if (existsSync(installedHook)) throw new Error('Recall Grok hook file survived uninstall');
   if (afterRemoval.hooks?.some(hook =>
-    hook.target === 'recall host-hook grok' && hook.source?.path === join(testGrokHome, 'hooks')
+    hook.target === hookCommand && hook.source?.path === join(testGrokHome, 'hooks')
   )) {
     throw new Error('Recall Grok hook registration survived uninstall');
   }

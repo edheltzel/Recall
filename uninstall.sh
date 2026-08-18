@@ -63,6 +63,11 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ "$PURGE" == "true" ]] && [[ "$SKIP_GROK" == "true" ]]; then
+  log_error "--skip-grok cannot be combined with --purge because purge removes its managed hook target"
+  exit 1
+fi
+
 # Dry-run wrapper: when DRY_RUN is true, narrate the mutation instead of
 # executing it. Preserves quoted args by passing through "$@".
 run() {

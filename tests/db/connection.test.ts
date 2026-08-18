@@ -120,6 +120,32 @@ describe('connection', () => {
       expect(result.path).toBe(testDbPath);
     });
 
+    test('repairs stale publication views once and leaves current views unchanged', () => {
+      closeDb();
+      const raw = new Database(testDbPath);
+      raw.exec(`
+        DROP VIEW IF EXISTS published_messages;
+        CREATE VIEW published_messages AS SELECT * FROM messages WHERE 0;
+      `);
+      raw.close();
+
+      initDb();
+      const repaired = getDb();
+      const definition = repaired.prepare(`
+        SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'published_messages'
+      `).get() as { sql: string };
+      expect(definition.sql).toContain('host_ingest_generation_messages');
+      const repairedVersion = (repaired.prepare('PRAGMA schema_version').get() as {
+        schema_version: number;
+      }).schema_version;
+
+      closeDb();
+      initDb();
+      expect((getDb().prepare('PRAGMA schema_version').get() as {
+        schema_version: number;
+      }).schema_version).toBe(repairedVersion);
+    });
+
     test('succeeds on a pre-migration DB (regresses the v0.7.0 -> v0.7.11 upgrade bug)', () => {
       // Regression for the pre-0.7.11 ordering bug in initDb: CREATE_INDEXES
       // ran before applyMigrations, so any DB still at schema v7 blew up on

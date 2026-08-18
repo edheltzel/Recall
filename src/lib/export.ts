@@ -138,9 +138,10 @@ export function toExportRow(table: string, row: ExportRow): ExportRow {
 export function collectTableRows(
   db: Database,
   table: ExportTable,
-  batchSize: number = SQLITE_SAFE_CHUNK_SIZE
+  batchSize: number = SQLITE_SAFE_CHUNK_SIZE,
+  source: 'published' | 'physical' = 'published'
 ): ExportRow[] {
-  const sourceTable = publishedRecordTable(table);
+  const sourceTable = source === 'published' ? publishedRecordTable(table) : table;
   const hasId = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
     .some(column => column.name === 'id');
   const cursor = hasId ? 'id' : 'rowid';
@@ -176,10 +177,13 @@ export function collectExportData(db: Database): ExportData {
  * explicit 'unknown' key, which is always present (even at zero) so consumers
  * never have to infer it.
  */
-export function buildProvenanceCounts(db: Database): Record<string, Record<string, number>> {
+export function buildProvenanceCounts(
+  db: Database,
+  source: 'published' | 'physical' = 'published'
+): Record<string, Record<string, number>> {
   const counts: Record<string, Record<string, number>> = {};
   for (const table of PROVENANCE_TABLES) {
-    const sourceTable = publishedRecordTable(table);
+    const sourceTable = source === 'published' ? publishedRecordTable(table) : table;
     const rows = db.prepare(
       `SELECT COALESCE(provenance, 'unknown') AS p, COUNT(*) AS c FROM ${sourceTable} GROUP BY COALESCE(provenance, 'unknown')`
     ).all() as Array<{ p: string; c: number }>;
@@ -196,9 +200,10 @@ export function buildManifest(
   tables: string[],
   options: { includesEmbeddings: boolean; createdAt: Date }
 ): ExportManifest {
+  const source = format === 'sql' || format === 'sqlite' ? 'physical' : 'published';
   const counts: Record<string, number> = {};
   for (const table of tables) {
-    const sourceTable = publishedRecordTable(table);
+    const sourceTable = source === 'published' ? publishedRecordTable(table) : table;
     counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${sourceTable}`).get() as { c: number }).c;
   }
   return {
@@ -208,7 +213,7 @@ export function buildManifest(
     format,
     tables,
     counts,
-    provenance_counts: buildProvenanceCounts(db),
+    provenance_counts: buildProvenanceCounts(db, source),
     includes_embeddings: options.includesEmbeddings,
   };
 }
@@ -312,7 +317,12 @@ export function renderSqlDump(db: Database, manifest: ExportManifest): string {
     const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
       .map(c => c.name);
     const columnList = columns.map(c => `"${c}"`).join(', ');
-    for (const row of collectTableRows(db, table as ExportTable)) {
+    for (const row of collectTableRows(
+      db,
+      table as ExportTable,
+      SQLITE_SAFE_CHUNK_SIZE,
+      'physical'
+    )) {
       const values = columns.map(c => sqlQuote(row[c])).join(', ');
       lines.push(`INSERT INTO "${table}" (${columnList}) VALUES (${values});`);
     }

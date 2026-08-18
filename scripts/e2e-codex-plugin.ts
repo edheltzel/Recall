@@ -514,7 +514,12 @@ stream_max_retries = 0
           (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS first_prompt,
           (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS second_prompt,
           (SELECT COUNT(*) FROM published_messages
-             WHERE session_id = ? AND content LIKE '# AGENTS.md instructions%') AS injected_instructions
+             WHERE session_id = ? AND (
+               content LIKE '# AGENTS.md instructions%'
+               OR content LIKE '<recommended_plugins>%'
+               OR content LIKE '<environment_context>%'
+               OR content LIKE '<user_instructions>%'
+             )) AS injected_instructions
       `)
       .get(
         sessionId,
@@ -622,7 +627,12 @@ stream_max_retries = 0
             (SELECT COUNT(*) FROM loa_entries
              WHERE session_id = ? AND tags LIKE 'automatic-capture,%') AS automatic_extracts,
             (SELECT COUNT(*) FROM published_messages
-             WHERE session_id = ? AND content LIKE '# AGENTS.md instructions%') AS injected_instructions,
+             WHERE session_id = ? AND (
+               content LIKE '# AGENTS.md instructions%'
+               OR content LIKE '<recommended_plugins>%'
+               OR content LIKE '<environment_context>%'
+               OR content LIKE '<user_instructions>%'
+             )) AS injected_instructions,
             (SELECT message_count FROM loa_entries
              WHERE session_id = ? AND description = 'Explicit memory dump.') AS explicit_message_count
         `)
