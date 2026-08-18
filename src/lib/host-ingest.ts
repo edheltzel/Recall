@@ -1292,7 +1292,7 @@ function activatePreparedGeneration(
         INSERT INTO loa_entries (
           title, description, fabric_extract, snapshot_max_message_id,
           session_id, project, tags, message_count, importance, provenance, source_ids
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 8, 'extracted', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 6, 'extracted', ?)
       `).run(
         terminal.title,
         terminal.description,

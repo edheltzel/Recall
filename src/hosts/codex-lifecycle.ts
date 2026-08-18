@@ -30,6 +30,21 @@ function messageText(content: unknown): string {
     .join('\n');
 }
 
+// Codex injects its own instruction blocks as `response_item` role=user turns
+// at session start and again after compaction (the ~20 KB `# AGENTS.md
+// instructions for <cwd>` payload, plus the environment/user-instruction
+// wrappers). Recall must not store these as verbatim user memory; the typed
+// prompt survives as its own user turn (finding F2).
+const INJECTED_USER_PREFIXES = [
+  '# AGENTS.md instructions for ',
+  '<environment_context>',
+  '<user_instructions>',
+];
+
+function isInjectedUserInstruction(text: string): boolean {
+  return INJECTED_USER_PREFIXES.some(prefix => text.startsWith(prefix));
+}
+
 function containsSubagentMarker(value: unknown, depth = 0): boolean {
   if (depth > 5 || !isObject(value)) return false;
   for (const [key, child] of Object.entries(value)) {
@@ -70,6 +85,7 @@ export function parseCodexRollout(raw: string): ParsedCodexRollout {
     if (role !== 'user' && role !== 'assistant') continue;
     const content = messageText(payload.content);
     if (!content.trim()) continue;
+    if (role === 'user' && isInjectedUserInstruction(content)) continue;
     messages.push({
       role,
       content,

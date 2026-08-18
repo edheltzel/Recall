@@ -132,19 +132,21 @@ function sweepExpiredBreadcrumbs(): void {
 }
 
 // ─── Column presence probe ──────────────────────────────────────────
-// Gracefully handle older databases that haven't run the importance migration.
-// If the column doesn't exist yet, fall back to creation-order ranking.
-function hasImportanceColumn(table: string): boolean {
+// Gracefully handle older databases that haven't run later migrations.
+// Reads the whole column set in one PRAGMA so a caller can check several
+// columns without reopening the database; an unreadable table yields an empty
+// set (fall back to creation-order ranking, no automatic-capture filter).
+function tableColumns(table: string): Set<string> {
   try {
     const { Database } = require('bun:sqlite');
     const dbPath = getDbPath();
-    if (!existsSync(dbPath)) return false;
+    if (!existsSync(dbPath)) return new Set();
     const db = new Database(dbPath, { readonly: true });
     const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     db.close();
-    return rows.some(r => r.name === 'importance');
+    return new Set(rows.map(r => r.name));
   } catch {
-    return false;
+    return new Set();
   }
 }
 
@@ -181,16 +183,26 @@ const TABLE_PRIORITY: Record<L1Row['table'], number> = {
 };
 
 function fetchLoa(project: string | undefined, limit: number): L1Row[] {
-  const hasImp = hasImportanceColumn('loa_entries');
+  const columns = tableColumns('loa_entries');
+  const hasImp = columns.has('importance');
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
-  const sql = project
-    ? `SELECT id, title, description, fabric_extract, project,
-              ${hasImp ? 'importance' : '8 AS importance'}, created_at
-       FROM loa_entries WHERE project = ? ORDER BY ${orderBy} LIMIT ?`
-    : `SELECT id, title, description, fabric_extract, project,
-              ${hasImp ? 'importance' : '8 AS importance'}, created_at
-       FROM loa_entries ORDER BY ${orderBy} LIMIT ?`;
-  const params = project ? [project, limit] : [limit];
+  const impSelect = hasImp ? 'importance' : '8 AS importance';
+  // Keep automatic Codex/Grok lifecycle captures out of the curated L1 pool so
+  // their template summaries never take the reserved LoA slots (finding F1).
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (project) {
+    conditions.push('project = ?');
+    params.push(project);
+  }
+  if (columns.has('tags')) {
+    conditions.push(`(tags IS NULL OR tags NOT LIKE 'automatic-capture,%')`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+  const sql = `SELECT id, title, description, fabric_extract, project,
+              ${impSelect}, created_at
+       FROM loa_entries ${where} ORDER BY ${orderBy} LIMIT ?`;
   const rows = queryDb(sql, params);
   return rows.map(r => ({
     table: 'loa' as const,
@@ -203,7 +215,7 @@ function fetchLoa(project: string | undefined, limit: number): L1Row[] {
 }
 
 function fetchDecisions(project: string | undefined, limit: number): L1Row[] {
-  const hasImp = hasImportanceColumn('decisions');
+  const hasImp = tableColumns('decisions').has('importance');
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
   const base = `SELECT id, decision, reasoning, project,
                        ${hasImp ? 'importance' : '5 AS importance'}, created_at
@@ -225,7 +237,7 @@ function fetchDecisions(project: string | undefined, limit: number): L1Row[] {
 }
 
 function fetchLearnings(project: string | undefined, limit: number): L1Row[] {
-  const hasImp = hasImportanceColumn('learnings');
+  const hasImp = tableColumns('learnings').has('importance');
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
   const sql = project
     ? `SELECT id, problem, solution, project,

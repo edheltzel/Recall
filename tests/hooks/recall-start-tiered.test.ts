@@ -154,6 +154,37 @@ describe('RecallStart — L1 assembly', () => {
     expect(loaCount).toBeGreaterThanOrEqual(2);
   });
 
+  test('excludes automatic-capture LoA from L1 and the reserved slots', async () => {
+    const project = 'automatic-capture-test';
+    // Curated entries that legitimately deserve the reserved LoA slots.
+    createLoaEntry({ title: 'Curated wisdom X', fabric_extract: 'x content', project });
+    createLoaEntry({ title: 'Curated wisdom Y', fabric_extract: 'y content', project });
+
+    // Automatic Codex/Grok lifecycle capture: template summary, tagged
+    // automatic-capture. Seeded at importance 8 to prove exclusion holds even at
+    // the curated tier (the host-ingest UPDATE path never lowers existing rows).
+    const { getDb } = await import('../../src/db/connection');
+    getDb().prepare(`
+      INSERT INTO loa_entries (title, description, fabric_extract, project, tags, importance, provenance)
+      VALUES (?, ?, ?, ?, 'automatic-capture,codex', 8, 'extracted')
+    `).run(
+      'Codex session 01a016bb',
+      'Automatic terminal extraction from codex lifecycle capture.',
+      'template body',
+      project
+    );
+
+    const { assembleL1 } = await import('../../hooks/RecallStart');
+    const rows = assembleL1(project);
+
+    // The automatic entry must never surface in L1 (it would otherwise take a
+    // reserved LoA slot ahead of the informative curated entries).
+    expect(rows.some(r => r.table === 'loa' && r.content.includes('Codex session'))).toBe(false);
+    const loaContents = rows.filter(r => r.table === 'loa').map(r => r.content);
+    expect(loaContents.some(c => c.includes('Curated wisdom X'))).toBe(true);
+    expect(loaContents.some(c => c.includes('Curated wisdom Y'))).toBe(true);
+  });
+
   test('tie-breaks by table priority (loa > decisions > learnings > breadcrumbs)', async () => {
     // Seed one of each at the same importance
     addDecision({
