@@ -27,12 +27,11 @@ import {
   lstatSync,
   readlinkSync,
 } from 'fs';
-import { join, dirname, isAbsolute } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { claudePaths } from '../hosts/claude.js';
+import { claudePaths, resolveClaudeInstallLayout } from '../hosts/claude.js';
 import { createInterface, type Interface } from 'readline';
 import { detectProject } from '../lib/project.js';
-import { getRecallHome } from '../lib/runtime-paths.js';
 
 // L0 identity files are silently truncated at load by hooks/RecallStart.ts.
 // Mirror that constant here so the onboarding UX can warn the user before the
@@ -310,9 +309,9 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 export function writeIdentityAtomic(
   outPath: string,
   markdown: string,
-  managedPaths = resolveManagedIdentityPaths(),
+  managedPaths = resolveClaudeInstallLayout(homedir()).identity,
 ): void {
-  const destination = outPath === managedPaths.claude
+  const destination = outPath === managedPaths.alias
     && existsSync(outPath)
     && lstatSync(outPath).isSymbolicLink()
     && readlinkSync(outPath) === managedPaths.canonical
@@ -321,31 +320,6 @@ export function writeIdentityAtomic(
   const tmp = destination + '.tmp';
   writeFileSync(tmp, markdown, 'utf-8');
   renameSync(tmp, destination);
-}
-
-export function resolveManagedIdentityPaths(
-  env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
-): { claude: string; canonical: string } {
-  const claude = claudePaths(home);
-  let installedCanonical: string | undefined;
-  try {
-    if (existsSync(claude.guide) && lstatSync(claude.guide).isSymbolicLink()) {
-      const guideTarget = readlinkSync(claude.guide);
-      const installRoot = dirname(dirname(guideTarget));
-      if (isAbsolute(guideTarget)
-        && guideTarget === join(installRoot, 'claude', 'Recall_GUIDE.md')) {
-        installedCanonical = join(installRoot, 'MEMORY', 'identity.md');
-      }
-    }
-  } catch {
-    installedCanonical = undefined;
-  }
-  const installRoot = env.RECALL_DIR || getRecallHome(env);
-  return {
-    claude: join(claude.memory, 'identity.md'),
-    canonical: installedCanonical ?? join(installRoot, 'MEMORY', 'identity.md'),
-  };
 }
 
 export async function runOnboard(options: OnboardOptions = {}): Promise<void> {

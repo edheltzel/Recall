@@ -22,9 +22,9 @@ import {
   splitMultiline,
   exceedsMaxL0,
   writeIdentityAtomic,
-  resolveManagedIdentityPaths,
   type IdentityAnswers,
 } from '../../src/commands/onboard';
+import { resolveClaudeInstallLayout } from '../../src/hosts/claude';
 
 const fullAnswers: IdentityAnswers = {
   name: 'Ed Heltzel',
@@ -202,16 +202,16 @@ describe('exceedsMaxL0', () => {
 // ─── Integration: atomic write via rename ────────────────────────────
 describe('identity file write (integration)', () => {
   test('resolves installer-relocated identity ownership from RECALL_DIR', () => {
-    const paths = resolveManagedIdentityPaths(
+    const paths = resolveClaudeInstallLayout(
+      '/test-home',
       {
         RECALL_DIR: '/relocated/Recall',
         RECALL_HOME: '/runtime/Recall',
       },
-      '/test-home',
     );
 
-    expect(paths).toEqual({
-      claude: '/test-home/.claude/MEMORY/identity.md',
+    expect(paths.identity).toEqual({
+      alias: '/test-home/.claude/MEMORY/identity.md',
       canonical: '/relocated/Recall/MEMORY/identity.md',
     });
   });
@@ -233,10 +233,10 @@ describe('identity file write (integration)', () => {
       symlinkSync(guide, join(claudeDir, 'Recall_GUIDE.md'));
       symlinkSync(canonical, identity);
 
-      const paths = resolveManagedIdentityPaths({}, home);
-      writeIdentityAtomic(identity, '# New\n', paths);
+      const paths = resolveClaudeInstallLayout(home, {});
+      writeIdentityAtomic(identity, '# New\n', paths.identity);
 
-      expect(paths.canonical).toBe(canonical);
+      expect(paths.identity.canonical).toBe(canonical);
       expect(lstatSync(identity).isSymbolicLink()).toBe(true);
       expect(readFileSync(canonical, 'utf-8')).toBe('# New\n');
     } finally {
@@ -267,7 +267,7 @@ describe('identity file write (integration)', () => {
       symlinkSync(canonicalPath, claudePath);
 
       writeIdentityAtomic(claudePath, '# New\n', {
-        claude: claudePath,
+        alias: claudePath,
         canonical: canonicalPath,
       });
 
@@ -288,7 +288,7 @@ describe('identity file write (integration)', () => {
       symlinkSync(targetPath, projectPath);
 
       writeIdentityAtomic(projectPath, '# Identity\n', {
-        claude: join(dir, 'claude-identity.md'),
+        alias: join(dir, 'claude-identity.md'),
         canonical: join(dir, 'canonical-identity.md'),
       });
 
