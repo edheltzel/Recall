@@ -35,7 +35,7 @@ TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from
 
 ## Work Guidance
 
-- Add a hook helper: create `lib/<name>.ts` (standalone).
+- Add a hook helper: create `lib/<name>.ts` (standalone), then add its installed path to `uninstall.sh:RECALL_HOOK_LIB_FILES`; `tests/install/uninstall.test.ts` audits parity with the recursive installer.
 - Modify extraction: edit `RecallExtract.ts`; the quality gate is `lib/extraction-quality.ts` (requires SUMMARY + MAIN IDEAS).
 - The host-neutral extraction cascade + topic/summary helpers live in `lib/extract-model.ts`; native providers register through `lib/hosts/index.ts`, with Claude-specific behavior in `lib/hosts/claude/extraction-provider.ts`. Reuse the provider interface; don't call a native model command from generic hook code.
 - Mid-session learning loop logic is `lib/insession.ts` (pure/dbPath-injectable: config, cadence, window slice, lock-cooperative extraction). `RecallInSession.ts` is the thin hook wrapper.

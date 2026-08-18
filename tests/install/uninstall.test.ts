@@ -9,10 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -74,6 +77,44 @@ function runUninstall(
     stderr: r.stderr ?? '',
     status: r.status ?? 1,
   };
+}
+
+function runPurge(claudeDir: string, backupBase: string): RunResult {
+  const result = spawnSync(
+    'bash',
+    [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
+    {
+      encoding: 'utf-8',
+      cwd: REPO,
+      input: 'PURGE\n',
+      env: {
+        ...process.env,
+        CLAUDE_DIR: claudeDir,
+        BACKUP_BASE: backupBase,
+        HOME: claudeDir,
+        RECALL_SKIP_BUN_UNLINK: 'true',
+      },
+    },
+  );
+  return {
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    status: result.status ?? 1,
+  };
+}
+
+function hookLibFiles(dir: string, prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const relative = prefix ? join(prefix, entry.name) : entry.name;
+    if (entry.isDirectory()) return hookLibFiles(join(dir, entry.name), relative);
+    return entry.isFile() && entry.name.endsWith('.ts') ? [relative] : [];
+  });
+}
+
+function installedHookFiles(): string[] {
+  return readdirSync(join(REPO, 'hooks'), { withFileTypes: true })
+    .filter(entry => entry.isFile() && /^Recall.*\.ts$/.test(entry.name))
+    .map(entry => entry.name);
 }
 
 function runUninstallIncludingPi(
@@ -188,12 +229,25 @@ describe('uninstall.sh', () => {
     writeFileSync(join(claudeDir, 'hooks', 'RecallTelosSync.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'RecallStart.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'RecallPreCompact.ts'), '// stub');
+    writeFileSync(join(claudeDir, 'hooks', 'RecallInSession.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-lock.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-migration.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-quality.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-semaphore.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'extraction-tracker.ts'), '// stub');
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'pid-utils.ts'), '// stub');
+    const identityHelperCanonical = join(
+      claudeDir,
+      '.agents',
+      'Recall',
+      'shared',
+      'hooks',
+      'lib',
+      'identity-path.ts',
+    );
+    mkdirSync(dirname(identityHelperCanonical), { recursive: true });
+    writeFileSync(identityHelperCanonical, '// shared identity resolver');
+    symlinkSync(identityHelperCanonical, join(claudeDir, 'hooks', 'lib', 'identity-path.ts'));
 
     // Unrelated user hook file — MUST survive
     writeFileSync(join(claudeDir, 'hooks', 'lib', 'my-own-helper.ts'), '// user');
@@ -251,6 +305,12 @@ describe('uninstall.sh', () => {
                 hooks: [{ type: 'command', command: 'bun run /path/RecallPreCompact.ts' }],
               },
             ],
+            PostToolUse: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'bun run /path/RecallInSession.ts' }],
+              },
+            ],
             UserPromptSubmit: [
               {
                 matcher: '',
@@ -302,9 +362,20 @@ This content must be preserved across an uninstall.
     expect(existsSync(join(claudeDir, 'hooks', 'RecallStart.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'RecallTelosSync.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'RecallPreCompact.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallInSession.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'RecallBatchExtract.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'lib', 'extraction-lock.ts'))).toBe(false);
     expect(existsSync(join(claudeDir, 'hooks', 'lib', 'pid-utils.ts'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'hooks', 'lib', 'identity-path.ts'))).toBe(false);
+    expect(existsSync(join(
+      claudeDir,
+      '.agents',
+      'Recall',
+      'shared',
+      'hooks',
+      'lib',
+      'identity-path.ts',
+    ))).toBe(true);
     expect(existsSync(join(claudeDir, 'commands', 'recall'))).toBe(false);
     expect(existsSync(join(claudeDir, 'Recall_GUIDE.md'))).toBe(false);
     expect(existsSync(join(claudeDir, 'MEMORY', 'extract_prompt.md'))).toBe(false);
@@ -319,6 +390,16 @@ This content must be preserved across an uninstall.
     expect(existsSync(join(claudeDir, 'memory.db'))).toBe(true);
     expect(existsSync(backupBase)).toBe(true);
     expect(existsSync(join(backupBase, '20260101_000000'))).toBe(true);
+  });
+
+  test('hook uninstall inventories cover every installed TypeScript file', () => {
+    const uninstall = readFileSync(UNINSTALL, 'utf-8');
+    for (const filename of installedHookFiles()) {
+      expect(uninstall).toContain(`"$CLAUDE_DIR/hooks/${filename}"`);
+    }
+    for (const relative of hookLibFiles(join(REPO, 'hooks', 'lib'))) {
+      expect(uninstall).toContain(`"$CLAUDE_DIR/hooks/lib/${relative}"`);
+    }
   });
 
   test('surgical settings.json filter: removes only Recall entries', () => {
@@ -336,6 +417,7 @@ This content must be preserved across an uninstall.
     expect(commands('Stop').some(c => c.includes('RecallExtract'))).toBe(false);
     expect(commands('SessionStart').some(c => c.includes('RecallStart'))).toBe(false);
     expect(commands('SessionStart').some(c => c.includes('RecallTelosSync'))).toBe(false);
+    expect(commands('PostToolUse').some(c => c.includes('RecallInSession'))).toBe(false);
     // PreCompact key removed entirely (all entries were Recall)
     expect(s.hooks?.PreCompact).toBeUndefined();
 
@@ -487,37 +569,56 @@ Preserve this.
     expect(content).toContain('## After-memory section');
   });
 
-  test('--purge: destroys memory.db and backups, keeps MEMORY/', () => {
-    // Interactive purge confirmation: pipe "PURGE\n" via stdin.
-    const r = spawnSync(
-      'bash',
-      [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
-      {
-        encoding: 'utf-8',
-        cwd: REPO,
-        input: 'PURGE\n',
-        env: {
-          ...process.env,
-          CLAUDE_DIR: claudeDir,
-          BACKUP_BASE: backupBase,
-          HOME: claudeDir,
-          RECALL_SKIP_BUN_UNLINK: 'true',
-        },
-      },
-    );
+  test('--purge: destroys databases and backups while materializing canonical user MEMORY', () => {
+    const recallDir = join(claudeDir, '.agents', 'Recall');
+    const canonicalMemory = join(recallDir, 'MEMORY');
+    const canonicalIdentity = join(canonicalMemory, 'identity.md');
+    const canonicalDistilled = join(canonicalMemory, 'DISTILLED.md');
+    mkdirSync(canonicalMemory, { recursive: true });
+    writeFileSync(canonicalIdentity, '# Canonical identity');
+    writeFileSync(canonicalDistilled, '# Canonical distilled');
+    rmSync(join(claudeDir, 'MEMORY', 'identity.md'));
+    rmSync(join(claudeDir, 'MEMORY', 'DISTILLED.md'));
+    symlinkSync(canonicalDistilled, join(claudeDir, 'MEMORY', 'DISTILLED.md'));
+
+    const r = runPurge(claudeDir, backupBase);
     expect(r.status).toBe(0);
 
     expect(existsSync(join(claudeDir, 'memory.db'))).toBe(false);
+    expect(existsSync(recallDir)).toBe(false);
 
-    // Pre-purge snapshot was written under BACKUP_BASE
-    const entries = require('fs').readdirSync(backupBase) as string[];
-    expect(entries.some(e => e.startsWith('pre_purge_'))).toBe(true);
+    const snapshot = readdirSync(backupBase).find(entry => entry.startsWith('pre_purge_'));
+    expect(snapshot).toBeDefined();
+    expect(readFileSync(join(backupBase, snapshot!, 'MEMORY', 'identity.md'), 'utf-8'))
+      .toBe('# Canonical identity');
+    expect(readFileSync(join(backupBase, snapshot!, 'MEMORY', 'DISTILLED.md'), 'utf-8'))
+      .toBe('# Canonical distilled');
 
-    // Old backup dir gone
     expect(existsSync(join(backupBase, '20260101_000000'))).toBe(false);
 
-    // MEMORY/ preserved even on --purge
-    expect(existsSync(join(claudeDir, 'MEMORY', 'identity.md'))).toBe(true);
+    expect(readFileSync(join(claudeDir, 'MEMORY', 'identity.md'), 'utf-8'))
+      .toBe('# Canonical identity');
+    expect(readFileSync(join(claudeDir, 'MEMORY', 'DISTILLED.md'), 'utf-8'))
+      .toBe('# Canonical distilled');
+    expect(lstatSync(join(claudeDir, 'MEMORY', 'DISTILLED.md')).isSymbolicLink()).toBe(false);
+  });
+
+  test('--purge: preserves a foreign identity and snapshots the canonical copy', () => {
+    const recallDir = join(claudeDir, '.agents', 'Recall');
+    const canonicalIdentity = join(recallDir, 'MEMORY', 'identity.md');
+    mkdirSync(dirname(canonicalIdentity), { recursive: true });
+    writeFileSync(canonicalIdentity, '# Canonical identity');
+    writeFileSync(join(claudeDir, 'MEMORY', 'identity.md'), '# Foreign identity');
+
+    const result = runPurge(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(claudeDir, 'MEMORY', 'identity.md'), 'utf-8'))
+      .toBe('# Foreign identity');
+    const snapshot = readdirSync(backupBase).find(entry => entry.startsWith('pre_purge_'));
+    expect(snapshot).toBeDefined();
+    expect(readFileSync(join(backupBase, snapshot!, 'MEMORY', 'identity.md'), 'utf-8'))
+      .toBe('# Canonical identity');
   });
 
   test('--dry-run: narrates but does not mutate', () => {

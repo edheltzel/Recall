@@ -4,12 +4,13 @@
 #
 # Removes Recall integration from Claude Code, OpenCode, and Pi. By default
 # preserves user data (~/.agents/Recall/ tree — DB, canonical hooks/commands,
-# backups, MEMORY artifacts). Use --purge to destroy everything.
+# backups, MEMORY artifacts). Use --purge to destroy runtime state and databases
+# while retaining user-authored identity and distilled memory.
 #
 # Usage:
 #   ./uninstall.sh                  # preserve-everything default
 #   ./uninstall.sh --dry-run        # show what would change, touch nothing
-#   ./uninstall.sh --purge          # also destroy memory.db + backup tree
+#   ./uninstall.sh --purge          # destroy runtime + DBs; preserve identity/distilled memory
 #   ./uninstall.sh --no-confirm     # non-interactive; prints what was removed
 #   ./uninstall.sh --skip-opencode  # leave OpenCode integration alone
 #   ./uninstall.sh --skip-pi        # leave Pi integration alone
@@ -80,6 +81,7 @@ RECALL_HOOK_FILES=(
   "$CLAUDE_DIR/hooks/RecallTelosSync.ts"
   "$CLAUDE_DIR/hooks/RecallStart.ts"
   "$CLAUDE_DIR/hooks/RecallPreCompact.ts"
+  "$CLAUDE_DIR/hooks/RecallInSession.ts"
   "$CLAUDE_DIR/hooks/RecallClearExtract.ts"
   # Legacy names — kept here so uninstall still cleans up installs that
   # haven't run a Phase-2-aware update.sh yet.
@@ -106,6 +108,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/insession.ts"
   "$CLAUDE_DIR/hooks/lib/pid-utils.ts"
   "$CLAUDE_DIR/hooks/lib/db-path.ts"
+  "$CLAUDE_DIR/hooks/lib/identity-path.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
   "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
   "$CLAUDE_DIR/hooks/lib/session-progress.ts"
@@ -125,7 +128,7 @@ RECALL_HOOK_LIB_FILES=(
 # names so uninstall scrubs both. filter_claude_settings does substring
 # matching, so listing both eras is correct.
 RECALL_HOOK_NAMES=(
-  RecallExtract RecallBatchExtract RecallTelosSync RecallStart RecallPreCompact RecallClearExtract
+  RecallExtract RecallBatchExtract RecallTelosSync RecallStart RecallPreCompact RecallInSession RecallClearExtract
   SessionExtract BatchExtract TelosSync SessionRecall SessionPreCompact ClearExtract
 )
 
@@ -151,13 +154,13 @@ print_summary() {
   _banner warn "Recall Uninstall"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
-  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy ~/.agents/Recall/ tree, including the DB)"
+  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy ~/.agents/Recall/ runtime tree and DB after preserving user MEMORY artifacts)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
   [[ "$SKIP_OMP" == "true" ]] && echo "Skipping: omp"
   echo ""
-  echo "Will REMOVE (symlinks back to ~/.agents/Recall/ — canonical files stay):"
+  echo "Will REMOVE (integration symlinks; canonical runtime files stay unless --purge):"
   echo "  • ~/.claude/commands/Recall/ (legacy, and lowercase ~/.claude/commands/recall/ if present)"
   echo "  • ~/.claude/skills/recall-*/ (all 9 Recall-owned skills)"
   echo "  • ~/.claude/Recall_GUIDE.md"
@@ -177,13 +180,15 @@ print_summary() {
     echo "Will DESTROY (--purge):"
     echo "  • ~/.agents/Recall/recall.db  (your persistent memory database)"
     echo "  • ~/.claude/memory.db  (legacy DB, if still present)"
-    echo "  • ~/.agents/Recall/  (canonical hooks, commands, guides, backups)"
+    echo "  • ~/.agents/Recall/  (canonical runtime files and backups)"
     echo ""
   fi
   echo "Will PRESERVE:"
   if [[ "$PURGE" != "true" ]]; then
     echo "  • ~/.agents/Recall/ (DB, canonical files, backups, MEMORY artifacts)"
     echo "  • ~/.claude/memory.db (legacy DB if it exists)"
+  else
+    echo "  • User-authored identity.md and DISTILLED.md (materialized into ~/.claude/MEMORY/ when safe and included in the pre-purge snapshot)"
   fi
   echo "  • ~/.claude/MEMORY/ (non-Recall artifacts in this Claude-owned directory)"
   echo "  • This source directory (remove with: rm -rf $SCRIPT_DIR)"
@@ -205,11 +210,11 @@ confirm_purge_or_exit() {
     return
   fi
   echo ""
-  log_warn "--purge will permanently destroy memory.db and all backups."
+  log_warn "--purge will permanently destroy the Recall databases, runtime files, and old backups."
   read -p "Type 'PURGE' to confirm: " -r
   echo ""
   if [[ "$REPLY" != "PURGE" ]]; then
-    log_warn "Purge declined — skipping memory.db/backup destruction."
+    log_warn "Purge declined — preserving databases, runtime files, and backups."
     PURGE=false
   fi
 }
@@ -605,12 +610,44 @@ remove_omp() {
 
 # ── Purge ────────────────────────────────────────────────────────────────────
 
+preserve_purge_memory_artifacts() {
+  local pre_purge_dir="$1"
+  local fname canonical alias
+
+  for fname in identity.md DISTILLED.md; do
+    canonical="$RECALL_MEMORY_DIR/$fname"
+    [[ -f "$canonical" ]] || continue
+    alias="$CLAUDE_DIR/MEMORY/$fname"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would snapshot $canonical to $pre_purge_dir/MEMORY/$fname"
+      if [[ ! -e "$alias" && ! -L "$alias" ]] || { [[ -L "$alias" ]] && [[ "$(readlink "$alias")" == "$canonical" ]]; }; then
+        echo "  [dry-run] would materialize $canonical at $alias"
+      fi
+      continue
+    fi
+
+    mkdir -p "$pre_purge_dir/MEMORY"
+    cp -p "$canonical" "$pre_purge_dir/MEMORY/$fname"
+
+    if [[ -L "$alias" ]] && [[ "$(readlink "$alias")" == "$canonical" ]]; then
+      rm -f "$alias"
+      cp -p "$canonical" "$alias"
+    elif [[ ! -e "$alias" && ! -L "$alias" ]]; then
+      mkdir -p "$(dirname "$alias")"
+      cp -p "$canonical" "$alias"
+    fi
+  done
+}
+
 do_purge() {
-  # Snapshot every Recall-owned DB we can find before destroying it. Then
+  # Snapshot every Recall-owned DB and user-authored MEMORY artifact before destroying runtime state. Then
   # remove the install root entirely (preserving the pre_purge_ snapshot
   # under $BACKUP_BASE/pre_purge_$TIMESTAMP/, which lives outside the tree
   # we're about to delete since we capture it first).
   local pre_purge_dir="$BACKUP_BASE/pre_purge_$TIMESTAMP"
+
+  preserve_purge_memory_artifacts "$pre_purge_dir"
 
   # Snapshot canonical DB + sidecars (new layout).
   local canonical_db="$RECALL_DIR/recall.db"
@@ -767,11 +804,11 @@ main() {
       echo "Preserved (remove manually if desired):"
       echo "  • ~/.agents/Recall/ (DB, canonical files, backups)"
       echo "  • ~/.claude/memory.db (legacy DB if not migrated)"
-      echo "  • ~/.claude/MEMORY/ (non-Recall artifacts)"
+      echo "  • ~/.claude/MEMORY/ (user-authored files and surviving managed MEMORY links)"
     else
       echo "Preserved:"
-      echo "  • Pre-purge snapshot at $BACKUP_BASE/pre_purge_$TIMESTAMP/"
-      echo "  • ~/.claude/MEMORY/ (non-Recall artifacts only — our symlinks were removed)"
+      echo "  • Pre-purge database and user MEMORY snapshot at $BACKUP_BASE/pre_purge_$TIMESTAMP/"
+      echo "  • ~/.claude/MEMORY/ (user files, including materialized Recall identity and distilled memory when safe)"
     fi
     echo "  • Source directory at $SCRIPT_DIR (remove with: rm -rf $SCRIPT_DIR)"
   fi
