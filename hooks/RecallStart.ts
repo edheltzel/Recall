@@ -53,11 +53,14 @@ function getIdentityPath(): string | undefined {
   const home = process.env.HOME || process.env.USERPROFILE || '';
   const projectLocal = join(process.cwd(), '.atlas-recall', 'identity.md');
   if (existsSync(projectLocal)) return projectLocal;
-  const recallHome = process.env.RECALL_HOME || join(home, '.agents', 'Recall');
-  const canonicalPath = join(recallHome, 'MEMORY', 'identity.md');
-  if (existsSync(canonicalPath)) return canonicalPath;
-  const legacyClaudePath = join(home, '.claude', 'MEMORY', 'identity.md');
-  if (existsSync(legacyClaudePath)) return legacyClaudePath;
+  if (process.env.RECALL_HOME) {
+    const configuredPath = join(process.env.RECALL_HOME, 'MEMORY', 'identity.md');
+    if (existsSync(configuredPath)) return configuredPath;
+  }
+  const claudeIdentityPath = join(home, '.claude', 'MEMORY', 'identity.md');
+  if (existsSync(claudeIdentityPath)) return claudeIdentityPath;
+  const defaultCanonicalPath = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+  if (existsSync(defaultCanonicalPath)) return defaultCanonicalPath;
   return undefined;
 }
 

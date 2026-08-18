@@ -3,7 +3,7 @@
 // graceful empty-state behavior, and budget enforcement.
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -52,6 +52,37 @@ describe('RecallStart — L0 identity', () => {
     const { buildL0 } = await import('../../hooks/RecallStart');
     expect(buildL0()).toBeUndefined();
     process.env.RECALL_IDENTITY_PATH = original;
+  });
+
+  test('buildL0 prefers the installed Claude identity over stale default state', async () => {
+    const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
+    const originalHome = process.env.HOME;
+    const originalRecallHome = process.env.RECALL_HOME;
+    const home = join(tempIdentityDir, 'relocated-home');
+    const canonical = join(tempIdentityDir, 'relocated', 'Recall', 'MEMORY', 'identity.md');
+    const claudeIdentity = join(home, '.claude', 'MEMORY', 'identity.md');
+    const staleDefault = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+    mkdirSync(join(home, '.claude', 'MEMORY'), { recursive: true });
+    mkdirSync(join(home, '.agents', 'Recall', 'MEMORY'), { recursive: true });
+    mkdirSync(join(tempIdentityDir, 'relocated', 'Recall', 'MEMORY'), { recursive: true });
+    writeFileSync(canonical, '# Relocated identity\n');
+    writeFileSync(staleDefault, '# Stale default identity\n');
+    symlinkSync(canonical, claudeIdentity);
+    delete process.env.RECALL_IDENTITY_PATH;
+    delete process.env.RECALL_HOME;
+    process.env.HOME = home;
+
+    try {
+      const { buildL0 } = await import('../../hooks/RecallStart');
+      expect(buildL0()).toContain('Relocated identity');
+      expect(buildL0()).not.toContain('Stale default identity');
+    } finally {
+      process.env.RECALL_IDENTITY_PATH = originalIdentityPath;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalRecallHome === undefined) delete process.env.RECALL_HOME;
+      else process.env.RECALL_HOME = originalRecallHome;
+    }
   });
 });
 
