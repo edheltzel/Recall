@@ -183,8 +183,8 @@ recall doctor                 # Full health check — database, MCP, hooks, embe
 
 ### Recommended: seed your L0 identity tier
 
-Recall's `RecallStart` hook injects a small user-authored identity file at
-the top of every session (the L0 tier). Without it, the L0 section is empty
+Recall's supported session-start integrations inject a small user-authored
+identity file at the top of a session (the L0 tier). Without it, the L0 section is empty
 and the v2 tiered context is only half-populated.
 
 ```bash

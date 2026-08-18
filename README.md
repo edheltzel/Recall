@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected at session start, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
+Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected where a host supports session-start context, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
 
 
 > **A SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions where a host lifecycle adapter exists, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills span Claude Code, OpenCode, Pi, Codex, Grok, and JCode from one local database; lifecycle automation is host-specific.
@@ -42,7 +42,7 @@ Install once, then forget about it. Recall runs silently in the background:
 
 - **Auto-extraction** — sessions are parsed into structured summaries incrementally as you work (Stop hook fires at the end of every turn, not only when you exit)
 - **Full-text + semantic search** — find anything from any past session
-- **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically
+- **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically on supported hosts
 - **Zero friction** — no workflow changes, no manual steps
 - **MCP integration** — your agent searches memory automatically through standard MCP tools
 
@@ -68,7 +68,10 @@ recall install
 npx --package=recall-memory recall install
 ```
 
-`recall install` runs the canonical setup (MCP server, hooks, agent skills, guides) for all detected agents. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+`recall install` runs the canonical setup (MCP server, hooks, agent skills,
+guides) for installer-managed detected hosts. Codex uses the native plugin path
+below. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun`
+shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
 <details>
 <summary>Install from source instead</summary>
@@ -96,8 +99,8 @@ Claude Code can additionally install Recall as a native plugin, which takes over
 
 ### First run: set your identity
 
-Recall's tiered RecallStart injects a small identity file at the top
-of every session (the L0 tier — your role, projects, tools, and working
+Recall's supported session-start integrations inject a small identity file at
+the top of a session (the L0 tier — your role, projects, tools, and working
 preferences). Without it, L0 is empty and every new session has to
 re-learn the basics.
 
@@ -129,7 +132,7 @@ Installed from npm? Use `recall update` (same flags) — or `bun install -g reca
 ```bash
 ./uninstall.sh --dry-run   # preview, touch nothing
 ./uninstall.sh             # surgical remove; preserves ~/.agents/Recall/ (DB + backups)
-./uninstall.sh --purge     # also destroy ~/.agents/Recall/ and any legacy DB (confirmed)
+./uninstall.sh --purge     # destroy runtime + DBs; preserve identity/distilled snapshots (confirmed)
 ```
 
 Installed from npm? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
@@ -138,10 +141,10 @@ Installed from npm? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--pu
 
 ## How Recall Works
 
-Recall sits between your agent and a single SQLite database. A **WRITE path** captures sessions as you work; a **READ path** injects memory back into every new session. The diagram below shows both flows side-by-side, with the line styles in the legend distinguishing capture (solid), recall (dashed purple), and the write-only markdown mirror (dashed gray).
+Recall sits between your agent and a single SQLite database. A **WRITE path** captures sessions where a host exposes a supported lifecycle surface; a **READ path** injects memory where a host supports session-start context. The diagram below shows the shared flows side-by-side, with the line styles in the legend distinguishing capture (solid), recall (dashed purple), and the write-only markdown mirror (dashed gray).
 
 <p align="center">
-  <img src="assets/how-recall-works.png" alt="How Recall Works — write path captures sessions into SQLite, read path injects them back into the agent on next session" width="100%">
+  <img src="assets/how-recall-works.png" alt="How Recall Works — supported write paths capture sessions into SQLite, and supported read paths inject them on a later session" width="100%">
 </p>
 
 <details>

@@ -87,7 +87,8 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | host_ingest_state | Per-host transcript reference, digest, watermark, active generation, and terminal state | No |
 | host_ingest_messages | Persistent lifecycle message keys linked to inserted message rows | No |
 | host_ingest_generations | Lifecycle generation identity and publication status | No |
-| host_ingest_generation_messages | Scrubbed generation records activated by one checkpoint pointer | No |
+| host_ingest_generation_messages | Scrubbed generation records activated by one checkpoint pointer | Yes |
+| host_ingest_embedding_invalidations | Pending semantic-index cleanup for an activated lifecycle generation | No |
 | loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
 | loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
@@ -104,9 +105,9 @@ All FTS5-indexed tables have automatic sync triggers.
 
 Portable JSON, Markdown, and SQL exports contain the seven durable memory and
 deduplication tables plus `host_ingest_generations`,
-`host_ingest_generation_messages`, `host_ingest_state`,
-`host_ingest_messages`, and `loa_message_sources`. SQLite exports contain the
-full database.
+`host_ingest_generation_messages`, `host_ingest_embedding_invalidations`,
+`host_ingest_state`, `host_ingest_messages`, and `loa_message_sources`. SQLite
+exports contain the full database.
 
 The `importance` column was added in schema migration 7→8 (v0.7.0) on four
 tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1
@@ -134,7 +135,7 @@ candidates are report-only.
 
 ## Tiered RecallStart (v0.7.0+)
 
-The `RecallStart` hook injects two tiers at the top of every session:
+The `RecallStart` hook injects two tiers at the top of supported sessions:
 
 | Tier | Source | Cap | Purpose |
 |------|--------|-----|---------|
@@ -183,6 +184,13 @@ graph LR
 | Keyword | `recall search "query"` | memory_search | SQLite FTS5. Supports AND, OR, NOT, prefix*, "exact phrases", hard table filters (`-t` / `table`), and soft type boosts (`--bias-type` / `bias_type`) |
 | Semantic | `recall semantic "query"` | — | Ollama embedding → cosine similarity against stored vectors |
 | Hybrid | `recall "query"` | memory_hybrid_search | Both combined via Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama unavailable |
+
+Lifecycle messages use a separate publication-aware FTS index so a replacement
+generation never leaks partial rows into search. A search advances at most one
+bounded repair page; if publication is still pending, it returns available
+results with a `RETRYABLE` warning. MCP search tools mark that response as an
+error when no complete result is available. Retry the search or run
+`recall repair --execute` to advance the remaining work.
 
 ## Extraction Pipeline
 
