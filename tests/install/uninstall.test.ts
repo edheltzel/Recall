@@ -83,7 +83,11 @@ function runUninstall(
   };
 }
 
-function runPurge(claudeDir: string, backupBase: string): RunResult {
+function runPurge(
+  claudeDir: string,
+  backupBase: string,
+  envOverrides: Record<string, string> = {},
+): RunResult {
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
@@ -102,6 +106,7 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         RECALL_DB_PATH: '',
         MEM_DB_PATH: '',
         RECALL_SKIP_BUN_UNLINK: 'true',
+        ...envOverrides,
       },
     },
   );
@@ -747,6 +752,29 @@ Preserve this.
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}${result.stderr}`).toContain('unowned Recall root');
     expect(readFileSync(precious, 'utf-8')).toBe('keep');
+  });
+
+  test('--purge cleans external data and integrations when the install root is missing', () => {
+    const defaultRoot = join(claudeDir, '.agents', 'Recall');
+    const externalDb = join(tempRoot, 'external-db', 'recall.db');
+    const guide = join(claudeDir, 'Recall_GUIDE.md');
+    rmSync(defaultRoot, { recursive: true, force: true });
+    mkdirSync(dirname(externalDb), { recursive: true });
+    writeFileSync(externalDb, 'external-memory');
+    rmSync(guide, { force: true });
+    symlinkSync(join(defaultRoot, 'claude', 'Recall_GUIDE.md'), guide);
+
+    const result = runPurge(claudeDir, backupBase, { RECALL_DB_PATH: externalDb });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(externalDb)).toBe(false);
+    expect(existsSync(defaultRoot)).toBe(false);
+    expect(() => lstatSync(guide)).toThrow();
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallExtract.ts'))).toBe(false);
+    const snapshot = readdirSync(backupBase).find(entry => entry.startsWith('pre_purge_'));
+    expect(snapshot).toBeDefined();
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db'), 'utf-8'))
+      .toBe('external-memory');
   });
 
   test('--purge rejects --skip-grok before invalidating the retained hook', () => {

@@ -997,6 +997,7 @@ recall_restore_db_routing() {
 }
 
 recall_create_backup() {
+  recall_create_install_root || return 1
   log_info "Creating backup at: $BACKUP_DIR"
   mkdir -p "$BACKUP_DIR"
 
@@ -1244,7 +1245,7 @@ recall_create_install_root() {
   fi
 
   mkdir -p "$RECALL_DIR"
-  recall_claim_install_root
+  recall_claim_install_root || return 1
   mkdir -p \
     "$RECALL_SHARED_HOOKS_LIB_DIR" \
     "$RECALL_SHARED_SKILLS_DIR" \

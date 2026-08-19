@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path';
 import { isJsonObject, parseJsonc } from './jsonc';
@@ -157,6 +157,24 @@ export function assertRecallRootOwned(root: string, options: DbPathOptions = {})
   throw new Error(`Recall root is not installer-owned: ${physicalRoot}`);
 }
 
+function isStaleRootMarkerTemp(root: string, entry: string): boolean {
+  const match = /^\.recall-root\.tmp\.([1-9]\d*)$/.exec(entry);
+  if (!match) return false;
+  const path = join(root, entry);
+  try {
+    if (!lstatSync(path).isFile()) return false;
+    if (readFileSync(path, 'utf-8') !== RECALL_ROOT_MARKER_CONTENT) return false;
+    try {
+      process.kill(Number(match[1]), 0);
+      return false;
+    } catch (error) {
+      return (error as { code?: string }).code === 'ESRCH';
+    }
+  } catch {
+    return false;
+  }
+}
+
 export function claimRecallRoot(root: string, options: DbPathOptions = {}): string {
   const env = options.env ?? process.env;
   const home = resolveHome(env, options.home);
@@ -181,9 +199,12 @@ export function claimRecallRoot(root: string, options: DbPathOptions = {}): stri
     'recall.db-shm',
   ]);
   const entries = readdirSync(physicalRoot);
-  if (!hasLegacyRecallLayout(physicalRoot) && entries.some(entry => !allowed.has(entry))) {
+  const staleTemps = new Set(entries.filter(entry => isStaleRootMarkerTemp(physicalRoot, entry)));
+  if (!hasLegacyRecallLayout(physicalRoot)
+    && entries.some(entry => !allowed.has(entry) && !staleTemps.has(entry))) {
     throw new Error(`refusing to claim non-Recall directory: ${physicalRoot}`);
   }
+  for (const entry of staleTemps) unlinkSync(join(physicalRoot, entry));
   const temp = `${marker}.tmp.${process.pid}`;
   writeFileSync(temp, RECALL_ROOT_MARKER_CONTENT, { mode: 0o600 });
   renameSync(temp, marker);
@@ -223,6 +244,12 @@ export function resolveRecallRoot(options: DbPathOptions = {}): string {
     );
     const root = dirname(dirname(guideTarget));
     if (guideTarget === join(root, 'claude', 'Recall_GUIDE.md')) {
+      try {
+        lstatSync(root);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return defaultRoot;
+        throw error;
+      }
       return assertRecallRootOwned(root, { env, home });
     }
   }

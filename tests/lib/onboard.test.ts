@@ -160,6 +160,20 @@ describe('resolveOutputPath', () => {
     const p = resolveOutputPath({ project: true }, { RECALL_IDENTITY_PATH: '   ' });
     expect(p).toBe(join(process.cwd(), '.atlas-recall', 'identity.md'));
   });
+
+  test('keeps a dangling user-owned Claude identity alias authoritative', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const home = join(dir, 'home');
+      const alias = join(home, '.claude', 'MEMORY', 'identity.md');
+      mkdirSync(dirname(alias), { recursive: true });
+      symlinkSync(join(dir, 'missing-user-identity.md'), alias);
+
+      expect(resolveOutputPath({}, { HOME: home })).toBe(alias);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('splitMultiline', () => {

@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, lstatSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { resolveRecallRoot, symlinkPointsTo } from './db-path';
@@ -53,8 +53,14 @@ export function resolveIdentityPath(options: IdentityPathOptions = {}): string {
   }
 
   const managed = resolveManagedIdentityPaths(options);
-  if (!existsSync(managed.alias)) return managed.canonical;
-  return symlinkPointsTo(managed.alias, managed.canonical, { env, home: resolveHome(env, options.home) })
-    ? managed.canonical
-    : managed.alias;
+  try {
+    const alias = lstatSync(managed.alias);
+    return alias.isSymbolicLink()
+      && symlinkPointsTo(managed.alias, managed.canonical, { env, home: resolveHome(env, options.home) })
+      ? managed.canonical
+      : managed.alias;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return managed.canonical;
+    throw error;
+  }
 }
