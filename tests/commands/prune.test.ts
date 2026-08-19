@@ -24,6 +24,7 @@ import {
 import type { LineageStatus } from '../../src/lib/dedup';
 import { embeddingToBlob } from '../../src/lib/embeddings';
 import { coreDump } from '../../src/commands/dump';
+import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 
 const originalLog = console.log;
 const originalError = console.error;
@@ -262,6 +263,45 @@ describe('prune respects dedup survivors (#80)', () => {
     const messageLine = logged.find(line => line.includes('messages:'));
     expect(messageLine).toContain('1 rows');
     expect(messageLine).toContain('1 kept as dedup survivors/FK references');
+  });
+
+  test('protects FK endpoints spanning multiple SQLite chunks', () => {
+    const db = getDb();
+    const sessionId = 'many-explicit-range-endpoints';
+    const protectedCount = SQLITE_SAFE_CHUNK_SIZE + 1;
+    createSession({ session_id: sessionId, started_at: OLD });
+    const messageIds: number[] = [];
+    const insertMessage = db.prepare(`
+      INSERT INTO messages (
+        session_id, timestamp, role, content, provenance
+      ) VALUES (?, ?, 'user', ?, 'verbatim')
+    `);
+    db.transaction(() => {
+      for (let index = 0; index <= protectedCount; index++) {
+        const inserted = insertMessage.run(sessionId, OLD, `old message ${index}`);
+        messageIds.push(Number(inserted.lastInsertRowid));
+      }
+    })();
+    const insertLoa = db.prepare(`
+      INSERT INTO loa_entries (
+        title, fabric_extract, message_range_start, message_range_end, session_id
+      ) VALUES ('protected endpoint', 'x', ?, ?, ?)
+    `);
+    db.transaction(() => {
+      for (const id of messageIds.slice(0, protectedCount)) {
+        insertLoa.run(id, id, sessionId);
+      }
+    })();
+
+    runPrune({ execute: true });
+
+    expect((db.prepare(`
+      SELECT COUNT(*) AS count FROM messages WHERE session_id = ?
+    `).get(sessionId) as { count: number }).count).toBe(protectedCount);
+    expect(db.prepare('SELECT 1 FROM messages WHERE id = ?').get(messageIds.at(-1)!)).toBeNull();
+    const messageLine = logged.find(line => line.includes('messages:'));
+    expect(messageLine).toContain('1 rows');
+    expect(messageLine).toContain(`${protectedCount} kept as dedup survivors/FK references`);
   });
 
   test('protects a recorded survivor message and still prunes a non-survivor', () => {

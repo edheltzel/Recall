@@ -4,6 +4,7 @@ import { getDb } from '../db/connection.js';
 import { tableExists } from '../db/introspection.js';
 import { fkProtectedIds, notRecordedSurvivorSql } from '../lib/dedup.js';
 import { deleteRecordEmbeddingsBySelectionInTransaction } from '../lib/embedding-store.js';
+import { chunked } from '../lib/chunk.js';
 
 interface PruneOptions {
   execute?: boolean;
@@ -63,14 +64,15 @@ export function runPrune(options: PruneOptions): void {
     `WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
      AND timestamp < ${cutoff}`;
   const messageGuard = `AND ${notRecordedSurvivorSql("'messages'", 'messages.id')}`;
-  const messageFkProtectedIds = fkProtectedIds(db, 'messages');
+  const messageFkProtectedChunks = chunked([...fkProtectedIds(db, 'messages')]);
   const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere}`);
   let messageCount = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard}`);
-  for (const id of messageFkProtectedIds) {
+  for (const idChunk of messageFkProtectedChunks) {
+    const placeholders = idChunk.map(() => '?').join(', ');
     messageCount -= countRows(
       db,
-      `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard} AND messages.id = ?`,
-      [id]
+      `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard} AND messages.id IN (${placeholders})`,
+      idChunk
     );
   }
   results.push({
@@ -193,10 +195,12 @@ export function runPrune(options: PruneOptions): void {
         SELECT id, host_ingest_token FROM published_messages AS messages
         ${messageWhere} ${messageGuard}
       `).run();
-      const removeFkProtected = db.prepare(`
-        DELETE FROM temp.prune_message_selection WHERE id = ?
-      `);
-      for (const id of messageFkProtectedIds) removeFkProtected.run(id);
+      for (const idChunk of messageFkProtectedChunks) {
+        const placeholders = idChunk.map(() => '?').join(', ');
+        db.prepare(`
+          DELETE FROM temp.prune_message_selection WHERE id IN (${placeholders})
+        `).run(...idChunk);
+      }
       deleteRecordEmbeddingsBySelectionInTransaction(
         db,
         'messages',
