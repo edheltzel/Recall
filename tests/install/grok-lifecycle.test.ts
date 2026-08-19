@@ -272,21 +272,85 @@ describe('Grok lifecycle hook ownership', () => {
     expect(() => resolveRecallRoot({ env, home })).toThrow('not installer-owned');
   });
 
+  test('ignores a dangling Claude guide when its install root is missing', () => {
+    const defaultRoot = join(home, '.agents', 'Recall');
+    const missingRoot = join(tempRoot, 'missing-guide-root', 'Recall');
+    const guideAlias = join(home, '.claude', 'Recall_GUIDE.md');
+    mkdirSync(dirname(guideAlias), { recursive: true });
+    symlinkSync(join(missingRoot, 'claude', 'Recall_GUIDE.md'), guideAlias);
+
+    expect(resolveRecallRoot({ env: { HOME: home }, home })).toBe(defaultRoot);
+  });
+
   test('fails relocated installation when the default locator is occupied', () => {
     const defaultRoot = join(home, '.agents', 'Recall');
     const relocatedRoot = join(tempRoot, 'blocked-relocation', 'Recall');
     mkdirSync(defaultRoot, { recursive: true });
     writeFileSync(join(defaultRoot, 'foreign.txt'), 'keep');
 
-    const result = helper('recall_create_install_root', {
+    const result = helper('recall_create_backup', {
       RECALL_DIR: relocatedRoot,
       RECALL_HOME: relocatedRoot,
+      BACKUP_DIR: join(relocatedRoot, 'backups', 'test'),
     });
 
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}${result.stderr}`).toContain('occupied path');
     expect(existsSync(relocatedRoot)).toBe(false);
     expect(readFileSync(join(defaultRoot, 'foreign.txt'), 'utf-8')).toBe('keep');
+  });
+
+  test('rejects an unowned root before creating backup artifacts', () => {
+    const foreignRoot = join(tempRoot, 'unowned-root');
+    const precious = join(foreignRoot, 'precious.txt');
+    mkdirSync(foreignRoot, { recursive: true });
+    writeFileSync(precious, 'keep');
+
+    const result = helper('recall_create_backup', {
+      RECALL_DIR: foreignRoot,
+      RECALL_HOME: foreignRoot,
+      BACKUP_DIR: join(foreignRoot, 'backups', 'test'),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain('refusing to claim non-Recall directory');
+    expect(readFileSync(precious, 'utf-8')).toBe('keep');
+    expect(existsSync(join(foreignRoot, 'backups'))).toBe(false);
+  });
+
+  test('recovers an exact stale root-marker temp file', () => {
+    const root = join(tempRoot, 'stale-marker', 'Recall');
+    const stale = join(root, '.recall-root.tmp.999999');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(stale, 'recall-root-v1\n');
+
+    expect(claimRecallRoot(root, { env: { HOME: home }, home })).toBe(realpathSync(root));
+    expect(existsSync(stale)).toBe(false);
+    expect(readFileSync(join(root, '.recall-root'), 'utf-8')).toBe('recall-root-v1\n');
+  });
+
+  test('rejects an invalid root-marker temp file', () => {
+    const root = join(tempRoot, 'invalid-marker', 'Recall');
+    const invalid = join(root, '.recall-root.tmp.999999');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(invalid, 'foreign\n');
+
+    expect(() => claimRecallRoot(root, { env: { HOME: home }, home }))
+      .toThrow('refusing to claim non-Recall directory');
+    expect(readFileSync(invalid, 'utf-8')).toBe('foreign\n');
+    expect(existsSync(join(root, '.recall-root'))).toBe(false);
+  });
+
+  test('rejects an exact root-marker temp file owned by a live process', () => {
+    const root = join(tempRoot, 'active-marker', 'Recall');
+    const active = join(root, `.recall-root.tmp.${process.pid}`);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(active, 'recall-root-v1\n');
+
+    expect(() => claimRecallRoot(root, { env: { HOME: home }, home }))
+      .toThrow('refusing to claim non-Recall directory');
+    expect(readFileSync(active, 'utf-8')).toBe('recall-root-v1\n');
+    expect(existsSync(join(root, '.recall-root'))).toBe(false);
   });
 
   test('normalizes default-root aliases before following the managed locator', () => {

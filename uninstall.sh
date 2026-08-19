@@ -244,7 +244,7 @@ remove_slash_commands() {
 
 remove_guide() {
   local f="$CLAUDE_DIR/Recall_GUIDE.md"
-  if [[ -f "$f" ]]; then
+  if [[ -f "$f" || -L "$f" ]]; then
     run rm -f "$f"
     log_success "Removed $f"
   fi
@@ -726,7 +726,7 @@ do_purge() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
-  if [[ "$PURGE" == "true" ]]; then
+  if [[ "$PURGE" == "true" ]] && { [[ -e "$RECALL_DIR" ]] || [[ -L "$RECALL_DIR" ]]; }; then
     if ! recall_assert_owned_root "$RECALL_DIR"; then
       log_error "Refusing to purge an unowned Recall root: $RECALL_DIR"
       exit 1

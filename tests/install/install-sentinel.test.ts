@@ -48,7 +48,16 @@ describe('install.sh completion sentinel (#27)', () => {
 
     mkdirSync(claudeDir, { recursive: true });
     mkdirSync(join(fakeRepo, 'agent-skills', 'recall-scout'), { recursive: true });
+    mkdirSync(join(fakeRepo, 'hooks', 'lib'), { recursive: true });
     writeFileSync(join(fakeRepo, 'agent-skills', 'recall-scout', 'SKILL.md'), '# scout\n');
+    writeFileSync(
+      join(fakeRepo, 'hooks', 'lib', 'db-path.ts'),
+      readFileSync(join(process.cwd(), 'hooks', 'lib', 'db-path.ts')),
+    );
+    writeFileSync(
+      join(fakeRepo, 'hooks', 'lib', 'jsonc.ts'),
+      readFileSync(join(process.cwd(), 'hooks', 'lib', 'jsonc.ts')),
+    );
     writeFileSync(join(fakeRepo, 'package.json'), JSON.stringify({ version: '9.9.9' }));
   });
 
