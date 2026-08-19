@@ -25,17 +25,35 @@ function expandHome(path: string, home: string): string {
   return path;
 }
 
+function resolveSymlinkPath(path: string): string {
+  let current = path;
+  const seen = new Set<string>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    try {
+      if (!lstatSync(current).isSymbolicLink()) return current;
+      const target = readlinkSync(current);
+      current = isAbsolute(target) ? resolve(target) : resolve(dirname(current), target);
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
 export function resolveRecallRoot(options: DbPathOptions = {}): string {
   const env = options.env ?? process.env;
   const home = resolveHome(env, options.home);
-  const explicit = env.RECALL_DIR || env.RECALL_HOME;
-  if (explicit) return expandHome(explicit, home);
-
   const defaultRoot = join(home, '.agents', 'Recall');
+  const explicit = [env.RECALL_DIR, env.RECALL_HOME]
+    .filter((path): path is string => !!path)
+    .map(path => expandHome(path, home))
+    .find(path => path !== defaultRoot);
+  if (explicit) return explicit;
+
   try {
     if (lstatSync(defaultRoot).isSymbolicLink()) {
-      const target = readlinkSync(defaultRoot);
-      return isAbsolute(target) ? target : resolve(dirname(defaultRoot), target);
+      return resolveSymlinkPath(defaultRoot);
     }
   } catch {
   }
@@ -54,9 +72,32 @@ export function resolveRecallRoot(options: DbPathOptions = {}): string {
   return defaultRoot;
 }
 
+export function resolvePhysicalRecallRoot(options: DbPathOptions = {}): string {
+  return resolveSymlinkPath(resolveRecallRoot(options));
+}
+
+export function resolveRecallRootLocator(options: DbPathOptions = {}): string | null {
+  const env = options.env ?? process.env;
+  const home = resolveHome(env, options.home);
+  const locator = join(home, '.agents', 'Recall');
+  try {
+    if (!lstatSync(locator).isSymbolicLink()) return null;
+    return resolveSymlinkPath(locator) === resolvePhysicalRecallRoot(options) ? locator : null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveDbPathStatePath(options: DbPathOptions = {}): string {
   const env = options.env ?? process.env;
-  return env.RECALL_DB_PATH_STATE || join(resolveRecallRoot(options), '.db-path');
+  const home = resolveHome(env, options.home);
+  const defaultState = join(home, '.agents', 'Recall', '.db-path');
+  const explicit = env.RECALL_DB_PATH_STATE
+    ? expandHome(env.RECALL_DB_PATH_STATE, home)
+    : '';
+  return explicit && explicit !== defaultState
+    ? explicit
+    : join(resolveRecallRoot({ env, home }), '.db-path');
 }
 
 export function resolveManagedDbConfigTargets(options: DbPathOptions = {}): ManagedDbConfigTarget[] {
@@ -146,12 +187,21 @@ if (import.meta.main) {
   const action = process.argv[2];
   if (action === 'resolve') {
     process.stdout.write(`${resolveDbPath()}\n`);
+  } else if (action === 'root') {
+    process.stdout.write(`${resolveRecallRoot()}\n`);
+  } else if (action === 'physical-root') {
+    process.stdout.write(`${resolvePhysicalRecallRoot()}\n`);
+  } else if (action === 'state') {
+    process.stdout.write(`${resolveDbPathStatePath()}\n`);
+  } else if (action === 'locator') {
+    const locator = resolveRecallRootLocator();
+    if (locator) process.stdout.write(`${locator}\n`);
   } else if (action === 'physical') {
     process.stdout.write(`${resolvePhysicalDbPath(process.argv[3] || '')}\n`);
   } else if (action === 'persist') {
     persistDbPath(process.argv[3] || '');
   } else {
-    console.error('usage: db-path.ts resolve | physical <path> | persist <path>');
+    console.error('usage: db-path.ts resolve | root | physical-root | state | locator | physical <path> | persist <path>');
     process.exit(1);
   }
 }

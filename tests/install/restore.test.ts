@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   readdirSync,
   rmSync,
   statSync,
@@ -229,6 +230,50 @@ describe('installer restore (rollback)', () => {
     expect(restored.status).toBe(0);
     expect(readFileSync(customDb, 'utf-8')).toBe('before-update');
     expect(existsSync(join(recallDir, '.db-path'))).toBe(false);
+  });
+
+  test('restores a symlinked database with physical WAL sidecars', () => {
+    const stamp = '20260606120000';
+    const backupDir = join(backupBase, stamp);
+    const physicalDb = join(root, 'physical-db', 'memory.sqlite');
+    const configuredDb = join(root, 'configured-db', 'memory.sqlite');
+    mkdirSync(dirname(physicalDb), { recursive: true });
+    mkdirSync(dirname(configuredDb), { recursive: true });
+    writeFileSync(physicalDb, 'physical-memory');
+    writeFileSync(`${physicalDb}-wal`, 'physical-wal');
+    writeFileSync(`${physicalDb}-shm`, 'physical-shm');
+    symlinkSync(physicalDb, configuredDb);
+    const physicalTarget = realpathSync(physicalDb);
+
+    const created = sh('recall_create_backup', {
+      TIMESTAMP: stamp,
+      BACKUP_DIR: backupDir,
+      RECALL_DB_PATH: configuredDb,
+    });
+    expect(created.status).toBe(0);
+    expect(readFileSync(join(backupDir, 'recall.db'), 'utf-8')).toBe('physical-memory');
+    expect(readFileSync(join(backupDir, 'recall.db-wal'), 'utf-8')).toBe('physical-wal');
+    expect(readFileSync(join(backupDir, 'recall.db-shm'), 'utf-8')).toBe('physical-shm');
+    expect(readFileSync(join(backupDir, 'recall.db.physical-path'), 'utf-8'))
+      .toBe(`${physicalTarget}\n`);
+    expect(readFileSync(join(backupDir, 'recall.db.symlink-target'), 'utf-8'))
+      .toBe(`${physicalDb}\n`);
+
+    writeFileSync(physicalDb, 'drifted-memory');
+    writeFileSync(`${physicalDb}-wal`, 'drifted-wal');
+    writeFileSync(`${physicalDb}-shm`, 'drifted-shm');
+    rmSync(configuredDb);
+
+    const restored = sh('recall_restore_db_routing "$BACKUP_DIR"', {
+      BACKUP_DIR: backupDir,
+      RECALL_DB_PATH: configuredDb,
+    });
+    expect(restored.status).toBe(0);
+    expect(lstatSync(configuredDb).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(configuredDb)).toBe(physicalDb);
+    expect(readFileSync(physicalDb, 'utf-8')).toBe('physical-memory');
+    expect(readFileSync(`${physicalDb}-wal`, 'utf-8')).toBe('physical-wal');
+    expect(readFileSync(`${physicalDb}-shm`, 'utf-8')).toBe('physical-shm');
   });
 
   test('an unknown timestamp fails without touching current files', () => {
