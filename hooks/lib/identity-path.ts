@@ -61,6 +61,6 @@ export function resolveIdentityPath(options: IdentityPathOptions = {}): string {
       : managed.alias;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return managed.canonical;
-    throw error;
+    return managed.alias;
   }
 }

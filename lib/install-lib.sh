@@ -1285,6 +1285,15 @@ recall_symlink_target_within() {
   HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" symlink-target-within "$1" "$2"
 }
 
+recall_symlink_target_is_managed() {
+  local target="$1"
+  [[ -L "$target" ]] || return 1
+  if [[ -e "$RECALL_DIR" || -L "$RECALL_DIR" ]]; then
+    recall_assert_owned_root "$RECALL_DIR" >/dev/null 2>&1 || return 1
+  fi
+  recall_symlink_target_within "$target" "$RECALL_DIR"
+}
+
 recall_resolve_db_path() {
   RECALL_DIR="$RECALL_DIR" \
     RECALL_HOME="$RECALL_DIR" \
@@ -1435,10 +1444,7 @@ _recall_hash_file() {
 # Args: TARGET_PATH
 recall_unlink_if_managed() {
   local target="$1"
-  if [[ ! -L "$target" ]]; then
-    return 0
-  fi
-  if recall_symlink_target_within "$target" "$RECALL_DIR"; then
+  if recall_symlink_target_is_managed "$target"; then
     rm -f "$target"
   fi
 }
