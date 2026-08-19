@@ -829,7 +829,7 @@ server.tool(
 				...(detail !== undefined ? detectThreats(detail) : []),
 			];
 			if (threats.length > 0) {
-				console.error(`[recall] threat-detect: ${summarizeThreats(threats)} in memory_add — record stored unchanged`);
+				console.error(`[recall] threat-detect: ${summarizeThreats(threats)} in memory_add — known-prefix secrets may be redacted before storage`);
 			}
 
 			let id: number;
