@@ -40,6 +40,7 @@ SKIP_OPENCODE=false
 SKIP_PI=false
 SKIP_GROK=false
 SKIP_OMP=false
+RECALL_DB_PHYSICAL_PATH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -160,7 +161,7 @@ print_summary() {
   _banner warn "Recall Uninstall"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
-  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy $RECALL_DB_PATH and ~/.agents/Recall/ after preserving user MEMORY artifacts)"
+  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy $RECALL_DB_PHYSICAL_PATH and ~/.agents/Recall/ after preserving user MEMORY artifacts)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
@@ -184,7 +185,8 @@ print_summary() {
   echo ""
   if [[ "$PURGE" == "true" ]]; then
     echo "Will DESTROY (--purge):"
-    echo "  • $RECALL_DB_PATH  (your configured persistent memory database)"
+    echo "  • $RECALL_DB_PHYSICAL_PATH  (physical persistent memory database)"
+    [[ "$RECALL_DB_PATH" != "$RECALL_DB_PHYSICAL_PATH" ]] && echo "  • $RECALL_DB_PATH  (configured database path)"
     echo "  • ~/.claude/memory.db  (legacy DB, if still present)"
     echo "  • ~/.agents/Recall/  (canonical runtime files and backups)"
     echo ""
@@ -218,6 +220,7 @@ confirm_purge_or_exit() {
   echo ""
   log_warn "--purge will permanently destroy the Recall databases, runtime files, and old backups."
   log_warn "Configured database: $RECALL_DB_PATH"
+  [[ "$RECALL_DB_PATH" != "$RECALL_DB_PHYSICAL_PATH" ]] && log_warn "Physical database target: $RECALL_DB_PHYSICAL_PATH"
   read -p "Type 'PURGE' to confirm: " -r
   echo ""
   if [[ "$REPLY" != "PURGE" ]]; then
@@ -654,18 +657,23 @@ do_purge() {
   # we're about to delete since we capture it first).
   local pre_purge_dir="$BACKUP_BASE/pre_purge_$TIMESTAMP"
   local configured_db="$RECALL_DB_PATH"
+  local physical_db="$RECALL_DB_PHYSICAL_PATH"
 
   preserve_purge_memory_artifacts "$pre_purge_dir"
 
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [dry-run] would snapshot $configured_db and routing state to $pre_purge_dir/"
+    echo "  [dry-run] would remove physical database $physical_db"
   else
     recall_backup_db_routing "$pre_purge_dir"
     if [[ -f "$configured_db" ]]; then
       log_success "Snapshotted configured database to $pre_purge_dir/"
     fi
-    rm -f "$configured_db" "${configured_db}-wal" "${configured_db}-shm"
-    log_success "Removed configured DB at $configured_db"
+    rm -f "$physical_db" "${physical_db}-wal" "${physical_db}-shm"
+    if [[ "$configured_db" != "$physical_db" ]]; then
+      rm -f "$configured_db" "${configured_db}-wal" "${configured_db}-shm"
+    fi
+    log_success "Removed configured DB at $physical_db"
   fi
 
   # Snapshot legacy DB + sidecars if still present (pre-migration installs).
@@ -731,6 +739,7 @@ do_purge() {
 
 main() {
   recall_activate_db_path
+  RECALL_DB_PHYSICAL_PATH="$(recall_resolve_physical_db_path "$RECALL_DB_PATH")"
   print_summary
   confirm_or_exit
   confirm_purge_or_exit

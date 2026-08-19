@@ -67,6 +67,20 @@ cd /path/to/Recall
    leave hooks missing.
 8. Verifies via `recall --version` and `recall stats`.
 
+### One-time transition for older updaters
+
+An updater from before post-pull re-execution cannot replace the shell code
+already running in its own process. Its first run pulls the new updater, but
+new lifecycle installation steps such as the Grok global hook may not run yet.
+Immediately run one forced convergence pass:
+
+```bash
+./update.sh --force
+```
+
+The newly pulled updater re-executes itself after future pulls, so this second
+forced run is required only once when crossing that older-updater boundary.
+
 The OpenCode integration now follows the current OpenCode 1.18.x contract:
 restart OpenCode after an update so its plugin reloads, then verify
 `opencode --version` and `opencode export <session-id>`. Recall normalizes the
