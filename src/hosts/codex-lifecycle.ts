@@ -34,7 +34,7 @@ function messageText(content: unknown): string {
 // at session start and again after compaction (the ~20 KB `# AGENTS.md
 // instructions for <cwd>` payload, plus the environment/user-instruction
 // wrappers). Recall must not store these as verbatim user memory; the typed
-// prompt survives as its own user turn (finding F2).
+// prompt survives as its own user turn.
 const WRAPPED_INJECTED_USER_TAGS = [
   'recommended_plugins',
   'environment_context',

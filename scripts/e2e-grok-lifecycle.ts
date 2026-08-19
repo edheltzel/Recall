@@ -147,19 +147,27 @@ printf '%s' "$payload" | bun ${JSON.stringify(join(repoRoot, 'dist', 'index.js')
 
   console.log(`isolation.test_db=${testDb}`);
   console.log(`grok.version=${runGrok(['--version'], env).trim()}`);
-  runLifecycleHelper('recall_install_grok_platform', env);
+  runLifecycleHelper(
+    'recall_create_install_root; recall_persist_db_path "$(recall_resolve_db_path)"; recall_install_grok_platform',
+    env
+  );
+  const runtimeEnv = stringEnv({
+    ...env,
+    RECALL_DB_PATH: '',
+    MEM_DB_PATH: '',
+  });
   const installedHook = join(testGrokHome, 'hooks', 'RecallLifecycle.json');
   if (!existsSync(installedHook)) throw new Error('Recall Grok lifecycle hook was not installed');
   const hookConfig = JSON.parse(readFileSync(installedHook, 'utf-8')) as {
     hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> };
   };
   const hookCommand = hookConfig.hooks.Stop[0].hooks[0].command;
-  if (!hookCommand.includes('RECALL_DB_PATH=')) {
-    throw new Error(`Recall Grok hook did not pin its database path: ${hookCommand}`);
+  if (hookCommand !== 'recall host-hook grok') {
+    throw new Error(`Recall Grok hook did not use the shared database resolver: ${hookCommand}`);
   }
   const inspect = parseJson<{
     hooks?: Array<{ event?: string; target?: string; source?: { type?: string; path?: string } }>;
-  }>(runGrok(['inspect', '--json'], env), 'grok inspect');
+  }>(runGrok(['inspect', '--json'], runtimeEnv), 'grok inspect');
   const installedHooks = inspect.hooks?.filter(hook =>
     hook.target === hookCommand
       && hook.source?.type === 'user'
@@ -190,7 +198,7 @@ context_window = 16000
     );
     const effective = parseJson<{
       hooks?: Array<{ target?: string; source?: { path?: string } }>;
-    }>(runGrok(['inspect', '--json'], env), 'grok inspect before headless run');
+    }>(runGrok(['inspect', '--json'], runtimeEnv), 'grok inspect before headless run');
     if (!effective.hooks?.some(hook =>
       hook.target === hookCommand && hook.source?.path === join(testGrokHome, 'hooks')
     )) {
@@ -209,7 +217,7 @@ context_window = 16000
         '--debug-file',
         join(tempRoot, 'grok-headless-debug.log'),
       ],
-      env
+      runtimeEnv
     );
   } finally {
     model.stop();
@@ -225,7 +233,7 @@ context_window = 16000
     db.close();
     const direct = spawnSync(join(testBin, 'recall'), ['host-hook', 'grok'], {
       cwd: workspace,
-      env,
+      env: runtimeEnv,
       encoding: 'utf-8',
       input: JSON.stringify({
         hookEventName: 'Stop',
@@ -272,7 +280,7 @@ context_window = 16000
 
   const replay = spawnSync(join(testBin, 'recall'), ['host-hook', 'grok'], {
     cwd: workspace,
-    env,
+    env: runtimeEnv,
     encoding: 'utf-8',
     input: JSON.stringify({ hookEventName: 'Stop', sessionId: session.session_id, cwd: workspace }),
   });
@@ -288,9 +296,9 @@ context_window = 16000
     throw new Error(`Grok replay duplicated rows: ${firstCount} to ${replayCount}`);
   console.log('grok.deduplication=true');
 
-  runLifecycleHelper('recall_uninstall_grok_platform', env);
+  runLifecycleHelper('recall_uninstall_grok_platform', runtimeEnv);
   const afterRemoval = parseJson<{ hooks?: Array<{ target?: string; source?: { path?: string } }> }>(
-    runGrok(['inspect', '--json'], env),
+    runGrok(['inspect', '--json'], runtimeEnv),
     'grok inspect after removal'
   );
   if (existsSync(installedHook)) throw new Error('Recall Grok hook file survived uninstall');

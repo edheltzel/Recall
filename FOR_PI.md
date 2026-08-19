@@ -121,8 +121,8 @@ Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts �
 
 ## Lifecycle scripts
 
-Three shell scripts in the Recall source directory manage installation.
-They are platform-agnostic — Pi, Claude Code, and OpenCode share them.
+Three shell scripts in the Recall source directory manage installer-owned host
+integrations. Codex remains native-plugin-owned.
 
 | Script | Purpose |
 |---|---|
@@ -158,9 +158,9 @@ See [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) for the verified Pi capab
 1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
 2. **Record decisions** — When architectural decisions are made, use `recall_memory_memory_add` to record them
 3. **Delegate with context** — Before spawning subagents, call `recall_memory_context_for_agent` to give them relevant history
-4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` (the `recall-dump` skill) to persist the conversation
+4. **Capture sessions** — Pi captures supported shutdown sessions automatically. When automatic capture is unavailable or the user requests a supplemental snapshot, run `recall dump "Descriptive Title"` (the `recall-dump` skill).
 5. **Onboarding check** — At session start, if the L0 identity tier is empty, suggest `recall onboard` once. Do not nag on subsequent turns.
-6. **Never store secrets** — `recall_memory_memory_add` and `recall dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+6. **Never store secrets** — `recall_memory_memory_add` applies Recall's known-prefix secret scrub and reports redacted kinds, but `recall dump` can persist conversation text verbatim into `recall.db`. Stored records can resurface in later search or eligible L1 context, so redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 7. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall_memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ## How Extraction Works
@@ -181,4 +181,4 @@ The SQLite database is at `~/.agents/Recall/recall.db` (or wherever `RECALL_DB_P
 - **FTS5** indexes on all text tables
 - **Vector embeddings** (optional, requires Ollama) for semantic search
 
-The same database is shared with Claude Code, OpenCode, and Codex if they are installed — your memory is unified across platforms.
+Every configured Recall host uses the same database, so memory is unified across platforms.

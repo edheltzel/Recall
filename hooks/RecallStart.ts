@@ -188,7 +188,7 @@ function fetchLoa(project: string | undefined, limit: number): L1Row[] {
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
   const impSelect = hasImp ? 'importance' : '8 AS importance';
   // Keep automatic Codex/Grok lifecycle captures out of the curated L1 pool so
-  // their template summaries never take the reserved LoA slots (finding F1).
+  // their template summaries never take the reserved LoA slots.
   const conditions: string[] = [];
   const params: unknown[] = [];
   if (project) {

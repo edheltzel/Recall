@@ -34,7 +34,7 @@ The `recall update` / `recall uninstall` / `recall install` subcommands simply f
 
 Recall installs runtime state under `~/.agents/Recall/`, links host-owned files where appropriate, and registers native host packages where available. On Pi, one Recall command coordinates a native package plus the separately discovered MCP adapter/configuration. Pick the on-ramp that matches how you got Recall:
 
-- **npm (recommended):** `bun install -g recall-memory` puts the `recall` / `recall-mcp` binaries on your PATH, then `recall install` runs the canonical setup — MCP registration, hooks, agent skills, guides — for every detected agent. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
+- **npm (recommended):** `bun install -g recall-memory` puts the `recall` / `recall-mcp` binaries on your PATH, then `recall install` applies the host-appropriate integration for each detected installer-managed host. Codex remains native-plugin-owned. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
 - **npx (one-shot):** `npx --package=recall-memory recall install` — same canonical setup, no global install. Bun must still be on PATH.
 - **Source / dev checkout:** `git clone … && cd Recall && ./install.sh`. This one **builds from your working tree** (`bun install` + `bun run build` + `bun link`), so it's the right choice when you're developing Recall or running a branch. See the [Installation guide](installation.md) for prerequisites and the full step list.
 
@@ -51,7 +51,7 @@ Both run the same canonical steps and are **idempotent** — re-running repairs 
 
 ## Update
 
-> **Exit Claude Code / OpenCode / Pi first.** Updating reloads hooks and the `recall-mcp` server; a running session can hold stale state. `update.sh` warns you before it proceeds.
+> **Exit Claude Code / OpenCode / Pi / Grok first.** Updating reloads installer-owned hooks and the `recall-mcp` server; a running session can hold stale state. `update.sh` warns you before it proceeds.
 
 **Source / git checkout — `recall update`** (delegates to `./update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, force-re-registers the hooks, and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
 

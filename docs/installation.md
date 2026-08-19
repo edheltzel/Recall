@@ -135,13 +135,13 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
 | Step | What happens |
 |------|-------------|
-| 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `recall.db`) to `~/.claude/backups/recall/` |
+| 1. Backup | Backs up the database and affected host configuration under the resolved Recall install root's `backups/<TIMESTAMP>/` directory |
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
 | 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
-| 7. Setup hooks | Copies `RecallExtract.ts` and `RecallBatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
+| 7. Setup Claude hooks | Copies the inventoried Claude hook files and shared hook libraries to the canonical Recall root, links them into `~/.claude/hooks/`, and registers each supported event in `~/.claude/settings.json` |
 | 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs agent skills to `~/.claude/skills/recall-*/` (removing any legacy `~/.claude/commands/Recall/` symlinks) |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
 | 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
@@ -163,14 +163,15 @@ flowchart LR
     G --> H[Register Hooks\nsettings.json]
     H --> I[Copy Guide\nRecall_GUIDE.md]
     I --> J[Configure Memory Pointer\nor defer to managed Recall rule]
-    J --> K[Done\nRestart Claude Code]
+    J --> K[Configure detected hosts]
+    K --> L[Done\nRestart configured hosts]
 ```
 
 ---
 
 ## Verify Installation
 
-After the installer completes and you have restarted Claude Code, run these checks:
+After the installer completes and you have restarted each configured host, run these checks:
 
 ```bash
 which recall recall-mcp          # Both CLIs should resolve to a path
@@ -253,7 +254,9 @@ Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config
 
 ## Backup and Restore
 
-The installer automatically creates a timestamped backup before making any changes. Backups are stored at `~/.claude/backups/recall/`.
+The installer automatically creates a timestamped backup before making any
+changes. By default, backups live at `~/.agents/Recall/backups/`; a relocated
+install uses that resolved Recall root's `backups/` directory instead.
 
 ```bash
 ./install.sh list              # List available backups
@@ -297,7 +300,7 @@ cd /path/to/Recall
 ### What is preserved (default)
 
 - `~/.agents/Recall/recall.db` — your persistent memory database
-- `~/.claude/backups/recall/` — the backup tree written by install/update
+- The resolved Recall root's `backups/` directory (normally `~/.agents/Recall/backups/`) — the backup tree written by install/update
 - User-authored identity and distilled memory under the resolved Recall root, together with any managed Claude links or legacy files in `~/.claude/MEMORY/`
 - This source directory (remove with `rm -rf /path/to/Recall`)
 

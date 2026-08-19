@@ -59,7 +59,11 @@ Records marked as duplicates by [`recall dedup`](#dedup) are hidden from every s
 recall dump "Session Title"             # Import session + capture LoA entry
 ```
 
-Combines `recall import` and `recall loa write` in one step. Run this at the end of every session to persist the conversation and extract a Fabric summary into the Library of Alexandria. The title should describe what was accomplished in the session.
+Combines session import and LoA capture as an explicit snapshot. Claude Code,
+OpenCode, and Pi have native CLI transcript adapters. Hosts with automatic
+lifecycle capture do not need this command for ordinary sessions; use their
+integration guide when you want a supplemental snapshot. The title should
+describe what was accomplished in the session.
 
 ### Library of Alexandria (LoA)
 
@@ -117,6 +121,10 @@ recall add breadcrumb "User prefers dark mode in all UIs" -p myproject -i 8
 ```
 
 Stores a freeform observation or preference. The `-i` flag sets importance on a scale of 1–10 (default: 5). Higher importance surfaces the breadcrumb earlier in search results.
+
+All three structured `recall add` paths pass free-text fields through Recall's
+canonical known-prefix secret scrub before insertion and report any redacted
+secret kinds.
 
 ---
 
@@ -198,8 +206,10 @@ silently truncates beyond that threshold.
 
 ## Importance
 
-The `importance` column (1-10) on `messages`, `decisions`, `learnings`, and
-`loa_entries` controls L1 tier ranking at session start.
+The `importance` column (1-10) is available on messages, decisions, learnings,
+breadcrumbs, and LoA entries. L1 ranks eligible decisions, learnings,
+breadcrumbs, and curated LoA; raw messages and automatic lifecycle summaries
+remain searchable on demand instead of entering L1.
 
 ```bash
 # Backfill importance scores from confidence signals (dry-run by default)

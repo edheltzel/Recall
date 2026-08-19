@@ -7,7 +7,7 @@
 Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected where a host supports session-start context, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
 
 
-> **A SQLite-backed persistent memory layer for coding agents.** Stop-hook extraction captures sessions where a host lifecycle adapter exists, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills span Claude Code, OpenCode, Pi, Codex, Grok, and JCode from one local database; lifecycle automation is host-specific.
+> **A SQLite-backed persistent memory layer for coding agents.** Supported lifecycle adapters capture sessions automatically, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills span Claude Code, OpenCode, Pi, Codex, Grok, and JCode from one local database; lifecycle automation is host-specific.
 
 Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
 
@@ -32,6 +32,8 @@ AI agents have no memory between sessions. Context is lost. You repeat yourself.
 
 Install once, then forget about it. Recall runs silently in the background:
 
+On Claude Code, the reference lifecycle looks like this:
+
 ```
 ┌──────────┐    ┌────────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
 │ You Work │───▶│ Stop hook fires│───▶│ Auto-Extract │───▶│ SQLite + FTS5 │───▶│ Next Session │
@@ -40,7 +42,7 @@ Install once, then forget about it. Recall runs silently in the background:
       └───────────────────────────── Memory Available ───────────────────────────────┘
 ```
 
-- **Auto-extraction** — sessions are parsed into structured summaries incrementally as you work (Stop hook fires at the end of every turn, not only when you exit)
+- **Auto-extraction on Claude Code** — sessions are parsed into structured summaries incrementally as you work (the Stop hook fires at the end of every turn, not only when you exit)
 - **Full-text + semantic search** — find anything from any past session
 - **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically on supported hosts
 - **Zero friction** — no workflow changes, no manual steps
@@ -68,9 +70,9 @@ recall install
 npx --package=recall-memory recall install
 ```
 
-`recall install` runs the canonical setup (MCP server, hooks, agent skills,
-guides) for installer-managed detected hosts. Codex uses the native plugin path
-below. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun`
+`recall install` applies the host-appropriate setup for installer-managed
+detected hosts. Codex uses the native plugin path below. Prefer
+`bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun`
 shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
 <details>
@@ -141,82 +143,12 @@ Installed from npm? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--pu
 
 ## How Recall Works
 
-Recall sits between your agent and a single SQLite database. A **WRITE path** captures sessions where a host exposes a supported lifecycle surface; a **READ path** injects memory where a host supports session-start context. The diagram below shows the shared flows side-by-side, with the line styles in the legend distinguishing capture (solid), recall (dashed purple), and the write-only markdown mirror (dashed gray).
-
-<p align="center">
-  <img src="assets/how-recall-works.png" alt="How Recall Works — supported write paths capture sessions into SQLite, and supported read paths inject them on a later session" width="100%">
-</p>
-
-<details>
-<summary>Text-only architecture diagram (for terminal viewers)</summary>
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        DATA ENTRY POINTS                             │
-│                                                                      │
-│  ┌────────────┐  ┌────────────┐  ┌──────────────┐  ┌────────────┐    │
-│  │ CLI Direct │  │ MCP Server │  │  Stop Hook   │  │   Batch    │    │
-│  │  recall add   │  │ (Claude    │  │ SessionExt-  │  │  Extract   │    │
-│  │  recall dump  │  │  Code)     │  │  ract.ts     │  │  (cron)    │    │
-│  └─────┬──────┘  └─────┬──────┘  └──────┬───────┘  └─────┬──────┘    │
-└────────┼────────────────┼────────────────┼────────────────┼──────────┘
-         │                │                │                │
-         ▼                ▼                ▼                ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│                      PROCESSING LAYER                                 │
-│                                                                       │
-│  Direct Inserts:              Session Extraction Pipeline:            │
-│  recall add breadcrumb ──┐       Read JSONL                              │
-│  recall add decision  ───┤         → Filter noise (tool results)         │
-│  recall add learning  ───┤         → Dedup check (.extraction_tracker)   │
-│  memory_add (MCP)  ───┤         → Acquire lock                        │
-│                       │         → Claude Haiku extract                │
-│                       │           (>120K? chunk → meta-extract)       │
-│                       │           (fallback: Ollama)                  │
-│                       │         → Quality gate                        │
-│                       │           (requires SUMMARY + MAIN IDEAS)     │
-│                       │              │                                │
-└───────────────────────┼──────────────┼────────────────────────────────┘
-                        │              │
-                        ▼              ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                    STORAGE LAYER (Dual-Write)                        │
-│                                                                      │
-│  SQLite (~/.agents/Recall/recall.db)  Memory Files (~/.agents/Recall/MEMORY/) │
-│  ┌────────────────────────────┐     ┌──────────────────────────────┐ │
-│  │ sessions ←── messages      │     │ DISTILLED.md    (archive)    │ │
-│  │ decisions    learnings     │     │ HOT_RECALL.md   (last 10)    │ │
-│  │ breadcrumbs  loa_entries   │     │ SESSION_INDEX.json           │ │
-│  │ embeddings (768-dim vecs)  │     │ DECISIONS.log                │ │
-│  │                            │     │ REJECTIONS.log               │ │
-│  │ FTS5 indexes (auto-sync)   │     │ ERROR_PATTERNS.json          │ │
-│  │ WAL mode · 0600 perms      │     └──────────────────────────────┘ │
-│  └────────────────────────────┘                                      │
-└──────────────────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                      RETRIEVAL LAYER                                 │
-│                                                                      │
-│  ┌───────────────┐  ┌────────────────┐  ┌─────────────────────────┐  │
-│  │Keyword (FTS5) │  │Semantic (Embed)│  │  Hybrid (RRF Fusion)    │  │
-│  │recall search     │  │recall semantic    │  │  recall hybrid (DEFAULT)   │  │
-│  │memory_search  │  │embed → Ollama  │  │  FTS5 rank ─┐           │  │
-│  │               │  │cosine sim      │  │  Embed rank ─┤→ merged  │  │
-│  └───────────────┘  └────────────────┘  │  RRF(k=60) ◄┘           │  │
-│                                         └─────────────────────────┘  │
-│  Direct: recall recent · recall show · memory_recall · context_for_agent   │
-└──────────────────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  CONSUMERS:  Coding agents (MCP)  ·  CLI user (recall)  ·  Sub-agents   │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-</details>
-
-The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](assets/how-recall-works.excalidraw) — drop it onto [excalidraw.com](https://excalidraw.com) to edit.
+Recall sits between your agents and a single SQLite database. Supported host
+lifecycle adapters capture sessions through host-owned surfaces; CLI and MCP
+writes use the same store; supported session-start adapters inject a bounded
+L0/L1 working set. The [architecture guide](docs/architecture.md) owns the
+storage, publication, extraction, and tier-selection details, while the
+[capability matrix](#roadmap) records the current per-host boundaries.
 
 ### Claude Code Session Lifecycle
 
@@ -251,8 +183,8 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **Auto-captured session memory** — Claude Code extracts incrementally; Codex and Grok write supported transcript content directly to SQLite; Pi and OpenCode use their documented host adapters
 - **MCP server (`recall-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
-- **Tiered RecallStart (v0.7.0+)** — resolved L0 identity + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
-- **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `recall pin` / `recall unpin` / `recall importance backfill`
+- **Tiered RecallStart (v0.7.0+)** — resolved L0 identity + L1 top 12 eligible decisions, learnings, breadcrumbs, and curated Library of Alexandria entries ranked by importance, with 4 reserved LoA slots. L2/L3 fetched on demand
+- **Importance scoring (1–10)** — eligible L1 records are ranked by importance. Manage with `recall pin` / `recall unpin` / `recall importance backfill`; see the [tier-selection contract](docs/architecture.md#tiered-recallstart-v070)
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
 - **Cross-host ingestion** — Codex and Grok lifecycle hooks write immediately through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host

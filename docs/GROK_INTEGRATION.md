@@ -44,7 +44,7 @@ For each event, Recall:
 2. Runs the supported `grok export <session-id>` command.
 3. Stores the export as an opaque Markdown frame so message content that resembles a role heading cannot change attribution.
 4. Scrubs unattended content before storage, as required by [#50](https://github.com/edheltzel/Recall/issues/50).
-5. Writes new verbatim rows immediately to `recall.db` with `source = 'grok'`.
+5. Writes new scrubbed rows immediately to `recall.db` with `source = 'grok'`.
 6. Uses persistent message keys and a validated byte watermark to skip unchanged exports, ingest append-only suffixes, and fall back to a full frame after rewrites or shrinkage.
 7. Finalizes the session and creates one extracted summary at terminal lifecycle events.
 

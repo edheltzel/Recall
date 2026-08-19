@@ -6,7 +6,7 @@
 //
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -348,12 +348,25 @@ describe('update.sh', () => {
       // minimal fixture so the driver's `set -e` doesn't abort early.
       mkdirSync(join(fakeRepo, 'hooks'), { recursive: true });
       writeFileSync(join(fakeRepo, 'hooks', 'RecallExtract.ts'), '// stub\n');
+      mkdirSync(join(fakeRepo, 'hooks', 'lib'), { recursive: true });
+      for (const helper of ['db-path.ts', 'jsonc.ts']) {
+        copyFileSync(join(REPO, 'hooks', 'lib', helper), join(fakeRepo, 'hooks', 'lib', helper));
+      }
 
       // Simulate a pre-migration install: command canonical + managed symlink,
       // plus a user-authored file sitting in the same directory.
       const cmdCanonicalDir = join(tempRoot, '.agents', 'Recall', 'claude', 'commands', 'Recall');
       mkdirSync(cmdCanonicalDir, { recursive: true });
       writeFileSync(join(cmdCanonicalDir, 'scout.md'), '# scout\n');
+      mkdirSync(join(tempRoot, '.agents', 'Recall', 'shared', 'hooks'), { recursive: true });
+      writeFileSync(
+        join(tempRoot, '.agents', 'Recall', 'shared', 'hooks', 'RecallStart.ts'),
+        '// legacy hook\n'
+      );
+      writeFileSync(
+        join(tempRoot, '.agents', 'Recall', 'claude', 'Recall_GUIDE.md'),
+        '# Legacy guide\n'
+      );
       const cmdDir = join(tempRoot, '.claude', 'commands', 'Recall');
       mkdirSync(cmdDir, { recursive: true });
       symlinkSync(join(cmdCanonicalDir, 'scout.md'), join(cmdDir, 'scout.md'));
@@ -378,7 +391,7 @@ describe('update.sh', () => {
         env: { ...process.env, REPO },
       });
 
-      expect(r.status).toBe(0);
+      expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
       // Managed symlink removed; user file survives; canonicals dropped.
       expect(existsSync(join(cmdDir, 'scout.md'))).toBe(false);
       expect(existsSync(join(cmdDir, 'mine.md'))).toBe(true);

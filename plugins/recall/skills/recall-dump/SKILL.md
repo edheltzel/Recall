@@ -13,7 +13,8 @@ The canonical workflow below remains authoritative, but equivalent behavior is n
 
 Dump the current conversation session into the Recall SQLite database, making all messages immediately searchable. Also creates a curated LoA (Library of Alexandria) entry with extracted wisdom.
 
-Run this at the end of every session or when you want to persist the current conversation mid-session.
+Run this when the current host does not already capture the session automatically,
+or when the user wants an explicit supplemental snapshot mid-session.
 
 ## Usage
 

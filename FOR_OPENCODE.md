@@ -136,8 +136,8 @@ Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts �
 
 ## Lifecycle scripts
 
-Three shell scripts in the Recall source directory manage installation.
-They are platform-agnostic — OpenCode, Claude Code, and Pi share them.
+Three shell scripts in the Recall source directory manage installer-owned host
+integrations. Codex remains native-plugin-owned.
 
 | Script | Purpose |
 |---|---|
@@ -161,7 +161,7 @@ OpenCode first.
 2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
 3. **Context for agents** — Before spawning subagents via `@agent`, call `recall-memory_context_for_agent`
 4. **Onboarding check** — At session start, if the L0 identity tier is empty, suggest `recall onboard` once. Do not nag on subsequent turns.
-5. **Never store secrets** — `recall-memory_memory_add` and `recall-memory_memory_dump` persist content verbatim into `recall.db` (and automatic extraction captures session text), and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+5. **Never store secrets** — `recall-memory_memory_add` applies Recall's known-prefix secret scrub and reports redacted kinds, but `recall-memory_memory_dump` can persist supplied conversation text verbatim into `recall.db` (and automatic extraction captures session text). Stored records can resurface in later search or eligible L1 context, so redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 6. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ## How Extraction Works
@@ -190,4 +190,4 @@ The SQLite database is at `~/.agents/Recall/recall.db` (or wherever `RECALL_DB_P
 - **FTS5** indexes on all text tables
 - **Vector embeddings** (optional, requires Ollama) for semantic search
 
-The same database is shared with Claude Code if both are installed — your memory is unified across platforms.
+Every configured Recall host uses the same database, so memory is unified across platforms.

@@ -819,12 +819,11 @@ server.tool(
 	},
 	async ({ type, content, detail, project, tags, confidence, importance }) => {
 		try {
-			// #156 detection layer — DETECT-AND-SURFACE ONLY (Ed's ruling): it never
-			// mutates or blocks. Scan the content + detail and surface any
+			// #156 detection layer — DETECT-AND-SURFACE ONLY: it never blocks or
+			// performs the mutation itself. Scan content + detail and surface any
 			// injection/exfil or anonymous-high-entropy flags as a non-fatal stderr
-			// log; the record is stored exactly as provided. (Anchored known-prefix
-			// secrets remain scrub()'s job on the scrub paths; memory_add lacks scrub
-			// today — out of scope for #156, tracked for a follow-up.)
+			// log. The shared add functions independently scrub known-prefix secrets
+			// before insertion and report the redacted kinds to this handler.
 			const threats = [
 				...detectThreats(content),
 				...(detail !== undefined ? detectThreats(detail) : []),

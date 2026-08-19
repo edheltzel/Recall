@@ -29,7 +29,7 @@ cd /path/to/Recall
 
 ## Using `update.sh` (recommended)
 
-Exit Claude Code first, then:
+Exit active Claude Code, OpenCode, Pi, and Grok sessions first, then:
 
 ```bash
 cd /path/to/Recall
@@ -41,9 +41,9 @@ cd /path/to/Recall
 1. Fetches the latest release tag from GitHub and compares to
    `package.json`. Exits 0 if already current (unless `--force`).
 2. Creates a timestamped backup of `settings.json`, `recall.db`,
-   `CLAUDE.md`, OpenCode/Pi configs, and `.mcp.json` at
-   `~/.claude/backups/recall/<TIMESTAMP>/`. Records the git `PRE_SHA`
-   in the manifest.
+   `CLAUDE.md`, and detected-host configs under the resolved
+   [Recall backup root](installation.md#backup-and-restore). Records the git
+   `PRE_SHA` in the manifest.
 3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
    dirty tree; resolve manually and re-run).
 4. `bun install && bun run build`.
@@ -61,10 +61,9 @@ cd /path/to/Recall
    cross-host bundle.
    `extract_prompt.md` gets a drift check — if you edited it, the new version
    lands at `extract_prompt.md.new` and your edits are preserved.
-7. Forces re-registration of all four hooks (RecallExtract,
-   RecallTelosSync, RecallStart, RecallPreCompact) — this permanently
-   prevents the pre-0.7.1 bug class where a partial install could
-   leave hooks missing.
+7. Re-registers every installer-owned Claude hook from the canonical hook
+   inventory. Each registration converges independently, so a partial install
+   cannot leave later hooks permanently missing.
 8. Verifies via `recall --version` and `recall stats`.
 
 ### One-time transition for older updaters
@@ -100,9 +99,9 @@ not used.
 
 ### Rollback
 
-If `update.sh` fails at any step, it writes a rollback recipe to
-`~/.claude/backups/recall/<TIMESTAMP>/ROLLBACK.txt` with the exact
-commands to revert:
+If `update.sh` fails at any step, it writes `ROLLBACK.txt` into that run's
+directory under the resolved [Recall backup root](installation.md#backup-and-restore),
+with the exact commands to revert:
 
 ```
 git reset --hard <PRE_SHA>
@@ -311,29 +310,7 @@ graph TD
 
 ## Backup and Restore
 
-### Automatic Backups
-
-The installer automatically backs up existing files before making any changes. Backups are stored at `~/.claude/backups/recall/`.
-
-### Managing Backups
-
-```bash
-./install.sh list              # List available backups
-./install.sh restore           # Restore most recent backup
-./install.sh restore 20260219  # Restore specific backup
-```
-
-### Manual Backup
-
-```bash
-cp ~/.agents/Recall/recall.db ~/.agents/Recall/recall.db.backup
-```
-
-### What Gets Backed Up
-
-| File | Description |
-|------|-------------|
-| `recall.db` | The SQLite database |
-| `settings.json` | Claude Code configuration (MCP + hooks) |
-| `CLAUDE.md` | Global Claude instructions |
-| `~/.claude/MEMORY/` | Memory files |
+The [Installation guide](installation.md#backup-and-restore) owns the backup
+location, list/restore commands, relocation behavior, and manual database-copy
+recipe. Update failures add a `ROLLBACK.txt` recipe to the timestamped backup
+created for that run.
