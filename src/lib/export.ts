@@ -131,16 +131,12 @@ export function toExportRow(table: string, row: ExportRow): ExportRow {
   return { ...row, provenance: row.provenance ?? 'unknown' };
 }
 
-/**
- * Read every row of a durable table in bounded batches via keyset pagination.
- * Fixed two-parameter bind per statement regardless of table size.
- */
-export function collectTableRows(
+function collectRowsFrom(
   db: Database,
   table: ExportTable,
+  sourceTable: string,
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ExportRow[] {
-  const sourceTable = publishedRecordTable(table);
   const hasId = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
     .some(column => column.name === 'id');
   const cursor = hasId ? 'id' : 'rowid';
@@ -160,6 +156,22 @@ export function collectTableRows(
     }
   }
   return rows;
+}
+
+/**
+ * Read every row of a durable table in bounded batches via keyset pagination.
+ * Fixed two-parameter bind per statement regardless of table size.
+ */
+export function collectTableRows(
+  db: Database,
+  table: ExportTable,
+  batchSize: number = SQLITE_SAFE_CHUNK_SIZE
+): ExportRow[] {
+  return collectRowsFrom(db, table, publishedRecordTable(table), batchSize);
+}
+
+function collectStoredTableRows(db: Database, table: ExportTable): ExportRow[] {
+  return collectRowsFrom(db, table, table);
 }
 
 /** Collect all durable tables, with export-row normalization applied. */
@@ -312,7 +324,7 @@ export function renderSqlDump(db: Database, manifest: ExportManifest): string {
     const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
       .map(c => c.name);
     const columnList = columns.map(c => `"${c}"`).join(', ');
-    for (const row of collectTableRows(db, table as ExportTable)) {
+    for (const row of collectStoredTableRows(db, table as ExportTable)) {
       const values = columns.map(c => sqlQuote(row[c])).join(', ');
       lines.push(`INSERT INTO "${table}" (${columnList}) VALUES (${values});`);
     }

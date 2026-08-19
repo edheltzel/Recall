@@ -1479,6 +1479,27 @@ describe('host-neutral immediate SQLite ingest', () => {
       messages: [{ role: 'user', content: 'Lifecycle evidence for explicit capture.' }],
     });
     const capture = getMessagesSinceLastLoa();
+    const source = capture.messages[0];
+    const generation = getDb().prepare(`
+      SELECT generation_id FROM host_ingest_generation_messages
+      WHERE message_id = ? AND content IS NOT NULL
+    `).get(source.id!) as { generation_id: string };
+    getDb().prepare(`
+      INSERT INTO messages (
+        id, session_id, timestamp, role, content, project, importance,
+        provenance, host_ingest_token
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      source.id!,
+      source.session_id,
+      source.timestamp,
+      source.role,
+      source.content,
+      source.project ?? null,
+      source.importance ?? 5,
+      source.provenance ?? null,
+      generation.generation_id
+    );
 
     const loaId = createLoaEntryFromMessages({
       title: 'Explicit lifecycle capture',

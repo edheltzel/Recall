@@ -20,8 +20,11 @@ import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runExport } from '../../src/commands/export';
 import { getDb } from '../../src/db/connection';
+import { CREATE_INDEXES, CREATE_TABLES, PUBLISHED_MESSAGES_SCHEMA } from '../../src/db/schema';
 import { EXPORT_TABLES, PROVENANCE_TABLES } from '../../src/lib/export';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
+import { createMemoryDb } from '../helpers/memdb';
 import {
   createSession,
   addMessage,
@@ -275,6 +278,61 @@ describe('SQL dump', () => {
       }).user_version).toBeGreaterThan(0);
     } finally {
       restored.close();
+    }
+  });
+
+  test('round-trips lifecycle generations into initialized and empty databases', () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'sql-lifecycle-roundtrip',
+      capturedAt: '2026-01-01T00:00:00.000Z',
+      messages: [
+        { role: 'user', content: 'first lifecycle export message' },
+        { role: 'assistant', content: 'second lifecycle export message' },
+      ],
+    });
+    const file = join(outDir, 'lifecycle-roundtrip.sql');
+    runExport({ format: 'sql', output: file, now: NOW });
+    const sql = readFileSync(file, 'utf-8');
+
+    const assertRestored = (restored: Database): void => {
+      expect((restored.prepare('SELECT COUNT(*) AS count FROM messages').get() as {
+        count: number;
+      }).count).toBe(0);
+      expect((restored.prepare(`
+        SELECT COUNT(*) AS count FROM host_ingest_generation_messages
+      `).get() as { count: number }).count).toBe(2);
+      expect((restored.prepare(`
+        SELECT content FROM published_messages ORDER BY id
+      `).all() as Array<{ content: string }>).map(message => message.content)).toEqual([
+        'first lifecycle export message',
+        'second lifecycle export message',
+      ]);
+    };
+
+    const initialized = createMemoryDb();
+    try {
+      const inserts = sql.split('\n').filter(line => line.startsWith('INSERT INTO '));
+      initialized.exec([
+        'PRAGMA foreign_keys=OFF;',
+        'BEGIN TRANSACTION;',
+        ...inserts,
+        'COMMIT;',
+      ].join('\n'));
+      assertRestored(initialized);
+    } finally {
+      initialized.close();
+    }
+
+    const empty = new Database(':memory:');
+    try {
+      empty.exec(sql);
+      empty.exec(CREATE_TABLES);
+      empty.exec(CREATE_INDEXES);
+      empty.exec(PUBLISHED_MESSAGES_SCHEMA);
+      assertRestored(empty);
+    } finally {
+      empty.close();
     }
   });
 });

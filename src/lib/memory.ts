@@ -841,13 +841,26 @@ export function createLoaEntryFromMessages(
 
   return db.transaction(() => {
     const physicalIds = new Set<number>();
+    const generationBackedIds = new Set<number>();
     for (const idChunk of chunked(messageIds)) {
-      const rows = db.prepare(`
+      const physicalRows = db.prepare(`
         SELECT id FROM messages WHERE id IN (${idChunk.map(() => '?').join(',')})
       `).all(...idChunk) as Array<{ id: number }>;
-      for (const row of rows) physicalIds.add(row.id);
+      for (const row of physicalRows) physicalIds.add(row.id);
+      const generationRows = db.prepare(`
+        SELECT generated.message_id AS id
+        FROM host_ingest_generation_messages AS generated
+        JOIN host_ingest_state AS state
+          ON state.active_generation = generated.generation_id
+         AND state.source = generated.source
+         AND state.session_id = generated.session_id
+        WHERE generated.message_id IN (${idChunk.map(() => '?').join(',')})
+      `).all(...idChunk) as Array<{ id: number }>;
+      for (const row of generationRows) generationBackedIds.add(row.id);
     }
-    const pinSources = messageIds.some(id => !physicalIds.has(id));
+    const pinSources = messageIds.some(id =>
+      generationBackedIds.has(id) || !physicalIds.has(id)
+    );
     const loaId = createLoaEntry(pinSources ? {
       ...entry,
       message_range_start: undefined,
