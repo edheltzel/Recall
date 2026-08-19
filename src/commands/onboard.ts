@@ -8,7 +8,8 @@
 // through 7 short questions, then writes the file.
 //
 // Defaults:
-//   - Writes to the resolved global identity path (used everywhere).
+//   - Writes to the global identity, ~/.agents/Recall/MEMORY/identity.md
+//     (used everywhere; ~/.claude/MEMORY/identity.md is the managed link).
 //   - --project writes to ./.atlas-recall/identity.md (project-local override).
 //   - --print previews the rendered markdown without writing.
 //   - --yes accepts all suggested defaults non-interactively (good for CI).
@@ -162,7 +163,7 @@ function detectMachine(): string {
 
 // ───────────────────────────────────────────────────────────────────────
 // Path resolution — mirror RecallStart's identity-file lookup order.
-// Precedence: --out > RECALL_IDENTITY_PATH env > --project > resolved global.
+// Precedence: --out > RECALL_IDENTITY_PATH env > --project > global.
 // The env var is honored because RecallStart reads it with highest
 // precedence at load; without this, a user with the env set could write
 // to one path while the hook loads from another.

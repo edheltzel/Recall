@@ -194,9 +194,9 @@ recall onboard --print --yes   # Preview what would be written (no side effects)
 
 Global onboarding uses the same resolver as `RecallStart`. An existing
 user-owned `~/.claude/MEMORY/identity.md` remains authoritative; otherwise
-the path resolves under the installer-managed Recall root (normally
-`~/.agents/Recall/MEMORY/identity.md`, including relocated installs). A
-managed Claude link, when present, exposes that same canonical file.
+the path is the canonical file under the Recall install root,
+`~/.agents/Recall/MEMORY/identity.md`. A managed Claude link, when present,
+exposes that same canonical file.
 `--project` instead writes `./.atlas-recall/identity.md`. Files exceeding
 1200 characters are silently truncated at load; the command warns if your
 rendered output exceeds that limit.
@@ -238,7 +238,7 @@ crontab -e
 |----------|---------|---------|
 | `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
 | `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
-| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and the installer-resolved global identity. Honored by both `RecallStart` (read) and `recall onboard` (write). |
+| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and the global identity (`~/.agents/Recall/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `recall onboard` (write). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
 | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
@@ -298,7 +298,7 @@ cd /path/to/Recall
 
 - `~/.agents/Recall/recall.db` — your persistent memory database
 - `~/.claude/backups/recall/` — the backup tree written by install/update
-- User-authored identity and distilled memory under the resolved Recall root, together with any managed Claude links or legacy files in `~/.claude/MEMORY/`
+- User-authored identity and distilled memory under `~/.agents/Recall/MEMORY/`, together with any managed Claude links or legacy files in `~/.claude/MEMORY/`
 - This source directory (remove with `rm -rf /path/to/Recall`)
 
 ### Flags

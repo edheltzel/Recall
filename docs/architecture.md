@@ -55,7 +55,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ```
 
 Project-local L0 override: `./.atlas-recall/identity.md` takes precedence over
-the resolved global identity. `RECALL_IDENTITY_PATH` overrides both.
+the global identity (`~/.agents/Recall/MEMORY/identity.md`). `RECALL_IDENTITY_PATH` overrides both.
 
 ## Host Boundaries
 
@@ -150,7 +150,7 @@ Path resolution for `identity.md`:
 1. `RECALL_IDENTITY_PATH` env var (if set)
 2. `./.atlas-recall/identity.md` (project-local, if exists)
 3. Existing user-owned `~/.claude/MEMORY/identity.md`, if it is not the managed canonical link
-4. The canonical file under the installer-resolved root: durable Claude guide link, then `RECALL_DIR`, then `RECALL_HOME`, then `~/.agents/Recall/MEMORY/identity.md`
+4. The canonical file under the Recall install root: `~/.agents/Recall/MEMORY/identity.md`
 
 `recall onboard` uses the same resolver, with explicit `--out` first and
 `--project` forcing step 2 even before the file exists. A managed Claude

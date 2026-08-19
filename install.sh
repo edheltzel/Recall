@@ -318,7 +318,7 @@ do_install() {
   step=$((step + 1))
   echo "  $step. (Recommended) Set up your L0 identity tier:"
   echo "     recall onboard"
-  echo "     A 7-question interview that writes the resolved global identity file."
+  echo "     A 7-question interview that writes ~/.agents/Recall/MEMORY/identity.md."
   echo "     Loads at every session start, gives every agent the same baseline."
   step=$((step + 1))
   echo "  $step. (Optional) Install Fabric for richer session extraction:"

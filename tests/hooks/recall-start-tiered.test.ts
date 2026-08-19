@@ -3,7 +3,7 @@
 // graceful empty-state behavior, and budget enforcement.
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync, symlinkSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -54,63 +54,27 @@ describe('RecallStart — L0 identity', () => {
     process.env.RECALL_IDENTITY_PATH = original;
   });
 
-  test('buildL0 discovers a relocated identity from the installed Claude guide', async () => {
+  test('buildL0 reads the canonical identity under ~/.agents/Recall and ignores RECALL_DIR / RECALL_HOME', async () => {
     const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
     const originalHome = process.env.HOME;
     const originalRecallHome = process.env.RECALL_HOME;
     const originalRecallDir = process.env.RECALL_DIR;
-    const home = join(tempIdentityDir, 'relocated-home');
-    const installRoot = join(tempIdentityDir, 'relocated', 'Recall');
-    const canonical = join(installRoot, 'MEMORY', 'identity.md');
-    const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
-    const staleDefault = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
-    mkdirSync(join(home, '.claude'), { recursive: true });
+    const home = join(tempIdentityDir, 'default-root-home');
+    const canonical = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+    const elsewhere = join(tempIdentityDir, 'elsewhere', 'Recall');
     mkdirSync(join(home, '.agents', 'Recall', 'MEMORY'), { recursive: true });
-    mkdirSync(join(installRoot, 'MEMORY'), { recursive: true });
-    mkdirSync(join(installRoot, 'claude'), { recursive: true });
-    writeFileSync(canonical, '# Relocated identity\n');
-    writeFileSync(guide, '# Guide\n');
-    writeFileSync(staleDefault, '# Stale default identity\n');
-    symlinkSync(guide, join(home, '.claude', 'Recall_GUIDE.md'));
+    mkdirSync(join(elsewhere, 'MEMORY'), { recursive: true });
+    writeFileSync(canonical, '# Canonical identity\n');
+    writeFileSync(join(elsewhere, 'MEMORY', 'identity.md'), '# Relocated identity\n');
     delete process.env.RECALL_IDENTITY_PATH;
-    delete process.env.RECALL_HOME;
-    delete process.env.RECALL_DIR;
+    process.env.RECALL_HOME = elsewhere;
+    process.env.RECALL_DIR = elsewhere;
     process.env.HOME = home;
 
     try {
       const { buildL0 } = await import('../../hooks/RecallStart');
-      expect(buildL0()).toContain('Relocated identity');
-      expect(buildL0()).not.toContain('Stale default identity');
-    } finally {
-      if (originalIdentityPath === undefined) delete process.env.RECALL_IDENTITY_PATH;
-      else process.env.RECALL_IDENTITY_PATH = originalIdentityPath;
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
-      if (originalRecallHome === undefined) delete process.env.RECALL_HOME;
-      else process.env.RECALL_HOME = originalRecallHome;
-      if (originalRecallDir === undefined) delete process.env.RECALL_DIR;
-      else process.env.RECALL_DIR = originalRecallDir;
-    }
-  });
-
-  test('buildL0 honors a relocated RECALL_DIR without a Claude identity alias', async () => {
-    const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
-    const originalHome = process.env.HOME;
-    const originalRecallHome = process.env.RECALL_HOME;
-    const originalRecallDir = process.env.RECALL_DIR;
-    const home = join(tempIdentityDir, 'recall-dir-home');
-    const installRoot = join(tempIdentityDir, 'recall-dir-root');
-    const canonical = join(installRoot, 'MEMORY', 'identity.md');
-    mkdirSync(join(installRoot, 'MEMORY'), { recursive: true });
-    writeFileSync(canonical, '# RECALL_DIR identity\n');
-    delete process.env.RECALL_IDENTITY_PATH;
-    delete process.env.RECALL_HOME;
-    process.env.RECALL_DIR = installRoot;
-    process.env.HOME = home;
-
-    try {
-      const { buildL0 } = await import('../../hooks/RecallStart');
-      expect(buildL0()).toContain('RECALL_DIR identity');
+      expect(buildL0()).toContain('Canonical identity');
+      expect(buildL0()).not.toContain('Relocated identity');
     } finally {
       if (originalIdentityPath === undefined) delete process.env.RECALL_IDENTITY_PATH;
       else process.env.RECALL_IDENTITY_PATH = originalIdentityPath;

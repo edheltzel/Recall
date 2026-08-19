@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
-import { resolveManagedIdentityPaths } from '../../hooks/lib/identity-path.js';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
 
 export interface ClaudePaths {
@@ -28,37 +27,6 @@ export function claudePaths(home: string): ClaudePaths {
     guide: join(root, 'Recall_GUIDE.md'),
     settings: join(root, 'settings.json'),
     legacySettings: join(home, '.claude.json'),
-  };
-}
-
-export interface ClaudeInstallLayout {
-  root: string;
-  guide: { alias: string; canonical: string };
-  extractPrompt: { alias: string; canonical: string };
-  identity: { alias: string; canonical: string };
-}
-
-export function resolveClaudeInstallLayout(
-  home: string,
-  env: NodeJS.ProcessEnv = process.env,
-): ClaudeInstallLayout {
-  const paths = claudePaths(home);
-  const identity = resolveManagedIdentityPaths({ home, env });
-  const root = identity.root;
-  return {
-    root,
-    guide: {
-      alias: paths.guide,
-      canonical: join(root, 'claude', 'Recall_GUIDE.md'),
-    },
-    extractPrompt: {
-      alias: join(paths.memory, 'extract_prompt.md'),
-      canonical: join(root, 'shared', 'extract_prompt.md'),
-    },
-    identity: {
-      alias: identity.alias,
-      canonical: identity.canonical,
-    },
   };
 }
 

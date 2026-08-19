@@ -35,8 +35,10 @@ fi
 
 # Recall install root — canonical home for hooks, commands, guides, the DB,
 # and backups. Claude/OpenCode homes receive per-file symlinks back here; Pi's
-# extensions + skills load through its native package manifest. Override via
-# $RECALL_DIR to relocate.
+# extensions + skills load through its native package manifest. This is the
+# one supported location: there is no user-facing relocation, and the runtime
+# (hooks, CLI, MCP) does not read $RECALL_DIR. The := default exists only so
+# the install tests and e2e harnesses can sandbox the tree.
 : "${RECALL_DIR:=$HOME/.agents/Recall}"
 : "${RECALL_SHARED_DIR:=$RECALL_DIR/shared}"
 : "${RECALL_SHARED_HOOKS_DIR:=$RECALL_SHARED_DIR/hooks}"

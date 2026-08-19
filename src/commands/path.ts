@@ -12,9 +12,10 @@ import { getDbPath } from '../db/connection.js';
 import { existsSync, lstatSync, readlinkSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { resolveClaudeInstallLayout } from '../hosts/claude.js';
+import { claudePaths } from '../hosts/claude.js';
 import { openCodePaths } from '../hosts/opencode.js';
 import { piPaths } from '../hosts/pi.js';
+import { getRecallHome } from '../lib/runtime-paths.js';
 
 export interface PathOptions {
   json?: boolean;
@@ -67,8 +68,8 @@ function dbSizeMb(path: string): number | null {
 
 export function runPath(opts: PathOptions): void {
   const home = homedir();
-  const claude = resolveClaudeInstallLayout(home);
-  const installRoot = claude.root;
+  const installRoot = getRecallHome();
+  const claude = claudePaths(home);
   const openCode = openCodePaths(home);
   const pi = piPaths(home);
   const dbPath = getDbPath();
@@ -79,9 +80,9 @@ export function runPath(opts: PathOptions): void {
   // (target path, canonical path) pair so we can report drift.
   const symlinks: Array<{ name: string; from: string; to: string; info: SymlinkInfo }> = [];
   const candidates: Array<[string, string, string]> = [
-    ['claude_guide', claude.guide.alias, claude.guide.canonical],
-    ['claude_extract_prompt', claude.extractPrompt.alias, claude.extractPrompt.canonical],
-    ['claude_identity', claude.identity.alias, claude.identity.canonical],
+    ['claude_guide', claude.guide, join(installRoot, 'claude', 'Recall_GUIDE.md')],
+    ['claude_extract_prompt', join(claude.memory, 'extract_prompt.md'), join(installRoot, 'shared', 'extract_prompt.md')],
+    ['claude_identity', join(claude.memory, 'identity.md'), join(installRoot, 'MEMORY', 'identity.md')],
     ['opencode_guide', openCode.guide, join(installRoot, 'opencode', 'Recall_GUIDE.md')],
     ['pi_guide', pi.guide, join(installRoot, 'pi', 'Recall_GUIDE.md')],
   ];

@@ -157,10 +157,10 @@ recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP confi
 
 ### L0 identity file
 
-The L0 tier reads the installer-resolved global identity, with
-`./.atlas-recall/identity.md` taking precedence if present. The global file
-normally lives at `~/.agents/Recall/MEMORY/identity.md` and may be exposed
-through a managed Claude link. `RECALL_IDENTITY_PATH` overrides both. If the
+The L0 tier reads the global identity, with `./.atlas-recall/identity.md`
+taking precedence if present. The global file lives at
+`~/.agents/Recall/MEMORY/identity.md` and is exposed through a managed
+`~/.claude/MEMORY/identity.md` link. `RECALL_IDENTITY_PATH` overrides both. If the
 user has never created this file, the L0 section of session context is empty —
 recommend running `recall onboard` to fix it.
 

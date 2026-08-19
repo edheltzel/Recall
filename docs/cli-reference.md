@@ -188,10 +188,11 @@ recall onboard --out /path/identity.md  # Write to an explicit path
 
 `recall onboard` creates the L0 tier that `RecallStart` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
-`--project` > the installer-resolved global identity. The global resolver preserves
-an existing user-owned Claude identity; otherwise it selects the canonical file
-under the Recall install root, including relocated installs. If a file already
-exists, the command asks for confirmation and writes a `.bak` copy before overwriting.
+`--project` > the global identity. The global resolver preserves an existing
+user-owned `~/.claude/MEMORY/identity.md`; otherwise it selects the canonical
+file under the Recall install root, `~/.agents/Recall/MEMORY/identity.md`. If a
+file already exists, the command asks for confirmation and writes a `.bak` copy
+before overwriting.
 
 The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `RecallStart`
 silently truncates beyond that threshold.

@@ -108,9 +108,9 @@ re-learn the basics.
 recall onboard
 ```
 
-A 7-question interview that writes the resolved global identity file
-(normally `~/.agents/Recall/MEMORY/identity.md`; Claude may expose the same
-file through its managed `~/.claude/MEMORY/identity.md` link). Run it once.
+A 7-question interview that writes the global identity file
+`~/.agents/Recall/MEMORY/identity.md` (Claude exposes the same file through
+its managed `~/.claude/MEMORY/identity.md` link). Run it once.
 Re-run whenever your role, active projects, or working preferences change.
 Use `|` (not `,`) to separate values so a phrase like `no force-push, ever`
 survives as a single entry.
@@ -220,7 +220,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ### Claude Code Session Lifecycle
 
-1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your resolved global or project-local `identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
+1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your global or project-local `identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
 2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`) before falling back to git history. Decisions, learnings, and breadcrumbs are recorded in real-time with `memory_add`.
 3. **End of every turn** — A `Stop` hook fires `RecallExtract.ts`, which self-spawns a background process (non-blocking). It checks `.extraction_tracker.json` and only re-extracts if the conversation has grown meaningfully since last time — so capture is incremental, not just an "on exit" event.
 4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to the `claude` CLI running Haiku (with chunking for large sessions >120K chars). Optional Ollama fallback if the CLI fails. A quality gate rejects low-quality extractions before they're stored.

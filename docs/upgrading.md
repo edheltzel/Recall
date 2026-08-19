@@ -189,8 +189,8 @@ automatically on `recall init` or `./install.sh`.
 ### Recommended: run `recall onboard` post-upgrade
 
 v0.7.0 introduces a tiered session-start context (L0 identity + L1
-importance-ranked). The L0 tier reads the installer-resolved global identity
-or an existing project-local override — if you don't have one, that tier is
+importance-ranked). The L0 tier reads the global identity
+(`~/.agents/Recall/MEMORY/identity.md`) or an existing project-local override — if you don't have one, that tier is
 empty and you're only getting half the v2 design.
 
 ```bash

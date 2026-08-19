@@ -130,6 +130,16 @@ describe('resolveOutputPath', () => {
     expect(p).toBe('/test-home/.agents/Recall/MEMORY/identity.md');
   });
 
+  test('ignores RECALL_DIR and RECALL_HOME: the only install root is ~/.agents/Recall', () => {
+    const path = resolveOutputPath({}, {
+      HOME: '/test-home',
+      RECALL_DIR: '/relocated/Recall',
+      RECALL_HOME: '/runtime/Recall',
+    });
+
+    expect(path).toBe('/test-home/.agents/Recall/MEMORY/identity.md');
+  });
+
   test('--project resolves to project-local .atlas-recall/identity.md', () => {
     const p = resolveOutputPath({ project: true }, {});
     expect(p).toBe(join(process.cwd(), '.atlas-recall', 'identity.md'));
@@ -200,30 +210,14 @@ describe('exceedsMaxL0', () => {
 
 // ─── Integration: atomic write via rename ────────────────────────────
 describe('identity file write (integration)', () => {
-  test('resolves installer-relocated identity ownership from RECALL_DIR', () => {
-    const path = resolveOutputPath({}, {
-      HOME: '/test-home',
-      RECALL_DIR: '/relocated/Recall',
-      RECALL_HOME: '/runtime/Recall',
-    });
-
-    expect(path).toBe('/relocated/Recall/MEMORY/identity.md');
-  });
-
-  test('writes a fresh identity into the root discovered from the Claude guide link', () => {
+  test('writes a fresh identity into the canonical Recall root when no Claude alias exists', () => {
     const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
     try {
       const home = join(dir, 'home');
-      const claudeDir = join(home, '.claude');
-      const installRoot = join(dir, 'relocated', 'Recall');
-      const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
-      const canonical = join(installRoot, 'MEMORY', 'identity.md');
-      const identity = join(claudeDir, 'MEMORY', 'identity.md');
-      mkdirSync(dirname(guide), { recursive: true });
+      const canonical = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+      const identity = join(home, '.claude', 'MEMORY', 'identity.md');
       mkdirSync(dirname(canonical), { recursive: true });
       mkdirSync(dirname(identity), { recursive: true });
-      writeFileSync(guide, '# Guide\n');
-      symlinkSync(guide, join(claudeDir, 'Recall_GUIDE.md'));
 
       const outPath = resolveOutputPath({}, { HOME: home });
       writeIdentityAtomic(outPath, '# New\n');
@@ -254,16 +248,11 @@ describe('identity file write (integration)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
     try {
       const home = join(dir, 'home');
-      const installRoot = join(dir, 'relocated', 'Recall');
-      const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
-      const canonicalPath = join(installRoot, 'MEMORY', 'identity.md');
+      const canonicalPath = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
       const claudePath = join(home, '.claude', 'MEMORY', 'identity.md');
-      mkdirSync(dirname(guide), { recursive: true });
       mkdirSync(dirname(canonicalPath), { recursive: true });
       mkdirSync(dirname(claudePath), { recursive: true });
-      writeFileSync(guide, '# Guide\n');
       writeFileSync(canonicalPath, '# Old\n');
-      symlinkSync(guide, join(home, '.claude', 'Recall_GUIDE.md'));
       symlinkSync(canonicalPath, claudePath);
 
       const outPath = resolveOutputPath({}, { HOME: home });

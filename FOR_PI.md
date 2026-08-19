@@ -13,8 +13,8 @@ Recall is a persistent memory framework. It gives you:
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
 4. **Tiered session-start context (v0.7.0+)** — L0 identity (`identity.md`) + L1 top 12 records by importance. Review both at session start
 
-The L0 tier reads the installer-resolved global identity (normally
-`~/.agents/Recall/MEMORY/identity.md`), a project-local
+The L0 tier reads the global identity
+(`~/.agents/Recall/MEMORY/identity.md`), a project-local
 `./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set. If the user
 has never written one, recommend `recall onboard` via Bash to create it.
 
