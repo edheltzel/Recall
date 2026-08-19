@@ -144,6 +144,54 @@ describe('Grok lifecycle hook ownership', () => {
 
     expect(resolveRecallRoot({ env, home })).toBe(relocatedRoot);
     expect(resolveDbPath({ env, home })).toBe(customDb);
+    const initializedEnv = {
+      HOME: home,
+      RECALL_DIR: defaultRoot,
+      RECALL_HOME: defaultRoot,
+      RECALL_DB_PATH_STATE: join(defaultRoot, '.db-path'),
+    } as NodeJS.ProcessEnv;
+    expect(resolveRecallRoot({ env: initializedEnv, home })).toBe(relocatedRoot);
+    expect(resolveDbPath({ env: initializedEnv, home })).toBe(customDb);
+  });
+
+  test('activates a relocated root before shell lifecycle globals are derived', () => {
+    const relocatedRoot = join(tempRoot, 'shell-relocated', 'Recall');
+    const defaultRoot = join(home, '.agents', 'Recall');
+    const customDb = join(tempRoot, 'shell-custom-db', 'recall.db');
+    mkdirSync(relocatedRoot, { recursive: true });
+    mkdirSync(join(home, '.agents'), { recursive: true });
+    writeFileSync(join(relocatedRoot, '.db-path'), `${customDb}\n`);
+    symlinkSync(relocatedRoot, defaultRoot);
+
+    const result = helper(
+      `printf '%s\\n' "$RECALL_DIR" "$RECALL_DB_PATH_STATE" "$(recall_resolve_db_path)"`,
+      {
+        RECALL_DIR: defaultRoot,
+        RECALL_HOME: defaultRoot,
+        RECALL_DB_PATH_STATE: join(defaultRoot, '.db-path'),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim().split('\n')).toEqual([
+      relocatedRoot,
+      join(relocatedRoot, '.db-path'),
+      customDb,
+    ]);
+  });
+
+  test('publishes a relocated install root through the managed locator', () => {
+    const relocatedRoot = join(tempRoot, 'published-relocation', 'Recall');
+    const defaultRoot = join(home, '.agents', 'Recall');
+
+    const result = helper('recall_create_install_root', {
+      RECALL_DIR: relocatedRoot,
+      RECALL_HOME: relocatedRoot,
+    });
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(defaultRoot).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(defaultRoot)).toBe(relocatedRoot);
   });
 
   test('discovers relocated state through the managed Claude guide link', () => {
@@ -159,6 +207,14 @@ describe('Grok lifecycle hook ownership', () => {
 
     expect(resolveRecallRoot({ env, home })).toBe(relocatedRoot);
     expect(resolveDbPath({ env, home })).toBe(customDb);
+    const initializedEnv = {
+      HOME: home,
+      RECALL_DIR: join(home, '.agents', 'Recall'),
+      RECALL_HOME: join(home, '.agents', 'Recall'),
+      RECALL_DB_PATH_STATE: join(home, '.agents', 'Recall', '.db-path'),
+    } as NodeJS.ProcessEnv;
+    expect(resolveRecallRoot({ env: initializedEnv, home })).toBe(relocatedRoot);
+    expect(resolveDbPath({ env: initializedEnv, home })).toBe(customDb);
   });
 
   test('backs up a foreign collision and removes only the managed symlink', () => {

@@ -95,6 +95,9 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir,
+        RECALL_DIR: '',
+        RECALL_HOME: '',
+        RECALL_DB_PATH_STATE: '',
         RECALL_DB_PATH: '',
         MEM_DB_PATH: '',
         RECALL_SKIP_BUN_UNLINK: 'true',
@@ -658,6 +661,7 @@ Preserve this.
     mkdirSync(recallDir, { recursive: true });
     writeFileSync(physicalDb, 'physical-memory');
     writeFileSync(`${physicalDb}-wal`, 'physical-wal');
+    writeFileSync(`${physicalDb}-shm`, 'physical-shm');
     symlinkSync(physicalDb, configuredDb);
     writeFileSync(join(recallDir, '.db-path'), `${configuredDb}\n`);
     const physicalTarget = realpathSync(physicalDb);
@@ -669,10 +673,43 @@ Preserve this.
     expect(existsSync(configuredDb)).toBe(false);
     expect(existsSync(physicalDb)).toBe(false);
     expect(existsSync(`${physicalDb}-wal`)).toBe(false);
+    expect(existsSync(`${physicalDb}-shm`)).toBe(false);
     const snapshot = readdirSync(backupBase).find(entry => entry.startsWith('pre_purge_'));
     expect(snapshot).toBeDefined();
     expect(readFileSync(join(backupBase, snapshot!, 'recall.db'), 'utf-8'))
       .toBe('physical-memory');
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db-wal'), 'utf-8'))
+      .toBe('physical-wal');
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db-shm'), 'utf-8'))
+      .toBe('physical-shm');
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db.physical-path'), 'utf-8'))
+      .toBe(`${physicalTarget}\n`);
+  });
+
+  test('--purge destroys a relocated physical install root and its locator', () => {
+    const defaultRoot = join(claudeDir, '.agents', 'Recall');
+    const relocatedRoot = join(tempRoot, 'relocated', 'Recall');
+    const relocatedDb = join(relocatedRoot, 'recall.db');
+    const internalBackupBase = join(relocatedRoot, 'backups');
+    const purgeBackupBase = join(claudeDir, 'backups', 'recall');
+    rmSync(defaultRoot, { recursive: true, force: true });
+    mkdirSync(relocatedRoot, { recursive: true });
+    writeFileSync(relocatedDb, 'relocated-memory');
+    writeFileSync(join(relocatedRoot, '.db-path'), `${relocatedDb}\n`);
+    mkdirSync(dirname(defaultRoot), { recursive: true });
+    symlinkSync(relocatedRoot, defaultRoot);
+
+    const result = runPurge(claudeDir, internalBackupBase);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(relocatedRoot);
+    expect(existsSync(relocatedRoot)).toBe(false);
+    expect(existsSync(defaultRoot)).toBe(false);
+    expect(() => lstatSync(defaultRoot)).toThrow();
+    const snapshot = readdirSync(purgeBackupBase).find(entry => entry.startsWith('pre_purge_'));
+    expect(snapshot).toBeDefined();
+    expect(readFileSync(join(purgeBackupBase, snapshot!, 'recall.db'), 'utf-8'))
+      .toBe('relocated-memory');
   });
 
   test('--purge rejects --skip-grok before invalidating the retained hook', () => {

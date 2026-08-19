@@ -161,7 +161,7 @@ print_summary() {
   _banner warn "Recall Uninstall"
   echo ""
   echo "Mode: $([[ "$DRY_RUN" == "true" ]] && echo "DRY-RUN (no changes)" || echo "LIVE")"
-  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy $RECALL_DB_PHYSICAL_PATH and ~/.agents/Recall/ after preserving user MEMORY artifacts)"
+  [[ "$PURGE" == "true" ]] && echo "Purge: YES (will destroy $RECALL_DB_PHYSICAL_PATH and $RECALL_DIR after preserving user MEMORY artifacts)"
   [[ "$SKIP_OPENCODE" == "true" ]] && echo "Skipping: OpenCode"
   [[ "$SKIP_PI" == "true" ]] && echo "Skipping: Pi"
   [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
@@ -188,12 +188,12 @@ print_summary() {
     echo "  • $RECALL_DB_PHYSICAL_PATH  (physical persistent memory database)"
     [[ "$RECALL_DB_PATH" != "$RECALL_DB_PHYSICAL_PATH" ]] && echo "  • $RECALL_DB_PATH  (configured database path)"
     echo "  • ~/.claude/memory.db  (legacy DB, if still present)"
-    echo "  • ~/.agents/Recall/  (canonical runtime files and backups)"
+    echo "  • $RECALL_DIR  (physical canonical runtime files and backups)"
     echo ""
   fi
   echo "Will PRESERVE:"
   if [[ "$PURGE" != "true" ]]; then
-    echo "  • ~/.agents/Recall/ (DB, canonical files, backups, MEMORY artifacts)"
+    echo "  • $RECALL_DIR (DB, canonical files, backups, MEMORY artifacts)"
     echo "  • ~/.claude/memory.db (legacy DB if it exists)"
   else
     echo "  • User-authored identity.md and DISTILLED.md (materialized into ~/.claude/MEMORY/ when safe and included in the pre-purge snapshot)"
@@ -651,11 +651,7 @@ preserve_purge_memory_artifacts() {
 }
 
 do_purge() {
-  # Snapshot every Recall-owned DB and user-authored MEMORY artifact before destroying runtime state. Then
-  # remove the install root entirely (preserving the pre_purge_ snapshot
-  # under $BACKUP_BASE/pre_purge_$TIMESTAMP/, which lives outside the tree
-  # we're about to delete since we capture it first).
-  local pre_purge_dir="$BACKUP_BASE/pre_purge_$TIMESTAMP"
+  local pre_purge_dir="$RECALL_PRE_PURGE_DIR"
   local configured_db="$RECALL_DB_PATH"
   local physical_db="$RECALL_DB_PHYSICAL_PATH"
 
@@ -693,44 +689,36 @@ do_purge() {
     fi
   fi
 
-  # Wipe the install root, but preserve the pre_purge snapshot we just made.
-  # Easiest: move snapshot out of $BACKUP_BASE before rm -rf, restore after.
+  if [[ -n "$RECALL_ROOT_LOCATOR" ]] && [[ -L "$RECALL_ROOT_LOCATOR" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would remove install-root locator $RECALL_ROOT_LOCATOR"
+    else
+      rm -f "$RECALL_ROOT_LOCATOR"
+    fi
+  fi
+
   if [[ -d "$RECALL_DIR" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would rm -rf $RECALL_DIR (keeping $pre_purge_dir)"
     else
-      local snapshot_holding=""
-      if [[ -d "$pre_purge_dir" ]]; then
-        snapshot_holding="${TMPDIR:-/tmp}/recall-pre-purge-$TIMESTAMP"
-        mv "$pre_purge_dir" "$snapshot_holding"
-      fi
       rm -rf "$RECALL_DIR"
       log_success "Removed install root: $RECALL_DIR"
-      if [[ -n "$snapshot_holding" ]] && [[ -d "$snapshot_holding" ]]; then
-        mkdir -p "$BACKUP_BASE"
-        mv "$snapshot_holding" "$pre_purge_dir"
-        log_info "Preserved snapshot at: $pre_purge_dir"
-      fi
+      log_info "Preserved snapshot at: $pre_purge_dir"
     fi
   fi
 
-  # Legacy backup tree cleanup. If $BACKUP_BASE lives outside $RECALL_DIR
-  # (which it does on pre-migration installs whose backups stayed under
-  # $CLAUDE_DIR/backups/recall/, or whenever the user/tests override
-  # BACKUP_BASE), remove the sibling snapshots — but not the pre_purge
-  # snapshot we just wrote.
-  if [[ -d "$BACKUP_BASE" ]] && [[ "$BACKUP_BASE" != "$RECALL_DIR/backups" ]]; then
+  if [[ -d "$RECALL_PURGE_BACKUP_BASE" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "  [dry-run] would rm legacy backups in $BACKUP_BASE (except pre_purge_$TIMESTAMP)"
+      echo "  [dry-run] would rm legacy backups in $RECALL_PURGE_BACKUP_BASE (except pre_purge_$TIMESTAMP)"
     else
       local dir
-      for dir in "$BACKUP_BASE"/*/; do
+      for dir in "$RECALL_PURGE_BACKUP_BASE"/*/; do
         [[ ! -d "$dir" ]] && continue
         [[ "$(basename "$dir")" == "pre_purge_$TIMESTAMP" ]] && continue
         rm -rf "$dir"
       done
-      [[ -f "$BACKUP_BASE/latest" ]] && rm -f "$BACKUP_BASE/latest"
-      log_success "Cleared legacy backup snapshots in $BACKUP_BASE"
+      [[ -f "$RECALL_PURGE_BACKUP_BASE/latest" ]] && rm -f "$RECALL_PURGE_BACKUP_BASE/latest"
+      log_success "Cleared legacy backup snapshots in $RECALL_PURGE_BACKUP_BASE"
     fi
   fi
 }
@@ -821,7 +809,7 @@ main() {
       echo "  • ~/.claude/MEMORY/ (user-authored files and surviving managed MEMORY links)"
     else
       echo "Preserved:"
-      echo "  • Pre-purge database and user MEMORY snapshot at $BACKUP_BASE/pre_purge_$TIMESTAMP/"
+      echo "  • Pre-purge database and user MEMORY snapshot at $RECALL_PRE_PURGE_DIR/"
       echo "  • ~/.claude/MEMORY/ (user files, including materialized Recall identity and distilled memory when safe)"
     fi
     echo "  • Source directory at $SCRIPT_DIR (remove with: rm -rf $SCRIPT_DIR)"

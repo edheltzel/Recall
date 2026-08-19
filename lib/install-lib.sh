@@ -33,11 +33,48 @@ fi
 
 : "${CLAUDE_DIR:=$HOME/.claude}"
 
+_recall_resolved_root=""
+_recall_resolved_state=""
+_recall_root_locator=""
+if command -v bun >/dev/null 2>&1 && [[ -f "$RECALL_REPO_DIR/hooks/lib/db-path.ts" ]]; then
+  _recall_resolved_root="$(
+    RECALL_DIR="${RECALL_DIR:-}" \
+      RECALL_HOME="${RECALL_HOME:-}" \
+      CLAUDE_DIR="$CLAUDE_DIR" \
+      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" physical-root 2>/dev/null || true
+  )"
+fi
+if [[ -n "$_recall_resolved_root" ]]; then
+  RECALL_DIR="$_recall_resolved_root"
+fi
+: "${RECALL_DIR:=$HOME/.agents/Recall}"
+if command -v bun >/dev/null 2>&1 && [[ -f "$RECALL_REPO_DIR/hooks/lib/db-path.ts" ]]; then
+  _recall_resolved_state="$(
+    RECALL_DIR="$RECALL_DIR" \
+      RECALL_HOME="$RECALL_DIR" \
+      RECALL_DB_PATH_STATE="${RECALL_DB_PATH_STATE:-}" \
+      CLAUDE_DIR="$CLAUDE_DIR" \
+      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" state 2>/dev/null || true
+  )"
+  _recall_root_locator="$(
+    RECALL_DIR="$RECALL_DIR" \
+      RECALL_HOME="$RECALL_DIR" \
+      CLAUDE_DIR="$CLAUDE_DIR" \
+      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" locator 2>/dev/null || true
+  )"
+fi
+if [[ -n "$_recall_resolved_state" ]]; then
+  RECALL_DB_PATH_STATE="$_recall_resolved_state"
+fi
+RECALL_ROOT_LOCATOR="$_recall_root_locator"
+RECALL_HOME="$RECALL_DIR"
+export RECALL_DIR RECALL_HOME RECALL_DB_PATH_STATE
+unset _recall_resolved_root _recall_resolved_state _recall_root_locator
+
 # Recall install root — canonical home for hooks, commands, guides, the DB,
 # and backups. Claude/OpenCode homes receive per-file symlinks back here; Pi's
 # extensions + skills load through its native package manifest. Override via
 # $RECALL_DIR to relocate.
-: "${RECALL_DIR:=$HOME/.agents/Recall}"
 : "${RECALL_SHARED_DIR:=$RECALL_DIR/shared}"
 : "${RECALL_SHARED_HOOKS_DIR:=$RECALL_SHARED_DIR/hooks}"
 : "${RECALL_SHARED_HOOKS_LIB_DIR:=$RECALL_SHARED_HOOKS_DIR/lib}"
@@ -68,6 +105,16 @@ RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${TIMESTAMP:=$(date +%Y%m%d_%H%M%S)}"
 : "${BACKUP_BASE:=$RECALL_DIR/backups}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
+if [[ "$BACKUP_BASE" == "$RECALL_DIR" ]] || [[ "$BACKUP_BASE" == "$RECALL_DIR/"* ]]; then
+  RECALL_PURGE_BACKUP_BASE="$CLAUDE_DIR/backups/recall"
+  if [[ "$RECALL_PURGE_BACKUP_BASE" == "$RECALL_DIR" ]] \
+    || [[ "$RECALL_PURGE_BACKUP_BASE" == "$RECALL_DIR/"* ]]; then
+    RECALL_PURGE_BACKUP_BASE="$(dirname "$RECALL_DIR")/Recall-pre-purge"
+  fi
+else
+  RECALL_PURGE_BACKUP_BASE="$BACKUP_BASE"
+fi
+RECALL_PRE_PURGE_DIR="$RECALL_PURGE_BACKUP_BASE/pre_purge_$TIMESTAMP"
 
 # Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
 # output stay clean). Tests can override by exporting RED/GREEN/etc. before
@@ -857,14 +904,25 @@ recall_backup_file() {
 
 recall_backup_db_routing() {
   local destination="$1"
-  local db_path ext
+  local db_path physical_path ext
   db_path="$(recall_resolve_db_path)"
+  physical_path="$(recall_resolve_physical_db_path "$db_path")"
   mkdir -p "$destination"
   printf '%s\n' "$db_path" > "$destination/recall.db.path"
-  if [[ -f "$db_path" ]]; then
-    cp -p "$db_path" "$destination/recall.db"
+  printf '%s\n' "$physical_path" > "$destination/recall.db.physical-path"
+  if [[ -L "$db_path" ]]; then
+    readlink "$db_path" > "$destination/recall.db.symlink-target"
+  else
+    rm -f "$destination/recall.db.symlink-target"
+  fi
+  if [[ -f "$physical_path" ]]; then
+    cp -p "$physical_path" "$destination/recall.db"
     for ext in -wal -shm; do
-      [[ -f "${db_path}${ext}" ]] && cp -p "${db_path}${ext}" "$destination/recall.db${ext}"
+      if [[ -f "${physical_path}${ext}" ]]; then
+        cp -p "${physical_path}${ext}" "$destination/recall.db${ext}"
+      elif [[ -f "${db_path}${ext}" ]]; then
+        cp -p "${db_path}${ext}" "$destination/recall.db${ext}"
+      fi
     done
     RECALL_ROUTING_BACKUP_COUNT=1
   else
@@ -881,27 +939,43 @@ recall_backup_db_routing() {
 
 recall_restore_db_routing() {
   local source="$1"
-  local db_path ext
+  local db_path physical_path restore_path symlink_target ext
   RECALL_ROUTING_RESTORED_COUNT=0
   if [[ -f "$source/recall.db.path" ]]; then
     IFS= read -r db_path < "$source/recall.db.path" || true
   else
     db_path="$RECALL_DIR/recall.db"
   fi
+  if [[ -f "$source/recall.db.physical-path" ]]; then
+    IFS= read -r physical_path < "$source/recall.db.physical-path" || true
+  else
+    physical_path="$db_path"
+  fi
+  restore_path="$db_path"
+  if [[ -f "$source/recall.db.symlink-target" ]]; then
+    restore_path="$physical_path"
+    IFS= read -r symlink_target < "$source/recall.db.symlink-target" || true
+  fi
   if [[ -f "$source/recall.db" ]]; then
-    if [[ "$db_path" != /* ]] || [[ "$db_path" == "/" ]]; then
-      log_error "Refusing to restore database to invalid path: $db_path"
+    if [[ "$db_path" != /* ]] || [[ "$db_path" == "/" ]] \
+      || [[ "$restore_path" != /* ]] || [[ "$restore_path" == "/" ]]; then
+      log_error "Refusing to restore database to invalid path: $restore_path"
       return 1
     fi
-    mkdir -p "$(dirname "$db_path")"
-    cp -p "$source/recall.db" "$db_path"
+    mkdir -p "$(dirname "$restore_path")"
+    cp -p "$source/recall.db" "$restore_path"
     for ext in -wal -shm; do
       if [[ -f "$source/recall.db${ext}" ]]; then
-        cp -p "$source/recall.db${ext}" "${db_path}${ext}"
+        cp -p "$source/recall.db${ext}" "${restore_path}${ext}"
       else
-        rm -f "${db_path}${ext}"
+        rm -f "${restore_path}${ext}"
       fi
     done
+    if [[ -f "$source/recall.db.symlink-target" ]] && [[ "$db_path" != "$restore_path" ]]; then
+      mkdir -p "$(dirname "$db_path")"
+      rm -f "$db_path" "${db_path}-wal" "${db_path}-shm"
+      ln -s "$symlink_target" "$db_path"
+    fi
     log_success "Restored: recall.db → $db_path"
     RECALL_ROUTING_RESTORED_COUNT=$((RECALL_ROUTING_RESTORED_COUNT + 1))
   fi
@@ -1051,6 +1125,7 @@ recall_do_restore() {
     [[ "$filename" == "recall.db-wal" ]] && continue
     [[ "$filename" == "recall.db-shm" ]] && continue
     [[ "$filename" == "recall.db.path" ]] && continue
+    [[ "$filename" == "recall.db.physical-path" ]] && continue
     [[ "$filename" == ".db-path" ]] && continue
     [[ "$filename" == ".db-path.absent" ]] && continue
 
@@ -1153,6 +1228,19 @@ recall_create_install_root() {
     "$RECALL_GROK_HOOKS_DIR" \
     "$RECALL_MEMORY_DIR" \
     "$BACKUP_BASE"
+
+  local default_root="$HOME/.agents/Recall"
+  if [[ "$RECALL_DIR" != "$default_root" ]]; then
+    mkdir -p "$(dirname "$default_root")"
+    if [[ -L "$default_root" ]] && [[ "$(readlink "$default_root")" == "$RECALL_DIR" ]]; then
+      return 0
+    fi
+    if [[ ! -e "$default_root" ]] && [[ ! -L "$default_root" ]]; then
+      ln -s "$RECALL_DIR" "$default_root"
+    else
+      log_warn "Cannot publish relocated Recall root at occupied path: $default_root"
+    fi
+  fi
 }
 
 recall_resolve_db_path() {
