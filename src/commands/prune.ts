@@ -2,7 +2,7 @@
 
 import { getDb } from '../db/connection.js';
 import { tableExists } from '../db/introspection.js';
-import { notRecordedSurvivorSql } from '../lib/dedup.js';
+import { fkProtectedIds, notRecordedSurvivorSql } from '../lib/dedup.js';
 import { deleteRecordEmbeddingsBySelectionInTransaction } from '../lib/embedding-store.js';
 
 interface PruneOptions {
@@ -17,6 +17,7 @@ interface PruneResult {
   count: number;
   /** Rows matching the prune criteria but withheld as recorded dedup survivors (#80). */
   protected?: number;
+  protectedReason?: string;
 }
 
 function parseDays(value: string): number {
@@ -62,9 +63,23 @@ export function runPrune(options: PruneOptions): void {
     `WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
      AND timestamp < ${cutoff}`;
   const messageGuard = `AND ${notRecordedSurvivorSql("'messages'", 'messages.id')}`;
+  const messageFkProtectedIds = fkProtectedIds(db, 'messages');
   const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere}`);
-  const messageCount = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard}`);
-  results.push({ table: 'messages', description: `Consolidated messages older than ${days}d`, count: messageCount, protected: messageMatched - messageCount });
+  let messageCount = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard}`);
+  for (const id of messageFkProtectedIds) {
+    messageCount -= countRows(
+      db,
+      `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard} AND messages.id = ?`,
+      [id]
+    );
+  }
+  results.push({
+    table: 'messages',
+    description: `Consolidated messages older than ${days}d`,
+    count: messageCount,
+    protected: messageMatched - messageCount,
+    protectedReason: 'kept as dedup survivors/FK references',
+  });
 
   // 2. Sessions: delete orphaned sessions (no messages, no LoA) older than N days
   const sessionWhere =
@@ -136,7 +151,7 @@ export function runPrune(options: PruneOptions): void {
   for (const r of results) {
     const icon = r.count > 0 ? '[prune]' : '[ok]';
     const protectedNote = r.protected && r.protected > 0
-      ? ` (${r.protected.toLocaleString()} kept as dedup survivors)`
+      ? ` (${r.protected.toLocaleString()} ${r.protectedReason ?? 'kept as dedup survivors'})`
       : '';
     console.log(`  ${icon} ${r.table}: ${r.count.toLocaleString()} rows - ${r.description}${protectedNote}`);
   }
@@ -178,6 +193,10 @@ export function runPrune(options: PruneOptions): void {
         SELECT id, host_ingest_token FROM published_messages AS messages
         ${messageWhere} ${messageGuard}
       `).run();
+      const removeFkProtected = db.prepare(`
+        DELETE FROM temp.prune_message_selection WHERE id = ?
+      `);
+      for (const id of messageFkProtectedIds) removeFkProtected.run(id);
       deleteRecordEmbeddingsBySelectionInTransaction(
         db,
         'messages',

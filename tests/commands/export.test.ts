@@ -24,6 +24,7 @@ import { CREATE_INDEXES, CREATE_TABLES, PUBLISHED_MESSAGES_SCHEMA } from '../../
 import { EXPORT_TABLES, PROVENANCE_TABLES } from '../../src/lib/export';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
+import { repairLifecycleSearchIndex } from '../../src/lib/lifecycle-search';
 import { createMemoryDb } from '../helpers/memdb';
 import {
   createSession,
@@ -287,7 +288,7 @@ describe('SQL dump', () => {
       sessionId: 'sql-lifecycle-roundtrip',
       capturedAt: '2026-01-01T00:00:00.000Z',
       messages: [
-        { role: 'user', content: 'first lifecycle export message' },
+        { role: 'user', content: 'first lifecycleexportneedle message' },
         { role: 'assistant', content: 'second lifecycle export message' },
       ],
     });
@@ -302,17 +303,51 @@ describe('SQL dump', () => {
       expect((restored.prepare(`
         SELECT COUNT(*) AS count FROM host_ingest_generation_messages
       `).get() as { count: number }).count).toBe(2);
+      expect(restored.prepare(`
+        SELECT fts_ready FROM host_ingest_generations
+      `).get()).toEqual({ fts_ready: 0 });
+      expect((restored.prepare(`
+        SELECT COUNT(*) AS count FROM host_ingest_generation_messages
+        WHERE fts_pending = 1
+      `).get() as { count: number }).count).toBe(2);
       expect((restored.prepare(`
         SELECT content FROM published_messages ORDER BY id
       `).all() as Array<{ content: string }>).map(message => message.content)).toEqual([
-        'first lifecycle export message',
+        'first lifecycleexportneedle message',
         'second lifecycle export message',
       ]);
+      expect((restored.prepare(`
+        SELECT COUNT(*) AS count FROM host_ingest_generation_messages_fts
+      `).get() as { count: number }).count).toBe(0);
+      expect(repairLifecycleSearchIndex(restored, { maxPages: 8 }).status).toBe('ready');
+      expect((restored.prepare(`
+        SELECT COUNT(*) AS count FROM host_ingest_generation_messages_fts
+        WHERE host_ingest_generation_messages_fts MATCH 'lifecycleexportneedle'
+      `).get() as { count: number }).count).toBe(1);
+
+      const maxGeneratedId = (restored.prepare(`
+        SELECT MAX(message_id) AS id FROM host_ingest_generation_messages
+      `).get() as { id: number }).id;
+      const inserted = restored.prepare(`
+        INSERT INTO messages (
+          session_id, timestamp, role, content, provenance
+        ) VALUES (
+          'sql-lifecycle-roundtrip', '2026-01-01T00:00:03.000Z',
+          'assistant', 'ordinary message after restore', 'verbatim'
+        )
+      `).run();
+      expect(Number(inserted.lastInsertRowid)).toBeGreaterThan(maxGeneratedId);
+      expect(restored.prepare(`
+        SELECT COUNT(*) AS count, COUNT(DISTINCT id) AS distinct_count
+        FROM published_messages
+      `).get()).toEqual({ count: 3, distinct_count: 3 });
     };
 
     const initialized = createMemoryDb();
     try {
-      const inserts = sql.split('\n').filter(line => line.startsWith('INSERT INTO '));
+      const inserts = sql.split('\n').filter(line =>
+        line.startsWith('INSERT INTO ') || line.startsWith('UPDATE sqlite_sequence ')
+      );
       initialized.exec([
         'PRAGMA foreign_keys=OFF;',
         'BEGIN TRANSACTION;',

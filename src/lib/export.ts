@@ -174,6 +174,21 @@ function collectStoredTableRows(db: Database, table: ExportTable): ExportRow[] {
   return collectRowsFrom(db, table, table);
 }
 
+function toSqlRestoreRow(table: ExportTable, row: ExportRow): ExportRow {
+  if (table === 'host_ingest_generations') return { ...row, fts_ready: 0 };
+  if (table === 'host_ingest_generation_messages') return { ...row, fts_pending: 1 };
+  return row;
+}
+
+function messageSequenceHighWater(db: Database): number {
+  return (db.prepare(`
+    SELECT MAX(
+      COALESCE((SELECT MAX(id) FROM messages), 0),
+      COALESCE((SELECT MAX(message_id) FROM host_ingest_generation_messages), 0)
+    ) AS seq
+  `).get() as { seq: number }).seq;
+}
+
 /** Collect all durable tables, with export-row normalization applied. */
 export function collectExportData(db: Database): ExportData {
   const data: ExportData = {};
@@ -324,9 +339,15 @@ export function renderSqlDump(db: Database, manifest: ExportManifest): string {
     const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
       .map(c => c.name);
     const columnList = columns.map(c => `"${c}"`).join(', ');
-    for (const row of collectStoredTableRows(db, table as ExportTable)) {
+    for (const storedRow of collectStoredTableRows(db, table as ExportTable)) {
+      const row = toSqlRestoreRow(table as ExportTable, storedRow);
       const values = columns.map(c => sqlQuote(row[c])).join(', ');
       lines.push(`INSERT INTO "${table}" (${columnList}) VALUES (${values});`);
+    }
+    if (table === 'messages') {
+      const seq = messageSequenceHighWater(db);
+      lines.push(`UPDATE sqlite_sequence SET seq = MAX(COALESCE(seq, 0), ${seq}) WHERE name = 'messages';`);
+      lines.push(`INSERT INTO sqlite_sequence (name, seq) SELECT 'messages', ${seq} WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'messages');`);
     }
   }
   lines.push('COMMIT;');

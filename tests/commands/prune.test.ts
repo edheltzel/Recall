@@ -23,6 +23,7 @@ import {
 } from '../../src/lib/memory';
 import type { LineageStatus } from '../../src/lib/dedup';
 import { embeddingToBlob } from '../../src/lib/embeddings';
+import { coreDump } from '../../src/commands/dump';
 
 const originalLog = console.log;
 const originalError = console.error;
@@ -219,6 +220,48 @@ describe('prune respects dedup survivors (#80)', () => {
     expect(db.prepare('SELECT 1 FROM messages WHERE id = ?').get(generated.message_id)).toBeNull();
     expect(db.prepare('SELECT content FROM messages WHERE id = ?').get(staged.lastInsertRowid))
       .toEqual({ content: 'unrelated staged body' });
+  });
+
+  test('protects explicit lifecycle dump range endpoints', async () => {
+    const sessionId = 'explicit-lifecycle-prune';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      capturedAt: OLD,
+      finalize: true,
+      messages: [{ role: 'user', content: 'automatic lifecycle body' }],
+    });
+    const dumped = await coreDump('Explicit lifecycle snapshot', {
+      skipFabric: true,
+      skipEmbed: true,
+      session: {
+        source: 'codex',
+        sessionId,
+        filePath: `mcp://codex/${sessionId}`,
+        messages: [{
+          session_id: sessionId,
+          timestamp: OLD,
+          role: 'assistant',
+          content: 'explicit lifecycle dump body',
+        }],
+      },
+    });
+    const db = getDb();
+    const explicitLoa = db.prepare(`
+      SELECT message_range_start, message_range_end FROM loa_entries WHERE id = ?
+    `).get(dumped.loaId!) as { message_range_start: number; message_range_end: number };
+
+    runPrune({ execute: true });
+
+    expect(explicitLoa.message_range_start).toBe(explicitLoa.message_range_end);
+    expect(db.prepare(`
+      SELECT content FROM messages WHERE id = ?
+    `).get(explicitLoa.message_range_start)).toEqual({
+      content: 'explicit lifecycle dump body',
+    });
+    const messageLine = logged.find(line => line.includes('messages:'));
+    expect(messageLine).toContain('1 rows');
+    expect(messageLine).toContain('1 kept as dedup survivors/FK references');
   });
 
   test('protects a recorded survivor message and still prunes a non-survivor', () => {
