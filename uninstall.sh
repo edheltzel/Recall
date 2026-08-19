@@ -244,7 +244,15 @@ remove_slash_commands() {
 
 remove_guide() {
   local f="$CLAUDE_DIR/Recall_GUIDE.md"
-  if [[ -f "$f" || -L "$f" ]]; then
+  if [[ -L "$f" ]]; then
+    if ! recall_symlink_target_is_managed "$f" \
+      || ! recall_symlink_points_to "$f" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"; then
+      log_warn "Preserved foreign guide symlink: $f"
+      return
+    fi
+    run rm -f "$f"
+    log_success "Removed $f"
+  elif [[ -f "$f" ]]; then
     run rm -f "$f"
     log_success "Removed $f"
   fi

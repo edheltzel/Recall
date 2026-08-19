@@ -65,7 +65,7 @@ describe('Grok lifecycle hook ownership', () => {
   });
 
   test('installs one managed global hook with capture events and no injection claim', () => {
-    const result = helper('recall_install_grok_platform');
+    const result = helper('recall_create_install_root; recall_install_grok_platform');
     expect(result.status).toBe(0);
 
     const target = join(grokDir, 'hooks', 'RecallLifecycle.json');
@@ -396,7 +396,7 @@ describe('Grok lifecycle hook ownership', () => {
     const target = join(grokDir, 'hooks', 'RecallLifecycle.json');
     writeFileSync(target, '{"user":"owned"}\n');
 
-    expect(helper('recall_install_grok_platform').status).toBe(0);
+    expect(helper('recall_create_install_root; recall_install_grok_platform').status).toBe(0);
     const backup = join(backupDir, 'collisions', '.grok', 'hooks', 'RecallLifecycle.json');
     expect(readFileSync(backup, 'utf-8')).toBe('{"user":"owned"}\n');
     expect(lstatSync(target).isSymbolicLink()).toBe(true);

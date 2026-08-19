@@ -55,6 +55,23 @@ describe('RecallStart — L0 identity', () => {
     process.env.RECALL_IDENTITY_PATH = original;
   });
 
+  test('buildL0 omits identity when alias metadata cannot be read', async () => {
+    const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
+    const originalHome = process.env.HOME;
+    delete process.env.RECALL_IDENTITY_PATH;
+    process.env.HOME = `/${'x'.repeat(5000)}`;
+
+    try {
+      const { buildL0 } = await import('../../hooks/RecallStart');
+      expect(buildL0()).toBeUndefined();
+    } finally {
+      if (originalIdentityPath === undefined) delete process.env.RECALL_IDENTITY_PATH;
+      else process.env.RECALL_IDENTITY_PATH = originalIdentityPath;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+    }
+  });
+
   test('buildL0 discovers a relocated identity from the installed Claude guide', async () => {
     const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
     const originalHome = process.env.HOME;

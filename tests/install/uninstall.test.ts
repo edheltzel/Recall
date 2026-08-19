@@ -13,6 +13,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   readdirSync,
   rmSync,
@@ -775,6 +776,35 @@ Preserve this.
     expect(snapshot).toBeDefined();
     expect(readFileSync(join(backupBase, snapshot!, 'recall.db'), 'utf-8'))
       .toBe('external-memory');
+  });
+
+  test('preserves a foreign dangling Claude guide symlink', () => {
+    const guide = join(claudeDir, 'Recall_GUIDE.md');
+    const foreignTarget = join(tempRoot, 'foreign-guide', 'Recall_GUIDE.md');
+    rmSync(guide, { force: true });
+    symlinkSync(foreignTarget, guide);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(guide).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(guide)).toBe(foreignTarget);
+  });
+
+  test('preserves a guide symlink into an unowned Recall-shaped root', () => {
+    const guide = join(claudeDir, 'Recall_GUIDE.md');
+    const defaultRoot = join(claudeDir, '.agents', 'Recall');
+    const canonical = join(defaultRoot, 'claude', 'Recall_GUIDE.md');
+    rmSync(guide, { force: true });
+    rmSync(defaultRoot, { recursive: true, force: true });
+    mkdirSync(dirname(canonical), { recursive: true });
+    symlinkSync(canonical, guide);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(guide).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(guide)).toBe(canonical);
   });
 
   test('--purge rejects --skip-grok before invalidating the retained hook', () => {
