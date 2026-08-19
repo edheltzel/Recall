@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { spawnSync } from 'child_process';
-import { resolveDbPath, resolveRecallRoot } from '../../hooks/lib/db-path';
+import {
+  claimRecallRoot,
+  resolveDbPath,
+  resolvePurgeBackupBase,
+  resolveRecallRoot,
+} from '../../hooks/lib/db-path';
 
 const repoRoot = process.cwd();
 const installLib = join(repoRoot, 'lib', 'install-lib.sh');
@@ -14,7 +19,7 @@ let grokDir = '';
 let backupDir = '';
 
 function helper(name: string, overrides: Record<string, string> = {}) {
-  return spawnSync('bash', ['-c', `source ${JSON.stringify(installLib)}; ${name}`], {
+  return spawnSync('bash', ['-c', `source ${JSON.stringify(installLib)} && { ${name}; }`], {
     cwd: repoRoot,
     encoding: 'utf-8',
     env: {
@@ -64,7 +69,7 @@ describe('Grok lifecycle hook ownership', () => {
     expect(result.status).toBe(0);
 
     const target = join(grokDir, 'hooks', 'RecallLifecycle.json');
-    const canonical = join(recallDir, 'grok', 'hooks', 'RecallLifecycle.json');
+    const canonical = join(realpathSync(recallDir), 'grok', 'hooks', 'RecallLifecycle.json');
     expect(lstatSync(target).isSymbolicLink()).toBe(true);
     expect(readlinkSync(target)).toBe(canonical);
 
@@ -137,12 +142,14 @@ describe('Grok lifecycle hook ownership', () => {
     const defaultRoot = join(home, '.agents', 'Recall');
     const customDb = join(tempRoot, 'custom-db', 'recall.db');
     mkdirSync(relocatedRoot, { recursive: true });
+    claimRecallRoot(relocatedRoot, { env: { HOME: home }, home });
     mkdirSync(join(home, '.agents'), { recursive: true });
     writeFileSync(join(relocatedRoot, '.db-path'), `${customDb}\n`);
     symlinkSync(relocatedRoot, defaultRoot);
     const env = { HOME: home } as NodeJS.ProcessEnv;
 
-    expect(resolveRecallRoot({ env, home })).toBe(relocatedRoot);
+    const physicalRoot = realpathSync(relocatedRoot);
+    expect(resolveRecallRoot({ env, home })).toBe(physicalRoot);
     expect(resolveDbPath({ env, home })).toBe(customDb);
     const initializedEnv = {
       HOME: home,
@@ -150,7 +157,7 @@ describe('Grok lifecycle hook ownership', () => {
       RECALL_HOME: defaultRoot,
       RECALL_DB_PATH_STATE: join(defaultRoot, '.db-path'),
     } as NodeJS.ProcessEnv;
-    expect(resolveRecallRoot({ env: initializedEnv, home })).toBe(relocatedRoot);
+    expect(resolveRecallRoot({ env: initializedEnv, home })).toBe(physicalRoot);
     expect(resolveDbPath({ env: initializedEnv, home })).toBe(customDb);
   });
 
@@ -159,6 +166,7 @@ describe('Grok lifecycle hook ownership', () => {
     const defaultRoot = join(home, '.agents', 'Recall');
     const customDb = join(tempRoot, 'shell-custom-db', 'recall.db');
     mkdirSync(relocatedRoot, { recursive: true });
+    claimRecallRoot(relocatedRoot, { env: { HOME: home }, home });
     mkdirSync(join(home, '.agents'), { recursive: true });
     writeFileSync(join(relocatedRoot, '.db-path'), `${customDb}\n`);
     symlinkSync(relocatedRoot, defaultRoot);
@@ -173,9 +181,10 @@ describe('Grok lifecycle hook ownership', () => {
     );
 
     expect(result.status).toBe(0);
+    const physicalRoot = realpathSync(relocatedRoot);
     expect(result.stdout.trim().split('\n')).toEqual([
-      relocatedRoot,
-      join(relocatedRoot, '.db-path'),
+      physicalRoot,
+      join(physicalRoot, '.db-path'),
       customDb,
     ]);
   });
@@ -191,7 +200,20 @@ describe('Grok lifecycle hook ownership', () => {
 
     expect(result.status).toBe(0);
     expect(lstatSync(defaultRoot).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(defaultRoot)).toBe(relocatedRoot);
+    expect(readlinkSync(defaultRoot)).toBe(realpathSync(relocatedRoot));
+    expect(readFileSync(join(relocatedRoot, '.recall-root'), 'utf-8')).toBe('recall-root-v1\n');
+  });
+
+  test('claims a pre-marker Recall layout during upgrade', () => {
+    const legacyRoot = join(tempRoot, 'legacy-layout', 'Recall');
+    mkdirSync(join(legacyRoot, 'shared', 'hooks'), { recursive: true });
+    mkdirSync(join(legacyRoot, 'claude'), { recursive: true });
+    writeFileSync(join(legacyRoot, 'shared', 'hooks', 'RecallStart.ts'), '// legacy hook\n');
+    writeFileSync(join(legacyRoot, 'claude', 'Recall_GUIDE.md'), '# Legacy guide\n');
+
+    expect(claimRecallRoot(legacyRoot, { env: { HOME: home }, home }))
+      .toBe(realpathSync(legacyRoot));
+    expect(readFileSync(join(legacyRoot, '.recall-root'), 'utf-8')).toBe('recall-root-v1\n');
   });
 
   test('discovers relocated state through the managed Claude guide link', () => {
@@ -199,13 +221,16 @@ describe('Grok lifecycle hook ownership', () => {
     const guide = join(relocatedRoot, 'claude', 'Recall_GUIDE.md');
     const customDb = join(tempRoot, 'guide-custom-db', 'recall.db');
     mkdirSync(join(home, '.claude'), { recursive: true });
+    mkdirSync(relocatedRoot, { recursive: true });
+    claimRecallRoot(relocatedRoot, { env: { HOME: home }, home });
     mkdirSync(join(relocatedRoot, 'claude'), { recursive: true });
     writeFileSync(guide, '# Guide\n');
     writeFileSync(join(relocatedRoot, '.db-path'), `${customDb}\n`);
     symlinkSync(guide, join(home, '.claude', 'Recall_GUIDE.md'));
     const env = { HOME: home } as NodeJS.ProcessEnv;
 
-    expect(resolveRecallRoot({ env, home })).toBe(relocatedRoot);
+    const physicalRoot = realpathSync(relocatedRoot);
+    expect(resolveRecallRoot({ env, home })).toBe(physicalRoot);
     expect(resolveDbPath({ env, home })).toBe(customDb);
     const initializedEnv = {
       HOME: home,
@@ -213,8 +238,94 @@ describe('Grok lifecycle hook ownership', () => {
       RECALL_HOME: join(home, '.agents', 'Recall'),
       RECALL_DB_PATH_STATE: join(home, '.agents', 'Recall', '.db-path'),
     } as NodeJS.ProcessEnv;
-    expect(resolveRecallRoot({ env: initializedEnv, home })).toBe(relocatedRoot);
+    expect(resolveRecallRoot({ env: initializedEnv, home })).toBe(physicalRoot);
     expect(resolveDbPath({ env: initializedEnv, home })).toBe(customDb);
+  });
+
+  test('rejects foreign default-root and Claude-guide symlinks', () => {
+    const defaultRoot = join(home, '.agents', 'Recall');
+    const foreignRoot = join(tempRoot, 'foreign-root');
+    const precious = join(foreignRoot, 'precious.txt');
+    mkdirSync(foreignRoot, { recursive: true });
+    mkdirSync(dirname(defaultRoot), { recursive: true });
+    writeFileSync(precious, 'keep');
+    symlinkSync(foreignRoot, defaultRoot);
+    const env = { HOME: home } as NodeJS.ProcessEnv;
+
+    expect(() => resolveRecallRoot({ env, home })).toThrow('not installer-owned');
+    const shell = helper('true', {
+      RECALL_DIR: defaultRoot,
+      RECALL_HOME: defaultRoot,
+      RECALL_DB_PATH_STATE: join(defaultRoot, '.db-path'),
+    });
+    expect(shell.status).not.toBe(0);
+    expect(shell.stderr).toContain('not installer-owned');
+    expect(readFileSync(precious, 'utf-8')).toBe('keep');
+
+    rmSync(defaultRoot);
+    const guideRoot = join(tempRoot, 'foreign-guide-root');
+    const guide = join(guideRoot, 'claude', 'Recall_GUIDE.md');
+    mkdirSync(dirname(guide), { recursive: true });
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(guide, '# Foreign\n');
+    symlinkSync(guide, join(home, '.claude', 'Recall_GUIDE.md'));
+    expect(() => resolveRecallRoot({ env, home })).toThrow('not installer-owned');
+  });
+
+  test('fails relocated installation when the default locator is occupied', () => {
+    const defaultRoot = join(home, '.agents', 'Recall');
+    const relocatedRoot = join(tempRoot, 'blocked-relocation', 'Recall');
+    mkdirSync(defaultRoot, { recursive: true });
+    writeFileSync(join(defaultRoot, 'foreign.txt'), 'keep');
+
+    const result = helper('recall_create_install_root', {
+      RECALL_DIR: relocatedRoot,
+      RECALL_HOME: relocatedRoot,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain('occupied path');
+    expect(existsSync(relocatedRoot)).toBe(false);
+    expect(readFileSync(join(defaultRoot, 'foreign.txt'), 'utf-8')).toBe('keep');
+  });
+
+  test('normalizes default-root aliases before following the managed locator', () => {
+    const relocatedRoot = join(tempRoot, 'aliased-relocation', 'Recall');
+    const defaultRoot = join(home, '.agents', 'Recall');
+    mkdirSync(relocatedRoot, { recursive: true });
+    claimRecallRoot(relocatedRoot, { env: { HOME: home }, home });
+    mkdirSync(dirname(defaultRoot), { recursive: true });
+    symlinkSync(relocatedRoot, defaultRoot);
+
+    const result = helper('printf \'%s\\n\' "$RECALL_DIR" "$RECALL_ROOT_LOCATOR"', {
+      RECALL_DIR: `${defaultRoot}/`,
+      RECALL_HOME: join(defaultRoot, '.'),
+      RECALL_DB_PATH_STATE: join(defaultRoot, '.', '.db-path'),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim().split('\n')).toEqual([
+      realpathSync(relocatedRoot),
+      defaultRoot,
+    ]);
+  });
+
+  test('keeps purge backups outside a relocated root reached through aliases', () => {
+    const relocatedRoot = join(tempRoot, 'backup-relocation', 'Recall');
+    const defaultRoot = join(home, '.agents', 'Recall');
+    mkdirSync(relocatedRoot, { recursive: true });
+    claimRecallRoot(relocatedRoot, { env: { HOME: home }, home });
+    mkdirSync(dirname(defaultRoot), { recursive: true });
+    symlinkSync(relocatedRoot, defaultRoot);
+
+    const result = resolvePurgeBackupBase(
+      relocatedRoot,
+      join(defaultRoot, 'backups'),
+      join(defaultRoot, 'fallback'),
+      { env: { HOME: home }, home },
+    );
+
+    expect(result).toBe(join(dirname(realpathSync(relocatedRoot)), 'Recall-pre-purge'));
   });
 
   test('backs up a foreign collision and removes only the managed symlink', () => {

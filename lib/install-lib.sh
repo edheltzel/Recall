@@ -37,31 +37,37 @@ _recall_resolved_root=""
 _recall_resolved_state=""
 _recall_root_locator=""
 if command -v bun >/dev/null 2>&1 && [[ -f "$RECALL_REPO_DIR/hooks/lib/db-path.ts" ]]; then
-  _recall_resolved_root="$(
+  if ! _recall_resolved_root="$(
     RECALL_DIR="${RECALL_DIR:-}" \
       RECALL_HOME="${RECALL_HOME:-}" \
       CLAUDE_DIR="$CLAUDE_DIR" \
-      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" physical-root 2>/dev/null || true
-  )"
+      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" physical-root
+  )"; then
+    return 1 2>/dev/null || exit 1
+  fi
 fi
 if [[ -n "$_recall_resolved_root" ]]; then
   RECALL_DIR="$_recall_resolved_root"
 fi
 : "${RECALL_DIR:=$HOME/.agents/Recall}"
 if command -v bun >/dev/null 2>&1 && [[ -f "$RECALL_REPO_DIR/hooks/lib/db-path.ts" ]]; then
-  _recall_resolved_state="$(
+  if ! _recall_resolved_state="$(
     RECALL_DIR="$RECALL_DIR" \
       RECALL_HOME="$RECALL_DIR" \
       RECALL_DB_PATH_STATE="${RECALL_DB_PATH_STATE:-}" \
       CLAUDE_DIR="$CLAUDE_DIR" \
-      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" state 2>/dev/null || true
-  )"
-  _recall_root_locator="$(
+      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" state
+  )"; then
+    return 1 2>/dev/null || exit 1
+  fi
+  if ! _recall_root_locator="$(
     RECALL_DIR="$RECALL_DIR" \
       RECALL_HOME="$RECALL_DIR" \
       CLAUDE_DIR="$CLAUDE_DIR" \
-      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" locator 2>/dev/null || true
-  )"
+      bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" locator
+  )"; then
+    return 1 2>/dev/null || exit 1
+  fi
 fi
 if [[ -n "$_recall_resolved_state" ]]; then
   RECALL_DB_PATH_STATE="$_recall_resolved_state"
@@ -105,14 +111,15 @@ RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${TIMESTAMP:=$(date +%Y%m%d_%H%M%S)}"
 : "${BACKUP_BASE:=$RECALL_DIR/backups}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
-if [[ "$BACKUP_BASE" == "$RECALL_DIR" ]] || [[ "$BACKUP_BASE" == "$RECALL_DIR/"* ]]; then
-  RECALL_PURGE_BACKUP_BASE="$CLAUDE_DIR/backups/recall"
-  if [[ "$RECALL_PURGE_BACKUP_BASE" == "$RECALL_DIR" ]] \
-    || [[ "$RECALL_PURGE_BACKUP_BASE" == "$RECALL_DIR/"* ]]; then
-    RECALL_PURGE_BACKUP_BASE="$(dirname "$RECALL_DIR")/Recall-pre-purge"
+if command -v bun >/dev/null 2>&1 && [[ -f "$RECALL_REPO_DIR/hooks/lib/db-path.ts" ]]; then
+  if ! RECALL_PURGE_BACKUP_BASE="$(
+    HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" \
+      purge-backup-base "$RECALL_DIR" "$BACKUP_BASE" "$CLAUDE_DIR/backups/recall"
+  )"; then
+    return 1 2>/dev/null || exit 1
   fi
 else
-  RECALL_PURGE_BACKUP_BASE="$BACKUP_BASE"
+  RECALL_PURGE_BACKUP_BASE="$CLAUDE_DIR/backups/recall"
 fi
 RECALL_PRE_PURGE_DIR="$RECALL_PURGE_BACKUP_BASE/pre_purge_$TIMESTAMP"
 
@@ -1156,7 +1163,7 @@ recall_do_restore() {
       local saved_symlink_target
       saved_symlink_target="$(<"$symlink_target_file")"
       local managed_grok_canonical="$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
-      if [[ "$saved_symlink_target" == "$managed_grok_canonical" ]]; then
+      if recall_paths_equivalent "$saved_symlink_target" "$managed_grok_canonical"; then
         mkdir -p "$(dirname "$managed_grok_canonical")"
         cp -p "$file" "$managed_grok_canonical"
       fi
@@ -1220,8 +1227,25 @@ recall_do_restore() {
 # Create the canonical install root and all its expected subdirectories.
 # Idempotent: re-running on an existing install is a no-op.
 recall_create_install_root() {
+  local default_root="$HOME/.agents/Recall"
+  local physical_default_root
+  local relocated=false
+  physical_default_root="$(
+    HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" physical "$default_root"
+  )"
+  if [[ -n "$RECALL_ROOT_LOCATOR" ]] || [[ "$RECALL_DIR" != "$physical_default_root" ]]; then
+    relocated=true
+  fi
+  if [[ "$relocated" == "true" ]] \
+    && [[ "$RECALL_ROOT_LOCATOR" != "$default_root" ]] \
+    && { [[ -e "$default_root" ]] || [[ -L "$default_root" ]]; }; then
+    log_error "Cannot publish relocated Recall root at occupied path: $default_root"
+    return 1
+  fi
+
+  mkdir -p "$RECALL_DIR"
+  recall_claim_install_root
   mkdir -p \
-    "$RECALL_DIR" \
     "$RECALL_SHARED_HOOKS_LIB_DIR" \
     "$RECALL_SHARED_SKILLS_DIR" \
     "$RECALL_OPENCODE_PLUGINS_DIR" \
@@ -1229,18 +1253,35 @@ recall_create_install_root() {
     "$RECALL_MEMORY_DIR" \
     "$BACKUP_BASE"
 
-  local default_root="$HOME/.agents/Recall"
-  if [[ "$RECALL_DIR" != "$default_root" ]]; then
+  if [[ "$relocated" == "true" ]]; then
     mkdir -p "$(dirname "$default_root")"
-    if [[ -L "$default_root" ]] && [[ "$(readlink "$default_root")" == "$RECALL_DIR" ]]; then
+    if [[ "$RECALL_ROOT_LOCATOR" == "$default_root" ]]; then
       return 0
     fi
-    if [[ ! -e "$default_root" ]] && [[ ! -L "$default_root" ]]; then
-      ln -s "$RECALL_DIR" "$default_root"
-    else
-      log_warn "Cannot publish relocated Recall root at occupied path: $default_root"
-    fi
+    ln -s "$RECALL_DIR" "$default_root"
+    RECALL_ROOT_LOCATOR="$default_root"
   fi
+}
+
+recall_claim_install_root() {
+  HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" claim-root "$RECALL_DIR" >/dev/null
+}
+
+recall_assert_owned_root() {
+  local root="${1:-$RECALL_DIR}"
+  HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" assert-owned-root "$root" >/dev/null
+}
+
+recall_paths_equivalent() {
+  HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" same-path "$1" "$2"
+}
+
+recall_symlink_points_to() {
+  HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" symlink-points-to "$1" "$2"
+}
+
+recall_symlink_target_within() {
+  HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" symlink-target-within "$1" "$2"
 }
 
 recall_resolve_db_path() {
@@ -1337,9 +1378,7 @@ recall_link() {
 
   # Already correct — nothing to do.
   if [[ -L "$target" ]]; then
-    local current_target
-    current_target="$(readlink "$target")"
-    if [[ "$current_target" == "$canonical" ]]; then
+    if recall_symlink_points_to "$target" "$canonical"; then
       return 0
     fi
     # Foreign symlink — back it up and replace.
@@ -1398,9 +1437,7 @@ recall_unlink_if_managed() {
   if [[ ! -L "$target" ]]; then
     return 0
   fi
-  local resolved
-  resolved="$(readlink "$target")"
-  if [[ "$resolved" == "$RECALL_DIR"/* ]]; then
+  if recall_symlink_target_within "$target" "$RECALL_DIR"; then
     rm -f "$target"
   fi
 }
@@ -1536,7 +1573,7 @@ _recall_unlink_claude_skill_links() {
   [[ -d "$skills_root" ]] || return 0
   [[ -d "$RECALL_SHARED_SKILLS_DIR" ]] || return 0
 
-  local skill_dir skill_name installed_dir f target removed=0
+  local skill_dir skill_name installed_dir f removed=0
   for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
     [[ -d "$skill_dir" ]] || continue
     skill_name="$(basename "$skill_dir")"
@@ -1544,10 +1581,10 @@ _recall_unlink_claude_skill_links() {
     [[ -d "$installed_dir" ]] || continue
     for f in "$installed_dir"/*; do
       [[ -L "$f" ]] || continue
-      target="$(readlink "$f")"
-      case "$target" in
-        "$RECALL_SHARED_SKILLS_DIR"/*) rm -f "$f" && removed=$((removed + 1)) ;;
-      esac
+      if recall_symlink_target_within "$f" "$RECALL_SHARED_SKILLS_DIR"; then
+        rm -f "$f"
+        removed=$((removed + 1))
+      fi
     done
     rmdir "$installed_dir" 2>/dev/null || true
   done
@@ -1655,7 +1692,7 @@ recall_verify_install() {
     fi
     local actual
     actual="$(readlink "$target")"
-    if [[ "$actual" != "$expected_canonical" ]]; then
+    if ! recall_symlink_points_to "$target" "$expected_canonical"; then
       wrong_target+=("$target (points at $actual, expected $expected_canonical)")
     fi
   }
@@ -2658,7 +2695,7 @@ recall_remove_legacy_pi_resources() {
   local ext target
   for ext in RecallExtract.ts RecallPreCompact.ts; do
     target="$ext_dir/$ext"
-    if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$RECALL_DIR"/* ]]; then
+    if [[ -L "$target" ]] && recall_symlink_target_within "$target" "$RECALL_DIR"; then
       rm -f "$target"
       log_info "Removed legacy Pi extension symlink: $target"
     elif [[ -e "$target" || -L "$target" ]]; then
@@ -2678,7 +2715,7 @@ recall_remove_legacy_pi_resources() {
       [[ -d "$skill_dir" || -L "$skill_dir" ]] || continue
 
       if [[ -L "$skill_dir" ]]; then
-        if [[ "$(readlink "$skill_dir")" == "$RECALL_DIR"/* ]]; then
+        if recall_symlink_target_within "$skill_dir" "$RECALL_DIR"; then
           rm -f "$skill_dir"
           log_info "Removed legacy Pi skill symlink: $skill_dir"
         else
@@ -2690,7 +2727,7 @@ recall_remove_legacy_pi_resources() {
 
       for child in "$skill_dir"/*; do
         [[ -e "$child" || -L "$child" ]] || continue
-        if [[ -L "$child" ]] && [[ "$(readlink "$child")" == "$RECALL_DIR"/* ]]; then
+        if [[ -L "$child" ]] && recall_symlink_target_within "$child" "$RECALL_DIR"; then
           rm -f "$child"
         fi
       done

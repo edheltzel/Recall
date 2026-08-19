@@ -14,6 +14,7 @@ import {
   addBreadcrumb,
   createLoaEntry,
 } from '../../src/lib/memory';
+import { claimRecallRoot } from '../../hooks/lib/db-path';
 
 let tempIdentityDir: string;
 
@@ -66,6 +67,8 @@ describe('RecallStart — L0 identity', () => {
     const staleDefault = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
     mkdirSync(join(home, '.claude'), { recursive: true });
     mkdirSync(join(home, '.agents', 'Recall', 'MEMORY'), { recursive: true });
+    mkdirSync(installRoot, { recursive: true });
+    claimRecallRoot(installRoot, { env: { HOME: home }, home });
     mkdirSync(join(installRoot, 'MEMORY'), { recursive: true });
     mkdirSync(join(installRoot, 'claude'), { recursive: true });
     writeFileSync(canonical, '# Relocated identity\n');

@@ -21,6 +21,7 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
+import { claimRecallRoot } from '../../hooks/lib/db-path';
 import { legacyClaudeMemorySection, legacyPiMemorySection } from '../fixtures/legacy-memory-sections';
 
 const REPO = process.cwd();
@@ -230,6 +231,9 @@ describe('uninstall.sh', () => {
     mkdirSync(join(claudeDir, 'commands', 'recall'), { recursive: true });
     mkdirSync(join(claudeDir, 'MEMORY'), { recursive: true });
     mkdirSync(backupBase, { recursive: true });
+    const installedRoot = join(claudeDir, '.agents', 'Recall');
+    mkdirSync(installedRoot, { recursive: true });
+    claimRecallRoot(installedRoot, { env: { HOME: claudeDir }, home: claudeDir });
 
     // Drop a faux installed payload.
     writeFileSync(join(claudeDir, 'hooks', 'RecallExtract.ts'), '// stub');
@@ -690,19 +694,21 @@ Preserve this.
     const defaultRoot = join(claudeDir, '.agents', 'Recall');
     const relocatedRoot = join(tempRoot, 'relocated', 'Recall');
     const relocatedDb = join(relocatedRoot, 'recall.db');
-    const internalBackupBase = join(relocatedRoot, 'backups');
+    const internalBackupBase = join(defaultRoot, 'backups');
     const purgeBackupBase = join(claudeDir, 'backups', 'recall');
     rmSync(defaultRoot, { recursive: true, force: true });
     mkdirSync(relocatedRoot, { recursive: true });
+    claimRecallRoot(relocatedRoot, { env: { HOME: claudeDir }, home: claudeDir });
     writeFileSync(relocatedDb, 'relocated-memory');
     writeFileSync(join(relocatedRoot, '.db-path'), `${relocatedDb}\n`);
     mkdirSync(dirname(defaultRoot), { recursive: true });
     symlinkSync(relocatedRoot, defaultRoot);
+    const physicalRoot = realpathSync(relocatedRoot);
 
     const result = runPurge(claudeDir, internalBackupBase);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain(relocatedRoot);
+    expect(result.stdout).toContain(physicalRoot);
     expect(existsSync(relocatedRoot)).toBe(false);
     expect(existsSync(defaultRoot)).toBe(false);
     expect(() => lstatSync(defaultRoot)).toThrow();
@@ -710,6 +716,37 @@ Preserve this.
     expect(snapshot).toBeDefined();
     expect(readFileSync(join(purgeBackupBase, snapshot!, 'recall.db'), 'utf-8'))
       .toBe('relocated-memory');
+  });
+
+  test('--purge rejects a foreign default-root symlink without deleting its target', () => {
+    const defaultRoot = join(claudeDir, '.agents', 'Recall');
+    const foreignRoot = join(tempRoot, 'foreign-root');
+    const precious = join(foreignRoot, 'precious.txt');
+    rmSync(defaultRoot, { recursive: true, force: true });
+    mkdirSync(foreignRoot, { recursive: true });
+    writeFileSync(precious, 'keep');
+    symlinkSync(foreignRoot, defaultRoot);
+
+    const result = runPurge(claudeDir, backupBase);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('not installer-owned');
+    expect(readFileSync(precious, 'utf-8')).toBe('keep');
+    expect(lstatSync(defaultRoot).isSymbolicLink()).toBe(true);
+  });
+
+  test('--purge rejects an unowned regular install root', () => {
+    const defaultRoot = join(claudeDir, '.agents', 'Recall');
+    const precious = join(defaultRoot, 'precious.txt');
+    rmSync(defaultRoot, { recursive: true, force: true });
+    mkdirSync(defaultRoot, { recursive: true });
+    writeFileSync(precious, 'keep');
+
+    const result = runPurge(claudeDir, backupBase);
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain('unowned Recall root');
+    expect(readFileSync(precious, 'utf-8')).toBe('keep');
   });
 
   test('--purge rejects --skip-grok before invalidating the retained hook', () => {

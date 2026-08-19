@@ -1,7 +1,7 @@
-import { existsSync, lstatSync, readlinkSync } from 'fs';
+import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { resolveRecallRoot } from './db-path';
+import { resolveRecallRoot, symlinkPointsTo } from './db-path';
 
 export interface ManagedIdentityPaths {
   root: string;
@@ -53,13 +53,8 @@ export function resolveIdentityPath(options: IdentityPathOptions = {}): string {
   }
 
   const managed = resolveManagedIdentityPaths(options);
-  try {
-    const aliasStat = lstatSync(managed.alias);
-    if (aliasStat.isSymbolicLink() && readlinkSync(managed.alias) === managed.canonical) {
-      return managed.canonical;
-    }
-    return managed.alias;
-  } catch {
-    return managed.canonical;
-  }
+  if (!existsSync(managed.alias)) return managed.canonical;
+  return symlinkPointsTo(managed.alias, managed.canonical, { env, home: resolveHome(env, options.home) })
+    ? managed.canonical
+    : managed.alias;
 }
