@@ -20,6 +20,7 @@ import { runDedup } from '../../src/commands/dedup';
 import { runSemanticSearch, runHybridSearch } from '../../src/commands/embed';
 import { notMarkedDuplicateSql } from '../../src/lib/dedup';
 import { embeddingToBlob } from '../../src/lib/embeddings';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 
 // Mock only the Ollama-backed exports so the end-to-end vector-search tests
 // (issue #91) run offline: embed() returns a fixed unit vector that matches the
@@ -354,6 +355,36 @@ describe('destructive opt-in (--execute --delete)', () => {
     // The record still exists, just hidden.
     const msg = getDb().prepare('SELECT id FROM messages WHERE id = ?').get(referenced);
     expect(msg).toBeDefined();
+  });
+
+  test('redacts generation-backed message duplicates atomically', () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'generation-dedup',
+      messages: [
+        { role: 'user', content: CRUMB, nativeId: 'first-copy' },
+        { role: 'user', content: CRUMB, nativeId: 'second-copy' },
+      ],
+    });
+    const ids = (getDb().prepare(`
+      SELECT id FROM published_messages WHERE session_id = ? ORDER BY id
+    `).all('generation-dedup') as Array<{ id: number }>).map(row => row.id);
+    for (const id of ids) insertEmbedding('messages', id, [1, 0, 0]);
+
+    const result = runDedup({ execute: true, delete: true })!;
+    expect(result.applied?.deleted).toBe(1);
+    const duplicateId = lineageRows()[0].duplicate_id as number;
+    expect(getDb().prepare(`
+      SELECT content FROM host_ingest_generation_messages WHERE message_id = ?
+    `).get(duplicateId)).toEqual({ content: null });
+    expect(getDb().prepare(`
+      SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
+    `).get('generation-dedup')).toEqual({ count: 1 });
+    expect(getDb().prepare(`
+      SELECT COUNT(*) AS count FROM embeddings
+      WHERE source_table = 'messages' AND source_id = ?
+    `).get(duplicateId)).toEqual({ count: 0 });
+    expect(search('bun', { table: 'messages', includeDuplicates: true })).toHaveLength(1);
   });
 });
 

@@ -12,7 +12,7 @@
 // search.ts uses for its display contract).
 //
 // Bind-count note (see src/lib/chunk.ts): export reads bind a fixed number of
-// parameters per statement — keyset pagination (`WHERE id > ? LIMIT ?`) — so
+// parameters per statement — keyset pagination over `id` or `rowid` — so
 // bind counts never scale with selected rows and chunked() IN-lists are not
 // needed. The shared SQLITE_SAFE_CHUNK_SIZE constant is reused as the batch
 // size so large exports stream in bounded batches instead of one giant read.
@@ -24,11 +24,11 @@ import { join, extname, dirname, basename } from 'path';
 import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { getMigrationVersion } from '../db/migrations.js';
 import { VERSION } from '../version.js';
+import { publishedRecordTable } from './published-records.js';
 
 /**
  * Durable tables included in app-level (JSON/Markdown/SQL) exports: the
- * memory tables plus dedup_lineage (issue #45), so duplicate lineage stays
- * portable and auditable alongside the records it describes.
+ * memory tables plus their durable deduplication and lifecycle state.
  */
 export const EXPORT_TABLES = [
   'sessions',
@@ -38,6 +38,12 @@ export const EXPORT_TABLES = [
   'breadcrumbs',
   'loa_entries',
   'dedup_lineage',
+  'host_ingest_generations',
+  'host_ingest_generation_messages',
+  'host_ingest_embedding_invalidations',
+  'host_ingest_state',
+  'host_ingest_messages',
+  'loa_message_sources',
 ] as const;
 export type ExportTable = typeof EXPORT_TABLES[number];
 
@@ -128,22 +134,30 @@ export function toExportRow(table: string, row: ExportRow): ExportRow {
 /**
  * Read every row of a durable table in bounded batches via keyset pagination.
  * Fixed two-parameter bind per statement regardless of table size.
- * Relies on every EXPORT_TABLES table having an INTEGER PRIMARY KEY `id`
- * (schema.ts) — a future table without one cannot use this pagination.
  */
 export function collectTableRows(
   db: Database,
   table: ExportTable,
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ExportRow[] {
-  const stmt = db.prepare(`SELECT * FROM ${table} WHERE id > ? ORDER BY id LIMIT ?`);
+  const sourceTable = publishedRecordTable(table);
+  const hasId = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    .some(column => column.name === 'id');
+  const cursor = hasId ? 'id' : 'rowid';
+  const cursorResult = hasId ? '*' : 'rowid AS __recall_rowid, *';
+  const stmt = db.prepare(
+    `SELECT ${cursorResult} FROM ${sourceTable} WHERE ${cursor} > ? ORDER BY ${cursor} LIMIT ?`
+  );
   const rows: ExportRow[] = [];
-  let lastId = 0;
+  let lastId = -1;
   for (;;) {
     const batch = stmt.all(lastId, batchSize) as ExportRow[];
     if (batch.length === 0) break;
-    rows.push(...batch);
-    lastId = batch[batch.length - 1].id as number;
+    lastId = batch[batch.length - 1][hasId ? 'id' : '__recall_rowid'] as number;
+    for (const row of batch) {
+      if (!hasId) delete row.__recall_rowid;
+      rows.push(row);
+    }
   }
   return rows;
 }
@@ -165,8 +179,9 @@ export function collectExportData(db: Database): ExportData {
 export function buildProvenanceCounts(db: Database): Record<string, Record<string, number>> {
   const counts: Record<string, Record<string, number>> = {};
   for (const table of PROVENANCE_TABLES) {
+    const sourceTable = publishedRecordTable(table);
     const rows = db.prepare(
-      `SELECT COALESCE(provenance, 'unknown') AS p, COUNT(*) AS c FROM ${table} GROUP BY COALESCE(provenance, 'unknown')`
+      `SELECT COALESCE(provenance, 'unknown') AS p, COUNT(*) AS c FROM ${sourceTable} GROUP BY COALESCE(provenance, 'unknown')`
     ).all() as Array<{ p: string; c: number }>;
     const histogram: Record<string, number> = { unknown: 0 };
     for (const row of rows) histogram[row.p] = row.c;
@@ -183,7 +198,8 @@ export function buildManifest(
 ): ExportManifest {
   const counts: Record<string, number> = {};
   for (const table of tables) {
-    counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+    const sourceTable = publishedRecordTable(table);
+    counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${sourceTable}`).get() as { c: number }).c;
   }
   return {
     recall_version: VERSION,
@@ -250,8 +266,8 @@ export function renderMarkdownExport(manifest: ExportManifest, data: ExportData)
     const rows = data[table] ?? [];
     lines.push(`## ${table} (${rows.length} rows)`);
     lines.push('');
-    for (const row of rows) {
-      lines.push(`### ${table} #${row.id}`);
+    for (const [index, row] of rows.entries()) {
+      lines.push(`### ${table} #${row.id ?? index + 1}`);
       lines.push('');
       for (const [key, value] of Object.entries(row)) {
         if (key === 'id') continue;
@@ -302,5 +318,6 @@ export function renderSqlDump(db: Database, manifest: ExportManifest): string {
     }
   }
   lines.push('COMMIT;');
+  lines.push(`PRAGMA user_version=${manifest.schema_version};`);
   return lines.join('\n') + '\n';
 }

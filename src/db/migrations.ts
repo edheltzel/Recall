@@ -11,7 +11,15 @@ import { Database } from 'bun:sqlite';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { FTS_SCHEMA } from './schema';
+import {
+  FTS_SCHEMA,
+  HOST_INGEST_GENERATION_FTS_SCHEMA,
+  HOST_INGEST_GENERATION_SCHEMA,
+  LOA_MESSAGE_RETENTION_SCHEMA,
+  LOA_MESSAGE_SOURCES_SCHEMA,
+  PUBLISHED_MESSAGES_SCHEMA,
+  REBUILD_HOST_INGEST_GENERATION_FTS,
+} from './schema';
 import { claudePaths } from '../hosts/claude.js';
 
 export type Migration = (db: Database) => void;
@@ -26,6 +34,81 @@ export type Migration = (db: Database) => void;
 function skipLegacyDataMigrations(): boolean {
   const v = process.env.RECALL_SKIP_LEGACY_DATA_MIGRATIONS;
   return !!v && v !== '0' && v !== 'false';
+}
+
+function clearAmbiguousEmptyLoaCursors(db: Database): void {
+  const columns = new Set(
+    (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+      .map(column => column.name)
+  );
+  if (!columns.has('snapshot_max_message_id') || !columns.has('tags') ||
+    !columns.has('message_count')) return;
+  const generatedSnapshot = columns.has('source_ids')
+    ? `AND NOT COALESCE((
+        json_extract(
+          CASE WHEN json_valid(source_ids) THEN source_ids END,
+          '$.table'
+        ) = 'host_ingest_generation_messages'
+        AND json_extract(
+          CASE WHEN json_valid(source_ids) THEN source_ids END,
+          '$.generation_id'
+        ) IS NOT NULL
+      ), 0)`
+    : '';
+  db.exec(`
+    UPDATE loa_entries SET snapshot_max_message_id = NULL
+    WHERE tags LIKE 'automatic-capture,%'
+      AND COALESCE(message_count, 0) = 0
+      ${generatedSnapshot};
+  `);
+}
+
+function ensureGenerationFtsColumns(db: Database): void {
+  const generationColumns = new Set(
+    (db.prepare('PRAGMA table_info(host_ingest_generations)').all() as Array<{ name: string }>)
+      .map(column => column.name)
+  );
+  if (!generationColumns.has('fts_ready')) {
+    db.exec(`
+      ALTER TABLE host_ingest_generations
+      ADD COLUMN fts_ready INTEGER NOT NULL DEFAULT 0 CHECK (fts_ready IN (0, 1))
+    `);
+  }
+  const messageColumns = new Set(
+    (db.prepare('PRAGMA table_info(host_ingest_generation_messages)').all() as
+      Array<{ name: string }>).map(column => column.name)
+  );
+  if (!messageColumns.has('fts_pending')) {
+    db.exec(`
+      ALTER TABLE host_ingest_generation_messages
+      ADD COLUMN fts_pending INTEGER NOT NULL DEFAULT 0 CHECK (fts_pending IN (0, 1))
+    `);
+  }
+}
+
+function recreateGenerationFts(db: Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS host_ingest_generation_messages_fts_ai;
+    DROP TRIGGER IF EXISTS host_ingest_generation_messages_fts_ad;
+    DROP TRIGGER IF EXISTS host_ingest_generation_messages_fts_au;
+    DROP TABLE IF EXISTS host_ingest_generation_messages_fts;
+  `);
+  db.exec(HOST_INGEST_GENERATION_FTS_SCHEMA);
+}
+
+function rebuildGenerationFts(db: Database): void {
+  const hasState = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'host_ingest_state'
+  `).get());
+  if (hasState) {
+    db.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
+  } else {
+    db.exec(`
+      DELETE FROM host_ingest_generation_messages_fts;
+      UPDATE host_ingest_generations SET fts_ready = 0;
+    `);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +476,227 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS code_nodes;
       DROP TABLE IF EXISTS code_files;
     `);
+  },
+
+  // Migration 17 to 18: host lifecycle ingest watermarks and message keys.
+  // CREATE_TABLES handles fresh databases; these statements preserve upgrade
+  // behavior when applyMigrations is called against a legacy schema directly.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS host_ingest_state (
+        source            TEXT NOT NULL,
+        session_id        TEXT NOT NULL,
+        transcript_ref    TEXT,
+        watermark         TEXT,
+        transcript_digest TEXT NOT NULL,
+        finalized_at      TEXT,
+        updated_at        TEXT NOT NULL,
+        PRIMARY KEY (source, session_id),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS host_ingest_messages (
+        source      TEXT NOT NULL,
+        session_id  TEXT NOT NULL,
+        message_key TEXT NOT NULL,
+        message_id  INTEGER,
+        PRIMARY KEY (source, session_id, message_key),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_host_ingest_message_id
+        ON host_ingest_messages(message_id);
+    `);
+  },
+
+  (db) => {
+    const columns = db.prepare('PRAGMA table_info(host_ingest_messages)').all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some(column => column.name === 'source_position')) {
+      db.exec('ALTER TABLE host_ingest_messages ADD COLUMN source_position INTEGER');
+    }
+    db.exec(`
+      WITH ranked AS (
+        SELECT source, session_id, message_key,
+          ROW_NUMBER() OVER (
+            PARTITION BY source, session_id
+            ORDER BY message_id, message_key
+          ) AS ordinal
+        FROM host_ingest_messages
+        WHERE source = 'grok' AND source_position IS NULL
+      )
+      UPDATE host_ingest_messages
+      SET source_position = -9007199254740991 + (
+        SELECT ordinal FROM ranked
+        WHERE ranked.source = host_ingest_messages.source
+          AND ranked.session_id = host_ingest_messages.session_id
+          AND ranked.message_key = host_ingest_messages.message_key
+      )
+      WHERE source = 'grok' AND source_position IS NULL
+    `);
+  },
+
+  // Migration 19 to 20: pinned automatic LoA message sources.
+  (db) => {
+    db.exec(LOA_MESSAGE_SOURCES_SCHEMA);
+    const requiredColumns: Record<string, string[]> = {
+      messages: [
+        'id', 'session_id', 'timestamp', 'role', 'content', 'project',
+        'importance', 'provenance',
+      ],
+      host_ingest_messages: [
+        'source', 'session_id', 'message_id', 'source_position',
+      ],
+      loa_entries: ['id', 'session_id', 'source_ids'],
+    };
+    for (const [table, required] of Object.entries(requiredColumns)) {
+      const columns = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+          .map(column => column.name)
+      );
+      if (required.some(column => !columns.has(column))) return;
+    }
+    db.exec(LOA_MESSAGE_RETENTION_SCHEMA);
+
+    db.exec(`
+      INSERT OR IGNORE INTO loa_message_sources (
+        loa_id, ordinal, message_id, session_id, timestamp, role, content,
+        project, importance, provenance
+      )
+      SELECT loa.id,
+        ROW_NUMBER() OVER (
+          PARTITION BY loa.id
+          ORDER BY
+            CASE WHEN stored.source = 'grok' THEN stored.source_position END,
+            CASE WHEN stored.source <> 'grok' THEN message.timestamp END,
+            message.id
+        ) - 1,
+        message.id, message.session_id, message.timestamp, message.role,
+        message.content, message.project, message.importance, message.provenance
+      FROM loa_entries AS loa
+      JOIN host_ingest_messages AS stored
+        ON stored.session_id = loa.session_id
+       AND stored.source = json_extract(loa.source_ids, '$.source')
+      JOIN messages AS message ON message.id = stored.message_id
+      WHERE json_valid(loa.source_ids)
+        AND json_extract(loa.source_ids, '$.table') = 'host_ingest_messages'
+        AND message.id <= json_extract(loa.source_ids, '$.max_message_id')
+        AND (stored.source <> 'grok' OR stored.source_position IS NOT NULL)
+    `);
+
+    db.exec(`
+      UPDATE loa_entries
+      SET source_ids = json_object('table', 'loa_message_sources', 'loa_id', id)
+      WHERE json_valid(source_ids)
+        AND json_extract(source_ids, '$.table') = 'host_ingest_messages'
+    `);
+  },
+
+  (db) => {
+    db.exec(LOA_MESSAGE_SOURCES_SCHEMA);
+    const messageColumns = new Set(
+      (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const loaColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    if (
+      !messageColumns.has('id') ||
+      !loaColumns.has('source_ids') ||
+      !loaColumns.has('tags')
+    ) return;
+    db.exec(LOA_MESSAGE_RETENTION_SCHEMA);
+    db.exec(`
+      UPDATE loa_message_sources SET content = ''
+      WHERE content <> ''
+        AND NOT EXISTS (SELECT 1 FROM messages WHERE id = message_id);
+      UPDATE loa_entries
+      SET source_ids = json_object('table', 'loa_message_sources', 'loa_id', id)
+      WHERE EXISTS (
+        SELECT 1 FROM loa_message_sources WHERE loa_id = loa_entries.id
+      ) OR tags LIKE 'automatic-capture,%';
+    `);
+  },
+
+  (db) => {
+    const messageColumns = new Set(
+      (db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    if (messageColumns.size > 0 && !messageColumns.has('host_ingest_token')) {
+      db.exec('ALTER TABLE messages ADD COLUMN host_ingest_token TEXT');
+    }
+    const loaColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_entries)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    if (loaColumns.size > 0 && !loaColumns.has('snapshot_max_message_id')) {
+      db.exec('ALTER TABLE loa_entries ADD COLUMN snapshot_max_message_id INTEGER');
+    }
+    const sourceColumns = new Set(
+      (db.prepare('PRAGMA table_info(loa_message_sources)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const snapshotSource = loaColumns.has('id') &&
+      sourceColumns.has('loa_id') && sourceColumns.has('message_id')
+      ? '(SELECT MAX(message_id) FROM loa_message_sources WHERE loa_id = loa_entries.id)'
+      : undefined;
+    const cursorSources = [
+      snapshotSource,
+      loaColumns.has('message_range_end') ? 'message_range_end' : undefined,
+    ].filter((source): source is string => source !== undefined);
+    if (loaColumns.size > 0 && cursorSources.length > 0) {
+      const cursorExpression = cursorSources.length === 1
+        ? cursorSources[0]
+        : `COALESCE(${cursorSources.join(', ')})`;
+      db.exec(`
+        UPDATE loa_entries SET snapshot_max_message_id = ${cursorExpression}
+        WHERE snapshot_max_message_id IS NULL
+      `);
+    }
+    if (messageColumns.size > 0) {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_host_ingest_token
+          ON messages(host_ingest_token) WHERE host_ingest_token IS NOT NULL
+      `);
+    }
+  },
+
+  (_db) => {},
+
+  (db) => {
+    const stateColumns = new Set(
+      (db.prepare('PRAGMA table_info(host_ingest_state)').all() as Array<{ name: string }>)
+        .map(column => column.name)
+    );
+    const hasState = stateColumns.size > 0;
+    if (hasState && !stateColumns.has('active_generation')) {
+      db.exec('ALTER TABLE host_ingest_state ADD COLUMN active_generation TEXT');
+    }
+    db.exec(HOST_INGEST_GENERATION_SCHEMA);
+    clearAmbiguousEmptyLoaCursors(db);
+    if (hasState) db.exec(PUBLISHED_MESSAGES_SCHEMA);
+  },
+
+  (db) => {
+    ensureGenerationFtsColumns(db);
+    recreateGenerationFts(db);
+    clearAmbiguousEmptyLoaCursors(db);
+    rebuildGenerationFts(db);
+  },
+
+  (db) => {
+    ensureGenerationFtsColumns(db);
+    recreateGenerationFts(db);
+    rebuildGenerationFts(db);
+  },
+
+  (db) => {
+    ensureGenerationFtsColumns(db);
+    recreateGenerationFts(db);
+    rebuildGenerationFts(db);
   },
 ];
 

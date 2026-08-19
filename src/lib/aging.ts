@@ -19,6 +19,7 @@ import type { ProvenanceTable } from '../types/index.js';
 import { notRecordedSurvivorSql, notMarkedDuplicateSql, fkProtectedIds } from './dedup.js';
 import { clampImportance } from './memory.js';
 import { chunked } from './chunk.js';
+import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
 
 /** Tables the aging policy operates on, in display order. */
 export const AGE_TABLES: readonly ProvenanceTable[] = [
@@ -138,16 +139,17 @@ function planTable(
   const threshold = options.importanceThreshold ?? DEFAULT_IMPORTANCE_THRESHOLD;
 
   const where = matchWhere(config, ageCutoffDays, horizon, threshold);
+  const sourceTable = table === 'messages' ? 'published_messages AS messages' : table;
   const matched = (db.prepare(
-    `SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`
+    `SELECT COUNT(*) AS count FROM ${sourceTable} WHERE ${where}`
   ).get() as { count: number }).count;
 
   const rows = db.prepare(
-    `SELECT id, importance FROM ${table} WHERE ${where} AND ${guardSql(table)} ORDER BY id`
+    `SELECT id, importance FROM ${sourceTable} WHERE ${where} AND ${guardSql(table)} ORDER BY id`
   ).all() as Array<{ id: number; importance: number }>;
 
-  // FK protection: a message referenced by a loa_entries range cannot be
-  // hard-deleted under foreign_keys=ON. Withhold it (reuse the dedup precedent).
+  // FK protection withholds explicit LoA ranges. Automatic lifecycle ranges
+  // are released by the retention trigger so their raw endpoints can age out.
   const fkIds = config.fkProtect ? fkProtectedIds(db, table) : new Set<number>();
 
   const eligible: AgeCandidate[] = [];
@@ -204,10 +206,14 @@ export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
       if (report.action === 'delete') {
         for (const chunk of chunked(ids)) {
           const placeholders = chunk.map(() => '?').join(', ');
+          deleteRecordEmbeddingsByIdsInTransaction(db, report.table, chunk);
           db.prepare(`DELETE FROM ${report.table} WHERE id IN (${placeholders})`).run(...chunk);
-          db.prepare(
-            `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`
-          ).run(report.table, ...chunk);
+          if (report.table === 'messages') {
+            db.prepare(`
+              UPDATE host_ingest_generation_messages SET content = NULL
+              WHERE message_id IN (${placeholders})
+            `).run(...chunk);
+          }
         }
         result.deleted += ids.length;
       } else if (report.action === 'expire') {

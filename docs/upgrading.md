@@ -50,8 +50,8 @@ cd /path/to/Recall
 5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 6. Copies refreshed hooks, shared lib files, agent skills, and
-   `FOR_CLAUDE.md`; refreshes detected host integrations; and runs the shared
-   Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
+   `FOR_CLAUDE.md`; refreshes detected OpenCode, Pi, and Grok integrations; and
+   runs the shared Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
    exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
    unmarked customized/external sections are preserved, while marked sections
    remain Recall-owned. A Recall-specific `~/.claude/rules/memory.md` leaves
@@ -189,9 +189,9 @@ automatically on `recall init` or `./install.sh`.
 ### Recommended: run `recall onboard` post-upgrade
 
 v0.7.0 introduces a tiered session-start context (L0 identity + L1
-importance-ranked). The L0 tier reads from `~/.claude/MEMORY/identity.md`
-— if you don't have one, that tier is empty and you're only getting half
-the v2 design.
+importance-ranked). The L0 tier reads the installer-resolved global identity
+or an existing project-local override — if you don't have one, that tier is
+empty and you're only getting half the v2 design.
 
 ```bash
 recall onboard               # Interactive 7-question interview

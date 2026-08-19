@@ -11,7 +11,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runPrune } from '../../src/commands/prune';
-import { getDb } from '../../src/db/connection';
+import { ensurePublishedMessageViews, getDb } from '../../src/db/connection';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
+import { getLoaMessages } from '../../src/lib/memory';
 import {
   createSession,
   addMessage,
@@ -20,6 +22,7 @@ import {
   createLoaEntry,
 } from '../../src/lib/memory';
 import type { LineageStatus } from '../../src/lib/dedup';
+import { embeddingToBlob } from '../../src/lib/embeddings';
 
 const originalLog = console.log;
 const originalError = console.error;
@@ -29,12 +32,14 @@ const originalExitCode = process.exitCode;
 const OLD = '2020-01-01 00:00:00';
 
 let logged: string[] = [];
+let errored: string[] = [];
 
 beforeEach(() => {
   setupTestDb();
   logged = [];
+  errored = [];
   console.log = (...args: unknown[]) => { logged.push(args.join(' ')); };
-  console.error = () => {};
+  console.error = (...args: unknown[]) => { errored.push(args.join(' ')); };
 });
 
 afterEach(() => {
@@ -62,6 +67,106 @@ function rowExists(table: string, id: number): boolean {
 }
 
 describe('prune respects dedup survivors (#80)', () => {
+  test('fails closed with retryable readiness when lifecycle schema is unavailable', () => {
+    const db = getDb();
+    const sessionId = 'old-session-with-deferred-schema';
+    createSession({ session_id: sessionId, started_at: OLD });
+    db.exec(`
+      DROP VIEW IF EXISTS temp.published_messages;
+      DROP VIEW IF EXISTS main.published_messages;
+      DROP TABLE host_ingest_state;
+    `);
+    ensurePublishedMessageViews(db);
+
+    runPrune({});
+
+    expect(db.prepare('SELECT 1 AS present FROM sessions WHERE session_id = ?').get(sessionId))
+      .toEqual({ present: 1 });
+    expect(logged.find(line => line.includes('sessions:')))
+      .toContain('Deferred until lifecycle schema is ready');
+    expect(errored).toContain(
+      "RETRYABLE: Lifecycle prune schema is not ready; run 'recall init' and retry."
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test('retains lifecycle-owned sessions with active generations', () => {
+    const db = getDb();
+    const sessionId = 'old-active-lifecycle-session';
+    const generationId = 'active-generation-for-old-session';
+    createSession({ session_id: sessionId, started_at: OLD, source: 'grok' });
+    db.prepare(`
+      INSERT INTO host_ingest_generations (
+        generation_id, source, session_id, created_at, ready, status
+      ) VALUES (?, 'grok', ?, ?, 1, 'active')
+    `).run(generationId, sessionId, OLD);
+    db.prepare(`
+      INSERT INTO host_ingest_state (
+        source, session_id, transcript_digest, active_generation, updated_at
+      ) VALUES ('grok', ?, 'empty-export', ?, ?)
+    `).run(sessionId, generationId, OLD);
+
+    runPrune({ execute: true });
+
+    expect(db.prepare('SELECT 1 AS present FROM sessions WHERE session_id = ?').get(sessionId))
+      .toEqual({ present: 1 });
+    expect(db.prepare('SELECT active_generation FROM host_ingest_state WHERE session_id = ?')
+      .get(sessionId)).toEqual({ active_generation: generationId });
+    expect(db.prepare('SELECT status FROM host_ingest_generations WHERE generation_id = ?')
+      .get(generationId)).toEqual({ status: 'active' });
+  });
+
+  test('prunes automatic lifecycle range endpoints and scrubs exact lineage', () => {
+    const sessionId = 'old-lifecycle-session';
+    const result = ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      capturedAt: OLD,
+      finalize: true,
+      messages: [
+        { role: 'user', content: 'old lifecycle prompt' },
+        { role: 'assistant', content: 'old lifecycle response' },
+      ],
+    });
+
+    const db = getDb();
+    const messageId = (db.prepare(`
+      SELECT message_id FROM host_ingest_generation_messages
+      WHERE generation_id = json_extract(
+        (SELECT source_ids FROM loa_entries WHERE id = ?), '$.generation_id'
+      ) AND content IS NOT NULL ORDER BY ordinal LIMIT 1
+    `).get(result.loaId!) as { message_id: number }).message_id;
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('messages', ?, 'test', 3, ?)
+    `).run(messageId, embeddingToBlob([1, 0, 0]));
+
+    runPrune({ execute: true });
+
+    expect((db.prepare(`
+      SELECT COUNT(*) AS count FROM published_messages WHERE session_id = ?
+    `).get(sessionId) as { count: number }).count).toBe(0);
+    expect(db.prepare(`
+      SELECT message_range_start, message_range_end FROM loa_entries WHERE id = ?
+    `).get(result.loaId!)).toEqual({
+      message_range_start: null,
+      message_range_end: null,
+    });
+    expect(getLoaMessages(result.loaId!)).toEqual([]);
+    expect((db.prepare(`
+      SELECT COUNT(*) AS count FROM host_ingest_generation_messages
+      WHERE generation_id = json_extract(
+        (SELECT source_ids FROM loa_entries WHERE id = ?), '$.generation_id'
+      ) AND content IS NOT NULL
+    `).get(result.loaId!) as { count: number }).count).toBe(0);
+    expect(db.prepare(`
+      SELECT 1 FROM embeddings WHERE source_table = 'messages' AND source_id = ?
+    `).get(messageId)).toBeNull();
+    expect(db.prepare(`
+      SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'
+    `).get()).toEqual({ value: '1' });
+  });
+
   test('protects a recorded survivor message and still prunes a non-survivor', () => {
     // s1 is consolidated (has a LoA entry) → its old messages are prune-eligible.
     createSession({ session_id: 's1', started_at: OLD });

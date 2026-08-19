@@ -12,13 +12,18 @@ import type { hybridSearch as HybridSearchFn, formatHybridModeNote as FormatHybr
 // in both cases, so vec/both results prove the semantic path supplied the row.
 const QV = new Array(1024).fill(0);
 QV[0] = 1;
+const KNN_VECTOR = new Array(1024).fill(0);
+KNN_VECTOR[1] = 1;
 
 let vecAvailable = false;
 let ensureVecIndexSyncedCalls = 0;
+let vecSynced = true;
 let knnCalls: Array<{ queryEmbedding: number[]; k: number }> = [];
 // VecHit[] to return, or an Error for the mocked knnSearch to throw (pins the
 // knn→bruteforce catch fallback).
-let knnHits: VecHit[] | Error = [];
+let knnHits: VecHit[] | Error | ((k: number) => VecHit[]) = [];
+let afterConsistentSearch: (() => void) | undefined;
+let afterReadSnapshot: (() => void) | undefined;
 
 // bun's mock.module is PROCESS-GLOBAL and applies to every test file sharing
 // the run, so BOTH mocks below must delegate to the real module unless this
@@ -38,14 +43,19 @@ let embedThrows = false;
 const realIsVecAvailable = vecReal.isVecAvailable;
 const realEnsureVecIndexSynced = vecReal.ensureVecIndexSynced;
 const realKnnSearch = vecReal.knnSearch;
+const realWithReadSnapshot = vecReal.withReadSnapshot;
+const realWithConsistentVecIndex = vecReal.withConsistentVecIndex;
 const realEmbed = embeddingsReal.embed;
 const realCheckEmbeddingService = embeddingsReal.checkEmbeddingService;
 
 function resetVecMock(): void {
   vecAvailable = false;
   ensureVecIndexSyncedCalls = 0;
+  vecSynced = true;
   knnCalls = [];
   knnHits = [];
+  afterConsistentSearch = undefined;
+  afterReadSnapshot = undefined;
   embedThrows = false;
 }
 
@@ -55,12 +65,33 @@ mock.module('../src/db/vec', () => ({
   ensureVecIndexSynced: (db: Parameters<typeof realEnsureVecIndexSynced>[0]) => {
     if (!mockEngaged) return realEnsureVecIndexSynced(db);
     ensureVecIndexSyncedCalls += 1;
+    return vecSynced;
   },
   knnSearch: (db: Parameters<typeof realKnnSearch>[0], queryEmbedding: number[], k: number) => {
     if (!mockEngaged) return realKnnSearch(db, queryEmbedding, k);
     knnCalls.push({ queryEmbedding, k });
     if (knnHits instanceof Error) throw knnHits;
-    return knnHits;
+    return typeof knnHits === 'function' ? knnHits(k) : knnHits;
+  },
+  withReadSnapshot: <T>(
+    db: Parameters<typeof realKnnSearch>[0],
+    read: () => T,
+  ): T => {
+    if (!mockEngaged) return realWithReadSnapshot(db, read);
+    const result = read();
+    afterReadSnapshot?.();
+    return result;
+  },
+  withConsistentVecIndex: <T>(
+    db: Parameters<typeof realKnnSearch>[0],
+    search: () => T,
+  ): T | null => {
+    if (!mockEngaged) return realWithConsistentVecIndex(db, search);
+    ensureVecIndexSyncedCalls += 1;
+    if (!vecSynced) return null;
+    const result = search();
+    afterConsistentSearch?.();
+    return result;
   },
 }));
 mock.module('../src/lib/embeddings', () => ({
@@ -102,6 +133,10 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
       `INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
        VALUES ('decisions', ?, 'qwen3-embedding:0.6b', 1024, ?)`
     ).run(bruteForceDecisionId, embeddingToBlob(QV));
+    getDb().prepare(
+      `INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
+       VALUES ('decisions', ?, 'qwen3-embedding:0.6b', 1024, ?)`
+    ).run(knnDecisionId, embeddingToBlob(KNN_VECTOR));
   });
   afterAll(() => {
     mockEngaged = false;
@@ -119,6 +154,58 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
     expect(hit).toBeDefined();
     expect(['vec', 'both']).toContain(hit!.source);
+  });
+
+  test('materializes canonical fallback content inside the guarded read', async () => {
+    resetVecMock();
+    afterReadSnapshot = () => {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('replacement content published after canonical search', bruteForceDecisionId);
+    };
+
+    try {
+      const { results, semanticBackend } = await hybridSearch('canonicalguardquery109', { limit: 5 });
+
+      expect(semanticBackend).toBe('bruteforce');
+      const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
+      expect(hit?.content).toContain('wibblefrotz zharkon decision');
+    } finally {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('wibblefrotz zharkon decision', bruteForceDecisionId);
+    }
+  });
+
+  test('filters orphan embeddings before capping canonical candidates', async () => {
+    resetVecMock();
+    const orphanIds = Array.from({ length: 25 }, (_, index) => 100_000 + index);
+    const insertOrphan = getDb().prepare(
+      `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+       VALUES ('decisions', ?, 'qwen3-embedding:0.6b', 1024, ?)`,
+    );
+
+    try {
+      getDb().prepare(
+        `UPDATE embeddings SET embedding = ?
+         WHERE source_table = 'decisions' AND source_id = ?`,
+      ).run(embeddingToBlob(KNN_VECTOR), bruteForceDecisionId);
+      for (const id of orphanIds) insertOrphan.run(id, embeddingToBlob(QV));
+
+      const { results, semanticBackend } = await hybridSearch('orphanfilterquery111', { limit: 5 });
+
+      expect(semanticBackend).toBe('bruteforce');
+      expect(results.some(
+        (result) => result.table === 'decisions' && result.id === bruteForceDecisionId,
+      )).toBe(true);
+    } finally {
+      getDb().prepare(
+        `DELETE FROM embeddings
+         WHERE source_table = 'decisions' AND source_id >= 100000`,
+      ).run();
+      getDb().prepare(
+        `UPDATE embeddings SET embedding = ?
+         WHERE source_table = 'decisions' AND source_id = ?`,
+      ).run(embeddingToBlob(QV), bruteForceDecisionId);
+    }
   });
 
   test('reports knn backend while preserving the sqlite-vec KNN result', async () => {
@@ -139,6 +226,94 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(hit).toBeDefined();
     expect(hit!.source).toBe('vec');
     expect(hit!.content).toContain('knn deterministic vector-only issue 146');
+  });
+
+  test('filters bounded KNN pages until a published source is found', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    const orphans = Array.from({ length: 10 }, (_, index) => ({
+      source_table: 'decisions',
+      source_id: 200_000 + index,
+      distance: 0.001 + index * 0.0001,
+    }));
+    knnHits = (k) => k === 10
+      ? orphans
+      : [...orphans, { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }];
+
+    const { results, semanticBackend } = await hybridSearch('knnorphancandidatequery111', { limit: 5 });
+
+    expect(semanticBackend).toBe('knn');
+    expect(knnCalls.map(call => call.k)).toEqual([10, 20]);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === knnDecisionId,
+    )).toBe(true);
+  });
+
+  test('deduplicates identities when near-tied KNN pages reorder', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    const orphans = Array.from({ length: 9 }, (_, index) => ({
+      source_table: 'decisions',
+      source_id: 210_000 + index,
+      distance: 0.001 + index * 0.0001,
+    }));
+    knnHits = (k) => k === 10
+      ? [...orphans, { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }]
+      : [
+          { source_table: 'decisions', source_id: bruteForceDecisionId, distance: 0.0005 },
+          ...orphans,
+          { source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 },
+        ];
+
+    const { results, semanticBackend } = await hybridSearch('knnreorderedcandidatequery115', { limit: 5 });
+
+    expect(semanticBackend).toBe('knn');
+    expect(knnCalls.map(call => call.k)).toEqual([10, 20]);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === bruteForceDecisionId,
+    )).toBe(true);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === knnDecisionId,
+    )).toBe(true);
+  });
+
+  test('falls back when bounded KNN filtering cannot reach published results', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    knnHits = (k) => Array.from({ length: k }, (_, index) => ({
+      source_table: 'decisions',
+      source_id: 220_000 + index,
+      distance: 0.001 + index * 0.0001,
+    }));
+
+    const { results, semanticBackend } = await hybridSearch('knnexhaustedcandidatequery114', { limit: 5 });
+
+    expect(semanticBackend).toBe('bruteforce');
+    expect(knnCalls.map(call => call.k)).toEqual([10, 20, 30, 40]);
+    expect(results.some(
+      (result) => result.table === 'decisions' && result.id === bruteForceDecisionId,
+    )).toBe(true);
+  });
+
+  test('materializes vector-only content inside the guarded KNN read', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    knnHits = [{ source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }];
+    afterConsistentSearch = () => {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('replacement content published after guarded search', knnDecisionId);
+    };
+
+    try {
+      const { results, semanticBackend } = await hybridSearch('guardedcontentquery108', { limit: 5 });
+
+      expect(semanticBackend).toBe('knn');
+      const hit = results.find((r) => r.table === 'decisions' && r.id === knnDecisionId);
+      expect(hit?.content).toContain('knn deterministic vector-only issue 146');
+    } finally {
+      getDb().prepare('UPDATE decisions SET decision = ? WHERE id = ?')
+        .run('knn deterministic vector-only issue 146', knnDecisionId);
+    }
   });
 
   test('treats empty KNN over non-empty embeddings as failure and falls back to brute-force (#217 ruling)', async () => {
@@ -171,6 +346,20 @@ describe('hybridSearch sqlite-vec semantic backends (issues #146/#148)', () => {
     expect(embeddingsAvailable).toBe(true);
     const hit = results.find((r) => r.table === 'decisions' && r.id === bruteForceDecisionId);
     expect(hit).toBeDefined(); // the seeded row still surfaces via brute-force
+  });
+
+  test('falls back to canonical embeddings when vec synchronization is unconfirmed', async () => {
+    resetVecMock();
+    vecAvailable = true;
+    vecSynced = false;
+    knnHits = [{ source_table: 'decisions', source_id: knnDecisionId, distance: 0.01 }];
+
+    const { results, semanticBackend } = await hybridSearch('wibblefrotz zharkon', { limit: 5 });
+
+    expect(ensureVecIndexSyncedCalls).toBe(1);
+    expect(knnCalls).toHaveLength(0);
+    expect(semanticBackend).toBe('bruteforce');
+    expect(results.some((r) => r.table === 'decisions' && r.id === bruteForceDecisionId)).toBe(true);
   });
 
   test('reports embeddings unavailable and backend none when the query embed throws', async () => {

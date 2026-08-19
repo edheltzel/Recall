@@ -6,7 +6,11 @@ import {
   reindexVec,
   knnSearch,
   createVecTable,
+  ensureVecIndexSynced,
+  invalidateVecIndex,
   resetVecSyncCache,
+  withReadSnapshot,
+  withConsistentVecIndex,
 } from '../../src/db/vec';
 import {
   embeddingToBlob,
@@ -42,6 +46,27 @@ function insertEmbedding(id: number, v: number[]): void {
   ).run(id, v.length, embeddingToBlob(v));
 }
 
+function writeSchemaMetaFromPeer(key: string, value: string): void {
+  const result = Bun.spawnSync(
+    ['bun', '-e', `
+      import { Database } from 'bun:sqlite';
+      const db = new Database(process.env.RECALL_PEER_DB);
+      db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+        .run(process.env.RECALL_PEER_KEY, process.env.RECALL_PEER_VALUE);
+      db.close();
+    `],
+    {
+      env: {
+        ...process.env,
+        RECALL_PEER_DB: process.env.RECALL_DB_PATH!,
+        RECALL_PEER_KEY: key,
+        RECALL_PEER_VALUE: value,
+      },
+    },
+  );
+  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+}
+
 /** Brute-force reference ranking — the path KNN must match. */
 function bruteForceOrder(query: number[], k: number): string[] {
   const rows = getDb()
@@ -70,6 +95,124 @@ describe('sqlite-vec index (issue #148)', () => {
     expect(reindexVec(getDb())).toBe(5);
     const count = (getDb().prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
     expect(count).toBe(5);
+  });
+
+  test('deleting an embedding source removes its vector and dirties the index', () => {
+    const db = getDb();
+    const decisionId = Number(db.prepare(
+      `INSERT INTO decisions (decision) VALUES ('delete source vector')`
+    ).run().lastInsertRowid);
+    insertEmbedding(decisionId, vec(1));
+    db.prepare(`DELETE FROM schema_meta WHERE key IN ('vec_index_dirty', 'vec_index_generation')`).run();
+
+    db.prepare('DELETE FROM decisions WHERE id = ?').run(decisionId);
+
+    expect(db.prepare(
+      `SELECT 1 FROM embeddings WHERE source_table = 'decisions' AND source_id = ?`
+    ).get(decisionId)).toBeNull();
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toEqual({ value: '1' });
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
+      .toEqual({ value: '1' });
+  });
+
+  test('honors persisted invalidation after the process cache is warm', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    ensureVecIndexSynced(db);
+
+    db.prepare("DELETE FROM embeddings WHERE source_table = 'decisions' AND source_id = 1").run();
+    db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+      .run('vec_index_dirty', '1');
+    db.exec('DELETE FROM vec_embeddings');
+    insertEmbedding(1, vec(2));
+    ensureVecIndexSynced(db);
+
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toBeNull();
+    expect(knnSearch(db, vec(2), 1)[0].distance).toBeLessThan(0.001);
+  });
+
+  test('retries a KNN read when the vector generation changes', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    let calls = 0;
+
+    const result = withConsistentVecIndex(db, () => {
+      calls += 1;
+      if (calls === 1) invalidateVecIndex(db);
+      return knnSearch(db, vec(1), 1);
+    });
+
+    expect(calls).toBe(2);
+    expect(result?.[0]?.distance).toBeLessThan(0.001);
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toBeNull();
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
+      .toEqual({ value: '1' });
+  });
+
+  test('rejects a KNN read after two vector generation changes', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    let calls = 0;
+
+    const result = withConsistentVecIndex(db, () => {
+      calls += 1;
+      const hits = knnSearch(db, vec(1), 1);
+      invalidateVecIndex(db);
+      return hits;
+    });
+
+    expect(calls).toBe(2);
+    expect(result).toBeNull();
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_dirty'))
+      .toEqual({ value: '1' });
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('vec_index_generation'))
+      .toEqual({ value: '2' });
+  });
+
+  test('keeps a KNN read stable across an unrelated writer commit', () => {
+    if (!isVecAvailable()) return;
+    const db = getDb();
+    insertEmbedding(1, vec(1));
+    reindexVec(db);
+    let calls = 0;
+
+    const result = withConsistentVecIndex(db, () => {
+      calls += 1;
+      if (calls === 1) writeSchemaMetaFromPeer('vec_publication_test', '1');
+      return knnSearch(db, vec(1), 1);
+    });
+
+    expect(calls).toBe(1);
+    expect(result?.[0]?.distance).toBeLessThan(0.001);
+  });
+
+  test('keeps a stable WAL snapshot across an unrelated writer commit', () => {
+    const db = getDb();
+    db.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+      .run('canonical_publication_test', 'before');
+
+    const result = withReadSnapshot(db, () => {
+      const before = db.prepare('SELECT value FROM schema_meta WHERE key = ?')
+        .get('canonical_publication_test');
+      writeSchemaMetaFromPeer('canonical_publication_test', 'after');
+      const after = db.prepare('SELECT value FROM schema_meta WHERE key = ?')
+        .get('canonical_publication_test');
+      return { before, after };
+    });
+
+    expect(result.before).toEqual({ value: 'before' });
+    expect(result.after).toEqual({ value: 'before' });
+    expect(db.prepare('SELECT value FROM schema_meta WHERE key = ?')
+      .get('canonical_publication_test')).toEqual({ value: 'after' });
   });
 
   test('KNN ordering matches the brute-force cosine ranking (parity)', () => {

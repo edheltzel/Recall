@@ -6,9 +6,22 @@ import { configurableHosts } from '../../src/hosts';
 import { claudePaths } from '../../src/hosts/claude';
 import { extractClaudeProjectFromPath } from '../../src/hosts/claude-session-source';
 import { parseMarkdownDrop } from '../../src/hosts/markdown-session-source';
+import { SESSION_SOURCES } from '../../src/hosts/session-source';
 import { discoverCurrentSession } from '../../src/hosts/session-sources';
 
 describe('native host boundaries', () => {
+  test('portable dumps accept every attributed session source', () => {
+    expect(SESSION_SOURCES).toEqual([
+      'claude',
+      'opencode',
+      'pi',
+      'codex',
+      'grok',
+      'jcode',
+      'mcp',
+    ]);
+  });
+
   test('each verified host owns its MCP config shape', () => {
     const targets = configurableHosts.flatMap(host => host.mcpConfigTargets('/test-home'));
     expect(targets.map(target => target.host)).toEqual(['claude', 'claude', 'opencode', 'pi']);

@@ -19,6 +19,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runExport } from '../../src/commands/export';
+import { getDb } from '../../src/db/connection';
 import { EXPORT_TABLES, PROVENANCE_TABLES } from '../../src/lib/export';
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 import {
@@ -53,13 +54,35 @@ afterEach(() => {
 /** One known-provenance and one legacy (NULL) row across the durable tables. */
 function seed(): void {
   createSession({ session_id: 's1', started_at: '2026-01-01T00:00:00Z', project: 'demo' });
-  addMessage({ session_id: 's1', timestamp: '2026-01-01T00:00:01Z', role: 'user', content: 'known message', provenance: 'verbatim' });
+  const messageId = addMessage({ session_id: 's1', timestamp: '2026-01-01T00:00:01Z', role: 'user', content: 'known message', provenance: 'verbatim' });
   addMessage({ session_id: 's1', timestamp: '2026-01-01T00:00:02Z', role: 'assistant', content: "legacy 'quoted' message\nsecond line" });
   addDecision({ session_id: 's1', decision: 'known decision', status: 'active', provenance: 'user_authored' });
   addDecision({ session_id: 's1', decision: 'legacy decision', status: 'active' });
   addLearning({ session_id: 's1', problem: 'legacy problem', solution: 'fix' });
   addBreadcrumb({ session_id: 's1', content: 'known crumb', importance: 5, provenance: 'extracted' });
-  createLoaEntry({ title: 'legacy entry', fabric_extract: 'extract body' });
+  const loaId = createLoaEntry({ title: 'legacy entry', fabric_extract: 'extract body' });
+  const db = getDb();
+  db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?').run(
+    JSON.stringify({ table: 'loa_message_sources', loa_id: loaId }),
+    loaId
+  );
+  db.prepare(`
+    INSERT INTO host_ingest_state (
+      source, session_id, transcript_ref, watermark, transcript_digest, updated_at
+    ) VALUES ('codex', 's1', '/tmp/rollout.jsonl', 'bytes:1', 'digest', ?)
+  `).run('2026-01-01T00:00:03Z');
+  db.prepare(`
+    INSERT INTO host_ingest_messages
+      (source, session_id, message_key, message_id, source_position)
+    VALUES ('codex', 's1', 'known', ?, NULL)
+  `).run(messageId);
+  db.prepare(`
+    INSERT INTO loa_message_sources (
+      loa_id, ordinal, message_id, session_id, timestamp, role, content,
+      project, importance, provenance
+    ) VALUES (?, 0, ?, 's1', '2026-01-01T00:00:01Z', 'user',
+      'known message', 'demo', 5, 'verbatim')
+  `).run(loaId, messageId);
 }
 
 function readJsonExport(file: string): any {
@@ -135,6 +158,12 @@ describe('manifest', () => {
       breadcrumbs: 1,
       loa_entries: 1,
       dedup_lineage: 0,
+      host_ingest_generations: 0,
+      host_ingest_generation_messages: 0,
+      host_ingest_embedding_invalidations: 0,
+      host_ingest_state: 1,
+      host_ingest_messages: 1,
+      loa_message_sources: 1,
     });
     expect(manifest.provenance_counts.messages).toEqual({ unknown: 1, verbatim: 1 });
     expect(manifest.provenance_counts.decisions).toEqual({ unknown: 1, user_authored: 1 });
@@ -167,6 +196,12 @@ describe('SQL dump', () => {
     const sql = readFileSync(file, 'utf-8');
     expect(sql).toContain('CREATE TABLE sessions');
     expect(sql).toContain('INSERT INTO "messages"');
+    expect(sql).toContain('INSERT INTO "host_ingest_state"');
+    expect(sql).toContain('CREATE TABLE host_ingest_generations');
+    expect(sql).toContain('CREATE TABLE host_ingest_generation_messages');
+    expect(sql).toContain('CREATE TABLE host_ingest_embedding_invalidations');
+    expect(sql).toContain('INSERT INTO "host_ingest_messages"');
+    expect(sql).toContain('INSERT INTO "loa_message_sources"');
     expect(sql).toContain("''quoted''"); // escaped single quotes
     expect(sql).toContain('BEGIN TRANSACTION;');
     expect(sql).toContain('COMMIT;');
@@ -203,6 +238,12 @@ describe('SQL dump', () => {
         breadcrumbs: 1,
         loa_entries: 1,
         dedup_lineage: 0,
+        host_ingest_generations: 0,
+        host_ingest_generation_messages: 0,
+        host_ingest_embedding_invalidations: 0,
+        host_ingest_state: 1,
+        host_ingest_messages: 1,
+        loa_message_sources: 1,
       });
 
       // Legacy NULL restores as NULL; known values survive verbatim
@@ -214,6 +255,24 @@ describe('SQL dump', () => {
 
       // Quote + newline content round-trips byte-for-byte
       expect(legacy.content).toBe("legacy 'quoted' message\nsecond line");
+      const restoredKnownId = (restored.prepare(`
+        SELECT id FROM messages WHERE content = 'known message'
+      `).get() as { id: number }).id;
+      expect(restored.prepare(`
+        SELECT watermark, transcript_digest FROM host_ingest_state
+      `).get()).toEqual({ watermark: 'bytes:1', transcript_digest: 'digest' });
+      expect(restored.prepare(`
+        SELECT message_key, message_id FROM host_ingest_messages
+      `).get()).toEqual({ message_key: 'known', message_id: restoredKnownId });
+      expect(restored.prepare(`
+        SELECT message_id, content FROM loa_message_sources
+      `).get()).toEqual({
+        message_id: restoredKnownId,
+        content: 'known message',
+      });
+      expect((restored.prepare('PRAGMA user_version').get() as {
+        user_version: number;
+      }).user_version).toBeGreaterThan(0);
     } finally {
       restored.close();
     }

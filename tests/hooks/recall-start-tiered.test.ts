@@ -3,7 +3,7 @@
 // graceful empty-state behavior, and budget enforcement.
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -53,6 +53,75 @@ describe('RecallStart — L0 identity', () => {
     expect(buildL0()).toBeUndefined();
     process.env.RECALL_IDENTITY_PATH = original;
   });
+
+  test('buildL0 discovers a relocated identity from the installed Claude guide', async () => {
+    const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
+    const originalHome = process.env.HOME;
+    const originalRecallHome = process.env.RECALL_HOME;
+    const originalRecallDir = process.env.RECALL_DIR;
+    const home = join(tempIdentityDir, 'relocated-home');
+    const installRoot = join(tempIdentityDir, 'relocated', 'Recall');
+    const canonical = join(installRoot, 'MEMORY', 'identity.md');
+    const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
+    const staleDefault = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    mkdirSync(join(home, '.agents', 'Recall', 'MEMORY'), { recursive: true });
+    mkdirSync(join(installRoot, 'MEMORY'), { recursive: true });
+    mkdirSync(join(installRoot, 'claude'), { recursive: true });
+    writeFileSync(canonical, '# Relocated identity\n');
+    writeFileSync(guide, '# Guide\n');
+    writeFileSync(staleDefault, '# Stale default identity\n');
+    symlinkSync(guide, join(home, '.claude', 'Recall_GUIDE.md'));
+    delete process.env.RECALL_IDENTITY_PATH;
+    delete process.env.RECALL_HOME;
+    delete process.env.RECALL_DIR;
+    process.env.HOME = home;
+
+    try {
+      const { buildL0 } = await import('../../hooks/RecallStart');
+      expect(buildL0()).toContain('Relocated identity');
+      expect(buildL0()).not.toContain('Stale default identity');
+    } finally {
+      if (originalIdentityPath === undefined) delete process.env.RECALL_IDENTITY_PATH;
+      else process.env.RECALL_IDENTITY_PATH = originalIdentityPath;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalRecallHome === undefined) delete process.env.RECALL_HOME;
+      else process.env.RECALL_HOME = originalRecallHome;
+      if (originalRecallDir === undefined) delete process.env.RECALL_DIR;
+      else process.env.RECALL_DIR = originalRecallDir;
+    }
+  });
+
+  test('buildL0 honors a relocated RECALL_DIR without a Claude identity alias', async () => {
+    const originalIdentityPath = process.env.RECALL_IDENTITY_PATH;
+    const originalHome = process.env.HOME;
+    const originalRecallHome = process.env.RECALL_HOME;
+    const originalRecallDir = process.env.RECALL_DIR;
+    const home = join(tempIdentityDir, 'recall-dir-home');
+    const installRoot = join(tempIdentityDir, 'recall-dir-root');
+    const canonical = join(installRoot, 'MEMORY', 'identity.md');
+    mkdirSync(join(installRoot, 'MEMORY'), { recursive: true });
+    writeFileSync(canonical, '# RECALL_DIR identity\n');
+    delete process.env.RECALL_IDENTITY_PATH;
+    delete process.env.RECALL_HOME;
+    process.env.RECALL_DIR = installRoot;
+    process.env.HOME = home;
+
+    try {
+      const { buildL0 } = await import('../../hooks/RecallStart');
+      expect(buildL0()).toContain('RECALL_DIR identity');
+    } finally {
+      if (originalIdentityPath === undefined) delete process.env.RECALL_IDENTITY_PATH;
+      else process.env.RECALL_IDENTITY_PATH = originalIdentityPath;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalRecallHome === undefined) delete process.env.RECALL_HOME;
+      else process.env.RECALL_HOME = originalRecallHome;
+      if (originalRecallDir === undefined) delete process.env.RECALL_DIR;
+      else process.env.RECALL_DIR = originalRecallDir;
+    }
+  });
 });
 
 describe('RecallStart — L1 assembly', () => {
@@ -83,6 +152,37 @@ describe('RecallStart — L1 assembly', () => {
 
     const loaCount = rows.filter(r => r.table === 'loa').length;
     expect(loaCount).toBeGreaterThanOrEqual(2);
+  });
+
+  test('excludes automatic-capture LoA from L1 and the reserved slots', async () => {
+    const project = 'automatic-capture-test';
+    // Curated entries that legitimately deserve the reserved LoA slots.
+    createLoaEntry({ title: 'Curated wisdom X', fabric_extract: 'x content', project });
+    createLoaEntry({ title: 'Curated wisdom Y', fabric_extract: 'y content', project });
+
+    // Automatic Codex/Grok lifecycle capture: template summary, tagged
+    // automatic-capture. Seeded at importance 8 to prove exclusion holds even at
+    // the curated tier (the host-ingest UPDATE path never lowers existing rows).
+    const { getDb } = await import('../../src/db/connection');
+    getDb().prepare(`
+      INSERT INTO loa_entries (title, description, fabric_extract, project, tags, importance, provenance)
+      VALUES (?, ?, ?, ?, 'automatic-capture,codex', 8, 'extracted')
+    `).run(
+      'Codex session 01a016bb',
+      'Automatic terminal extraction from codex lifecycle capture.',
+      'template body',
+      project
+    );
+
+    const { assembleL1 } = await import('../../hooks/RecallStart');
+    const rows = assembleL1(project);
+
+    // The automatic entry must never surface in L1 (it would otherwise take a
+    // reserved LoA slot ahead of the informative curated entries).
+    expect(rows.some(r => r.table === 'loa' && r.content.includes('Codex session'))).toBe(false);
+    const loaContents = rows.filter(r => r.table === 'loa').map(r => r.content);
+    expect(loaContents.some(c => c.includes('Curated wisdom X'))).toBe(true);
+    expect(loaContents.some(c => c.includes('Curated wisdom Y'))).toBe(true);
   });
 
   test('tie-breaks by table priority (loa > decisions > learnings > breadcrumbs)', async () => {

@@ -35,7 +35,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ~/.claude/                              # Claude Code home (mostly symlinks back)
 ├── Recall_GUIDE.md                     # → ~/.agents/Recall/claude/Recall_GUIDE.md
 ├── MEMORY/
-│   ├── identity.md                     # → ~/.agents/Recall/MEMORY/identity.md
+│   ├── identity.md                     # optional managed link → ~/.agents/Recall/MEMORY/identity.md
 │   ├── DISTILLED.md                    # → ~/.agents/Recall/MEMORY/DISTILLED.md
 │   ├── HOT_RECALL.md                  # Last 10 sessions (fast context loading)
 │   ├── SESSION_INDEX.json             # Searchable session metadata lookup
@@ -55,8 +55,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ```
 
 Project-local L0 override: `./.atlas-recall/identity.md` takes precedence over
-the global `~/.claude/MEMORY/identity.md`. `RECALL_IDENTITY_PATH` overrides
-both.
+the resolved global identity. `RECALL_IDENTITY_PATH` overrides both.
 
 ## Host Boundaries
 
@@ -68,11 +67,11 @@ Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extr
 
 Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agents/Recall`) instead of a host configuration directory.
 
-Codex is distributed as the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`.
+Codex is distributed as the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`. Its `.mcp.json` registers `recall-memory`, `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical sources, and plugin hooks provide supported transcript capture and session-start context. See [Codex Integration](CODEX_INTEGRATION.md).
 
-Its `.mcp.json` registers `recall-memory`, and `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical `agent-skills/` sources.
+Grok lifecycle capture is installer-owned. A managed global hook runs `grok export <session-id>` and writes immediately through `src/lib/host-ingest.ts`; Grok has no verified automatic injection surface. See [Grok Integration](GROK_INTEGRATION.md).
 
-MCP covers the nine query/write operations but does not define transcript lifecycle events; see [Codex Integration](CODEX_INTEGRATION.md).
+The same ingest seam owns scrub, native session IDs, source/project attribution, persistent message keys, watermarks, and terminal finalization. JCode does not call it because the bounded live probe did not prove safe history ordering or additive configuration. See [JCode Integration](JCODE_INTEGRATION.md).
 
 Claude Code can install the native plugin in `plugins/recall-claude/` for skills + MCP while the lifecycle installer continues to own hooks and reconciles legacy duplicate surfaces; see [Claude Integration](CLAUDE_INTEGRATION.md).
 
@@ -85,8 +84,14 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | Table | Purpose | FTS5 Indexed |
 |-------|---------|:---:|
 | sessions | Cross-host session metadata (ID, timestamps, project, branch, source) | No |
-| messages | Conversation turns (user + assistant content); includes `importance` (1-10) column | Yes |
-| loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) column | Yes |
+| host_ingest_state | Per-host transcript reference, digest, watermark, active generation, and terminal state | No |
+| host_ingest_messages | Persistent lifecycle message keys linked to inserted message rows | No |
+| host_ingest_generations | Lifecycle generation identity and publication status | No |
+| host_ingest_generation_messages | Scrubbed generation records activated by one checkpoint pointer | Yes |
+| host_ingest_embedding_invalidations | Pending semantic-index cleanup for an activated lifecycle generation | No |
+| loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
+| messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
+| loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
 | learnings | Problems solved and patterns discovered; includes `confidence` (high/medium/low) and `importance` (1-10) columns | Yes |
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |
@@ -97,6 +102,12 @@ Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately 
 | dedup_lineage | Duplicate lineage audit trail from `recall dedup` (survivor, duplicate, reason, similarity, status) | No |
 
 All FTS5-indexed tables have automatic sync triggers.
+
+Portable JSON, Markdown, and SQL exports contain the seven durable memory and
+deduplication tables plus `host_ingest_generations`,
+`host_ingest_generation_messages`, `host_ingest_embedding_invalidations`,
+`host_ingest_state`, `host_ingest_messages`, and `loa_message_sources`. SQLite
+exports contain the full database.
 
 The `importance` column was added in schema migration 7→8 (v0.7.0) on four
 tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1
@@ -124,7 +135,7 @@ candidates are report-only.
 
 ## Tiered RecallStart (v0.7.0+)
 
-The `RecallStart` hook injects two tiers at the top of every session:
+The `RecallStart` hook injects two tiers at the top of supported sessions:
 
 | Tier | Source | Cap | Purpose |
 |------|--------|-----|---------|
@@ -138,7 +149,13 @@ tools (`memory_hybrid_search`, `memory_recall`).
 Path resolution for `identity.md`:
 1. `RECALL_IDENTITY_PATH` env var (if set)
 2. `./.atlas-recall/identity.md` (project-local, if exists)
-3. `~/.claude/MEMORY/identity.md` (global default)
+3. Existing user-owned `~/.claude/MEMORY/identity.md`, if it is not the managed canonical link
+4. The canonical file under the installer-resolved root: durable Claude guide link, then `RECALL_DIR`, then `RECALL_HOME`, then `~/.agents/Recall/MEMORY/identity.md`
+
+`recall onboard` uses the same resolver, with explicit `--out` first and
+`--project` forcing step 2 even before the file exists. A managed Claude
+identity link resolves to the canonical target rather than becoming a second
+storage location.
 
 ## PreCompact hook (v0.7.0+)
 
@@ -167,6 +184,13 @@ graph LR
 | Keyword | `recall search "query"` | memory_search | SQLite FTS5. Supports AND, OR, NOT, prefix*, "exact phrases", hard table filters (`-t` / `table`), and soft type boosts (`--bias-type` / `bias_type`) |
 | Semantic | `recall semantic "query"` | — | Ollama embedding → cosine similarity against stored vectors |
 | Hybrid | `recall "query"` | memory_hybrid_search | Both combined via Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama unavailable |
+
+Lifecycle messages use a separate publication-aware FTS index so a replacement
+generation never leaks partial rows into search. A search advances at most one
+bounded repair page; if publication is still pending, it returns available
+results with a `RETRYABLE` warning. MCP search tools mark that response as an
+error when no complete result is available. Retry the search or run
+`recall repair --execute` to advance the remaining work.
 
 ## Extraction Pipeline
 
@@ -205,7 +229,7 @@ The current Claude lifecycle adapter tries Claude Haiku first and falls back to 
 
 - **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `recall decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
 - **Breadcrumb sweep** — at session start, the `RecallStart` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
-- **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window, breadcrumbs below an importance threshold, and orphaned embeddings with no parent row. Prune is always dry-run by default; pass `--execute` to commit changes.
+- **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window and breadcrumbs below an importance threshold, with transactional embedding cleanup for deleted sources. Legacy orphan embeddings are handled by `recall repair --execute`. Prune is always dry-run by default; pass `--execute` to commit changes.
 
 - **WAL mode** for concurrent reads (no locking during MCP queries)
 - **FTS5** full-text search with automatic sync triggers

@@ -100,6 +100,7 @@ do_install() {
   [[ "${RECALL_PACKAGED:-false}" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL - 3))
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
+  [[ "$GROK_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$OMP_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
   # Pre-flight summary panel — shows what's about to happen and asks the
@@ -110,6 +111,7 @@ do_install() {
     [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && _platforms+=("Claude Code")
     [[ "$OPENCODE_DETECTED" == "true" ]] && _platforms+=("OpenCode")
     [[ "$PI_DETECTED" == "true" ]] && _platforms+=("Pi")
+    [[ "$GROK_DETECTED" == "true" ]] && _platforms+=("Grok")
     [[ "$OMP_DETECTED" == "true" ]] && _platforms+=("omp")
     local _plist
     _plist=$(IFS=", "; echo "${_platforms[*]:-(none — core install only)}")
@@ -227,6 +229,11 @@ do_install() {
     recall_install_pi_platform
   fi
 
+  if [[ "$GROK_DETECTED" == "true" ]]; then
+    _step "Grok" "Configuring automatic lifecycle capture"
+    recall_install_grok_platform
+  fi
+
   if [[ "$OMP_DETECTED" == "true" ]]; then
     _step "omp" "Configuring omp integration"
     recall_install_omp_platform
@@ -311,7 +318,7 @@ do_install() {
   step=$((step + 1))
   echo "  $step. (Recommended) Set up your L0 identity tier:"
   echo "     recall onboard"
-  echo "     A 7-question interview that writes ~/.claude/MEMORY/identity.md."
+  echo "     A 7-question interview that writes the resolved global identity file."
   echo "     Loads at every session start, gives every agent the same baseline."
   step=$((step + 1))
   echo "  $step. (Optional) Install Fabric for richer session extraction:"

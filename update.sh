@@ -358,6 +358,9 @@ step_refresh_runtime() {
   if [[ "$PI_DETECTED" == "true" ]]; then
     recall_install_pi_platform
   fi
+  if [[ "$GROK_DETECTED" == "true" ]]; then
+    recall_install_grok_platform
+  fi
   if [[ "$OMP_DETECTED" == "true" ]]; then
     recall_install_omp_platform
   fi
