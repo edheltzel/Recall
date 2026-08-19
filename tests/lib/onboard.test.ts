@@ -12,6 +12,7 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   lstatSync,
@@ -24,6 +25,7 @@ import {
   writeIdentityAtomic,
   type IdentityAnswers,
 } from '../../src/commands/onboard';
+import { claimRecallRoot } from '../../hooks/lib/db-path';
 
 const fullAnswers: IdentityAnswers = {
   name: 'Ed Heltzel',
@@ -219,6 +221,8 @@ describe('identity file write (integration)', () => {
       const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
       const canonical = join(installRoot, 'MEMORY', 'identity.md');
       const identity = join(claudeDir, 'MEMORY', 'identity.md');
+      mkdirSync(installRoot, { recursive: true });
+      claimRecallRoot(installRoot, { env: { HOME: home }, home });
       mkdirSync(dirname(guide), { recursive: true });
       mkdirSync(dirname(canonical), { recursive: true });
       mkdirSync(dirname(identity), { recursive: true });
@@ -228,7 +232,7 @@ describe('identity file write (integration)', () => {
       const outPath = resolveOutputPath({}, { HOME: home });
       writeIdentityAtomic(outPath, '# New\n');
 
-      expect(outPath).toBe(canonical);
+      expect(outPath).toBe(join(realpathSync(installRoot), 'MEMORY', 'identity.md'));
       expect(existsSync(identity)).toBe(false);
       expect(readFileSync(canonical, 'utf-8')).toBe('# New\n');
     } finally {
@@ -258,6 +262,8 @@ describe('identity file write (integration)', () => {
       const guide = join(installRoot, 'claude', 'Recall_GUIDE.md');
       const canonicalPath = join(installRoot, 'MEMORY', 'identity.md');
       const claudePath = join(home, '.claude', 'MEMORY', 'identity.md');
+      mkdirSync(installRoot, { recursive: true });
+      claimRecallRoot(installRoot, { env: { HOME: home }, home });
       mkdirSync(dirname(guide), { recursive: true });
       mkdirSync(dirname(canonicalPath), { recursive: true });
       mkdirSync(dirname(claudePath), { recursive: true });
@@ -269,7 +275,7 @@ describe('identity file write (integration)', () => {
       const outPath = resolveOutputPath({}, { HOME: home });
       writeIdentityAtomic(outPath, '# New\n');
 
-      expect(outPath).toBe(canonicalPath);
+      expect(outPath).toBe(join(realpathSync(installRoot), 'MEMORY', 'identity.md'));
       expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
       expect(readFileSync(canonicalPath, 'utf-8')).toBe('# New\n');
       expect(existsSync(canonicalPath + '.tmp')).toBe(false);

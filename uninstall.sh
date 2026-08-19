@@ -631,7 +631,7 @@ preserve_purge_memory_artifacts() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would snapshot $canonical to $pre_purge_dir/MEMORY/$fname"
-      if [[ ! -e "$alias" && ! -L "$alias" ]] || { [[ -L "$alias" ]] && [[ "$(readlink "$alias")" == "$canonical" ]]; }; then
+      if [[ ! -e "$alias" && ! -L "$alias" ]] || { [[ -L "$alias" ]] && recall_symlink_points_to "$alias" "$canonical"; }; then
         echo "  [dry-run] would materialize $canonical at $alias"
       fi
       continue
@@ -640,7 +640,7 @@ preserve_purge_memory_artifacts() {
     mkdir -p "$pre_purge_dir/MEMORY"
     cp -p "$canonical" "$pre_purge_dir/MEMORY/$fname"
 
-    if [[ -L "$alias" ]] && [[ "$(readlink "$alias")" == "$canonical" ]]; then
+    if [[ -L "$alias" ]] && recall_symlink_points_to "$alias" "$canonical"; then
       rm -f "$alias"
       cp -p "$canonical" "$alias"
     elif [[ ! -e "$alias" && ! -L "$alias" ]]; then
@@ -726,6 +726,12 @@ do_purge() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
+  if [[ "$PURGE" == "true" ]]; then
+    if ! recall_assert_owned_root "$RECALL_DIR"; then
+      log_error "Refusing to purge an unowned Recall root: $RECALL_DIR"
+      exit 1
+    fi
+  fi
   recall_activate_db_path
   RECALL_DB_PHYSICAL_PATH="$(recall_resolve_physical_db_path "$RECALL_DB_PATH")"
   print_summary
