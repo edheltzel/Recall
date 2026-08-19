@@ -54,6 +54,11 @@ The host-neutral ingest seam preserves the native Codex session ID and project a
 
 Capture writes directly to `recall.db`; it does not depend on the optional batch cron. Subagent rollouts are skipped by default. Set `RECALL_INCLUDE_SUBAGENTS=1` to opt in.
 
+Codex-injected instruction turns are not memory. Recall drops user turns that
+begin with the injected `AGENTS.md`, `<environment_context>`, or
+`<user_instructions>` wrappers while retaining the user's typed prompt as its
+own turn.
+
 `memory_dump` remains useful for an explicit supplemental snapshot. When it uses the same native session ID, Recall merges the snapshot without deleting lifecycle-owned rows or their automatic extraction. It is no longer required for ordinary automatic capture.
 
 ## Trust and boundaries

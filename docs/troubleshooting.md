@@ -31,8 +31,10 @@ recall benchmark run B         # Confirm v2_l0_chars > 0 after onboarding
 ```
 
 If onboard writes to the wrong location, check for `RECALL_IDENTITY_PATH` in
-your shell env and for a stale project-local `./.atlas-recall/identity.md`
-(which takes precedence over the global file).
+your shell env, a project-local `./.atlas-recall/identity.md`, or an existing
+user-owned `~/.claude/MEMORY/identity.md`. See
+[Identity & Onboarding](cli-reference.md#identity--onboarding) for the complete
+shared precedence.
 
 ### "My identity.md was silently truncated"
 

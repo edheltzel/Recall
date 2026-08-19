@@ -13,10 +13,11 @@ Recall is a persistent memory framework. It gives you:
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
 4. **Tiered session-start context (v0.7.0+)** — L0 identity (`identity.md`) + L1 top 12 records by importance. Review both at session start
 
-The L0 tier reads the global identity
-(`~/.agents/Recall/MEMORY/identity.md`), a project-local
-`./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set. If the user
-has never written one, recommend `recall onboard` via Bash to create it.
+The L0 tier uses Recall's shared identity resolver. On a new install the global
+file is `~/.agents/Recall/MEMORY/identity.md`; an existing user-owned Claude
+identity remains authoritative, while a project-local identity or
+`RECALL_IDENTITY_PATH` can override it. See [Identity & Onboarding](https://github.com/edheltzel/Recall/blob/main/docs/cli-reference.md#identity--onboarding).
+If no identity exists, recommend `recall onboard` via Bash.
 
 ## Your MCP Tools
 

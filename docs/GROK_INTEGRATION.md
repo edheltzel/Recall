@@ -32,7 +32,7 @@ It then creates a managed per-file symlink at:
 
 Set `GROK_HOME` to move the Grok configuration root. Deselect Grok in the interactive installer when it should remain untouched.
 
-The global hook is intentional. Grok 1.0.0 discovers plugin hook metadata, but live headless sessions do not compose those plugin hooks. The supported user-level global hook runs in both inspected and headless configurations.
+The global hook is intentional. Grok 1.0.4 discovers plugin hook metadata, but live headless sessions do not compose those plugin hooks. The supported user-level global hook runs in both inspected and headless configurations.
 
 ## Automatic capture
 

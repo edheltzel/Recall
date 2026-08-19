@@ -4,8 +4,8 @@
 
 ## File Layout
 
-Canonical Recall runtime files live under `~/.agents/Recall/`. Claude Code and
-OpenCode platform homes contain per-file symlinks back to those canonicals.
+Canonical Recall runtime files live under `~/.agents/Recall/`. Claude Code,
+OpenCode, and Grok platform homes contain per-file symlinks back to those canonicals.
 Pi instead records Recall's source as a native package and keeps its separately
 installed MCP adapter/configuration under `~/.pi/agent/`.
 
@@ -17,9 +17,9 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ├── shared/
 │   ├── hooks/                          # Canonical hook files (.ts)
 │   │   └── lib/                        # Hook helpers (.ts)
+│   ├── skills/                         # Agent Skill canonicals (recall-*)
 │   └── extract_prompt.md               # Extraction prompt template
 ├── claude/
-│   ├── shared/skills/                  # Agent Skill canonicals (recall-*)
 │   └── Recall_GUIDE.md                 # Guide for Claude Code
 ├── opencode/
 │   ├── plugins/                        # OpenCode plugin canonicals
@@ -27,6 +27,9 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   └── Recall_GUIDE.md                 # Guide for OpenCode
 ├── pi/
 │   └── Recall_GUIDE.md                 # Canonical guide linked into Pi home
+├── grok/
+│   └── hooks/
+│       └── RecallLifecycle.json        # Canonical Grok capture hook
 ├── MEMORY/                             # Migrated user-authored MEMORY files
 │   ├── identity.md                     # L0 identity (user-authored via recall onboard)
 │   └── DISTILLED.md                    # All extracted session summaries (full archive)
@@ -49,13 +52,17 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   ├── RecallStart.ts                # → ~/.agents/Recall/shared/hooks/RecallStart.ts
 │   ├── RecallPreCompact.ts            # → ~/.agents/Recall/shared/hooks/RecallPreCompact.ts
 │   ├── RecallExtract.ts               # → ~/.agents/Recall/shared/hooks/RecallExtract.ts
-│   ├── RecallBatchExtract.ts                 # → ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts
+│   ├── RecallBatchExtract.ts           # → ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts
+│   ├── RecallInSession.ts             # → ~/.agents/Recall/shared/hooks/RecallInSession.ts
 │   └── lib/                            # → ~/.agents/Recall/shared/hooks/lib/
 └── settings.json                       # Hook registration + MCP server (recall-memory)
+
+~/.grok/hooks/
+└── RecallLifecycle.json                # → ~/.agents/Recall/grok/hooks/RecallLifecycle.json
 ```
 
-Project-local L0 override: `./.atlas-recall/identity.md` takes precedence over
-the global identity (`~/.agents/Recall/MEMORY/identity.md`). `RECALL_IDENTITY_PATH` overrides both.
+The shared identity resolver and its complete precedence are documented under
+[Tiered RecallStart](#tiered-recallstart-v070).
 
 ## Host Boundaries
 
@@ -141,6 +148,10 @@ The `RecallStart` hook injects two tiers at the top of supported sessions:
 |------|--------|-----|---------|
 | **L0 — Identity** | `identity.md` (user-authored) | 1200 chars | Who the user is, what projects they work on, working preferences. Always on, always first. Truncated silently beyond the cap. |
 | **L1 — Importance-ranked** | Top 12 records across messages, decisions, learnings, LoA, ranked by `importance` DESC | 12 records | Load-bearing recent context. 4 of the 12 slots are reserved for LoA entries — LoA is often richer than any single decision. |
+
+Automatic terminal-capture LoA entries remain searchable but do not enter the
+reserved curated L1 pool, so host-generated summaries cannot displace curated
+knowledge at session start.
 
 L2 (full search results) and L3 (raw message history) are documented in the
 hook preamble but **not injected** — agents fetch them on demand via MCP
@@ -273,10 +284,10 @@ Sourced by all three scripts. Key functions:
 |---|---|
 | `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
 | `recall_register_hook <event> <name> <command> [timeout]` | Idempotent single-hook writer for `settings.json`. Every hook is registered independently — no blanket early-return (fixes the pre-0.7.1 bug class structurally) |
-| `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`RecallExtract`, `RecallTelosSync`, `RecallStart`, `RecallPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
+| `recall_register_all_hooks` | Registers every installer-owned Claude hook whose source file exists. Safe to re-run — missing registrations are added and present registrations are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
-| `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `agent-skills/*/SKILL.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits); removes legacy `/Recall:*` slash-command symlinks |
+| `recall_copy_runtime_files` | Refreshes canonical hooks, hook helpers, Agent Skills, the Claude guide, and `extract_prompt.md`; re-links managed host files with collision backups; removes legacy `/Recall:*` slash-command symlinks |
 | `recall_install_pi_platform` | Coordinates Pi's separate native package, `pi-mcp-adapter`, owned `mcp.json` entry, guide, and legacy-shadow cleanup; safe to re-run |
 | `recall_append_memory_section` | Shared Claude/Pi append path: completes an unterminated final line, inserts one blank separator, then writes the generated pointer |
 | `recall_memory_section_mutate` / `recall_configure_claude_md` | Shared Claude/Pi ownership classifier plus Claude bootstrap entry point. Marked sections and normalized exact legacy-generated bodies are refreshed on install/update and removable on uninstall; unmarked customized/external sections survive. Remove the marker before taking external ownership. A Recall-specific `~/.claude/rules/memory.md` takes precedence during install/update and leaves `CLAUDE.md` unchanged |

@@ -157,12 +157,12 @@ recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP confi
 
 ### L0 identity file
 
-The L0 tier reads the global identity, with `./.atlas-recall/identity.md`
-taking precedence if present. The global file lives at
-`~/.agents/Recall/MEMORY/identity.md` and is exposed through a managed
-`~/.claude/MEMORY/identity.md` link. `RECALL_IDENTITY_PATH` overrides both. If the
-user has never created this file, the L0 section of session context is empty —
-recommend running `recall onboard` to fix it.
+The L0 tier uses Recall's shared identity resolver. A project-local
+`./.atlas-recall/identity.md` takes precedence over the global identity; on a
+new install the global file is `~/.agents/Recall/MEMORY/identity.md`, while an
+existing user-owned Claude identity remains authoritative.
+`RECALL_IDENTITY_PATH` overrides both. See [Identity & Onboarding](https://github.com/edheltzel/Recall/blob/main/docs/cli-reference.md#identity--onboarding)
+for the complete precedence. If no identity exists, recommend `recall onboard`.
 
 ## Core Rules
 

@@ -40,7 +40,7 @@ Install once, then forget about it. Recall runs silently in the background:
       └───────────────────────────── Memory Available ───────────────────────────────┘
 ```
 
-- **Auto-extraction** — sessions are parsed into structured summaries incrementally as you work (Stop hook fires at the end of every turn, not only when you exit)
+- **Automatic capture** — supported lifecycle adapters preserve session progress without manual dumps; each host's exact capture and extraction behavior follows its verified lifecycle surface
 - **Full-text + semantic search** — find anything from any past session
 - **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically on supported hosts
 - **Zero friction** — no workflow changes, no manual steps
@@ -108,9 +108,10 @@ re-learn the basics.
 recall onboard
 ```
 
-A 7-question interview that writes the global identity file
-`~/.agents/Recall/MEMORY/identity.md` (Claude exposes the same file through
-its managed `~/.claude/MEMORY/identity.md` link). Run it once.
+A 7-question interview that writes the resolved global identity file. On a new
+install this is `~/.agents/Recall/MEMORY/identity.md`; an existing user-owned
+Claude identity remains authoritative. See the [installation guide](docs/installation.md#recommended-seed-your-l0-identity-tier)
+for the shared resolver's precedence. Run it once.
 Re-run whenever your role, active projects, or working preferences change.
 Use `|` (not `,`) to separate values so a phrase like `no force-push, ever`
 survives as a single entry.
@@ -329,8 +330,8 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**Claude Code**](https://claude.com/claude-code) | ✅ | ✅ Stop and PreCompact extraction | ✅ SessionStart L0/L1 | **Stable** reference implementation |
 | [**Pi**](https://pi.dev/) | ✅ | ⚠ Beta shutdown capture | ⚠ Beta before-agent context | Native package plus separate MCP adapter/config |
 | [**OpenCode**](https://opencode.ai/) | ✅ | ⚠ Beta `session.idle` capture | ❌ Compaction injection not verified | Runtime verified against OpenCode 1.18.5 |
-| [**Codex CLI**](https://github.com/openai/codex) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin, verified against Codex 0.147.0 |
-| [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Capture only, verified against Grok 1.0.0 |
+| [**Codex CLI**](docs/CODEX_INTEGRATION.md) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin; verified lifecycle contract |
+| [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
 | [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
 

@@ -1485,7 +1485,7 @@ recall_verify_install() {
     _check_symlink "$CLAUDE_DIR/hooks/$hook.ts" "$canonical"
   done
 
-  # Grok global lifecycle hook. Grok 1.0.0 headless mode ignores plugin
+  # Grok global lifecycle hook. Grok 1.0.4 headless mode ignores plugin
   # hooks, so this user-level managed symlink is the supported capture surface.
   if [[ "$GROK_DETECTED" == "true" ]] \
     && [[ -f "$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json" ]]; then
@@ -1856,10 +1856,10 @@ _recall_write_mcp_settings() {
 # ── Hooks ────────────────────────────────────────────────────────────────────
 #
 # Hook registration is split into two concerns:
-#   _recall_copy_hook_files — copies the TypeScript files + extract_prompt.md
-#                             from the source repo to ~/.claude/hooks/
+#   _recall_copy_hook_files — refreshes canonical TypeScript hooks and
+#                             extract_prompt.md, then links Claude targets
 #   recall_register_hook    — idempotent single-hook writer for settings.json
-#   recall_register_all_hooks — convenience loop that wires up all 4 hooks
+#   recall_register_all_hooks — convenience entry point for current Claude hooks
 #
 # The PREVIOUS install.sh had a blanket early-return after finding one hook,
 # which silently skipped the other three on re-install. `recall_register_hook`
@@ -1913,7 +1913,7 @@ _recall_copy_hook_files() {
   fi
 }
 
-# Grok 1.0.0 headless mode discovers user-level hook files but does not
+# Grok 1.0.4 headless mode discovers user-level hook files but does not
 # compose hooks from installed plugins. Install one Recall-owned global hook
 # file so headless and interactive sessions share the supported hook surface.
 recall_install_grok_platform() {
@@ -2622,7 +2622,7 @@ recall_install_pi_platform() {
 # ── Runtime file refresh (shared between install.sh and update.sh) ───────────
 #
 # Copies hooks/, hooks/lib/, agent-skills/, FOR_CLAUDE.md →
-# Recall_GUIDE.md, and extract_prompt.md (with drift preservation). Called by
+# Recall_GUIDE.md, and extract_prompt.md, then refreshes managed host links. Called by
 # install.sh Step 7+8b and update.sh Step 7 to keep runtime artifacts in sync
 # with the source tree.
 
