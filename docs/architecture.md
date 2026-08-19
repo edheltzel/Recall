@@ -17,9 +17,9 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ├── shared/
 │   ├── hooks/                          # Canonical hook files (.ts)
 │   │   └── lib/                        # Hook helpers (.ts)
+│   ├── skills/                         # Agent Skill canonicals (recall-*)
 │   └── extract_prompt.md               # Extraction prompt template
 ├── claude/
-│   ├── shared/skills/                  # Agent Skill canonicals (recall-*)
 │   └── Recall_GUIDE.md                 # Guide for Claude Code
 ├── opencode/
 │   ├── plugins/                        # OpenCode plugin canonicals
@@ -27,6 +27,9 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   └── Recall_GUIDE.md                 # Guide for OpenCode
 ├── pi/
 │   └── Recall_GUIDE.md                 # Canonical guide linked into Pi home
+├── grok/
+│   └── hooks/
+│       └── RecallLifecycle.json        # Canonical global Grok hook descriptor
 ├── MEMORY/                             # Migrated user-authored MEMORY files
 │   ├── identity.md                     # L0 identity (user-authored via recall onboard)
 │   └── DISTILLED.md                    # All extracted session summaries (full archive)
@@ -45,11 +48,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   ├── extract_prompt.md              # Extraction prompt template (used by hooks)
 │   ├── EXTRACT_LOG.txt                # Extraction run log (checked by recall doctor)
 │   └── .extraction_tracker.json       # Per-file extraction state (dedup + retry)
-├── hooks/                              # All entries below are symlinks
-│   ├── RecallStart.ts                # → ~/.agents/Recall/shared/hooks/RecallStart.ts
-│   ├── RecallPreCompact.ts            # → ~/.agents/Recall/shared/hooks/RecallPreCompact.ts
-│   ├── RecallExtract.ts               # → ~/.agents/Recall/shared/hooks/RecallExtract.ts
-│   ├── RecallBatchExtract.ts                 # → ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts
+├── hooks/                              # Installer-inventoried per-file symlinks
 │   └── lib/                            # → ~/.agents/Recall/shared/hooks/lib/
 └── settings.json                       # Hook registration + MCP server (recall-memory)
 ```
@@ -110,9 +109,11 @@ deduplication tables plus `host_ingest_generations`,
 exports contain the full database.
 
 The `importance` column was added in schema migration 7→8 (v0.7.0) on four
-tables (`messages`, `decisions`, `learnings`, `loa_entries`). It controls L1
-tier ranking at session start. Manage manually with `recall pin` / `recall unpin`
-or backfill from confidence signals with `recall importance backfill`.
+tables (`messages`, `decisions`, `learnings`, `loa_entries`). RecallStart uses
+importance to rank eligible decisions, learnings, breadcrumbs, and curated LoA;
+raw messages remain an on-demand search tier. Manage manually with `recall pin` /
+`recall unpin` or backfill from confidence signals with
+`recall importance backfill`.
 
 The `provenance` column was added in schema migration 8→9 on all five memory
 tables (`messages`, `decisions`, `learnings`, `breadcrumbs`, `loa_entries`).
@@ -140,7 +141,11 @@ The `RecallStart` hook injects two tiers at the top of supported sessions:
 | Tier | Source | Cap | Purpose |
 |------|--------|-----|---------|
 | **L0 — Identity** | `identity.md` (user-authored) | 1200 chars | Who the user is, what projects they work on, working preferences. Always on, always first. Truncated silently beyond the cap. |
-| **L1 — Importance-ranked** | Top 12 records across messages, decisions, learnings, LoA, ranked by `importance` DESC | 12 records | Load-bearing recent context. 4 of the 12 slots are reserved for LoA entries — LoA is often richer than any single decision. |
+| **L1 — Importance-ranked** | Top 12 eligible records across active decisions, learnings, unexpired breadcrumbs, and curated LoA, ranked by `importance` DESC | 12 records | Load-bearing context. 4 slots are reserved for curated LoA entries. Low-confidence decisions are excluded. |
+
+Automatic Codex/Grok terminal summaries carry an `automatic-capture,<source>`
+tag and are excluded from the curated L1 pool. Raw lifecycle messages are also
+not L1 candidates. Both remain available through L2/L3 search and recall tools.
 
 L2 (full search results) and L3 (raw message history) are documented in the
 hook preamble but **not injected** — agents fetch them on demand via MCP
@@ -192,7 +197,7 @@ results with a `RETRYABLE` warning. MCP search tools mark that response as an
 error when no complete result is available. Retry the search or run
 `recall repair --execute` to advance the remaining work.
 
-## Extraction Pipeline
+## Claude Extraction Pipeline
 
 ```mermaid
 graph TD
@@ -221,7 +226,7 @@ graph TD
 
 The hook self-spawns in background so the session exits immediately (non-blocking).
 
-The current Claude lifecycle adapter tries Claude Haiku first and falls back to a local Ollama model (configurable via `RECALL_OLLAMA_MODEL`).
+The current Claude lifecycle adapter tries Claude Haiku first and falls back to a local Ollama model (configurable via `Recall_OLLAMA_MODEL`).
 
 ## Technical Details
 
@@ -271,9 +276,9 @@ Sourced by all three scripts. Key functions:
 
 | Function | Purpose |
 |---|---|
-| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
+| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, and detected-host configs into `$BACKUP_BASE/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
 | `recall_register_hook <event> <name> <command> [timeout]` | Idempotent single-hook writer for `settings.json`. Every hook is registered independently — no blanket early-return (fixes the pre-0.7.1 bug class structurally) |
-| `recall_register_all_hooks` | Calls `recall_register_hook` for the four hooks Recall ships (`RecallExtract`, `RecallTelosSync`, `RecallStart`, `RecallPreCompact`). Safe to re-run — missing hooks are added, present hooks are skipped |
+| `recall_register_all_hooks` | Registers each installer-owned Claude hook on its supported event. Safe to re-run — missing hooks are added, present hooks are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
 | `recall_copy_runtime_files` | Copies `hooks/*.ts`, `hooks/lib/*.ts`, `agent-skills/*/SKILL.md`, `FOR_CLAUDE.md` → `Recall_GUIDE.md`, and `extract_prompt.md` (diff-check: writes `.new` on drift rather than overwriting user edits); removes legacy `/Recall:*` slash-command symlinks |
@@ -287,11 +292,13 @@ Callers can override these before sourcing `lib/install-lib.sh`:
 
 ```bash
 CLAUDE_DIR="$HOME/.claude"
-BACKUP_BASE="$CLAUDE_DIR/backups/recall"
+RECALL_DIR="$HOME/.agents/Recall"
+BACKUP_BASE="$RECALL_DIR/backups"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 PI_CONFIG_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+GROK_CONFIG_DIR="${GROK_HOME:-$HOME/.grok}"
 ```
 
 All use `: "${VAR:=default}"` so an override set *before* `source`

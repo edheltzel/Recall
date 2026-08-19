@@ -45,12 +45,12 @@ Codex CLI 0.147.0 provides supported plugin hooks, supplied transcript paths, co
 | Event | Recall behavior |
 | --- | --- |
 | `SessionStart` | Renders the shared tiered L0/L1 context and returns Codex `additionalContext` JSON. |
-| `Stop` | Reads only the supplied rollout path and immediately ingests new verbatim messages. |
+| `Stop` | Reads only the supplied rollout path and immediately ingests new scrubbed messages. |
 | `PreCompact` | Captures the supplied rollout before compaction. |
 | `PostCompact` | Reconciles the supplied rollout after compaction. |
 | `SessionEnd` | Captures the final rollout, closes the session, and creates one extracted summary. |
 
-The host-neutral ingest seam preserves the native Codex session ID and project attribution. It scrubs unattended content before storage as required by [#50](https://github.com/edheltzel/Recall/issues/50), records `source = 'codex'`, and persists message keys plus a rolling byte watermark. Ordinary `Stop` events read only an append-only suffix. Compaction and terminal events validate the complete prior prefix, while shrinkage resets to a full reconciliation.
+The host-neutral ingest seam preserves the native Codex session ID and project attribution. It keeps actual user and assistant response messages, removes Codex-injected startup and post-compaction instruction wrappers while preserving any coalesced typed prompt, then scrubs unattended content before storage as required by [#50](https://github.com/edheltzel/Recall/issues/50). It records `source = 'codex'` and persists message keys plus a rolling byte watermark. Ordinary `Stop` events read only an append-only suffix. Compaction and terminal events validate the complete prior prefix, while shrinkage resets to a full reconciliation.
 
 Capture writes directly to `recall.db`; it does not depend on the optional batch cron. Subagent rollouts are skipped by default. Set `RECALL_INCLUDE_SUBAGENTS=1` to opt in.
 

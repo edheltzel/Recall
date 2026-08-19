@@ -90,7 +90,7 @@ context_for_agent({ agent_task: "Refactor the auth middleware", project: "my-app
 
 ### memory_dump
 
-Dump the current session into SQLite mid-conversation. Messages become immediately searchable. Works across Claude Code, OpenCode, and Pi.
+Dump the current session into SQLite mid-conversation. Messages become immediately searchable. Claude Code, OpenCode, and Pi have native transcript discovery; other hosts must supply visible messages explicitly.
 
 ```
 memory_dump({ title: "Working on auth refactor", skip_fabric: true })
@@ -166,14 +166,14 @@ recommend running `recall onboard` to fix it.
 
 ## Core Rules
 
-1. **Memory-first at session start** — A `SessionStart` hook (`RecallStart.ts`) automatically loads two tiers: **L0 identity** (user-authored `identity.md`, always on, capped at 1200 chars) and **L1 top 12** (messages/decisions/learnings/LoA ranked by importance, with 4 slots reserved for LoA). Review both before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`. L2/L3 tiers are documented in the preamble but NOT injected — fetch them on demand.
+1. **Memory-first at session start** — A `SessionStart` hook (`RecallStart.ts`) automatically loads two tiers: **L0 identity** (user-authored `identity.md`, always on, capped at 1200 chars) and **L1 top 12** (eligible decisions, learnings, breadcrumbs, and curated LoA ranked by importance, with 4 slots reserved for LoA). Automatic lifecycle summaries and raw messages stay searchable on demand instead of entering L1. Review both tiers before your first response. If you need more detail, call `memory_recall()` or `memory_hybrid_search()`. L2/L3 tiers are documented in the preamble but NOT injected — fetch them on demand.
 2. **Search memory before git** — When you need context about past work, **always search Recall first** (`memory_search` or `memory_hybrid_search`) before falling back to `git log`, `git show`, or commit history. Recall contains structured decisions, learnings, and session summaries that are richer than commit messages. Prefer `bias_type` over `table` when a user asks for a kind of memory but broader context may still matter.
 3. **Search before asking** — Before asking the user to repeat information, search memory first
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
 6. **Session capture** — When the user says `/dump` or `/recall-dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
 7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `recall onboard` once per session. Do not nag on subsequent turns. An empty tier means the shared identity resolver found no identity file. Sample suggestion: "I notice your L0 identity tier is empty. Run `recall onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
-8. **Never store secrets** — `memory_add` and `memory_dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+8. **Never store secrets** — `memory_add` applies Recall's known-prefix secret scrub and reports redacted kinds, but `memory_dump` can persist supplied conversation text verbatim into `recall.db`. Stored records can resurface in later search or eligible L1 context, so redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 9. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ### Context Resolution Order

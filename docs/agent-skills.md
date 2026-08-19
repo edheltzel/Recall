@@ -10,7 +10,9 @@ Recall ships its command surface as [Agent Skills](https://agentskills.io) — o
 
 ### recall-dump
 
-Flush the current session to the database and capture a Library of Alexandria entry. Use this at the end of every session.
+Flush the current session to the database and capture a Library of Alexandria
+entry. Use it when the host does not already capture automatically or when the
+user wants an explicit supplemental snapshot.
 
 **Usage:** `/recall-dump Session Title Here`
 
