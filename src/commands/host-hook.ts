@@ -75,6 +75,28 @@ export interface HostHookResult {
   skipped?: string;
 }
 
+class HostHookSkip extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+  }
+}
+
+function resolveIngestBatch(
+  dependencies: HostHookDependencies
+): typeof ingestHostTranscriptBatch {
+  if (dependencies.ingestBatch) return dependencies.ingestBatch;
+  if (!dependencies.ingest) return ingestHostTranscriptBatch;
+  return (inputs: Iterable<HostTranscript>, _expectation, deadline) => {
+    let aggregate: HostIngestResult | undefined;
+    for (const input of inputs) {
+      assertHostDeadline(deadline);
+      aggregate = mergeHostIngestResults(aggregate, dependencies.ingest!(input));
+    }
+    if (!aggregate) throw new Error('Host transcript batch must not be empty');
+    return aggregate;
+  };
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined;
 }
@@ -352,19 +374,7 @@ function ingestStagedGrokExport(
 ): HostHookResult {
   assertHostDeadline(deadline);
   const transcriptRef = 'grok export';
-  const ingest = dependencies.ingest ?? ingestHostTranscript;
-  const ingestBatch: typeof ingestHostTranscriptBatch = dependencies.ingestBatch ??
-    (dependencies.ingest
-    ? (inputs: Iterable<HostTranscript>, _expectation, ingestDeadline) => {
-        let aggregate: HostIngestResult | undefined;
-        for (const input of inputs) {
-          assertHostDeadline(ingestDeadline);
-          aggregate = mergeHostIngestResults(aggregate, ingest(input));
-        }
-        if (!aggregate) throw new Error('Host transcript batch must not be empty');
-        return aggregate;
-      }
-    : ingestHostTranscriptBatch);
+  const ingestBatch = resolveIngestBatch(dependencies);
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
   const previous = checkpoint('grok', request.sessionId);
   assertHostDeadline(deadline);
@@ -527,7 +537,7 @@ export function handleHostHook(
   const sessionId = stringValue(payload.session_id) ?? stringValue(payload.sessionId);
   const cwd = stringValue(payload.cwd) ?? stringValue(payload.workspaceRoot);
   const capturedAt = stringValue(payload.timestamp);
-  const ingest = dependencies.ingest ?? ingestHostTranscript;
+  const ingestBatch = resolveIngestBatch(dependencies);
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
 
   if (payloadIsSubagent(payload) && !includeSubagents()) {
@@ -572,7 +582,7 @@ export function handleHostHook(
     }
     if (start === size) {
       return {
-        ingest: ingest({
+        ingest: ingestBatch([{
           source: 'codex',
           sessionId,
           messages: [],
@@ -585,30 +595,36 @@ export function handleHostHook(
           incremental,
           finalize,
           batch,
-        }),
+        }]),
       };
     }
-    let aggregate: HostIngestResult | undefined;
-    for (const chunk of boundedTranscriptChunks(start, size, read, capture.digest)) {
-      const parsed = parseCodexRollout(chunk.raw.toString('utf-8'));
-      if (parsed.sessionId && parsed.sessionId !== sessionId) {
-        return { skipped: 'session-id-mismatch' };
+    const inputs = function* (): Generator<HostTranscript> {
+      for (const chunk of boundedTranscriptChunks(start, size, read, capture.digest)) {
+        const parsed = parseCodexRollout(chunk.raw.toString('utf-8'));
+        if (parsed.sessionId && parsed.sessionId !== sessionId) {
+          throw new HostHookSkip('session-id-mismatch');
+        }
+        if (parsed.isSubagent && !includeSubagents()) throw new HostHookSkip('subagent');
+        yield {
+          source: 'codex',
+          sessionId,
+          messages: parsed.messages,
+          cwd: cwd ?? parsed.cwd,
+          transcriptRef: transcriptPath,
+          watermark: chunk.watermark,
+          capturedAt,
+          incremental,
+          finalize: finalize && chunk.end === size,
+          batch,
+        };
       }
-      if (parsed.isSubagent && !includeSubagents()) return { skipped: 'subagent' };
-      aggregate = mergeHostIngestResults(aggregate, ingest({
-        source: 'codex',
-        sessionId,
-        messages: parsed.messages,
-        cwd: cwd ?? parsed.cwd,
-        transcriptRef: transcriptPath,
-        watermark: chunk.watermark,
-        capturedAt,
-        incremental,
-        finalize: finalize && chunk.end === size,
-        batch,
-      }));
+    };
+    try {
+      return { ingest: ingestBatch(inputs()) };
+    } catch (error) {
+      if (error instanceof HostHookSkip) return { skipped: error.reason };
+      throw error;
     }
-    return { ingest: aggregate };
   }
 
   return { skipped: 'jcode-probe-did-not-prove-safe-capture' };

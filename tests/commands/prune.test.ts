@@ -167,6 +167,60 @@ describe('prune respects dedup survivors (#80)', () => {
     `).get()).toEqual({ value: '1' });
   });
 
+  test('removes restored lifecycle mirrors without deleting unrelated staged rows', () => {
+    const sessionId = 'restored-lifecycle-prune';
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId,
+      capturedAt: OLD,
+      finalize: true,
+      messages: [{ role: 'user', content: 'restored lifecycle body' }],
+    });
+    const db = getDb();
+    const generated = db.prepare(`
+      SELECT generation_id, message_id, timestamp, role, content, project,
+        importance, provenance
+      FROM host_ingest_generation_messages
+      WHERE session_id = ? AND content IS NOT NULL
+    `).get(sessionId) as {
+      generation_id: string;
+      message_id: number;
+      timestamp: string;
+      role: string;
+      content: string;
+      project: string | null;
+      importance: number;
+      provenance: string | null;
+    };
+    db.prepare(`
+      INSERT INTO messages (
+        id, session_id, timestamp, role, content, project, importance,
+        provenance, host_ingest_token
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      generated.message_id,
+      sessionId,
+      generated.timestamp,
+      generated.role,
+      generated.content,
+      generated.project,
+      generated.importance,
+      generated.provenance,
+      generated.generation_id
+    );
+    const staged = db.prepare(`
+      INSERT INTO messages (
+        session_id, timestamp, role, content, provenance, host_ingest_token
+      ) VALUES (?, ?, 'assistant', 'unrelated staged body', 'verbatim', 'pending:other')
+    `).run(sessionId, OLD);
+
+    runPrune({ execute: true });
+
+    expect(db.prepare('SELECT 1 FROM messages WHERE id = ?').get(generated.message_id)).toBeNull();
+    expect(db.prepare('SELECT content FROM messages WHERE id = ?').get(staged.lastInsertRowid))
+      .toEqual({ content: 'unrelated staged body' });
+  });
+
   test('protects a recorded survivor message and still prunes a non-survivor', () => {
     // s1 is consolidated (has a LoA entry) → its old messages are prune-eligible.
     createSession({ session_id: 's1', started_at: OLD });

@@ -4,6 +4,7 @@ import { getDb } from '../db/connection.js';
 import { tableExists } from '../db/introspection.js';
 import { notRecordedSurvivorSql } from '../lib/dedup.js';
 import { deleteRecordEmbeddingsBySelectionInTransaction } from '../lib/embedding-store.js';
+import { chunked, SQLITE_SAFE_CHUNK_SIZE } from '../lib/chunk.js';
 
 interface PruneOptions {
   execute?: boolean;
@@ -166,19 +167,35 @@ export function runPrune(options: PruneOptions): void {
   // Execute deletes
   if (messageCount > 0) {
     db.transaction(() => {
+      const selectedMessages = db.prepare(`
+        SELECT id, host_ingest_token FROM published_messages AS messages
+        ${messageWhere} ${messageGuard}
+      `).all() as Array<{ id: number; host_ingest_token: string | null }>;
       deleteRecordEmbeddingsBySelectionInTransaction(
         db,
         'messages',
         `SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}`
       );
-      db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
-        WHERE message_id IN (
-          SELECT id FROM published_messages AS messages ${messageWhere} ${messageGuard}
-        )`).run();
+      for (const idChunk of chunked(selectedMessages.map(message => message.id))) {
+        db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
+          WHERE message_id IN (${idChunk.map(() => '?').join(',')})`).run(...idChunk);
+      }
       db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}
         AND (host_ingest_token IS NULL OR EXISTS (
           SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
         ))`).run();
+      const restoredMirrors = selectedMessages.filter(message => message.host_ingest_token !== null);
+      for (const mirrorChunk of chunked(
+        restoredMirrors,
+        Math.floor(SQLITE_SAFE_CHUNK_SIZE / 2)
+      )) {
+        db.prepare(`DELETE FROM messages WHERE ${mirrorChunk
+          .map(() => '(id = ? AND host_ingest_token = ?)')
+          .join(' OR ')}`).run(...mirrorChunk.flatMap(message => [
+            message.id,
+            message.host_ingest_token,
+          ]));
+      }
     })();
   }
 

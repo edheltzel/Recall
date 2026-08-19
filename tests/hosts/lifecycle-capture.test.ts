@@ -19,8 +19,10 @@ import {
 import { SQLITE_SAFE_CHUNK_SIZE } from '../../src/lib/chunk';
 import { publishedEmbeddingSql } from '../../src/lib/published-records';
 import {
+  createLoaEntryFromMessages,
   getLastSearchErrors,
   getLastSearchReadiness,
+  getLoaEntry,
   getLoaMessages,
   getMessagesSinceLastLoa,
   search,
@@ -437,6 +439,7 @@ describe('host hook payload routing', () => {
     const codexLengths: number[] = [];
     const codexFinalization: boolean[] = [];
     const codexIncremental: boolean[] = [];
+    let codexBatchCalls = 0;
     const codexBatches: Array<HostTranscript['batch']> = [];
     const codex = handleHostHook(
       'codex',
@@ -451,22 +454,29 @@ describe('host hook payload routing', () => {
           codexLengths.push(length);
           return transcript.subarray(start, start + length);
         },
-        ingest: input => {
-          codexFinalization.push(Boolean(input.finalize));
-          codexIncremental.push(Boolean(input.incremental));
-          codexBatches.push(input.batch);
-          return {
-            sessionId: input.sessionId,
-            inserted: input.messages.length,
-            skipped: 0,
-            finalized: Boolean(input.finalize),
-            redactions: [],
-            digest: `${input.messages.length}`,
-          };
+        ingestBatch: inputs => {
+          codexBatchCalls++;
+          let aggregate: ReturnType<typeof ingestHostTranscript> | undefined;
+          for (const input of inputs) {
+            codexFinalization.push(Boolean(input.finalize));
+            codexIncremental.push(Boolean(input.incremental));
+            codexBatches.push(input.batch);
+            aggregate = mergeHostIngestResults(aggregate, {
+              sessionId: input.sessionId,
+              inserted: input.messages.length,
+              skipped: 0,
+              finalized: Boolean(input.finalize),
+              redactions: [],
+              digest: `${input.messages.length}`,
+            });
+          }
+          if (!aggregate) throw new Error('Expected Codex batch inputs');
+          return aggregate;
         },
       }
     );
     expect(codex.ingest).toMatchObject({ inserted: 2, finalized: true });
+    expect(codexBatchCalls).toBe(1);
     expect(codexFinalization).toEqual([false, true]);
     expect(codexIncremental).toEqual([false, false]);
     expect(codexBatches[0]).toBeDefined();
@@ -1459,6 +1469,38 @@ describe('host-neutral immediate SQLite ingest', () => {
     `).run();
     expect(getMessagesSinceLastLoa().messages.map(message => message.id))
       .toEqual([Number(next.lastInsertRowid)]);
+  });
+
+  test('pins explicit LoA sources when published IDs are generation-backed', () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'generation-backed-explicit-loa',
+      capturedAt: '2026-08-12T10:00:00.000Z',
+      messages: [{ role: 'user', content: 'Lifecycle evidence for explicit capture.' }],
+    });
+    const capture = getMessagesSinceLastLoa();
+
+    const loaId = createLoaEntryFromMessages({
+      title: 'Explicit lifecycle capture',
+      fabric_extract: 'Extracted lifecycle evidence.',
+      message_range_start: capture.startId ?? undefined,
+      message_range_end: capture.endId ?? undefined,
+      snapshot_max_message_id: capture.endId,
+      message_count: capture.messages.length,
+      provenance: 'extracted',
+    }, capture.messages);
+
+    expect(getLoaEntry(loaId)).toMatchObject({
+      message_range_start: null,
+      message_range_end: null,
+      snapshot_max_message_id: capture.endId,
+    });
+    expect(getLoaMessages(loaId).map(message => message.id))
+      .toEqual(capture.messages.map(message => message.id));
+    expect(getDb().prepare(`
+      SELECT message_id FROM loa_message_sources WHERE loa_id = ? ORDER BY ordinal
+    `).all(loaId)).toEqual(capture.messages.map(message => ({ message_id: message.id })));
+    expect(getMessagesSinceLastLoa().messages).toEqual([]);
   });
 
   test('pins finalized LoA evidence across non-terminal reconciliation', () => {

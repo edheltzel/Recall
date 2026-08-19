@@ -827,6 +827,63 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
   return result.lastInsertRowid as number;
 }
 
+export function createLoaEntryFromMessages(
+  entry: Omit<LoaEntry, 'id' | 'created_at'>,
+  messages: readonly Message[]
+): number {
+  const db = getDb();
+  const messageIds = messages.map(message => {
+    if (!Number.isSafeInteger(message.id) || message.id! < 1) {
+      throw new Error('LoA source messages must have persisted IDs');
+    }
+    return message.id!;
+  });
+
+  return db.transaction(() => {
+    const physicalIds = new Set<number>();
+    for (const idChunk of chunked(messageIds)) {
+      const rows = db.prepare(`
+        SELECT id FROM messages WHERE id IN (${idChunk.map(() => '?').join(',')})
+      `).all(...idChunk) as Array<{ id: number }>;
+      for (const row of rows) physicalIds.add(row.id);
+    }
+    const pinSources = messageIds.some(id => !physicalIds.has(id));
+    const loaId = createLoaEntry(pinSources ? {
+      ...entry,
+      message_range_start: undefined,
+      message_range_end: undefined,
+      source_ids: null,
+    } : entry);
+    if (!pinSources) return loaId;
+
+    const insertSource = db.prepare(`
+      INSERT INTO loa_message_sources (
+        loa_id, ordinal, message_id, session_id, timestamp, role, content,
+        project, importance, provenance
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const [ordinal, message] of messages.entries()) {
+      insertSource.run(
+        loaId,
+        ordinal,
+        message.id!,
+        message.session_id,
+        message.timestamp,
+        message.role,
+        message.content,
+        message.project ?? null,
+        message.importance ?? 5,
+        message.provenance ?? null
+      );
+    }
+    db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?').run(
+      JSON.stringify({ table: 'loa_message_sources', loa_id: loaId }),
+      loaId
+    );
+    return loaId;
+  })();
+}
+
 export function invalidateRecordEmbedding(
   db: ReturnType<typeof getDb>,
   sourceTable: ProvenanceTable,
