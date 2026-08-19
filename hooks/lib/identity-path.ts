@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readlinkSync } from 'fs';
 import { homedir } from 'os';
-import { dirname, isAbsolute, join } from 'path';
+import { join } from 'path';
+import { resolveRecallRoot } from './db-path';
 
 export interface ManagedIdentityPaths {
   root: string;
@@ -29,20 +30,7 @@ export function resolveManagedIdentityPaths(
   const env = options.env ?? process.env;
   const home = resolveHome(env, options.home);
   const alias = join(home, '.claude', 'MEMORY', 'identity.md');
-  const guideAlias = join(home, '.claude', 'Recall_GUIDE.md');
-  let root = env.RECALL_DIR || env.RECALL_HOME || join(home, '.agents', 'Recall');
-
-  try {
-    if (existsSync(guideAlias) && lstatSync(guideAlias).isSymbolicLink()) {
-      const guideTarget = readlinkSync(guideAlias);
-      const discoveredRoot = dirname(dirname(guideTarget));
-      if (isAbsolute(guideTarget)
-        && guideTarget === join(discoveredRoot, 'claude', 'Recall_GUIDE.md')) {
-        root = discoveredRoot;
-      }
-    }
-  } catch {
-  }
+  const root = resolveRecallRoot({ env, home });
 
   return {
     root,

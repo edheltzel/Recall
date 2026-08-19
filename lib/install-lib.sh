@@ -1167,6 +1167,12 @@ recall_resolve_db_path() {
     bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" resolve
 }
 
+recall_resolve_physical_db_path() {
+  local configured="${1:-}"
+  [[ -n "$configured" ]] || configured="$(recall_resolve_db_path)"
+  HOME="$HOME" bun run "$RECALL_REPO_DIR/hooks/lib/db-path.ts" physical "$configured"
+}
+
 recall_persist_db_path() {
   local resolved="${1:-}"
   [[ -n "$resolved" ]] || resolved="$(recall_resolve_db_path)"

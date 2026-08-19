@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import { isJsonObject, parseJsonc } from './jsonc';
 
 export interface DbPathOptions {
@@ -28,7 +28,30 @@ function expandHome(path: string, home: string): string {
 export function resolveRecallRoot(options: DbPathOptions = {}): string {
   const env = options.env ?? process.env;
   const home = resolveHome(env, options.home);
-  return env.RECALL_DIR || env.RECALL_HOME || join(home, '.agents', 'Recall');
+  const explicit = env.RECALL_DIR || env.RECALL_HOME;
+  if (explicit) return expandHome(explicit, home);
+
+  const defaultRoot = join(home, '.agents', 'Recall');
+  try {
+    if (lstatSync(defaultRoot).isSymbolicLink()) {
+      const target = readlinkSync(defaultRoot);
+      return isAbsolute(target) ? target : resolve(dirname(defaultRoot), target);
+    }
+  } catch {
+  }
+
+  const guideAlias = join(home, '.claude', 'Recall_GUIDE.md');
+  try {
+    if (lstatSync(guideAlias).isSymbolicLink()) {
+      const target = readlinkSync(guideAlias);
+      const guideTarget = isAbsolute(target) ? target : resolve(dirname(guideAlias), target);
+      const root = dirname(dirname(guideTarget));
+      if (guideTarget === join(root, 'claude', 'Recall_GUIDE.md')) return root;
+    }
+  } catch {
+  }
+
+  return defaultRoot;
 }
 
 export function resolveDbPathStatePath(options: DbPathOptions = {}): string {
@@ -107,14 +130,28 @@ export function persistDbPath(path: string, options: DbPathOptions = {}): string
   return resolved;
 }
 
+export function resolvePhysicalDbPath(path: string, options: DbPathOptions = {}): string {
+  if (!path.trim()) throw new Error('database path is required');
+  const env = options.env ?? process.env;
+  const home = resolveHome(env, options.home);
+  const resolved = expandHome(path, home);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 if (import.meta.main) {
   const action = process.argv[2];
   if (action === 'resolve') {
     process.stdout.write(`${resolveDbPath()}\n`);
+  } else if (action === 'physical') {
+    process.stdout.write(`${resolvePhysicalDbPath(process.argv[3] || '')}\n`);
   } else if (action === 'persist') {
     persistDbPath(process.argv[3] || '');
   } else {
-    console.error('usage: db-path.ts resolve | persist <path>');
+    console.error('usage: db-path.ts resolve | physical <path> | persist <path>');
     process.exit(1);
   }
 }

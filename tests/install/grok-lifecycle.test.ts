@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { resolveDbPath, resolveRecallRoot } from '../../hooks/lib/db-path';
 
 const repoRoot = process.cwd();
 const installLib = join(repoRoot, 'lib', 'install-lib.sh');
@@ -129,6 +130,35 @@ describe('Grok lifecycle hook ownership', () => {
     const resolved = helper('recall_resolve_db_path');
     expect(resolved.status).toBe(0);
     expect(resolved.stdout.trim()).toBe(customDb);
+  });
+
+  test('discovers relocated state through the managed default-root link', () => {
+    const relocatedRoot = join(tempRoot, 'relocated', 'Recall');
+    const defaultRoot = join(home, '.agents', 'Recall');
+    const customDb = join(tempRoot, 'custom-db', 'recall.db');
+    mkdirSync(relocatedRoot, { recursive: true });
+    mkdirSync(join(home, '.agents'), { recursive: true });
+    writeFileSync(join(relocatedRoot, '.db-path'), `${customDb}\n`);
+    symlinkSync(relocatedRoot, defaultRoot);
+    const env = { HOME: home } as NodeJS.ProcessEnv;
+
+    expect(resolveRecallRoot({ env, home })).toBe(relocatedRoot);
+    expect(resolveDbPath({ env, home })).toBe(customDb);
+  });
+
+  test('discovers relocated state through the managed Claude guide link', () => {
+    const relocatedRoot = join(tempRoot, 'guide-relocated', 'Recall');
+    const guide = join(relocatedRoot, 'claude', 'Recall_GUIDE.md');
+    const customDb = join(tempRoot, 'guide-custom-db', 'recall.db');
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    mkdirSync(join(relocatedRoot, 'claude'), { recursive: true });
+    writeFileSync(guide, '# Guide\n');
+    writeFileSync(join(relocatedRoot, '.db-path'), `${customDb}\n`);
+    symlinkSync(guide, join(home, '.claude', 'Recall_GUIDE.md'));
+    const env = { HOME: home } as NodeJS.ProcessEnv;
+
+    expect(resolveRecallRoot({ env, home })).toBe(relocatedRoot);
+    expect(resolveDbPath({ env, home })).toBe(customDb);
   });
 
   test('backs up a foreign collision and removes only the managed symlink', () => {

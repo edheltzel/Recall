@@ -155,6 +155,13 @@ EOF
 
 # Traps any failure and emits the rollback recipe before exiting.
 : "${PRE_SHA:=}"
+UPDATE_AFTER_PULL=false
+if [[ "${RECALL_UPDATE_AFTER_PULL:-}" == "1" ]] \
+  && [[ -n "$PRE_SHA" ]] \
+  && [[ -f "$BACKUP_DIR/manifest.txt" ]]; then
+  UPDATE_AFTER_PULL=true
+fi
+unset RECALL_UPDATE_AFTER_PULL
 rollback_on_failure() {
   local code=$?
   if [[ $code -ne 0 ]] && [[ -n "$PRE_SHA" ]] && [[ "$DRY_RUN" != "true" ]]; then
@@ -483,7 +490,7 @@ step_report() {
 main() {
   trap rollback_on_failure ERR
 
-  if [[ "${RECALL_UPDATE_AFTER_PULL:-}" != "1" ]]; then
+  if [[ "$UPDATE_AFTER_PULL" != "true" ]]; then
     _try_install_gum
 
     echo ""

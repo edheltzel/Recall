@@ -62,6 +62,8 @@ Use MCP search and recall tools during a Grok session. A wrapper that passes gen
 
 `update.sh` refreshes the managed hook when Grok is detected. `uninstall.sh` removes only the symlink owned by Recall. A foreign file at the same path is preserved, and an install-time collision is backed up first. This follows the surgical ownership requirement tracked in [#236](https://github.com/edheltzel/Recall/issues/236) without adding TOML mutation to the atomic-write debt in [#124](https://github.com/edheltzel/Recall/issues/124).
 
+Upgrading from a checkout whose updater predates post-pull re-execution needs the documented [one-time forced convergence pass](upgrading.md#one-time-transition-for-older-updaters).
+
 Use `./uninstall.sh --skip-grok` to leave the lifecycle hook installed.
 
 ## Development verification

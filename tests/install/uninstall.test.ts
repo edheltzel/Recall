@@ -13,6 +13,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   symlinkSync,
@@ -646,6 +647,32 @@ Preserve this.
       .toBe('custom-memory');
     expect(readFileSync(join(backupBase, snapshot!, 'recall.db.path'), 'utf-8'))
       .toBe(`${customDb}\n`);
+  });
+
+  test('--purge snapshots and destroys a symlinked database target', () => {
+    const recallDir = join(claudeDir, '.agents', 'Recall');
+    const physicalDb = join(tempRoot, 'physical-db', 'memory.sqlite');
+    const configuredDb = join(tempRoot, 'configured-db', 'memory.sqlite');
+    mkdirSync(dirname(physicalDb), { recursive: true });
+    mkdirSync(dirname(configuredDb), { recursive: true });
+    mkdirSync(recallDir, { recursive: true });
+    writeFileSync(physicalDb, 'physical-memory');
+    writeFileSync(`${physicalDb}-wal`, 'physical-wal');
+    symlinkSync(physicalDb, configuredDb);
+    writeFileSync(join(recallDir, '.db-path'), `${configuredDb}\n`);
+    const physicalTarget = realpathSync(physicalDb);
+
+    const result = runPurge(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(physicalTarget);
+    expect(existsSync(configuredDb)).toBe(false);
+    expect(existsSync(physicalDb)).toBe(false);
+    expect(existsSync(`${physicalDb}-wal`)).toBe(false);
+    const snapshot = readdirSync(backupBase).find(entry => entry.startsWith('pre_purge_'));
+    expect(snapshot).toBeDefined();
+    expect(readFileSync(join(backupBase, snapshot!, 'recall.db'), 'utf-8'))
+      .toBe('physical-memory');
   });
 
   test('--purge rejects --skip-grok before invalidating the retained hook', () => {

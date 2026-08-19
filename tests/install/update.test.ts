@@ -76,7 +76,10 @@ describe('update.sh', () => {
     expect(r.status).toBe(0);
   });
 
-  test('re-executes the freshly pulled updater without repeating backup', () => {
+  test('documents the old-updater transition and re-executes on the forced second run', () => {
+    const upgradingGuide = readFileSync(join(REPO, 'docs', 'upgrading.md'), 'utf-8');
+    expect(upgradingGuide).toContain('One-time transition for older updaters');
+    expect(upgradingGuide).toContain('./update.sh --force');
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-reexec-'));
     try {
       const checkout = join(tempRoot, 'checkout');
@@ -97,7 +100,18 @@ describe('update.sh', () => {
           'recall-memory': { env: { RECALL_DB_PATH: customDb } },
         },
       }));
-      writeFileSync(join(checkout, 'update.sh'), readFileSync(UPDATE), { mode: 0o755 });
+      const current = readFileSync(UPDATE, 'utf-8');
+      const functionNeedle = 'step_install_and_build() {\n  log_info "Installing dependencies (bun install)..."';
+      const reexecNeedle = '    step_fetch_and_pull\n    step_reexec_after_pull';
+      expect(current).toContain(functionNeedle);
+      expect(current).toContain(reexecNeedle);
+      const oldUpdater = current
+        .replace(reexecNeedle, '    step_fetch_and_pull')
+        .replace(
+          functionNeedle,
+          'step_install_and_build() {\n  printf "old\\n" > "$RECALL_REEXEC_MARKER"\n  exit 0\n  log_info "Installing dependencies (bun install)..."'
+        );
+      writeFileSync(join(checkout, 'update.sh'), oldUpdater, { mode: 0o755 });
       writeFileSync(join(checkout, 'lib', 'install-lib.sh'), readFileSync(join(REPO, 'lib', 'install-lib.sh')));
       writeFileSync(join(checkout, 'hooks', 'lib', 'db-path.ts'), readFileSync(join(REPO, 'hooks', 'lib', 'db-path.ts')));
       writeFileSync(join(checkout, 'hooks', 'lib', 'jsonc.ts'), readFileSync(join(REPO, 'hooks', 'lib', 'jsonc.ts')));
@@ -118,12 +132,9 @@ describe('update.sh', () => {
       expect(git(['remote', 'add', 'origin', remote]).status).toBe(0);
       expect(git(['push', '-u', 'origin', 'main']).status).toBe(0);
 
-      const current = readFileSync(join(checkout, 'update.sh'), 'utf-8');
-      const needle = 'step_install_and_build() {\n  log_info "Installing dependencies (bun install)..."';
-      expect(current).toContain(needle);
       writeFileSync(join(checkout, 'update.sh'), current.replace(
-        needle,
-        'step_install_and_build() {\n  printf "%s\\n" "${RECALL_UPDATE_AFTER_PULL:-}" > "$RECALL_REEXEC_MARKER"\n  exit 0\n  log_info "Installing dependencies (bun install)..."'
+        functionNeedle,
+        'step_install_and_build() {\n  printf "%s|%s\\n" "$UPDATE_AFTER_PULL" "${RECALL_UPDATE_AFTER_PULL-unset}" > "$RECALL_REEXEC_MARKER"\n  exit 0\n  log_info "Installing dependencies (bun install)..."'
       ), { mode: 0o755 });
       expect(git(['add', 'update.sh']).status).toBe(0);
       expect(git(['commit', '-m', 'fresh updater']).status).toBe(0);
@@ -141,22 +152,46 @@ describe('update.sh', () => {
           RECALL_DB_PATH: '',
           MEM_DB_PATH: '',
           RECALL_NO_GUM: '1',
+          RECALL_UPDATE_AFTER_PULL: '',
           RECALL_REEXEC_MARKER: marker,
+          TIMESTAMP: 'first-run',
           NO_COLOR: '1',
           PATH: `${stubDir}:${process.env.PATH ?? ''}`,
         },
       });
 
       expect(result.status).toBe(0);
-      expect(readFileSync(marker, 'utf-8')).toBe('1\n');
-      const backups = readdirSync(backupBase, { withFileTypes: true }).filter(entry => entry.isDirectory());
-      expect(backups).toHaveLength(1);
-      expect(readFileSync(join(backupBase, backups[0].name, 'recall.db'), 'utf-8'))
+      expect(readFileSync(marker, 'utf-8')).toBe('old\n');
+      expect(readFileSync(join(backupBase, 'first-run', 'recall.db'), 'utf-8'))
         .toBe('pre-update-memory');
-      expect(readFileSync(join(backupBase, backups[0].name, 'recall.db.path'), 'utf-8'))
+      expect(readFileSync(join(backupBase, 'first-run', 'recall.db.path'), 'utf-8'))
         .toBe(`${customDb}\n`);
       expect(readFileSync(join(home, '.agents', 'Recall', '.db-path'), 'utf-8'))
         .toBe(`${customDb}\n`);
+
+      const second = spawnSync('bash', [join(checkout, 'update.sh'), '--force', '--no-confirm', '--no-gum'], {
+        cwd: checkout,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: home,
+          RECALL_DIR: join(home, '.agents', 'Recall'),
+          BACKUP_BASE: backupBase,
+          RECALL_DB_PATH: '',
+          MEM_DB_PATH: '',
+          RECALL_NO_GUM: '1',
+          RECALL_UPDATE_AFTER_PULL: '',
+          RECALL_REEXEC_MARKER: marker,
+          TIMESTAMP: 'second-run',
+          NO_COLOR: '1',
+          PATH: `${stubDir}:${process.env.PATH ?? ''}`,
+        },
+      });
+
+      expect(second.status).toBe(0);
+      expect(readFileSync(marker, 'utf-8')).toBe('true|unset\n');
+      const backups = readdirSync(backupBase, { withFileTypes: true }).filter(entry => entry.isDirectory());
+      expect(backups.map(entry => entry.name).sort()).toEqual(['first-run', 'second-run']);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
