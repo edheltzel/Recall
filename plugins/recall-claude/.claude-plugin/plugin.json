@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "recall",
   "displayName": "Recall",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "description": "Persistent SQLite memory and retrieval tools for Claude Code",
   "author": {
     "name": "edheltzel",
