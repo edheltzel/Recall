@@ -50,8 +50,8 @@ cd /path/to/Recall
 5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 6. Copies refreshed hooks, shared lib files, agent skills, and
-   `FOR_CLAUDE.md`; refreshes detected host integrations; and runs the shared
-   Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
+   `FOR_CLAUDE.md`; refreshes detected OpenCode, Pi, and Grok integrations; and
+   runs the shared Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
    exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
    unmarked customized/external sections are preserved, while marked sections
    remain Recall-owned. A Recall-specific `~/.claude/rules/memory.md` leaves
@@ -59,10 +59,10 @@ cd /path/to/Recall
    For Pi, refresh means re-registering the native Recall package and separately
    converging `pi-mcp-adapter`, `mcp.json`, and the guide; it does not create a
    cross-host bundle.
-   `extract_prompt.md` gets a drift check — if you edited it, the new version
-   lands at `extract_prompt.md.new` and your edits are preserved.
-7. Forces re-registration of all four hooks (RecallExtract,
-   RecallTelosSync, RecallStart, RecallPreCompact) — this permanently
+   Canonical runtime files refresh in place; a foreign file at a managed host
+   link is moved into the timestamped collision backup before replacement.
+7. Forces re-registration of every installer-owned Claude hook through
+   `recall_register_all_hooks` — this permanently
    prevents the pre-0.7.1 bug class where a partial install could
    leave hooks missing.
 8. Verifies via `recall --version` and `recall stats`.
@@ -189,9 +189,10 @@ automatically on `recall init` or `./install.sh`.
 ### Recommended: run `recall onboard` post-upgrade
 
 v0.7.0 introduces a tiered session-start context (L0 identity + L1
-importance-ranked). The L0 tier reads from `~/.claude/MEMORY/identity.md`
-— if you don't have one, that tier is empty and you're only getting half
-the v2 design.
+importance-ranked). L0 uses the shared resolver documented under
+[Identity & Onboarding](cli-reference.md#identity--onboarding); on a new install
+its global path is `~/.agents/Recall/MEMORY/identity.md`. If no identity exists,
+that tier is empty and you're only getting half the v2 design.
 
 ```bash
 recall onboard               # Interactive 7-question interview

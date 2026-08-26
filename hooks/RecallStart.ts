@@ -23,7 +23,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join, basename } from 'path';
+import { basename } from 'path';
 import { execFileSync } from 'child_process';
 
 // ─── Budget constants (derived, not cargo-culted) ───────────────────
@@ -45,18 +45,7 @@ const L1_LOA_FALLBACK_CAP = 6;          // if no high-importance non-LoA exist, 
 // DB-path resolution lives in hooks/lib/db-path.ts so the CLI and every
 // hook agree on the same precedence (RECALL_DB_PATH > MEM_DB_PATH > default).
 import { resolveDbPath as getDbPath } from './lib/db-path';
-
-function getIdentityPath(): string | undefined {
-  // Precedence: env override > project-local > global.
-  // Project-local wins over global so per-project identity can differ.
-  if (process.env.RECALL_IDENTITY_PATH) return process.env.RECALL_IDENTITY_PATH;
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  const projectLocal = join(process.cwd(), '.atlas-recall', 'identity.md');
-  if (existsSync(projectLocal)) return projectLocal;
-  const globalPath = join(home, '.claude', 'MEMORY', 'identity.md');
-  if (existsSync(globalPath)) return globalPath;
-  return undefined;
-}
+import { resolveIdentityPath } from './lib/identity-path';
 
 // ─── Project detection ──────────────────────────────────────────────
 // Uses execFileSync (no shell) with a fixed argv — safe by construction.
@@ -99,35 +88,71 @@ function sweepExpiredBreadcrumbs(): void {
     const dbPath = getDbPath();
     if (!existsSync(dbPath)) return;
     const db = new Database(dbPath);
-    db.prepare('PRAGMA journal_mode = WAL').run();
-    db.prepare("DELETE FROM breadcrumbs WHERE expires_at IS NOT NULL AND expires_at < datetime('now')").run();
-    db.close();
+    try {
+      db.prepare('PRAGMA journal_mode = WAL').run();
+      db.prepare('PRAGMA busy_timeout = 5000').run();
+      const sweep = db.transaction(() => {
+        const expiredWhere = `expires_at IS NOT NULL AND expires_at < datetime('now')`;
+        const tables = new Set(
+          (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>)
+            .map(row => row.name)
+        );
+        if (tables.has('embeddings')) {
+          const removed = db.prepare(`
+            DELETE FROM embeddings
+            WHERE source_table = 'breadcrumbs'
+              AND source_id IN (
+                SELECT id FROM breadcrumbs
+                WHERE ${expiredWhere}
+              )
+          `).run().changes;
+          if (removed > 0 && tables.has('schema_meta') && !db.prepare(
+            `SELECT 1 FROM schema_meta WHERE key = 'vec_index_dirty'`
+          ).get()) {
+            db.prepare(`
+              INSERT INTO schema_meta (key, value) VALUES
+                ('vec_index_dirty', '1'), ('vec_index_generation', '1')
+              ON CONFLICT(key) DO UPDATE SET value = CASE
+                WHEN key = 'vec_index_generation'
+                  THEN CAST(schema_meta.value AS INTEGER) + 1
+                ELSE '1'
+              END
+            `).run();
+          }
+        }
+        db.prepare(`DELETE FROM breadcrumbs WHERE ${expiredWhere}`).run();
+      });
+      sweep.immediate();
+    } finally {
+      db.close();
+    }
   } catch {
     // Non-fatal best-effort cleanup
   }
 }
 
 // ─── Column presence probe ──────────────────────────────────────────
-// Gracefully handle older databases that haven't run the importance migration.
-// If the column doesn't exist yet, fall back to creation-order ranking.
-function hasImportanceColumn(table: string): boolean {
+// Gracefully handle older databases that haven't run later migrations.
+// Reads the whole column set in one PRAGMA so a caller can check several
+// columns without reopening the database; an unreadable table yields an empty
+// set (fall back to creation-order ranking, no automatic-capture filter).
+function tableColumns(table: string): Set<string> {
   try {
     const { Database } = require('bun:sqlite');
     const dbPath = getDbPath();
-    if (!existsSync(dbPath)) return false;
+    if (!existsSync(dbPath)) return new Set();
     const db = new Database(dbPath, { readonly: true });
     const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     db.close();
-    return rows.some(r => r.name === 'importance');
+    return new Set(rows.map(r => r.name));
   } catch {
-    return false;
+    return new Set();
   }
 }
 
 // ─── L0: Identity ────────────────────────────────────────────────────
 export function buildL0(): string | undefined {
-  const path = getIdentityPath();
-  if (!path) return undefined;
+  const path = resolveIdentityPath({ project: 'existing' });
   try {
     const content = readFileSync(path, 'utf-8').trim();
     if (!content) return undefined;
@@ -158,16 +183,26 @@ const TABLE_PRIORITY: Record<L1Row['table'], number> = {
 };
 
 function fetchLoa(project: string | undefined, limit: number): L1Row[] {
-  const hasImp = hasImportanceColumn('loa_entries');
+  const columns = tableColumns('loa_entries');
+  const hasImp = columns.has('importance');
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
-  const sql = project
-    ? `SELECT id, title, description, fabric_extract, project,
-              ${hasImp ? 'importance' : '8 AS importance'}, created_at
-       FROM loa_entries WHERE project = ? ORDER BY ${orderBy} LIMIT ?`
-    : `SELECT id, title, description, fabric_extract, project,
-              ${hasImp ? 'importance' : '8 AS importance'}, created_at
-       FROM loa_entries ORDER BY ${orderBy} LIMIT ?`;
-  const params = project ? [project, limit] : [limit];
+  const impSelect = hasImp ? 'importance' : '8 AS importance';
+  // Keep automatic Codex/Grok lifecycle captures out of the curated L1 pool so
+  // their template summaries never take the reserved LoA slots (finding F1).
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (project) {
+    conditions.push('project = ?');
+    params.push(project);
+  }
+  if (columns.has('tags')) {
+    conditions.push(`(tags IS NULL OR tags NOT LIKE 'automatic-capture,%')`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+  const sql = `SELECT id, title, description, fabric_extract, project,
+              ${impSelect}, created_at
+       FROM loa_entries ${where} ORDER BY ${orderBy} LIMIT ?`;
   const rows = queryDb(sql, params);
   return rows.map(r => ({
     table: 'loa' as const,
@@ -180,7 +215,7 @@ function fetchLoa(project: string | undefined, limit: number): L1Row[] {
 }
 
 function fetchDecisions(project: string | undefined, limit: number): L1Row[] {
-  const hasImp = hasImportanceColumn('decisions');
+  const hasImp = tableColumns('decisions').has('importance');
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
   const base = `SELECT id, decision, reasoning, project,
                        ${hasImp ? 'importance' : '5 AS importance'}, created_at
@@ -202,7 +237,7 @@ function fetchDecisions(project: string | undefined, limit: number): L1Row[] {
 }
 
 function fetchLearnings(project: string | undefined, limit: number): L1Row[] {
-  const hasImp = hasImportanceColumn('learnings');
+  const hasImp = tableColumns('learnings').has('importance');
   const orderBy = hasImp ? 'importance DESC, created_at DESC' : 'created_at DESC';
   const sql = project
     ? `SELECT id, problem, solution, project,
@@ -315,7 +350,7 @@ export function gatherContext(): string {
 
   // Empty-state hint
   if (!l0 && l1Rows.length === 0) {
-    sections.push('_No memory yet. Drop `identity.md` into `~/.claude/MEMORY/` or this project\'s `.atlas-recall/` to seed L0._');
+    sections.push('_No memory yet. Drop `identity.md` into `~/.agents/Recall/MEMORY/` or this project\'s `.atlas-recall/` to seed L0._');
     sections.push('_Record during this session with `memory_add`; search existing knowledge with `memory_search` or `memory_hybrid_search`._');
     sections.push('');
   }

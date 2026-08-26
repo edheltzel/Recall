@@ -188,9 +188,11 @@ recall onboard --out /path/identity.md  # Write to an explicit path
 
 `recall onboard` creates the L0 tier that `RecallStart` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
-`--project` > global default (`~/.claude/MEMORY/identity.md`). If a file already
-exists, the command asks for confirmation and writes a `.bak` copy before
-overwriting.
+`--project` > the global identity. The global resolver preserves an existing
+user-owned `~/.claude/MEMORY/identity.md`; otherwise it selects the canonical
+file under the Recall install root, `~/.agents/Recall/MEMORY/identity.md`. If a
+file already exists, the command asks for confirmation and writes a `.bak` copy
+before overwriting.
 
 The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `RecallStart`
 silently truncates beyond that threshold.
@@ -272,7 +274,11 @@ Formats:
 
 - **json / markdown** — app-level export of the durable memory tables
   (`sessions`, `messages`, `decisions`, `learnings`, `breadcrumbs`,
-  `loa_entries`, `dedup_lineage`). Every row of a provenance-bearing table carries an explicit
+  `loa_entries`, `dedup_lineage`, `host_ingest_generations`,
+  `host_ingest_generation_messages`, `host_ingest_embedding_invalidations`,
+  `host_ingest_state`,
+  `host_ingest_messages`, `loa_message_sources`). Every row of a
+  provenance-bearing table carries an explicit
   `provenance` field; legacy `NULL` provenance is exported as the literal
   `unknown` — never omitted, never guessed (see Record Provenance above).
   Embeddings are excluded.
@@ -391,6 +397,11 @@ What repair covers:
   sync triggers (the classic symptom: search silently returns nothing on an
   un-migrated database) are recreated from the canonical schema DDL and then
   rebuilt.
+- **Lifecycle message publication.** Pending lifecycle generations are checked
+  separately because their searchable rows are activated by a publication
+  pointer. With `--execute`, repair advances their FTS publication and semantic
+  invalidations in bounded batches. If work remains after that bounded pass,
+  repair exits nonzero so it can be retried safely.
 - **Re-embedding.** Rows expected to carry embeddings (`loa_entries`,
   `decisions`, `learnings`, assistant `messages`) that have none are
   re-embedded when the Ollama embedding service is available and the row has
@@ -398,17 +409,20 @@ What repair covers:
   missing embeddings and still exits successfully — unless another requested
   repair failed. Partial results are never hidden: embedded, skipped
   (too short), and failed counts are all reported.
-- **Orphan/invariant reporting.** Named, unambiguous integrity checks —
-  orphaned embeddings, dedup lineage pointing at missing rows, messages
-  without a session, broken LoA message ranges and parent links, pending
-  schema migrations — are **report-only**. Repair never attempts heuristic
-  data mutation; pending migrations are fixed by `recall init`.
+- **Orphan/invariant recovery.** With `--execute`, embeddings whose published
+  source record no longer exists are removed and the vector index is rebuilt
+  when sqlite-vec is available (otherwise it remains durably marked for the
+  next rebuild). Dedup lineage pointing at missing rows, messages without a
+  session, broken LoA message ranges and parent links, and pending schema
+  migrations remain **report-only**. Pending migrations are fixed by
+  `recall init`.
 
 Safety model:
 
 - **Dry-run by default.** Mutations require `--execute`. Run
   `recall export --backup` before applying repairs.
-- **Repair never hard-deletes rows.**
+- **Repair never hard-deletes source records.** Only derived orphan embedding
+  rows are removed.
 - **Repair never changes [Record Provenance](#record-provenance).** FTS
   rebuild regenerates index shadow tables; re-embedding only inserts into
   the `embeddings` table. No source-table column is written.
@@ -447,7 +461,7 @@ recall onboard --yes                    # Non-interactive (accept all defaults)
 recall onboard --dry-run                # Show the proposed identity.md, write nothing
 ```
 
-`recall onboard` runs a short interview that writes `~/.claude/MEMORY/identity.md` — the L0 tier of tiered RecallStart. L0 is the always-loaded slice that every agent sees at session start: your role, projects, tools, and working preferences. Without it, the L0 tier is empty and every new session has to re-learn the basics from search.
+`recall onboard` runs a short interview that writes the same resolved identity path `RecallStart` reads — the L0 tier of tiered RecallStart. L0 is the always-loaded slice on hosts with supported session-start injection: your role, projects, tools, and working preferences. Without it, those sessions have to re-learn the basics from search.
 
 Run it once after installing. Re-run it whenever your role, active projects, or working preferences change. The path can be overridden with `RECALL_IDENTITY_PATH` — honored by both `recall onboard` (write) and the RecallStart hook (read).
 
@@ -487,3 +501,6 @@ active `dedup_lineage` (status `marked`/`deleted`), even when it otherwise
 matches the retention rule above — deleting a survivor would orphan the
 duplicates marked under it. Withheld rows are counted and reported in the
 summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
+
+Prune also fails closed before mutation when the lifecycle schema is not ready.
+If it reports `RETRYABLE`, run `recall init` and retry the same command.

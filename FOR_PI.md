@@ -13,9 +13,11 @@ Recall is a persistent memory framework. It gives you:
 3. **Structured records** — decisions, learnings, breadcrumbs you can create and search
 4. **Tiered session-start context (v0.7.0+)** — L0 identity (`identity.md`) + L1 top 12 records by importance. Review both at session start
 
-The L0 tier reads from `~/.claude/MEMORY/identity.md` (or project-local
-`./.atlas-recall/identity.md`, or `RECALL_IDENTITY_PATH` if set). If the
-user has never written one, recommend `recall onboard` via Bash to create it.
+The L0 tier uses Recall's shared identity resolver. On a new install the global
+file is `~/.agents/Recall/MEMORY/identity.md`; an existing user-owned Claude
+identity remains authoritative, while a project-local identity or
+`RECALL_IDENTITY_PATH` can override it. See [Identity & Onboarding](https://github.com/edheltzel/Recall/blob/main/docs/cli-reference.md#identity--onboarding).
+If no identity exists, recommend `recall onboard` via Bash.
 
 ## Your MCP Tools
 
@@ -158,7 +160,7 @@ See [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) for the verified Pi capab
 2. **Record decisions** — When architectural decisions are made, use `recall_memory_memory_add` to record them
 3. **Delegate with context** — Before spawning subagents, call `recall_memory_context_for_agent` to give them relevant history
 4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` (the `recall-dump` skill) to persist the conversation
-5. **Onboarding check** — At session start, if the L0 identity tier is empty (no `~/.claude/MEMORY/identity.md` or the file is missing), suggest `recall onboard` once. Do not nag on subsequent turns.
+5. **Onboarding check** — At session start, if the L0 identity tier is empty, suggest `recall onboard` once. Do not nag on subsequent turns.
 6. **Never store secrets** — `recall_memory_memory_add` and `recall dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 7. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall_memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 

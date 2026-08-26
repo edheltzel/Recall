@@ -12,13 +12,19 @@
 import { getDb } from '../db/connection.js';
 import { checkEmbeddingService, embed } from '../lib/embeddings.js';
 import {
+  repairLifecycleSearchIndex,
+  type LifecycleSearchReadiness,
+} from '../lib/lifecycle-search.js';
+import {
   applyEmbedRepair,
   applyFtsRepair,
+  applyOrphanEmbeddingRepair,
   FTS_SOURCES,
   planRepair,
   type EmbedFn,
   type EmbedRepairResult,
   type FtsRepairResult,
+  type OrphanEmbeddingRepairResult,
   type RepairPlan,
 } from '../lib/repair.js';
 
@@ -44,9 +50,20 @@ export interface RepairRunResult {
   embeddings: EmbedRepairResult | null;
   /** Why the embedding pass did not run, or null if it ran. */
   embedSkipped: string | null;
+  lifecycle: LifecycleSearchReadiness | null;
+  orphanEmbeddings: OrphanEmbeddingRepairResult | null;
+  orphanEmbeddingErrors: Array<{ check: string; error: string }>;
 }
 
 const DEFAULT_DEPS: RepairDeps = { checkService: checkEmbeddingService, embedFn: embed };
+
+function isRepairableOrphanEmbeddingCheck(check: string, target: string): boolean {
+  return check === `orphaned-embeddings:${target}` ||
+    (target === 'all' && (
+      check.startsWith('orphaned-embeddings:') ||
+      check === 'unknown-embedding-source'
+    ));
+}
 
 export async function runRepair(
   options: RepairOptions = {},
@@ -99,6 +116,21 @@ export async function runRepair(
       process.exitCode = 1;
     }
   }
+  let lifecycle = plan.lifecycle;
+  if (lifecycle) {
+    lifecycle = execute
+      ? repairLifecycleSearchIndex(db, { maxPages: 8 })
+      : lifecycle;
+    if (lifecycle.status === 'ready') {
+      console.log('  Lifecycle message index: ready');
+    } else {
+      const action = execute ? 'repair remains' : 'would repair';
+      console.log(
+        `  Lifecycle message index: ${lifecycle.pendingGenerations} generation(s) pending — ${action}`
+      );
+      if (execute) process.exitCode = 1;
+    }
+  }
   console.log('');
 
   // ── Embeddings ───────────────────────────────────────────────
@@ -148,8 +180,25 @@ export async function runRepair(
   }
   console.log('');
 
-  // ── Orphans / invariants (report-only) ───────────────────────
-  console.log('Orphans / invariants (report-only, never repaired automatically):');
+  const repairableOrphanEmbeddingReports = plan.orphans.filter(orphan =>
+    isRepairableOrphanEmbeddingCheck(orphan.check, target)
+  );
+  const orphanEmbeddingErrors = repairableOrphanEmbeddingReports.flatMap(orphan =>
+    orphan.error ? [{ check: orphan.check, error: orphan.error }] : []
+  );
+  const orphanEmbeddingWork = repairableOrphanEmbeddingReports
+    .filter(orphan => !orphan.error)
+    .reduce((sum, orphan) => sum + orphan.count, 0);
+  let orphanEmbeddings: OrphanEmbeddingRepairResult | null = null;
+  if (execute && orphanEmbeddingWork > 0 && orphanEmbeddingErrors.length === 0) {
+    orphanEmbeddings = applyOrphanEmbeddingRepair(
+      db,
+      target === 'all' ? undefined : target
+    );
+  }
+
+  // ── Orphans / invariants ─────────────────────────────────────
+  console.log('Orphans / invariants:');
   if (plan.orphans.length === 0) {
     console.log('  None found.');
   } else {
@@ -159,6 +208,27 @@ export async function runRepair(
       } else {
         const sample = orphan.sample.length > 0 ? ` — ${orphan.sample.join(', ')}` : '';
         console.log(`  ${orphan.check}: ${orphan.count} (${orphan.description})${sample}`);
+      }
+    }
+  }
+  if (orphanEmbeddingErrors.length > 0) {
+    console.error(
+      `  RETRYABLE: ${orphanEmbeddingErrors.length} orphan embedding repair check(s) failed; cleanup is incomplete.`
+    );
+    process.exitCode = 1;
+  }
+  if (orphanEmbeddingWork > 0) {
+    if (!execute) {
+      console.log(`  ${orphanEmbeddingWork} orphan embedding(s) would be removed.`);
+    } else if (orphanEmbeddings) {
+      console.log(`  Removed ${orphanEmbeddings.removed} orphan embedding(s).`);
+      if (orphanEmbeddings.vectorError) {
+        console.error(`  FAILED vector reindex: ${orphanEmbeddings.vectorError}`);
+        process.exitCode = 1;
+      } else if (orphanEmbeddings.vectorReindexed) {
+        console.log(`  Reindexed ${orphanEmbeddings.vectorRows} vector row(s).`);
+      } else {
+        console.log('  Vector index marked for rebuild on the next available vector query.');
       }
     }
   }
@@ -178,12 +248,24 @@ export async function runRepair(
   if (!execute) {
     const ftsWork = plan.fts.filter(f => f.action === 'rebuild' || f.action === 'create-and-rebuild').length;
     const embedWork = plan.embedGaps.reduce((sum, g) => sum + (g.missing - g.tooShort), 0);
-    if (ftsWork > 0 || embedWork > 0) {
+    const lifecycleWork = lifecycle?.status === 'retryable';
+    if (
+      ftsWork > 0 || embedWork > 0 || lifecycleWork || orphanEmbeddingWork > 0 ||
+      orphanEmbeddingErrors.length > 0
+    ) {
       console.log("Re-run with --execute to apply repairs. Recommended: 'recall export --backup' first.");
     } else {
       console.log('Nothing to repair.');
     }
   }
 
-  return { plan, fts: ftsResult, embeddings: embedResult, embedSkipped };
+  return {
+    plan,
+    fts: ftsResult,
+    embeddings: embedResult,
+    embedSkipped,
+    lifecycle,
+    orphanEmbeddings,
+    orphanEmbeddingErrors,
+  };
 }

@@ -15,9 +15,10 @@ Standalone scripts that hosts run across a session lifecycle, plus cron jobs tha
 - `RecallBatchExtract.ts` — cron (batch-extract sessions missed during crashes)
 - `RecallTelosSync.ts` — cron (sync Telos goals/projects into memory)
 - `extract_prompt.md` — extraction prompt template (copied to `~/.claude/MEMORY/`)
+- `grok/RecallLifecycle.json` — installer-owned global Grok capture events; invokes the built `recall host-hook grok` command
 - `lib/` — shared host-neutral hook helpers; `lib/hosts/` owns native lifecycle payloads, paths, commands, authentication, and extraction providers
 
-Installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`.
+TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. The Grok descriptor is copied to `~/.agents/Recall/grok/hooks/` and linked into `~/.grok/hooks/`.
 
 ## Local Contracts
 
@@ -25,14 +26,17 @@ Installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/sh
 - Generic hook helpers depend on `lib/events.ts`, `lib/extraction-provider.ts`, and the native-provider registry in `lib/hosts/`; native payloads, path encoding, commands, auth, and recursion guards stay in a host adapter.
 - Documented DRY exception: small utilities (e.g. bun-path resolution) are intentionally duplicated inside `RecallExtract.ts` / `RecallBatchExtract.ts` so they never reach into `src/`. Do not "DRY this up."
 - DB-path resolution is centralized in `lib/db-path.ts` — the CLI and every hook agree through it.
+- Identity-path resolution is centralized in `lib/identity-path.ts` — `recall onboard` and `RecallStart.ts` share override, project, and managed-alias precedence through it. The global identity root is fixed at `~/.agents/Recall`; do not add env-based or discovered root relocation.
 - **An EXPLICIT transaction that reads before it writes must be IMMEDIATE.** SQLite fails a read-to-write upgrade inside a DEFERRED transaction with `SQLITE_BUSY` *instantly*, never consulting `busy_timeout` — so with two hosts extracting into the shared WAL database, the duplicate probe in `lib/sqlite-writers.ts` turned a peer's short transaction into a lost record. Those batches use `insertMany.immediate(...)`. Two shapes need nothing: a transaction whose first statement is a write (`consolidate-core.ts`, `RecallPreCompact.ts`), and a read-then-write pair with NO explicit transaction around it — `writeLoaEntryFromExtraction`'s probe autocommits and releases its read lock before the INSERT takes the write lock with `busy_timeout` honoured. The rule buys lock-wait behavior, NOT atomicity: two concurrent replays of the same extraction can still both pass that LoA probe and insert. Regression: `tests/hooks/sqlite-writers-concurrency.test.ts`.
 - Extraction dual-write is REPLAYED (archive crash or partial SQLite failure both leave the conversation retryable), so `dualWriteToSqlite` passes `skipDuplicates` to the plain-INSERT writers in `lib/sqlite-writers.ts`: a row already present for the same session, keyed on (session_id, content), is skipped. Content-scoped, never session-scoped: in-session windows write many different rows under one session_id. The flag is opt-in: the correction writer must keep recording repeated identical corrections.
+- `RecallStart.ts` sweeps expired breadcrumbs together with their embeddings in one immediate transaction and durably invalidates vector state without depending on optional source-delete triggers.
+- `RecallStart.ts` `fetchLoa` excludes automatic terminal-capture LoA (`tags LIKE 'automatic-capture,%'`) from the L1 pool so their template summaries never take the reserved LoA slots ahead of curated entries; `tableColumns()` reads the column set in one PRAGMA so the importance/tags probes share a single DB open.
 - Shebang `#!/usr/bin/env bun`. No build step — editing the canonical file updates the live symlink.
-- Hook registration (`Stop`, `SessionStart`, `PreCompact`, `PostToolUse`, `UserPromptSubmit`) lives in `~/.claude/settings.json`; the installer wires it.
+- Claude hook registration (`Stop`, `SessionStart`, `PreCompact`, `PostToolUse`, `UserPromptSubmit`) lives in `~/.claude/settings.json`. Grok capture registration is the single managed JSON file under its user hook directory.
 
 ## Work Guidance
 
-- Add a hook helper: create `lib/<name>.ts` (standalone).
+- Add a hook helper: create `lib/<name>.ts` (standalone), then add its installed path to `uninstall.sh:RECALL_HOOK_LIB_FILES`; `tests/install/uninstall.test.ts` audits parity with the recursive installer.
 - Modify extraction: edit `RecallExtract.ts`; the quality gate is `lib/extraction-quality.ts` (requires SUMMARY + MAIN IDEAS).
 - The host-neutral extraction cascade + topic/summary helpers live in `lib/extract-model.ts`; native providers register through `lib/hosts/index.ts`, with Claude-specific behavior in `lib/hosts/claude/extraction-provider.ts`. Reuse the provider interface; don't call a native model command from generic hook code.
 - Mid-session learning loop logic is `lib/insession.ts` (pure/dbPath-injectable: config, cadence, window slice, lock-cooperative extraction). `RecallInSession.ts` is the thin hook wrapper.

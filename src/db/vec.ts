@@ -60,6 +60,8 @@ function ensureCustomSqlite(): void {
 ensureCustomSqlite();
 
 let vecAvailable = false;
+const VEC_INDEX_DIRTY_KEY = 'vec_index_dirty';
+const VEC_INDEX_GENERATION_KEY = 'vec_index_generation';
 
 /**
  * Attempt to load sqlite-vec into an open DB connection. Per-connection (the
@@ -128,6 +130,7 @@ export function reindexVec(db: Database): number {
       `INSERT INTO vec_embeddings (source_table, source_id, embedding)
        SELECT source_table, source_id, vec_normalize(embedding) FROM embeddings WHERE dimensions = ?`
     ).run(EMBEDDING_DIMENSIONS);
+    db.prepare('DELETE FROM schema_meta WHERE key = ?').run(VEC_INDEX_DIRTY_KEY);
   });
   rebuild();
   return (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
@@ -135,6 +138,37 @@ export function reindexVec(db: Database): number {
 
 let syncedThisProcess = false;
 let syncInFlight = false;
+
+export function invalidateVecIndex(db: Database): void {
+  db.prepare(
+    `INSERT INTO schema_meta (key, value) VALUES (?, '1'), (?, '1')
+     ON CONFLICT(key) DO UPDATE SET value = CASE
+       WHEN key = ? THEN CAST(schema_meta.value AS INTEGER) + 1
+       ELSE '1'
+     END`
+  ).run(VEC_INDEX_DIRTY_KEY, VEC_INDEX_GENERATION_KEY, VEC_INDEX_GENERATION_KEY);
+  syncedThisProcess = false;
+}
+
+type VecIndexState = {
+  generation: number;
+  dirty: number;
+};
+
+function vecIndexState(db: Database): VecIndexState {
+  return db.prepare(
+    `SELECT
+       COALESCE(MAX(CASE WHEN key = ? THEN CAST(value AS INTEGER) END), 0) AS generation,
+       COALESCE(MAX(CASE WHEN key = ? THEN 1 ELSE 0 END), 0) AS dirty
+     FROM schema_meta
+     WHERE key IN (?, ?)`
+  ).get(
+    VEC_INDEX_GENERATION_KEY,
+    VEC_INDEX_DIRTY_KEY,
+    VEC_INDEX_GENERATION_KEY,
+    VEC_INDEX_DIRTY_KEY
+  ) as VecIndexState;
+}
 
 /**
  * Ensure the vec index reflects the canonical BLOBs. Runs the (O(n)) rebuild
@@ -146,24 +180,30 @@ let syncInFlight = false;
  * its lifetime silently serving an empty index (#217 review, 225-1). Never
  * throws.
  */
-export function ensureVecIndexSynced(db: Database): void {
-  if (!vecAvailable || syncedThisProcess || syncInFlight) return;
+export function ensureVecIndexSynced(db: Database): boolean {
+  if (!vecAvailable || syncInFlight) return false;
+  const dirty = Boolean(
+    db.prepare('SELECT 1 FROM schema_meta WHERE key = ?').get(VEC_INDEX_DIRTY_KEY)
+  );
+  if (syncedThisProcess && !dirty) return true;
   syncInFlight = true;
   try {
     createVecTable(db);
     const want = (db.prepare('SELECT COUNT(*) AS c FROM embeddings WHERE dimensions = ?').get(EMBEDDING_DIMENSIONS) as { c: number }).c;
     const have = (db.prepare('SELECT COUNT(*) AS c FROM vec_embeddings').get() as { c: number }).c;
-    if (have !== want) {
+    if (dirty || have !== want) {
       // One-time O(n) rebuild (~4s @100k) inside the first vector query after
       // an upgrade — say so on stderr so an agent host doesn't read it as a hang.
       console.error(`[recall] vec index out of sync (${have}/${want} rows) — rebuilding from canonical embeddings...`);
       reindexVec(db);
     }
     syncedThisProcess = true;
+    return true;
   } catch (err) {
     // Never block startup/query on index sync — brute-force remains available,
     // and the un-latched flag retries the rebuild on the next vector query.
     console.error(`[recall] vec index rebuild failed (will retry on next vector query): ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   } finally {
     syncInFlight = false;
   }
@@ -172,6 +212,28 @@ export function ensureVecIndexSynced(db: Database): void {
 /** Reset the once-per-process sync cache. Test-only. */
 export function resetVecSyncCache(): void {
   syncedThisProcess = false;
+}
+
+export function withReadSnapshot<T>(db: Database, read: () => T): T {
+  return db.transaction(read).deferred();
+}
+
+export function withConsistentVecIndex<T>(db: Database, search: () => T): T | null {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!ensureVecIndexSynced(db)) return null;
+    const guarded = withReadSnapshot(db, () => {
+      const before = vecIndexState(db);
+      if (before.dirty) return { valid: false as const };
+      const result = search();
+      const after = vecIndexState(db);
+      if (after.dirty || after.generation !== before.generation) {
+        return { valid: false as const };
+      }
+      return { valid: true as const, result };
+    });
+    if (guarded.valid) return guarded.result;
+  }
+  return null;
 }
 
 export interface VecHit {

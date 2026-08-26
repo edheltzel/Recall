@@ -8,7 +8,7 @@ Native host plugin bundles distributed directly from the Recall repository. One 
 
 ## Ownership
 
-- `recall/` — Codex native plugin manifest, MCP registration, and generated `recall-*` skill adapters
+- `recall/` — Codex native plugin manifest, MCP registration, lifecycle hooks, and generated `recall-*` skill adapters
 - `recall-claude/` — Claude Code native plugin manifest, MCP registration, and the nine `recall-*` skills
 
 The repository-level marketplace manifests are owned with their bundles even though they live outside this subtree: `.agents/plugins/marketplace.json` (Codex) and `.claude-plugin/marketplace.json` (Claude).
@@ -23,7 +23,7 @@ Both bundles declare plugin `name: "recall"` in their own host manifest; the dir
 - Host-specific invocation metadata belongs in each generated skill's `agents/` directory. Behavioral parity is verified per host; matching `SKILL.md` bytes are not proof — Codex strips `disable-model-invocation` and replaces it with `agents/openai.yaml`, while Claude keeps the field because it is Claude's own contract.
 - Codex adapters carry a routing preamble; the Claude bundle is byte-verbatim, because `agent-skills/` is already authored against Claude's frontmatter and rewriting it would change behavior for users migrating from the lifecycle install.
 - Copy skills into a bundle; never symlink. Claude drops symlinks that leave the plugin root on local-path installs, and `core.symlinks=false` checkouts degrade the payload silently.
-- **No bundle ships lifecycle hooks.** Claude merges plugin hooks with `settings.json` hooks instead of replacing them, so a bundled hook would double every capture for anyone who also ran `install.sh`. Codex has no verified transcript contract at all. Do not add plugin hooks to either bundle until that changes.
+- The Codex bundle owns its lifecycle hooks because current Codex supplies transcript paths and additional-context output. The lifecycle installer must not duplicate them. The Claude bundle still ships no hooks because Claude merges plugin and `settings.json` hooks, which would double captures for lifecycle-installed users.
 - The Claude bundle coexists with the lifecycle installer, so `lib/install-lib.sh` must keep reconciling the duplicate skill symlinks and MCP registration. `RECALL_CLAUDE_PLUGIN_ID` there and `CLAUDE_PLUGIN_ID` in `src/hosts/claude.ts` are the same id — keep them in step.
 
 ## Work Guidance

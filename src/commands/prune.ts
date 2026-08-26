@@ -1,7 +1,10 @@
 // recall prune command — table lifecycle management
 
 import { getDb } from '../db/connection.js';
-import { notRecordedSurvivorSql } from '../lib/dedup.js';
+import { tableExists } from '../db/introspection.js';
+import { fkProtectedIds, notRecordedSurvivorSql } from '../lib/dedup.js';
+import { deleteRecordEmbeddingsBySelectionInTransaction } from '../lib/embedding-store.js';
+import { chunked } from '../lib/chunk.js';
 
 interface PruneOptions {
   execute?: boolean;
@@ -15,6 +18,7 @@ interface PruneResult {
   count: number;
   /** Rows matching the prune criteria but withheld as recorded dedup survivors (#80). */
   protected?: number;
+  protectedReason?: string;
 }
 
 function parseDays(value: string): number {
@@ -33,6 +37,11 @@ function countRows(db: any, sql: string, params: any[] = []): number {
 
 export function runPrune(options: PruneOptions): void {
   const db = getDb();
+  const lifecyclePruneReady = [
+    'host_ingest_state',
+    'host_ingest_messages',
+    'host_ingest_generation_messages',
+  ].every(table => tableExists(db, table));
   const dryRun = !options.execute;
   const days = parseDays(options.olderThan || '180d');
   const decisionDays = Math.min(days, 90);
@@ -55,18 +64,46 @@ export function runPrune(options: PruneOptions): void {
     `WHERE session_id IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
      AND timestamp < ${cutoff}`;
   const messageGuard = `AND ${notRecordedSurvivorSql("'messages'", 'messages.id')}`;
-  const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM messages ${messageWhere}`);
-  const messageCount = countRows(db, `SELECT COUNT(*) as count FROM messages ${messageWhere} ${messageGuard}`);
-  results.push({ table: 'messages', description: `Consolidated messages older than ${days}d`, count: messageCount, protected: messageMatched - messageCount });
+  const messageFkProtectedChunks = chunked([...fkProtectedIds(db, 'messages')]);
+  const messageMatched = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere}`);
+  let messageCount = countRows(db, `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard}`);
+  for (const idChunk of messageFkProtectedChunks) {
+    const placeholders = idChunk.map(() => '?').join(', ');
+    messageCount -= countRows(
+      db,
+      `SELECT COUNT(*) as count FROM published_messages AS messages ${messageWhere} ${messageGuard} AND messages.id IN (${placeholders})`,
+      idChunk
+    );
+  }
+  results.push({
+    table: 'messages',
+    description: `Consolidated messages older than ${days}d`,
+    count: messageCount,
+    protected: messageMatched - messageCount,
+    protectedReason: 'kept as dedup survivors/FK references',
+  });
 
   // 2. Sessions: delete orphaned sessions (no messages, no LoA) older than N days
-  const sessionCount = countRows(db,
-    `SELECT COUNT(*) as count FROM sessions
-     WHERE session_id NOT IN (SELECT DISTINCT session_id FROM messages WHERE session_id IS NOT NULL)
+  const sessionWhere =
+    `WHERE session_id NOT IN (SELECT DISTINCT session_id FROM published_messages WHERE session_id IS NOT NULL)
      AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-     AND started_at < ${cutoff}`
+     ${lifecyclePruneReady
+       ? `AND NOT EXISTS (
+         SELECT 1 FROM host_ingest_state WHERE host_ingest_state.session_id = sessions.session_id
+       )`
+       : 'AND 0'}
+     AND started_at < ${cutoff}`;
+  const sessionCount = countRows(
+    db,
+    `SELECT COUNT(*) as count FROM sessions ${sessionWhere}`
   );
-  results.push({ table: 'sessions', description: `Orphaned sessions older than ${days}d`, count: sessionCount });
+  results.push({
+    table: 'sessions',
+    description: lifecyclePruneReady
+      ? `Orphaned sessions older than ${days}d`
+      : 'Deferred until lifecycle schema is ready',
+    count: sessionCount,
+  });
 
   // 3. Breadcrumbs: delete expired
   const breadcrumbWhere = `WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`;
@@ -116,12 +153,18 @@ export function runPrune(options: PruneOptions): void {
   for (const r of results) {
     const icon = r.count > 0 ? '[prune]' : '[ok]';
     const protectedNote = r.protected && r.protected > 0
-      ? ` (${r.protected.toLocaleString()} kept as dedup survivors)`
+      ? ` (${r.protected.toLocaleString()} ${r.protectedReason ?? 'kept as dedup survivors'})`
       : '';
     console.log(`  ${icon} ${r.table}: ${r.count.toLocaleString()} rows - ${r.description}${protectedNote}`);
   }
 
   console.log(`\n  Total: ${totalPrunable.toLocaleString()} rows to prune`);
+
+  if (!lifecyclePruneReady) {
+    console.error("RETRYABLE: Lifecycle prune schema is not ready; run 'recall init' and retry.");
+    process.exitCode = 1;
+    return;
+  }
 
   if (dryRun) {
     if (totalPrunable > 0) {
@@ -139,24 +182,71 @@ export function runPrune(options: PruneOptions): void {
 
   // Execute deletes
   if (messageCount > 0) {
-    db.prepare(`DELETE FROM messages ${messageWhere} ${messageGuard}`).run();
+    db.transaction(() => {
+      db.exec(`
+        DROP TABLE IF EXISTS temp.prune_message_selection;
+        CREATE TEMP TABLE prune_message_selection (
+          id INTEGER PRIMARY KEY,
+          host_ingest_token TEXT
+        );
+      `);
+      db.prepare(`
+        INSERT INTO temp.prune_message_selection (id, host_ingest_token)
+        SELECT id, host_ingest_token FROM published_messages AS messages
+        ${messageWhere} ${messageGuard}
+      `).run();
+      for (const idChunk of messageFkProtectedChunks) {
+        const placeholders = idChunk.map(() => '?').join(', ');
+        db.prepare(`
+          DELETE FROM temp.prune_message_selection WHERE id IN (${placeholders})
+        `).run(...idChunk);
+      }
+      deleteRecordEmbeddingsBySelectionInTransaction(
+        db,
+        'messages',
+        'SELECT id FROM temp.prune_message_selection'
+      );
+      db.prepare(`UPDATE host_ingest_generation_messages SET content = NULL
+        WHERE message_id IN (SELECT id FROM temp.prune_message_selection)`).run();
+      db.prepare(`DELETE FROM messages
+        WHERE id IN (SELECT id FROM temp.prune_message_selection)
+        AND (host_ingest_token IS NULL OR EXISTS (
+          SELECT 1 FROM host_ingest_messages WHERE message_id = messages.id
+        ))`).run();
+      db.prepare(`DELETE FROM messages WHERE EXISTS (
+        SELECT 1 FROM temp.prune_message_selection AS selected
+        WHERE selected.id = messages.id
+          AND selected.host_ingest_token IS NOT NULL
+          AND selected.host_ingest_token = messages.host_ingest_token
+      )`).run();
+      db.exec('DROP TABLE temp.prune_message_selection;');
+    })();
   }
 
   if (sessionCount > 0) {
-    db.prepare(
-      `DELETE FROM sessions
-       WHERE session_id NOT IN (SELECT DISTINCT session_id FROM messages WHERE session_id IS NOT NULL)
-       AND session_id NOT IN (SELECT DISTINCT session_id FROM loa_entries WHERE session_id IS NOT NULL)
-       AND started_at < ${cutoff}`
-    ).run();
+    db.prepare(`DELETE FROM sessions ${sessionWhere}`).run();
   }
 
   if (breadcrumbCount > 0) {
-    db.prepare(`DELETE FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`).run();
+    db.transaction(() => {
+      deleteRecordEmbeddingsBySelectionInTransaction(
+        db,
+        'breadcrumbs',
+        `SELECT id FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`
+      );
+      db.prepare(`DELETE FROM breadcrumbs ${breadcrumbWhere} ${breadcrumbGuard}`).run();
+    })();
   }
 
   if (!keepDecisions && decisionCount > 0) {
-    db.prepare(`DELETE FROM decisions ${decisionWhere} ${decisionGuard}`).run();
+    db.transaction(() => {
+      deleteRecordEmbeddingsBySelectionInTransaction(
+        db,
+        'decisions',
+        `SELECT id FROM decisions ${decisionWhere} ${decisionGuard}`
+      );
+      db.prepare(`DELETE FROM decisions ${decisionWhere} ${decisionGuard}`).run();
+    })();
   }
 
   if (trackerCount > 0) {

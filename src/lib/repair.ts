@@ -9,8 +9,8 @@
 // - Repair never changes Record Provenance — no repair statement writes a
 //   source-table column. FTS rebuild regenerates index shadow tables from
 //   the source rows; re-embed only inserts into the embeddings table.
-// - Repair never hard-deletes rows. Orphan/invariant findings are
-//   report-only — every check is named in code and covered by tests.
+// - Repair never hard-deletes source records. Orphan embeddings are safe to
+//   remove because their referenced record no longer exists.
 // - Initial repair scope is limited to unambiguous maintenance: FTS5
 //   rebuild (including recreating a missing index from the canonical
 //   schema DDL) and re-embedding rows missing embeddings. No heuristic
@@ -28,6 +28,17 @@ import { MIGRATIONS, getMigrationVersion } from '../db/migrations.js';
 import { notMarkedDuplicateSql } from './dedup.js';
 import { embeddingToBlob, type EmbeddingResult } from './embeddings.js';
 import { PROVENANCE_TABLES } from '../types/index.js';
+import { publishedRecordTable } from './published-records.js';
+import {
+  getLifecycleSearchReadiness,
+  type LifecycleSearchReadiness,
+} from './lifecycle-search.js';
+import { tableExists } from '../db/introspection.js';
+import { isVecAvailable, reindexVec } from '../db/vec.js';
+import {
+  deleteEmbeddingsByWhereInTransaction,
+  upsertEmbedding,
+} from './embedding-store.js';
 
 /** Source tables carrying an FTS5 index — derived from the schema map. */
 export const FTS_SOURCES = Object.keys(FTS_SCHEMA);
@@ -101,13 +112,6 @@ export interface FtsReport {
   status: FtsStatus;
   action: FtsAction;
   detail: string;
-}
-
-function tableExists(db: Database, name: string): boolean {
-  // FTS5 virtual tables are recorded in sqlite_master with type 'table'.
-  return !!db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
-  ).get(name);
 }
 
 /**
@@ -231,6 +235,7 @@ export interface EmbedGapReport {
 }
 
 function embedGapQuery(config: EmbedSourceConfig, excludeMarkedDuplicates: boolean): string {
+  const sourceTable = publishedRecordTable(config.table);
   const where = [
     't.id > ?',
     ...(config.extraWhere ? [config.extraWhere] : []),
@@ -244,7 +249,7 @@ function embedGapQuery(config: EmbedSourceConfig, excludeMarkedDuplicates: boole
   ].join(' AND ');
   return `
     SELECT t.id, ${config.columns.map(c => `t.${c}`).join(', ')}
-    FROM ${config.table} t
+    FROM ${sourceTable} t
     LEFT JOIN embeddings e ON e.source_table = '${config.table}' AND e.source_id = t.id
     WHERE ${where}
     ORDER BY t.id
@@ -293,7 +298,7 @@ export function countEmbedGaps(db: Database, config: EmbedSourceConfig): EmbedGa
 }
 
 // ---------------------------------------------------------------------------
-// Orphan / invariant checks — report-only, never repaired automatically
+// Orphan / invariant checks and explicit orphan-embedding cleanup
 // ---------------------------------------------------------------------------
 
 export interface OrphanReport {
@@ -322,8 +327,7 @@ function orphanCheckDefs(): OrphanCheckDef[] {
 
   // Embeddings whose source row no longer exists.
   for (const table of FTS_SOURCES) {
-    const where = `e.source_table = '${table}'
-      AND NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = e.source_id)`;
+    const where = orphanedEmbeddingWhere(table, 'e');
     defs.push({
       check: `orphaned-embeddings:${table}`,
       description: `embeddings rows pointing at deleted ${table} rows`,
@@ -347,8 +351,9 @@ function orphanCheckDefs(): OrphanCheckDef[] {
   // 'marked' means hidden-but-intact, so both sides must still exist.
   for (const side of ['duplicate', 'survivor'] as const) {
     for (const table of PROVENANCE_TABLES) {
+      const sourceTable = publishedRecordTable(table);
       const where = `dl.status = 'marked' AND dl.${side}_table = '${table}'
-        AND NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = dl.${side}_id)`;
+        AND NOT EXISTS (SELECT 1 FROM ${sourceTable} t WHERE t.id = dl.${side}_id)`;
       defs.push({
         check: `lineage-missing-${side}:${table}`,
         description: `dedup_lineage 'marked' rows whose ${side} ${table} row no longer exists`,
@@ -396,6 +401,57 @@ function orphanCheckDefs(): OrphanCheckDef[] {
   });
 
   return defs;
+}
+
+function orphanedEmbeddingWhere(table: string, alias: string): string {
+  const sourceTable = publishedRecordTable(table);
+  return `${alias}.source_table = '${table}'
+      AND NOT EXISTS (SELECT 1 FROM ${sourceTable} t WHERE t.id = ${alias}.source_id)`;
+}
+
+function repairableOrphanEmbeddingWhere(table?: string): string {
+  if (table) return orphanedEmbeddingWhere(table, 'embeddings');
+  const knownList = FTS_SOURCES.map(source => `'${source}'`).join(', ');
+  const missingSources = FTS_SOURCES.map(source =>
+    `(${orphanedEmbeddingWhere(source, 'embeddings')})`
+  ).join(' OR ');
+  return `(${missingSources}) OR embeddings.source_table NOT IN (${knownList})`;
+}
+
+export interface OrphanEmbeddingRepairResult {
+  removed: number;
+  vectorReindexed: boolean;
+  vectorRows: number | null;
+  vectorError?: string;
+}
+
+export function applyOrphanEmbeddingRepair(
+  db: Database,
+  table?: string
+): OrphanEmbeddingRepairResult {
+  const removed = db.transaction(() =>
+    deleteEmbeddingsByWhereInTransaction(
+      db,
+      repairableOrphanEmbeddingWhere(table)
+    )
+  )();
+  if (removed === 0 || !isVecAvailable()) {
+    return { removed, vectorReindexed: false, vectorRows: null };
+  }
+  try {
+    return {
+      removed,
+      vectorReindexed: true,
+      vectorRows: reindexVec(db),
+    };
+  } catch (error) {
+    return {
+      removed,
+      vectorReindexed: false,
+      vectorRows: null,
+      vectorError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function checkOrphans(db: Database): OrphanReport[] {
@@ -449,6 +505,7 @@ export interface RepairPlan {
   embedGaps: EmbedGapReport[];
   orphans: OrphanReport[];
   migrations: MigrationReport;
+  lifecycle: LifecycleSearchReadiness | null;
 }
 
 export interface PlanRepairOptions {
@@ -477,6 +534,9 @@ export function planRepair(db: Database, options: PlanRepairOptions = {}): Repai
     embedGaps,
     orphans: checkOrphans(db),
     migrations: checkMigrations(db),
+    lifecycle: !options.table || options.table === 'messages'
+      ? getLifecycleSearchReadiness(db)
+      : null,
   };
 }
 
@@ -538,10 +598,6 @@ export async function applyEmbedRepair(
   embedFn: EmbedFn,
   onProgress?: (table: string, done: number, total: number) => void
 ): Promise<EmbedRepairResult> {
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
-    VALUES (?, ?, ?, ?, ?)
-  `);
   const result: EmbedRepairResult = { embedded: 0, skippedTooShort: 0, failed: [] };
 
   for (const gap of plan.embedGaps) {
@@ -556,8 +612,16 @@ export async function applyEmbedRepair(
         continue;
       }
       try {
-        const res = await embedFn(config.text(row).trim());
-        insert.run(config.table, row.id as number, res.model, res.dimensions, embeddingToBlob(res.embedding));
+        const sourceContent = config.text(row);
+        const res = await embedFn(sourceContent.trim());
+        upsertEmbedding(db, {
+          sourceTable: config.table,
+          sourceId: row.id as number,
+          model: res.model,
+          dimensions: res.dimensions,
+          embedding: embeddingToBlob(res.embedding),
+          sourceContent,
+        });
         result.embedded++;
       } catch (err) {
         result.failed.push({

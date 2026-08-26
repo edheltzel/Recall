@@ -2,15 +2,17 @@
 
 [Back to README](../README.md)
 
-Recall is packaged for Codex with Codex's native plugin primitive.
+Recall is packaged for Codex with Codex's native plugin primitive. The checked-in marketplace manifest is `.agents/plugins/marketplace.json`, and the plugin bundle is `plugins/recall/`.
 
-The checked-in marketplace manifest is `.agents/plugins/marketplace.json`, and the plugin bundle is `plugins/recall/`.
+The plugin owns three distinct surfaces:
 
-The bundle registers `recall-memory` through `.mcp.json` and exposes nine generated Codex skill adapters.
+- `.mcp.json` registers the nine Recall MCP tools.
+- `skills/` contains generated adapters from the canonical `agent-skills/` sources.
+- `hooks/hooks.json` provides automatic transcript capture and session-start context.
 
 ## Install
 
-Install Recall first so `recall-mcp` is on `PATH`:
+Install Recall first so `recall`, `recall-mcp`, and the SQLite schema are available:
 
 ```bash
 bun install -g recall-memory
@@ -24,46 +26,51 @@ codex plugin marketplace add /absolute/path/to/Recall
 codex plugin add recall@recall-marketplace
 ```
 
-The repository path is deliberate for the current checked-in marketplace.
+The repository path is deliberate for the current checked-in marketplace. A future remote marketplace can remove that local-clone prerequisite after its distribution and update policy are defined.
 
-A future remote marketplace can remove that local-clone prerequisite after its distribution and update policy are defined.
+Codex owns plugin installation and removal. `install.sh` does not duplicate the Codex marketplace, MCP, skills, or hooks.
 
-## What MCP covers
+## MCP and skills
 
-MCP is the primary cross-host seam.
+MCP is the primary interactive cross-host seam. The plugin exposes `memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`, `memory_add`, `memory_stats`, `loa_show`, `memory_dump`, and `decision_update`.
 
-The plugin exposes all nine Recall operations: `memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`, `memory_add`, `memory_stats`, `loa_show`, `memory_dump`, and `decision_update`.
+They query and write the same SQLite store as the CLI. Set `RECALL_DB_PATH` in the plugin process environment when the store is not at the default path.
 
-They query and write the same SQLite store as the CLI.
+The nine `recall-*` skill adapters are generated from the canonical Agent Skills established by [#228](https://github.com/edheltzel/Recall/issues/228). Do not edit the generated plugin copies by hand.
 
-Set `RECALL_DB_PATH` in the MCP server environment when the store is not at the default path.
+## Automatic lifecycle support
 
-## What the plugin does not cover
+Codex CLI 0.147.0 provides supported plugin hooks, supplied transcript paths, compaction events, and structured additional-context output. Recall uses those public contracts without guessing Codex's private storage layout.
 
-This bundle has no verified transcript-aware Codex hook contract equivalent to Recall's Claude `Stop`, `SessionStart`, or `PreCompact` lifecycle contracts.
+| Event | Recall behavior |
+| --- | --- |
+| `SessionStart` | Renders the shared tiered L0/L1 context and returns Codex `additionalContext` JSON. |
+| `Stop` | Reads only the supplied rollout path and immediately ingests new verbatim messages. |
+| `PreCompact` | Captures the supplied rollout before compaction. |
+| `PostCompact` | Reconciles the supplied rollout after compaction. |
+| `SessionEnd` | Captures the final rollout, closes the session, and creates one extracted summary. |
 
-Therefore this plugin does not claim lifecycle auto-capture, automatic L0/L1 injection, or pre-compaction flushing.
+The host-neutral ingest seam preserves the native Codex session ID and project attribution. It scrubs unattended content before storage as required by [#50](https://github.com/edheltzel/Recall/issues/50), records `source = 'codex'`, and persists message keys plus a rolling byte watermark. Ordinary `Stop` events read only an append-only suffix. Compaction and terminal events validate the complete prior prefix, while shrinkage resets to a full reconciliation.
 
-Codex can call `memory_dump` only when it supplies the visible messages explicitly; Recall does not infer Codex's private transcript location or format.
+Capture writes directly to `recall.db`; it does not depend on the optional batch cron. Subagent rollouts are skipped by default. Set `RECALL_INCLUDE_SUBAGENTS=1` to opt in.
 
-The generated `recall-dump` adapter is marked explicit-only with `agents/openai.yaml`, because Codex does not interpret Claude's `disable-model-invocation` frontmatter.
+Codex-injected instruction turns are not memory. Recall drops user turns that
+begin with the injected `AGENTS.md`, `<environment_context>`, or
+`<user_instructions>` wrappers while retaining the user's typed prompt as its
+own turn.
 
-## Current boundaries
+`memory_dump` remains useful for an explicit supplemental snapshot. When it uses the same native session ID, Recall merges the snapshot without deleting lifecycle-owned rows or their automatic extraction. It is no longer required for ordinary automatic capture.
 
-The following remain intentionally unresolved instead of being guessed:
+## Trust and boundaries
 
-- Codex transcript format and whether a stable, supported transcript API exists.
-- Trust and consent rules for any future automatic capture.
-- The installed plugin-cache path as a durable runtime dependency.
-- Ownership and repair policy for user-managed Codex MCP configuration, including custom database paths.
-- Remote marketplace publication, update, and release ownership.
+Codex controls hook trust and plugin enablement. Recall never bypasses those controls.
 
-These unknowns do not block the nine MCP operations.
+The adapter intentionally does not depend on the installed plugin-cache path, infer a transcript path, or mutate Codex-owned marketplace state. Removing the plugin removes its MCP, skills, and lifecycle hooks together.
 
-They do block any claim that Codex has lifecycle parity with Claude Code.
+Remote marketplace publication and update policy remain separate distribution work. They do not affect the lifecycle contract of an installed local plugin.
 
 ## Development verification
 
-`bun run build:codex-plugin` regenerates the Codex skill adapters from the canonical `agent-skills/` sources.
+`bun run build:codex-plugin` regenerates Codex skill adapters from `agent-skills/`.
 
-`bun run test:e2e:codex-plugin` builds Recall, installs the plugin with the current local Codex CLI in an isolated `CODEX_HOME`, invokes every MCP tool against a disposable `RECALL_DB_PATH`, and verifies that the production database metadata did not change.
+`bun run test:e2e:codex-plugin` builds Recall and uses the current local Codex CLI with isolated `CODEX_HOME`, `HOME`, and `RECALL_DB_PATH` values. It verifies marketplace installation, all nine MCP tools, all five lifecycle hooks, structured session-start context, automatic temporary-database rows, deduplication, terminal extraction, plugin cleanup, and an unchanged production database.

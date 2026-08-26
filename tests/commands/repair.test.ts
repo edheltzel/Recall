@@ -8,8 +8,8 @@
 // - embedding service unavailable: missing embeddings reported, command
 //   still exits successfully (diagnostic path)
 // - partial embedding repair reports skipped rows and failures
-// - orphan/invariant problems are report-only — never auto-repaired
-// - repair never hard-deletes rows, never changes Record Provenance
+// - orphan embeddings are repaired only under --execute; other invariants stay report-only
+// - repair never hard-deletes source rows or changes Record Provenance
 // - --table scopes the run; invalid --table is rejected
 // - doctor recommends repair but doctor --fix never runs data repair
 
@@ -29,6 +29,7 @@ import { runRepair, type RepairDeps } from '../../src/commands/repair';
 import { checkFtsIndexes } from '../../src/commands/doctor';
 import { checkFts } from '../../src/lib/repair';
 import { embeddingToBlob, type EmbeddingResult } from '../../src/lib/embeddings';
+import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import {
   addBreadcrumb,
   addDecision,
@@ -42,11 +43,15 @@ import {
 const originalLog = console.log;
 const originalError = console.error;
 const originalExitCode = process.exitCode;
+let logged: string[] = [];
+let errored: string[] = [];
 
 beforeEach(() => {
   setupTestDb();
-  console.log = () => {};
-  console.error = () => {};
+  logged = [];
+  errored = [];
+  console.log = (...args: unknown[]) => { logged.push(args.join(' ')); };
+  console.error = (...args: unknown[]) => { errored.push(args.join(' ')); };
 });
 
 afterEach(() => {
@@ -89,6 +94,52 @@ function embeddingsCount(): number {
 }
 
 describe('dry-run vs execute', () => {
+  test('repairable orphan check failures remain retryable and incomplete', async () => {
+    const db = getDb();
+    db.exec(`
+      DROP VIEW IF EXISTS temp.published_messages;
+      DROP VIEW IF EXISTS main.published_messages;
+    `);
+
+    const dryRun = (await runRepair({ table: 'messages', embed: false }))!;
+    expect(dryRun.orphanEmbeddingErrors.map(error => error.check))
+      .toEqual(['orphaned-embeddings:messages']);
+    expect(logged).not.toContain('Nothing to repair.');
+    expect(errored.some(line => line.includes('RETRYABLE:'))).toBe(true);
+    expect(process.exitCode).toBe(1);
+
+    process.exitCode = 0;
+    logged = [];
+    errored = [];
+    const executed = (await runRepair({ execute: true, table: 'messages', embed: false }))!;
+    expect(executed.orphanEmbeddingErrors.map(error => error.check))
+      .toEqual(['orphaned-embeddings:messages']);
+    expect(executed.orphanEmbeddings).toBeNull();
+    expect(process.exitCode).toBe(1);
+  });
+
+  test('keeps incomplete lifecycle repair in the plan, result, and exit status', async () => {
+    ingestHostTranscript({
+      source: 'codex',
+      sessionId: 'repair-lifecycle-readiness',
+      messages: [{ role: 'assistant', content: 'lifecycle readiness repair row' }],
+    });
+    getDb().exec(`
+      DROP TRIGGER host_ingest_generation_messages_fts_ad;
+      DROP TRIGGER host_ingest_generation_messages_fts_au;
+      DROP TABLE host_ingest_generation_messages_fts;
+    `);
+
+    const dryRun = (await runRepair({ embed: false }))!;
+    expect(dryRun.plan.lifecycle?.status).toBe('retryable');
+    expect(dryRun.lifecycle?.status).toBe('retryable');
+    expect(process.exitCode).not.toBe(1);
+
+    const executed = (await runRepair({ execute: true, embed: false }))!;
+    expect(executed.lifecycle?.status).toBe('retryable');
+    expect(process.exitCode).toBe(1);
+  });
+
   test('dry-run reports the plan and writes nothing', async () => {
     addBreadcrumb({ content: CRUMB, importance: 5 });
     addDecision({ decision: 'Adopt SQLite WAL mode for every database connection.', status: 'active' });
@@ -252,7 +303,7 @@ describe('embedding repair', () => {
 });
 
 describe('safety invariants', () => {
-  test('repair never hard-deletes rows', async () => {
+  test('repair never hard-deletes source records', async () => {
     createSession({ session_id: 's1', started_at: '2026-01-01T00:00:00Z' });
     addMessage({ session_id: 's1', timestamp: '2026-01-01T00:00:01Z', role: 'assistant', content: CRUMB });
     addDecision({ decision: 'Adopt SQLite WAL mode for every database connection.', status: 'active' });
@@ -262,7 +313,7 @@ describe('safety invariants', () => {
     const db = getDb();
     db.prepare(`INSERT INTO telos (code, type, title, content) VALUES ('G0', 'goal', 'Goal', 'Telos content')`).run();
     db.prepare(`INSERT INTO documents (path, title, type, content) VALUES ('/tmp/d.md', 'Doc', 'reference', 'Document body')`).run();
-    // Orphaned embedding — reported, must never be deleted.
+    // Orphaned embeddings are derived state and may be removed.
     db.prepare(
       `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
        VALUES ('decisions', 9999, 'test', 3, ?)`
@@ -271,14 +322,10 @@ describe('safety invariants', () => {
 
     const tables = ['sessions', 'messages', 'decisions', 'learnings', 'breadcrumbs', 'loa_entries', 'telos', 'documents', 'dedup_lineage'];
     const before = tables.map(t => (db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c);
-    const embeddingsBefore = embeddingsCount();
-
     await runRepair({ execute: true }, upDeps);
 
     const after = tables.map(t => (db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c);
     expect(after).toEqual(before);
-    // Embeddings may only grow (re-embed), never shrink.
-    expect(embeddingsCount()).toBeGreaterThanOrEqual(embeddingsBefore);
   });
 
   test('repair never changes Record Provenance', async () => {
@@ -302,21 +349,25 @@ describe('safety invariants', () => {
     expect(snapshot()).toEqual(before);
   });
 
-  test('orphan problems are reported but never auto-repaired', async () => {
+  test('execute removes orphan embeddings and schedules vector synchronization', async () => {
     getDb().prepare(
       `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
        VALUES ('decisions', 9999, 'test', 3, ?)`
     ).run(embeddingToBlob([1, 0, 0]));
 
-    const result = (await runRepair({ execute: true }, upDeps))!;
+    const result = (await runRepair({
+      execute: true,
+      embed: false,
+      table: 'decisions',
+    }, upDeps))!;
     const orphan = result.plan.orphans.find(r => r.check === 'orphaned-embeddings:decisions');
     expect(orphan?.count).toBe(1);
+    expect(result.orphanEmbeddings?.removed).toBe(1);
 
-    // Still there after execute — repair only reports it.
     const remaining = getDb().prepare(
       `SELECT COUNT(*) AS c FROM embeddings WHERE source_table = 'decisions' AND source_id = 9999`
     ).get() as { c: number };
-    expect(remaining.c).toBe(1);
+    expect(remaining.c).toBe(0);
   });
 
   test('a genuine pre-dedup legacy database is self-healed on open and does not crash (#202)', async () => {

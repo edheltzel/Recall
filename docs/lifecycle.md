@@ -68,7 +68,7 @@ Two situations the original scripts didn't spell out:
 
 **`recall uninstall`** (delegates to `./uninstall.sh`) removes Recall's integration surgically and **preserves your memory database by default**. Exit your agent first.
 
-Flags (forwarded verbatim): `--dry-run` (narrate, touch nothing), `--purge` (also destroy `~/.agents/Recall/` — DB + backups — after a `pre_purge_<TS>/` snapshot and an interactive `PURGE` confirmation), `--no-confirm`, `--skip-opencode`, `--skip-pi`. The exact list of what is removed vs. preserved is in [Installation → Uninstalling](installation.md#uninstalling).
+Run `recall uninstall --help` for the canonical forwarded flag list. The exact removal, preservation, purge, and per-host skip behavior is documented in [Installation → Uninstalling](installation.md#uninstalling).
 
 ---
 
@@ -84,7 +84,7 @@ Flags (forwarded verbatim): `--dry-run` (narrate, touch nothing), `--purge` (als
 
 - **Restore a backup** (install/update write timestamped backups under `~/.agents/Recall/backups/`): `./install.sh list`, then `./install.sh restore [TIMESTAMP]`.
 - **A failed update** writes `ROLLBACK.txt` into its backup directory with the exact revert commands. See [Upgrading → Rollback](upgrading.md#rollback). Note: **DB schema downgrades are not supported** — if a migration ran, restore the DB file from the backup rather than just reverting the repo.
-- **A `--purge` uninstall** writes a `pre_purge_<TS>/` database snapshot before deleting, so a mistaken purge is recoverable.
+- **A `--purge` uninstall** writes a `pre_purge_<TS>/` snapshot containing the database and canonical user-authored MEMORY files before deleting runtime state; identity and distilled memory are also materialized into the Claude MEMORY directory when safe.
 - **Drifted symlinks** (e.g. after moving the checkout): `recall doctor` reports them and `recall doctor --fix` re-creates them, backing up any user-modified file at a symlink target first.
 
 ---

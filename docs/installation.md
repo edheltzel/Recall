@@ -73,6 +73,14 @@ plugin uses `opencode export <session-id>` (JSON) and converts the result into a
 markdown drop for the shared batch extractor. Verify with `opencode --version`.
 Use `./install.sh --skip-opencode` when OpenCode should remain untouched.
 
+### Grok Build CLI (Optional)
+
+If `grok` is installed, Recall adds the managed user-level lifecycle hook documented in [Grok Integration](GROK_INTEGRATION.md). The hook exports completed sessions through the public Grok CLI and writes them immediately to `recall.db`. It does not add automatic session-start injection.
+
+Verify with `grok --version`. Deselect Grok in the interactive installer when it should remain untouched.
+
+Codex uses its native marketplace plugin instead of this installer. JCode currently remains MCP and skills only; see [Codex Integration](CODEX_INTEGRATION.md) and [JCode Integration](JCODE_INTEGRATION.md).
+
 ---
 
 ### Fabric (Optional — recommended)
@@ -113,6 +121,10 @@ Set `OLLAMA_URL` if Ollama runs on a different host (default: `http://localhost:
 
 ## Install Recall
 
+Recall has one install root: `~/.agents/Recall`. The runtime tree is not
+relocatable. `RECALL_DB_PATH` and `install.sh --db-path` may place the SQLite
+database elsewhere; they do not move the install root.
+
 Clone the repository to a permanent directory (not `/tmp`), then run the installer:
 
 ```bash
@@ -133,11 +145,12 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
 | 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
 | 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
-| 7. Setup hooks | Copies `RecallExtract.ts` and `RecallBatchExtract.ts` to `~/.claude/hooks/`, copies `hooks/lib/` (shared hook libraries) to `~/.claude/hooks/lib/`, and registers the `Stop` hook in `~/.claude/settings.json` |
+| 7. Setup hooks | Copies the installer-owned Claude hooks and shared hook libraries to their canonical runtime paths, links them into `~/.claude/hooks/`, and registers the current Claude lifecycle events through the shared hook installer |
 | 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs agent skills to `~/.claude/skills/recall-*/` (removing any legacy `~/.claude/commands/Recall/` symlinks) |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
+| 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
 
-**After install:** Restart Claude Code to load the MCP server and hooks.
+**After install:** Restart each configured host to load its integration.
 
 ---
 
@@ -174,8 +187,8 @@ recall doctor                 # Full health check — database, MCP, hooks, embe
 
 ### Recommended: seed your L0 identity tier
 
-Recall's `RecallStart` hook injects a small user-authored identity file at
-the top of every session (the L0 tier). Without it, the L0 section is empty
+Recall's supported session-start integrations inject a small user-authored
+identity file at the top of a session (the L0 tier). Without it, the L0 section is empty
 and the v2 tiered context is only half-populated.
 
 ```bash
@@ -183,10 +196,14 @@ recall onboard                 # Interactive 7-question interview
 recall onboard --print --yes   # Preview what would be written (no side effects)
 ```
 
-This writes `~/.claude/MEMORY/identity.md` (global) or
-`./.atlas-recall/identity.md` (project-local with `--project`). Files
-exceeding 1200 characters are silently truncated at load; the command
-warns if your rendered output exceeds that limit.
+Global onboarding uses the same resolver as `RecallStart`. An existing
+user-owned `~/.claude/MEMORY/identity.md` remains authoritative; otherwise
+the path is the canonical file under the Recall install root,
+`~/.agents/Recall/MEMORY/identity.md`. A managed Claude link, when present,
+exposes that same canonical file.
+`--project` instead writes `./.atlas-recall/identity.md`. Files exceeding
+1200 characters are silently truncated at load; the command warns if your
+rendered output exceeds that limit.
 
 ---
 
@@ -225,7 +242,7 @@ crontab -e
 |----------|---------|---------|
 | `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
 | `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
-| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. Takes precedence over both project-local (`./.atlas-recall/identity.md`) and global (`~/.claude/MEMORY/identity.md`). Honored by both `RecallStart` (read) and `recall onboard` (write). |
+| `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. First in the shared resolver used by both `RecallStart` (read) and `recall onboard` (write); see [Identity & Onboarding](cli-reference.md#identity--onboarding). |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
 | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
@@ -269,22 +286,23 @@ cd /path/to/Recall
 ### What gets removed (default)
 
 - `~/.claude/commands/Recall/` (slash commands; legacy `~/.claude/commands/recall/` is also removed if present)
+- Recall-owned Agent Skills under `~/.claude/skills/recall-*/` and `~/.omp/agent/skills/recall-*/` (unless `--skip-omp` for omp)
 - `~/.claude/Recall_GUIDE.md`
-- Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact) — other hooks are preserved
+- Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact/PostToolUse/UserPromptSubmit) — other hooks are preserved
 - `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved
-- `~/.claude/hooks/{RecallExtract,RecallBatchExtract,RecallTelosSync,RecallStart,RecallPreCompact}.ts`
-- `~/.claude/hooks/lib/{extraction-*,pid-utils}.ts` — only Recall-owned files, never the whole `hooks/lib/` directory
+- Recall-owned hook files under `~/.claude/hooks/`, including `RecallInSession.ts`, and installed TypeScript helpers under `~/.claude/hooks/lib/` — only inventoried Recall paths, never either whole directory
 - The `## MEMORY` section in `~/.claude/CLAUDE.md` only if Recall generated it (current ownership marker or a normalized exact match of the complete legacy-generated body); unmarked customized/externally owned sections and the rest of `CLAUDE.md` are preserved; a marked section remains Recall-owned even if its body was edited
 - `~/.claude/MEMORY/extract_prompt.md` — only if unmodified from source; user-edited versions are preserved
 - OpenCode MCP entry + plugins + the shared plugin helpers Recall installs under `plugins/lib/` + agent + guide (unless `--skip-opencode`). `plugins/lib/` itself is removed only when Recall emptied it, so your own files there survive. An `opencode.json` that Recall cannot parse is reported and left untouched; the plugins, agent, and guide are still removed and the rest of the uninstall continues
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
+- The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
 ### What is preserved (default)
 
 - `~/.agents/Recall/recall.db` — your persistent memory database
 - `~/.claude/backups/recall/` — the backup tree written by install/update
-- `~/.claude/MEMORY/` — identity.md, DISTILLED.md, session subdirs
+- User-authored identity and distilled memory under `~/.agents/Recall/MEMORY/`, together with any managed Claude links or legacy files in `~/.claude/MEMORY/`
 - This source directory (remove with `rm -rf /path/to/Recall`)
 
 ### Flags
@@ -292,13 +310,18 @@ cd /path/to/Recall
 | Flag | Purpose |
 |------|---------|
 | `--dry-run` | Narrate every change, touch nothing |
-| `--purge` | Also destroy `recall.db` + backup tree. Requires interactive `PURGE` confirmation. Writes a `pre_purge_<TS>/` snapshot before deleting. |
+| `--purge` | Destroy `recall.db`, runtime files, and the old backup tree. Requires interactive `PURGE` confirmation. The `pre_purge_<TS>/` snapshot retains the database plus canonical `identity.md`/`DISTILLED.md`; those user files are also materialized into `~/.claude/MEMORY/` when that does not overwrite a foreign file. |
 | `--no-confirm` | Non-interactive (still requires PURGE confirmation for `--purge`) |
 | `--skip-opencode` | Leave OpenCode integration alone |
 | `--skip-pi` | Leave Pi integration alone |
+| `--skip-grok` | Leave Grok lifecycle capture alone |
+| `--skip-omp` | Leave omp Agent Skills alone |
+| `--no-gum` | Skip optional gum setup and use the bash interface for this run |
 | `--help` | Show usage |
 
-Even with `--purge`, `~/.claude/MEMORY/` is preserved — it's user-authored content, not Recall-owned state.
+Even with `--purge`, user-authored identity and distilled memory are retained.
+An existing foreign Claude file is never overwritten; the canonical Recall
+copy remains available in the pre-purge snapshot.
 
 ---
 

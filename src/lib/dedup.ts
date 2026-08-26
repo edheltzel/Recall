@@ -33,7 +33,9 @@
 import { createHash } from 'crypto';
 import { Database } from 'bun:sqlite';
 import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
+import { publishedRecordTable } from './published-records.js';
 import { blobToEmbedding, cosineSimilarity } from './embeddings.js';
+import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
 import {
   PROVENANCE_TABLES,
   PROVENANCE_VALUES,
@@ -315,6 +317,7 @@ export function scanCandidates(
   batchSize: number = SQLITE_SAFE_CHUNK_SIZE
 ): ScanResult {
   const config = TABLE_SCAN_CONFIG[table];
+  const sourceTable = publishedRecordTable(table);
   const where = [
     'id > ?',
     ...(config.extraWhere ? [config.extraWhere] : []),
@@ -324,7 +327,7 @@ export function scanCandidates(
     SELECT id, project, provenance, importance,
            ${config.createdAtColumn} AS created_at,
            ${config.textColumns.join(', ')}
-    FROM ${table}
+    FROM ${sourceTable}
     WHERE ${where}
     ORDER BY id
     LIMIT ?
@@ -401,17 +404,17 @@ export function loadEmbeddings(db: Database, table: ProvenanceTable): Map<number
 }
 
 /**
- * Ids in `table` that other rows reference via foreign keys (loa_entries
- * message ranges, loa parent links). With foreign_keys=ON these cannot be
- * hard-deleted; destructive mode downgrades them to 'marked' instead of
- * failing the whole transaction.
+ * Ids in `table` that other rows reference via foreign keys (explicit
+ * loa_entries message ranges, loa parent links). Automatic lifecycle ranges
+ * are released by the retention trigger before deletion.
  */
 export function fkProtectedIds(db: Database, table: ProvenanceTable): Set<number> {
   const ids = new Set<number>();
   if (table === 'messages') {
     const rows = db.prepare(
       `SELECT message_range_start AS s, message_range_end AS e FROM loa_entries
-       WHERE message_range_start IS NOT NULL OR message_range_end IS NOT NULL`
+       WHERE (tags IS NULL OR tags NOT LIKE 'automatic-capture,%')
+         AND (message_range_start IS NOT NULL OR message_range_end IS NOT NULL)`
     ).all() as Array<{ s: number | null; e: number | null }>;
     for (const row of rows) {
       if (row.s !== null) ids.add(row.s);
@@ -693,10 +696,14 @@ export function applyDedupPlan(
     for (const [table, ids] of toDelete) {
       for (const chunk of chunked(ids)) {
         const placeholders = chunk.map(() => '?').join(', ');
+        deleteRecordEmbeddingsByIdsInTransaction(db, table, chunk);
+        if (table === 'messages') {
+          db.prepare(`
+            UPDATE host_ingest_generation_messages SET content = NULL
+            WHERE message_id IN (${placeholders})
+          `).run(...chunk);
+        }
         db.prepare(`DELETE FROM ${table} WHERE id IN (${placeholders})`).run(...chunk);
-        db.prepare(
-          `DELETE FROM embeddings WHERE source_table = ? AND source_id IN (${placeholders})`
-        ).run(table, ...chunk);
       }
     }
   });

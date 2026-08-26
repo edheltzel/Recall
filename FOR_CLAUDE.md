@@ -157,10 +157,12 @@ recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP confi
 
 ### L0 identity file
 
-The L0 tier reads from `~/.claude/MEMORY/identity.md` by default, with
-`./.atlas-recall/identity.md` taking precedence if present. The `RECALL_IDENTITY_PATH`
-env var overrides both. If the user has never created this file, the L0 section of
-session context is empty — recommend running `recall onboard` to fix it.
+The L0 tier uses Recall's shared identity resolver. A project-local
+`./.atlas-recall/identity.md` takes precedence over the global identity; on a
+new install the global file is `~/.agents/Recall/MEMORY/identity.md`, while an
+existing user-owned Claude identity remains authoritative.
+`RECALL_IDENTITY_PATH` overrides both. See [Identity & Onboarding](https://github.com/edheltzel/Recall/blob/main/docs/cli-reference.md#identity--onboarding)
+for the complete precedence. If no identity exists, recommend `recall onboard`.
 
 ## Core Rules
 
@@ -170,7 +172,7 @@ session context is empty — recommend running `recall onboard` to fix it.
 4. **Record decisions** — When architectural decisions are made, use `memory_add` to record them
 5. **Context for agents** — Before spawning agents, call `context_for_agent` to give them relevant history
 6. **Session capture** — When the user says `/dump` or `/recall-dump`, call `memory_dump({ title: "Descriptive Title" })` to capture the session into SQLite. This works mid-conversation — you don't need to wait for the session to end. The dumped messages are immediately searchable from any new session via `memory_search`.
-7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `recall onboard` once per session. Do not nag on subsequent turns. The L0 tier reads from `~/.claude/MEMORY/identity.md`; an empty tier means the user has not yet run the interview. Sample suggestion: "I notice your L0 identity tier is empty. Run `recall onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
+7. **Onboarding check** — At session start, if the L0 tier is empty (the `## L0 — Identity` block in the RecallStart preamble is missing or empty), suggest the user run `recall onboard` once per session. Do not nag on subsequent turns. An empty tier means the shared identity resolver found no identity file. Sample suggestion: "I notice your L0 identity tier is empty. Run `recall onboard` once to set up the baseline that every session loads — it takes about 90 seconds."
 8. **Never store secrets** — `memory_add` and `memory_dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
 9. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 

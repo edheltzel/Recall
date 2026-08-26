@@ -1,6 +1,6 @@
 // recall loa command - Library of Alexandria capture
 
-import { createLoaEntry, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages } from '../lib/memory.js';
+import { createLoaEntryFromMessages, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages } from '../lib/memory.js';
 import { detectProject } from '../lib/project.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { getDb } from '../db/connection.js';
@@ -76,18 +76,19 @@ export async function runLoa(title: string, options: LoaOptions): Promise<void> 
 
   // Create LoA entry — Fabric extract_wisdom output is generated from the
   // session messages, so the record is extracted (ADR-0001).
-  const id = createLoaEntry({
+  const id = createLoaEntryFromMessages({
     title,
     description: `Captured ${messages.length} messages`,
     fabric_extract: fabricExtract,
     message_range_start: startId || undefined,
     message_range_end: endId || undefined,
+    snapshot_max_message_id: endId,
     parent_loa_id: options.continues,
     project,
     tags: options.tags,
     message_count: messages.length,
     provenance: 'extracted'
-  });
+  }, messages);
 
   console.log(`\n✓ LoA #${id} captured: "${title}"`);
   console.log(`  Messages: ${messages.length} (IDs ${startId}-${endId})`);

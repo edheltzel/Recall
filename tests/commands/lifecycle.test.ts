@@ -186,6 +186,33 @@ describe('lifecycle: end-to-end CLI passthrough (delegates to real scripts)', ()
     expect(r.stderr + r.stdout).toMatch(/Unknown flag/);
   });
 
+  test('uninstall help forwards the canonical host and flag inventory', () => {
+    const r = cli(['uninstall', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('Recall Uninstall Script');
+    expect(r.stdout).toContain('Grok');
+    for (const flag of [
+      '--dry-run',
+      '--purge',
+      '--no-confirm',
+      '--skip-opencode',
+      '--skip-pi',
+      '--skip-grok',
+      '--skip-omp',
+      '--no-gum',
+    ]) {
+      expect(r.stdout).toContain(flag);
+    }
+  });
+
+  test('top-level help includes Grok in uninstall ownership', () => {
+    const r = cli(['--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      'Uninstall Recall from Claude Code / OpenCode / Pi / Grok / omp',
+    );
+  });
+
   test('uninstall --dry-run delegates, narrates, and does not mutate', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'recall-cli-uninstall-'));
     try {

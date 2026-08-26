@@ -51,6 +51,19 @@ CREATE TABLE IF NOT EXISTS breadcrumbs (
   importance INTEGER DEFAULT 5 CHECK (importance BETWEEN 1 AND 10),
   expires_at DATETIME
 );
+CREATE TABLE IF NOT EXISTS embeddings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_table TEXT NOT NULL,
+  source_id INTEGER NOT NULL,
+  model TEXT,
+  dimensions INTEGER,
+  embedding BLOB,
+  UNIQUE(source_table, source_id)
+);
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 `;
 
 let tempDir: string;
@@ -269,6 +282,32 @@ describe('gatherContext', () => {
     expect(output).toContain('Active breadcrumb');
     expect(output).toContain('No expiry breadcrumb');
     expect(output).not.toContain('Expired breadcrumb');
+  });
+
+  test('sweeps expired breadcrumb embeddings without cleanup triggers', async () => {
+    const db = createTestDb();
+    const expiredId = Number(db.prepare(`
+      INSERT INTO breadcrumbs (content, expires_at, project)
+      VALUES ('Expired embedded breadcrumb', '2020-01-01T00:00:00Z', ?)
+    `).run(TEST_PROJECT).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding)
+      VALUES ('breadcrumbs', ?, 'test', 1, ?)
+    `).run(expiredId, Buffer.alloc(4));
+    db.close();
+
+    const { gatherContext } = await importHook();
+    gatherContext();
+
+    const inspected = new Database(dbPath);
+    expect(inspected.prepare('SELECT 1 FROM breadcrumbs WHERE id = ?').get(expiredId)).toBeNull();
+    expect(inspected.prepare(`
+      SELECT 1 FROM embeddings WHERE source_table = 'breadcrumbs' AND source_id = ?
+    `).get(expiredId)).toBeNull();
+    expect(inspected.prepare(`
+      SELECT value FROM schema_meta WHERE key = 'vec_index_dirty'
+    `).get()).toEqual({ value: '1' });
+    inspected.close();
   });
 
   test('includes learnings in L1 with problem and solution', async () => {

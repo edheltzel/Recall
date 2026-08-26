@@ -4,14 +4,24 @@
 // description); the rest is covered here.
 
 import { describe, test, expect } from 'bun:test';
-import { homedir, tmpdir } from 'os';
-import { join } from 'path';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { dirname, join } from 'path';
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  lstatSync,
+} from 'fs';
 import {
   renderIdentityMarkdown,
   resolveOutputPath,
   splitMultiline,
   exceedsMaxL0,
+  writeIdentityAtomic,
   type IdentityAnswers,
 } from '../../src/commands/onboard';
 
@@ -115,9 +125,19 @@ describe('renderIdentityMarkdown', () => {
 });
 
 describe('resolveOutputPath', () => {
-  test('defaults to global ~/.claude/MEMORY/identity.md', () => {
-    const p = resolveOutputPath({}, {});
-    expect(p).toBe(join(homedir(), '.claude', 'MEMORY', 'identity.md'));
+  test('defaults to the canonical Recall identity when no Claude alias exists', () => {
+    const p = resolveOutputPath({}, { HOME: '/test-home' });
+    expect(p).toBe('/test-home/.agents/Recall/MEMORY/identity.md');
+  });
+
+  test('ignores RECALL_DIR and RECALL_HOME: the only install root is ~/.agents/Recall', () => {
+    const path = resolveOutputPath({}, {
+      HOME: '/test-home',
+      RECALL_DIR: '/relocated/Recall',
+      RECALL_HOME: '/runtime/Recall',
+    });
+
+    expect(path).toBe('/test-home/.agents/Recall/MEMORY/identity.md');
   });
 
   test('--project resolves to project-local .atlas-recall/identity.md', () => {
@@ -189,27 +209,77 @@ describe('exceedsMaxL0', () => {
 });
 
 // ─── Integration: atomic write via rename ────────────────────────────
-// This doesn't mock the interview — it drives renderIdentityMarkdown and
-// the atomic-write path indirectly by calling writeFileSync + rename the
-// same way runOnboard does. Narrow but meaningful coverage on the branch
-// that was previously zero-coverage.
-
 describe('identity file write (integration)', () => {
+  test('writes a fresh identity into the canonical Recall root when no Claude alias exists', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const home = join(dir, 'home');
+      const canonical = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+      const identity = join(home, '.claude', 'MEMORY', 'identity.md');
+      mkdirSync(dirname(canonical), { recursive: true });
+      mkdirSync(dirname(identity), { recursive: true });
+
+      const outPath = resolveOutputPath({}, { HOME: home });
+      writeIdentityAtomic(outPath, '# New\n');
+
+      expect(outPath).toBe(canonical);
+      expect(existsSync(identity)).toBe(false);
+      expect(readFileSync(canonical, 'utf-8')).toBe('# New\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('renaming an identity.md.tmp over identity.md yields the new content', () => {
     const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
     try {
       const outPath = join(dir, 'identity.md');
-      const tmp = outPath + '.tmp';
-
       writeFileSync(outPath, '# Old\n');
-      writeFileSync(tmp, '# New\n');
+      writeIdentityAtomic(outPath, '# New\n');
 
-      // Mirrors runOnboard's atomic step.
-      const { renameSync } = require('fs');
-      renameSync(tmp, outPath);
-
-      expect(existsSync(tmp)).toBe(false);
+      expect(existsSync(outPath + '.tmp')).toBe(false);
       expect(readFileSync(outPath, 'utf-8')).toBe('# New\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('updates a symlink target without replacing the identity symlink', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const home = join(dir, 'home');
+      const canonicalPath = join(home, '.agents', 'Recall', 'MEMORY', 'identity.md');
+      const claudePath = join(home, '.claude', 'MEMORY', 'identity.md');
+      mkdirSync(dirname(canonicalPath), { recursive: true });
+      mkdirSync(dirname(claudePath), { recursive: true });
+      writeFileSync(canonicalPath, '# Old\n');
+      symlinkSync(canonicalPath, claudePath);
+
+      const outPath = resolveOutputPath({}, { HOME: home });
+      writeIdentityAtomic(outPath, '# New\n');
+
+      expect(outPath).toBe(canonicalPath);
+      expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
+      expect(readFileSync(canonicalPath, 'utf-8')).toBe('# New\n');
+      expect(existsSync(canonicalPath + '.tmp')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('replaces an arbitrary symlink without overwriting its target', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-onboard-'));
+    try {
+      const targetPath = join(dir, 'unrelated.md');
+      const projectPath = join(dir, 'identity.md');
+      writeFileSync(targetPath, '# Unrelated\n');
+      symlinkSync(targetPath, projectPath);
+
+      writeIdentityAtomic(projectPath, '# Identity\n');
+
+      expect(lstatSync(projectPath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(projectPath, 'utf-8')).toBe('# Identity\n');
+      expect(readFileSync(targetPath, 'utf-8')).toBe('# Unrelated\n');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

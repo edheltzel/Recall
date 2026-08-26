@@ -4,12 +4,21 @@ import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
-import { CREATE_TABLES, CREATE_INDEXES, CREATE_FTS, CREATE_FTS_TRIGGERS, CREATE_VECTOR_TABLES } from './schema.js';
+import {
+  CREATE_TABLES,
+  CREATE_INDEXES,
+  CREATE_FTS,
+  CREATE_FTS_TRIGGERS,
+  CREATE_VECTOR_TABLES,
+  REBUILD_HOST_INGEST_GENERATION_FTS,
+  PUBLISHED_MESSAGES_SCHEMA,
+} from './schema.js';
 import { applyMigrations } from './migrations.js';
 // Importing vec sets up bun:sqlite's custom (extension-capable) SQLite on macOS
 // at module load — BEFORE any Database is opened below, as setCustomSQLite
 // requires (it is process-global). See src/db/vec.ts.
 import { loadVecExtension, isVecAvailable, createVecTable } from './vec.js';
+import { repairLifecycleSearchIndex } from '../lib/lifecycle-search.js';
 
 const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
@@ -114,10 +123,77 @@ export function getDb(): Database {
     } catch {
       // Degrade gracefully — read-only / locked DB. No new throw on the read path.
     }
+    ensurePublishedMessageViews(db);
+    try {
+      repairLifecycleSearchIndex(db, { maxPages: 1 });
+    } catch {
+    }
 
     return db;
+  } catch (error) {
+    db?.close();
+    db = null;
+    throw error;
   } finally {
     dbInitializing = false;
+  }
+}
+
+export function ensurePublishedMessageViews(database: Database): void {
+  const tables = new Set(
+    (database.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table'
+    `).all() as Array<{ name: string }>).map(row => row.name)
+  );
+  const views = new Set(
+    (database.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'view'
+        AND name IN ('active_host_ingest_messages', 'published_messages')
+    `).all() as Array<{ name: string }>).map(row => row.name)
+  );
+  const messageColumns = new Set(
+    (database.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>)
+      .map(column => column.name)
+  );
+  const hostMessageColumns = new Set(
+    (database.prepare('PRAGMA table_info(host_ingest_messages)').all() as
+      Array<{ name: string }>).map(column => column.name)
+  );
+  const fallbackActive = tables.has('host_ingest_messages') &&
+    hostMessageColumns.has('message_id')
+    ? `SELECT source, session_id, message_key, message_id,
+        ${hostMessageColumns.has('source_position') ? 'source_position' : 'NULL AS source_position'}
+       FROM main.host_ingest_messages`
+    : `SELECT NULL AS source, NULL AS session_id, NULL AS message_key,
+        NULL AS message_id, NULL AS source_position WHERE 0`;
+  const fallbackPublished = messageColumns.has('host_ingest_token') &&
+    hostMessageColumns.has('message_id')
+    ? `SELECT message.* FROM main.messages AS message
+       WHERE message.host_ingest_token IS NULL OR EXISTS (
+         SELECT 1 FROM main.host_ingest_messages AS stored
+         WHERE stored.message_id = message.id
+       )`
+    : 'SELECT * FROM main.messages';
+  const install = (activeSource: string, publishedSource: string) => {
+    database.exec(`
+      DROP VIEW IF EXISTS temp.active_host_ingest_messages;
+      DROP VIEW IF EXISTS temp.published_messages;
+      CREATE TEMP VIEW active_host_ingest_messages AS ${activeSource};
+      CREATE TEMP VIEW published_messages AS ${publishedSource};
+    `);
+    database.prepare('SELECT 1 FROM active_host_ingest_messages LIMIT 1').get();
+    database.prepare('SELECT 1 FROM published_messages LIMIT 1').get();
+  };
+  try {
+    install(
+      views.has('active_host_ingest_messages')
+        ? `SELECT source, session_id, message_key, message_id, source_position
+           FROM main.active_host_ingest_messages`
+        : fallbackActive,
+      views.has('published_messages') ? 'SELECT * FROM main.published_messages' : fallbackPublished
+    );
+  } catch {
+    install(fallbackActive, fallbackPublished);
   }
 }
 
@@ -141,11 +217,17 @@ export function getDb(): Database {
  * that to degrade gracefully; initDb lets it surface.
  */
 function ensureSchema(database: Database): void {
+  const generationFtsExists = Boolean(database.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'host_ingest_generation_messages_fts'
+  `).get());
   database.exec(CREATE_TABLES);
   const migration = applyMigrations(database);
   database.exec(CREATE_INDEXES);
+  database.exec(PUBLISHED_MESSAGES_SCHEMA);
   database.exec(CREATE_FTS);
   database.exec(CREATE_FTS_TRIGGERS);
+  if (!generationFtsExists) database.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
   database.exec(CREATE_VECTOR_TABLES);
   // sqlite-vec index table (#148) — created ONLY when the extension loaded.
   // Deliberately NOT a migration: a vec0 CREATE throws where the extension is
@@ -179,6 +261,11 @@ export function initDb(): { created: boolean; path: string } {
   loadVecExtension(db);
 
   ensureSchema(db);
+  ensurePublishedMessageViews(db);
+  try {
+    repairLifecycleSearchIndex(db, { maxPages: 1 });
+  } catch {
+  }
 
   // SECURITY: Set restrictive permissions (owner read/write only)
   // Prevents other users on system from reading conversation history

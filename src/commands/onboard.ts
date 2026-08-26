@@ -8,7 +8,8 @@
 // through 7 short questions, then writes the file.
 //
 // Defaults:
-//   - Writes to ~/.claude/MEMORY/identity.md (global, used everywhere).
+//   - Writes to the global identity, ~/.agents/Recall/MEMORY/identity.md
+//     (used everywhere; ~/.claude/MEMORY/identity.md is the managed link).
 //   - --project writes to ./.atlas-recall/identity.md (project-local override).
 //   - --print previews the rendered markdown without writing.
 //   - --yes accepts all suggested defaults non-interactively (good for CI).
@@ -17,12 +18,18 @@
 // If a file already exists, the user must explicitly confirm overwrite —
 // the previous file is backed up to identity.md.bak first.
 
-import { existsSync, mkdirSync, writeFileSync, copyFileSync, renameSync, statSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  copyFileSync,
+  renameSync,
+  statSync,
+} from 'fs';
 import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { claudePaths } from '../hosts/claude.js';
 import { createInterface, type Interface } from 'readline';
 import { detectProject } from '../lib/project.js';
+import { resolveIdentityPath } from '../../hooks/lib/identity-path.js';
 
 // L0 identity files are silently truncated at load by hooks/RecallStart.ts.
 // Mirror that constant here so the onboarding UX can warn the user before the
@@ -156,7 +163,7 @@ function detectMachine(): string {
 
 // ───────────────────────────────────────────────────────────────────────
 // Path resolution — mirror RecallStart's identity-file lookup order.
-// Precedence: --out > RECALL_IDENTITY_PATH env > --project > global default.
+// Precedence: --out > RECALL_IDENTITY_PATH env > --project > global.
 // The env var is honored because RecallStart reads it with highest
 // precedence at load; without this, a user with the env set could write
 // to one path while the hook loads from another.
@@ -165,11 +172,11 @@ export function resolveOutputPath(
   options: OnboardOptions,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  if (options.out) return options.out;
-  const envPath = env.RECALL_IDENTITY_PATH;
-  if (envPath && envPath.trim()) return envPath.trim();
-  if (options.project) return join(process.cwd(), '.atlas-recall', 'identity.md');
-  return join(claudePaths(homedir()).memory, 'identity.md');
+  return resolveIdentityPath({
+    env,
+    explicitPath: options.out,
+    project: options.project ? 'force' : 'ignore',
+  });
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -297,7 +304,10 @@ async function confirm(rl: Interface, prompt: string, autoYes: boolean): Promise
 // Guarantees the destination is either the old content or the full new
 // content — never a half-written file. Works because rename(2) is atomic
 // on the same filesystem.
-function writeIdentityAtomic(outPath: string, markdown: string): void {
+export function writeIdentityAtomic(
+  outPath: string,
+  markdown: string,
+): void {
   const tmp = outPath + '.tmp';
   writeFileSync(tmp, markdown, 'utf-8');
   renameSync(tmp, outPath);

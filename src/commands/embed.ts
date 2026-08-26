@@ -8,13 +8,18 @@ import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
+import { publishedEmbeddingSql, publishedRecordTable } from '../lib/published-records.js';
+import { upsertEmbedding, upsertEmbeddingsInTransaction } from '../lib/embedding-store.js';
 
 // Marked duplicates (recall dedup, issue #45) keep their embeddings but are
 // hidden from the semantic search paths, matching the FTS5 default. Exported
 // so the dedup-hiding contract for the semantic + hybrid vector paths can be
 // pinned by tests (issue #74).
-export function embeddingsWhere(table?: string): string {
-  const conditions = [notMarkedDuplicateSql('source_table', 'source_id')];
+export function embeddingsWhere(db: ReturnType<typeof getDb>, table?: string): string {
+  const conditions = [
+    notMarkedDuplicateSql('source_table', 'source_id'),
+    publishedEmbeddingSql(db),
+  ];
   if (table) conditions.push(`source_table = '${table}'`);
   return `WHERE ${conditions.join(' AND ')}`;
 }
@@ -87,15 +92,17 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
            WHERE e.id IS NULL
            ORDER BY l.created_at DESC LIMIT ?`;
       break;
-    case 'messages':
+    case 'messages': {
       sourceTable = 'messages';
+      const publishedMessages = publishedRecordTable(sourceTable);
       query = options.force
-        ? `SELECT id, content FROM messages WHERE role = 'assistant' ORDER BY timestamp DESC LIMIT ?`
-        : `SELECT m.id, m.content FROM messages m
+        ? `SELECT id, content FROM ${publishedMessages} WHERE role = 'assistant' ORDER BY timestamp DESC LIMIT ?`
+        : `SELECT m.id, m.content FROM ${publishedMessages} m
            LEFT JOIN embeddings e ON e.source_table = 'messages' AND e.source_id = m.id
            WHERE e.id IS NULL AND m.role = 'assistant'
            ORDER BY m.timestamp DESC LIMIT ?`;
       break;
+    }
     default:
       console.error(`Unknown table: ${table}`);
       process.exit(1);
@@ -109,12 +116,6 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
   }
 
   console.log(`Embedding ${rows.length} ${table} entries...\n`);
-
-  // Prepare insert statement
-  const insertStmt = db.prepare(`
-    INSERT OR REPLACE INTO embeddings (source_table, source_id, model, dimensions, embedding)
-    VALUES (?, ?, ?, ?, ?)
-  `);
 
   let success = 0;
   let failed = 0;
@@ -136,7 +137,14 @@ export async function runEmbedBackfill(options: EmbedOptions): Promise<void> {
       const result = await embed(content);
       const blob = embeddingToBlob(result.embedding);
 
-      insertStmt.run(sourceTable, row.id, result.model, result.dimensions, blob);
+      upsertEmbedding(db, {
+        sourceTable,
+        sourceId: row.id,
+        model: result.model,
+        dimensions: result.dimensions,
+        embedding: blob,
+        sourceContent: sourceTable === 'messages' ? String(row.content ?? '') : undefined,
+      });
 
       console.log(`✓ (${result.dimensions}d)`);
       success++;
@@ -197,20 +205,29 @@ export async function runRebackfill(): Promise<void> {
   // Phase 1: produce every new embedding up front (no DB writes yet). We embed
   // only rows that still have a resolvable, long-enough source — the rest are
   // dropped by the clear in phase 2, keeping the table uniform.
-  const updates: Array<{ table: string; id: number; model: string; dimensions: number; blob: Buffer }> = [];
+  const updates: Array<{
+    table: string;
+    id: number;
+    model: string;
+    dimensions: number;
+    blob: Buffer;
+    sourceContent?: string;
+  }> = [];
   let processed = 0;
 
   for (const config of EMBED_SOURCES) {
+    const sourceTable = publishedRecordTable(config.table);
     const cols = config.columns.map(c => `t.${c}`).join(', ');
     const rows = db.prepare(
       `SELECT t.id AS id, ${cols}
-       FROM ${config.table} t
+       FROM ${sourceTable} t
        JOIN embeddings e ON e.source_table = ? AND e.source_id = t.id`
     ).all(config.table) as Array<Record<string, unknown>>;
 
     for (const row of rows) {
       processed++;
-      const text = embeddingTextFor(config.table, row).trim();
+      const sourceContent = embeddingTextFor(config.table, row);
+      const text = sourceContent.trim();
       if (text.length < MIN_EMBED_TEXT_LENGTH) continue; // pruned by the clear
 
       process.stdout.write(`  [${processed}/${total}] Re-embedding ${config.table}#${row.id}... `);
@@ -221,6 +238,7 @@ export async function runRebackfill(): Promise<void> {
         model: result.model,
         dimensions: result.dimensions,
         blob: embeddingToBlob(result.embedding),
+        sourceContent: config.table === 'messages' ? sourceContent : undefined,
       });
       console.log(`✓ (${result.dimensions}d)`);
     }
@@ -228,14 +246,16 @@ export async function runRebackfill(): Promise<void> {
 
   // Phase 2: atomic swap. Clear the old (possibly mixed-model) rows, insert the
   // freshly produced ones, and stamp the marker — all or nothing.
-  const insert = db.prepare(
-    `INSERT INTO embeddings (source_table, source_id, model, dimensions, embedding) VALUES (?, ?, ?, ?, ?)`
-  );
   const swap = db.transaction(() => {
     db.prepare('DELETE FROM embeddings').run();
-    for (const u of updates) {
-      insert.run(u.table, u.id, u.model, u.dimensions, u.blob);
-    }
+    upsertEmbeddingsInTransaction(db, updates.map(u => ({
+      sourceTable: u.table,
+      sourceId: u.id,
+      model: u.model,
+      dimensions: u.dimensions,
+      embedding: u.blob,
+      sourceContent: u.sourceContent,
+    })));
     writeEmbeddingMarker(db);
   });
   swap();
@@ -291,7 +311,7 @@ export async function runSemanticSearch(query: string, options: { table?: string
   const embeddings = db.prepare(`
     SELECT id, source_table, source_id, embedding
     FROM embeddings
-    ${embeddingsWhere(options.table)}
+    ${embeddingsWhere(db, options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   if (embeddings.length === 0) {
@@ -422,7 +442,7 @@ export async function runHybridSearch(query: string, options: { table?: string; 
   const embeddings = db.prepare(`
     SELECT id, source_table, source_id, embedding
     FROM embeddings
-    ${embeddingsWhere(options.table)}
+    ${embeddingsWhere(db, options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
   // Calculate similarities
