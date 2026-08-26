@@ -10,7 +10,7 @@ MCP tool names (`memory_search`, `memory_add`, etc.) remain stable. 1.0.0 is
 intentionally reserved for a later, deliberate milestone — see the versioning
 note in the 0.9.0 entry.
 
-## [Unreleased]
+## [0.10.0] - 2026-08-26 - "cross-host lifecycle capture"
 
 ### Added
 
