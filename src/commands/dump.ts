@@ -2,8 +2,18 @@
 // Core functions are exported for use by the MCP server's memory_dump tool.
 
 import { getDb } from '../db/connection.js';
-import { createSession, sessionExists, addMessagesBatch, createLoaEntry } from '../lib/memory.js';
+import {
+  createSession,
+  sessionExists,
+  addMessagesBatch,
+  createLoaEntry,
+  invalidateRecordEmbedding,
+} from '../lib/memory.js';
 import { chunked } from '../lib/chunk.js';
+import {
+  deleteRecordEmbeddingsByIdsInTransaction,
+  deleteRecordEmbeddingsBySelectionInTransaction,
+} from '../lib/embedding-store.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
 import { discoverCurrentSession } from '../hosts/session-sources.js';
@@ -20,6 +30,16 @@ interface DumpOptions {
   skipFabric?: boolean;
   /** Test/internal seam; normal CLI and MCP behavior still attempts LoA embedding. */
   skipEmbed?: boolean;
+}
+
+const EXPLICIT_DUMP_DESCRIPTION = 'Explicit memory dump.';
+
+interface DumpMessageRow {
+  id: number;
+  content: string;
+  role: 'user' | 'assistant' | 'system';
+  timestamp: string;
+  project: string | null;
 }
 
 // ============ Internal Helpers ============
@@ -69,6 +89,7 @@ export function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: 
     }
 
     for (const chunk of chunks) {
+      deleteRecordEmbeddingsByIdsInTransaction(db, 'loa_entries', chunk);
       db.prepare(`
         DELETE FROM loa_entries WHERE id IN (${chunk.map(() => '?').join(',')})
       `).run(...chunk);
@@ -76,14 +97,14 @@ export function deleteLoaEntriesRecursive(db: ReturnType<typeof getDb>, loaIds: 
   })();
 }
 
-function deleteSession(sessionId: string): number {
+function clearSessionMessages(sessionId: string): number {
   const db = getDb();
 
   const deleteAll = db.transaction(() => {
-    const countResult = db.prepare('SELECT COUNT(*) as count FROM messages WHERE session_id = ?').get(sessionId) as { count: number };
+    const countResult = db.prepare('SELECT COUNT(*) as count FROM published_messages WHERE session_id = ?').get(sessionId) as { count: number };
     const count = countResult?.count || 0;
 
-    const rangeResult = db.prepare('SELECT MIN(id) as minId, MAX(id) as maxId FROM messages WHERE session_id = ?').get(sessionId) as { minId: number | null; maxId: number | null };
+    const rangeResult = db.prepare('SELECT MIN(id) as minId, MAX(id) as maxId FROM published_messages WHERE session_id = ?').get(sessionId) as { minId: number | null; maxId: number | null };
 
     if (rangeResult && rangeResult.minId !== null && rangeResult.maxId !== null) {
       const affectedLoaIds = db.prepare(`
@@ -96,13 +117,65 @@ function deleteSession(sessionId: string): number {
       }
     }
 
+    deleteRecordEmbeddingsBySelectionInTransaction(
+      db,
+      'messages',
+      'SELECT id FROM messages WHERE session_id = ?',
+      [sessionId]
+    );
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-    db.prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
 
     return count;
   });
 
   return deleteAll();
+}
+
+function lifecycleSessionSource(sessionId: string): string | undefined {
+  const row = getDb()
+    .prepare('SELECT source FROM host_ingest_state WHERE session_id = ? LIMIT 1')
+    .get(sessionId) as { source: string } | undefined;
+  return row?.source;
+}
+
+function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 'project'>): string {
+  return JSON.stringify([message.role, message.content, message.project]);
+}
+
+function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
+  const rows = getDb()
+    .prepare(`
+      SELECT m.id, m.content, m.role, m.timestamp, m.project
+      FROM published_messages m
+      WHERE m.session_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM active_host_ingest_messages h WHERE h.message_id = m.id
+        )
+      ORDER BY m.id
+    `)
+    .all(session.sessionId) as DumpMessageRow[];
+  const expectedKeys = session.messages.map(message =>
+    explicitSnapshotKey({
+      role: message.role,
+      content: message.content,
+      project: message.project ?? session.project ?? null,
+    })
+  );
+
+  for (let start = rows.length - expectedKeys.length; start >= 0; start--) {
+    const snapshot = rows.slice(start, start + expectedKeys.length);
+    const contiguous = snapshot.every((message, index) =>
+      index === 0 || message.id === snapshot[index - 1].id + 1
+    );
+    if (
+      contiguous &&
+      snapshot.every((message, index) => explicitSnapshotKey(message) === expectedKeys[index])
+    ) {
+      return snapshot;
+    }
+  }
+
+  return undefined;
 }
 
 // ============ Core Dump Logic (shared by CLI and MCP) ============
@@ -131,36 +204,69 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     }
   }
 
-  // Delete existing session if re-importing
-  if (sessionExists(session.sessionId)) {
-    deleteSession(session.sessionId);
+  const replacingSession = sessionExists(session.sessionId);
+  const lifecycleSource = replacingSession
+    ? lifecycleSessionSource(session.sessionId)
+    : undefined;
+  if (lifecycleSource && lifecycleSource !== session.source) {
+    return {
+      success: false,
+      sessionId: session.sessionId,
+      messageCount: 0,
+      source: session.source,
+      error: `Session ${session.sessionId} is owned by ${lifecycleSource}, not ${session.source}`,
+    };
   }
+  const lifecycleOwned = Boolean(lifecycleSource);
+  if (replacingSession && !lifecycleOwned) clearSessionMessages(session.sessionId);
+  const existingSnapshot = lifecycleOwned ? findExplicitSnapshot(session) : undefined;
 
   // Import messages to SQLite FIRST (fast, always succeeds)
   const timestamps = session.messages.map(m => m.timestamp).sort();
-  createSession({
-    session_id: session.sessionId,
-    started_at: timestamps[0],
-    ended_at: timestamps[timestamps.length - 1],
-    project: options.project || session.project,
-    summary: `Dumped: ${title}`,
-    source: session.source,
-  });
+  const project = options.project || session.project;
+  if (replacingSession && !lifecycleOwned) {
+    getDb().prepare(`
+      UPDATE sessions SET
+        started_at = ?, ended_at = ?, summary = ?, project = ?,
+        cwd = NULL, git_branch = NULL, model = NULL, source = ?
+      WHERE session_id = ?
+    `).run(
+      timestamps[0],
+      timestamps[timestamps.length - 1],
+      `Dumped: ${title}`,
+      project ?? null,
+      session.source,
+      session.sessionId
+    );
+  } else if (!replacingSession) {
+    createSession({
+      session_id: session.sessionId,
+      started_at: timestamps[0],
+      ended_at: timestamps[timestamps.length - 1],
+      project,
+      summary: `Dumped: ${title}`,
+      source: session.source,
+    });
+  }
 
   // Raw conversation capture is verbatim (ADR-0001).
-  const importedCount = addMessagesBatch(session.messages.map(m => ({ ...m, provenance: 'verbatim' as const })));
+  const messagesToImport = existingSnapshot ? [] : session.messages;
+  const importedCount = addMessagesBatch(
+    messagesToImport.map(message => ({ ...message, provenance: 'verbatim' as const }))
+  );
 
-  // Get imported message IDs for LoA
   const db = getDb();
-  const importedMessages = db.prepare(`
-    SELECT id, content, role, timestamp
-    FROM messages
-    WHERE session_id = ?
-    ORDER BY timestamp
-    ${options.limit ? 'LIMIT ?' : ''}
-  `).all(session.sessionId, ...(options.limit ? [options.limit] : [])) as Array<{
-    id: number; content: string; role: 'user' | 'assistant' | 'system'; timestamp: string;
-  }>;
+  const snapshotMessages = lifecycleOwned
+    ? (existingSnapshot ?? findExplicitSnapshot(session) ?? [])
+    : db.prepare(`
+        SELECT id, content, role, timestamp, project
+        FROM published_messages
+        WHERE session_id = ?
+        ORDER BY timestamp
+      `).all(session.sessionId) as DumpMessageRow[];
+  const importedMessages = options.limit
+    ? snapshotMessages.slice(0, options.limit)
+    : snapshotMessages;
 
   if (importedMessages.length === 0) {
     return { success: true, sessionId: session.sessionId, messageCount: importedCount, source: session.source };
@@ -172,29 +278,68 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   // Try Fabric, fall back to basic summary
   let fabricExtract: string;
   if (options.skipFabric) {
-    fabricExtract = generateBasicSummary(session.messages);
+    fabricExtract = generateBasicSummary(importedMessages);
   } else {
     try {
       const conversationText = formatMessagesForExtraction(importedMessages);
       fabricExtract = runFabricExtract(conversationText);
     } catch {
-      fabricExtract = generateBasicSummary(session.messages);
+      fabricExtract = generateBasicSummary(importedMessages);
     }
   }
 
-  const loaId = createLoaEntry({
-    title,
-    fabric_extract: fabricExtract,
-    message_range_start: startId,
-    message_range_end: endId,
-    parent_loa_id: options.continues,
-    project: options.project || session.project,
-    tags: options.tags,
-    message_count: importedMessages.length,
-    // Fabric output and the basic-summary fallback are both generated from
-    // the session messages — extracted either way (ADR-0001).
-    provenance: 'extracted'
-  });
+  const sourceIds = JSON.stringify(
+    importedMessages.map(message => ({ table: 'messages', id: message.id }))
+  );
+  const existingLoa = lifecycleOwned
+    ? db.prepare(`
+        SELECT id, title, fabric_extract FROM loa_entries
+        WHERE session_id = ? AND description = ? AND source_ids = ?
+        ORDER BY id DESC LIMIT 1
+      `).get(session.sessionId, EXPLICIT_DUMP_DESCRIPTION, sourceIds) as
+        { id: number; title: string; fabric_extract: string } | undefined
+    : undefined;
+  let loaId: number;
+  if (existingLoa) {
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE loa_entries SET
+          title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
+          snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?,
+          created_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        title,
+        fabricExtract,
+        startId,
+        endId,
+        endId,
+        options.project || session.project,
+        options.tags ?? null,
+        importedMessages.length,
+        existingLoa.id
+      );
+      if (existingLoa.title !== title || existingLoa.fabric_extract !== fabricExtract) {
+        invalidateRecordEmbedding(db, 'loa_entries', existingLoa.id);
+      }
+    })();
+    loaId = existingLoa.id;
+  } else {
+    loaId = createLoaEntry({
+      title,
+      description: lifecycleOwned ? EXPLICIT_DUMP_DESCRIPTION : undefined,
+      fabric_extract: fabricExtract,
+      message_range_start: startId,
+      message_range_end: endId,
+      parent_loa_id: options.continues,
+      session_id: lifecycleOwned ? session.sessionId : undefined,
+      project: options.project || session.project,
+      tags: options.tags,
+      message_count: importedMessages.length,
+      source_ids: sourceIds,
+      provenance: 'extracted'
+    });
+  }
 
   if (!options.skipEmbed) await autoEmbedLoaEntry(loaId, title, fabricExtract);
 

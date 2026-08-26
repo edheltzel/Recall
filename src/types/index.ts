@@ -88,6 +88,7 @@ export interface LoaEntry {
   fabric_extract: string;
   message_range_start?: number;
   message_range_end?: number;
+  snapshot_max_message_id?: number | null;
   parent_loa_id?: number;
   session_id?: string;
   project?: string;
@@ -95,9 +96,8 @@ export interface LoaEntry {
   message_count?: number;
   importance?: number;
   provenance?: Provenance | null;
-  // Source lineage for derived consolidation summaries (issue #140/#141): JSON
-  // array of {table, id} records this entry was built from. Nullable — legacy
-  // and non-derived rows stay NULL (never guessed, ADR-0001).
+  // Source lineage: JSON references to records this entry was built from.
+  // Nullable when exact lineage is unavailable (ADR-0001).
   source_ids?: string | null;
 }
 

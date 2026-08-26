@@ -99,7 +99,7 @@ Named explicitly rather than assumed away, because identical `SKILL.md` bytes do
 | `disable-model-invocation` | Stripped; replaced by `agents/openai.yaml` because Codex does not interpret it | Kept — it is Claude's own frontmatter contract |
 | MCP naming | `recall-memory` | `plugin:recall:recall-memory` (namespaced) |
 | Pre-existing install to reconcile | None — Codex had no lifecycle installer | Nine skill symlinks and a user-scope MCP entry |
-| Lifecycle capture | Not implemented on any surface | Implemented, but by the installer's hooks — not the plugin |
+| Lifecycle capture | Plugin-owned; see [Codex Integration](CODEX_INTEGRATION.md) | Implemented, but by the installer's hooks — not the plugin |
 
 The Claude bundle needs no routing preamble because `agent-skills/` is already authored against Claude's frontmatter. Rewriting the bodies would change behavior relative to the skills users already have, which is the opposite of a safe migration.
 

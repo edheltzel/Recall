@@ -3,9 +3,20 @@
 import { getDb, getDbPath } from '../db/connection.js';
 import { existsSync, statSync } from 'fs';
 import { notMarkedDuplicateSql } from './dedup.js';
-import { chunked } from './chunk.js';
+import { chunked, SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { scrub } from './write-safety.js';
-import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance } from '../types/index.js';
+import { deleteRecordEmbeddingsByIdsInTransaction } from './embedding-store.js';
+import { publishedRecordTable } from './published-records.js';
+import {
+  LIFECYCLE_SEARCH_RETRYABLE,
+  countActiveLifecycleGenerations,
+  getLifecycleSearchCapabilities,
+  repairLifecycleSearchIndex,
+  type LifecycleSearchReadiness,
+} from './lifecycle-search.js';
+import type { Session, Message, Decision, Learning, Breadcrumb, LoaEntry, Stats, SearchResult, Provenance, ProvenanceTable } from '../types/index.js';
+
+export { LIFECYCLE_SEARCH_RETRYABLE } from './lifecycle-search.js';
 
 // Choke point for redacting known-prefix secrets (and stripping invisible
 // unicode) on the EXPLICIT add paths — `recall add` (CLI) and `memory_add`
@@ -306,6 +317,10 @@ export function getBreadcrumb(id: number): Breadcrumb | undefined {
 
 // Track search errors for debugging (FIX #7)
 let lastSearchErrors: string[] = [];
+let lastSearchReadiness: LifecycleSearchReadiness = {
+  status: 'ready',
+  pendingGenerations: 0,
+};
 
 export const SEARCH_TABLES = ['messages', 'loa', 'decisions', 'learnings', 'breadcrumbs'] as const;
 export type SearchTable = typeof SEARCH_TABLES[number];
@@ -345,11 +360,69 @@ export function getLastSearchErrors(): string[] {
   return lastSearchErrors;
 }
 
+export function getLastSearchReadiness(): LifecycleSearchReadiness {
+  return lastSearchReadiness;
+}
+
+type RankedSearchRow = {
+  id: number;
+  content: string;
+  project: string | null;
+  created_at: string;
+  provenance: Provenance | null;
+  rank: number;
+};
+
+function asSearchResult(table: string, row: RankedSearchRow): SearchResult {
+  return {
+    table,
+    id: row.id,
+    content: row.content,
+    project: row.project || undefined,
+    created_at: row.created_at,
+    provenance: row.provenance ?? null,
+    rank: row.rank,
+  };
+}
+
+function fuseMessageSearchGroups(groups: RankedSearchRow[][]): SearchResult[] {
+  const populated = groups.filter(group => group.length > 0);
+  if (populated.length <= 1) {
+    return (populated[0] ?? []).map(row => asSearchResult('messages', row));
+  }
+  const scores = new Map<number, number>();
+  const rows = new Map<number, RankedSearchRow>();
+  for (const group of populated) {
+    group.forEach((row, index) => {
+      rows.set(row.id, row);
+      scores.set(row.id, (scores.get(row.id) ?? 0) + 1 / (60 + index + 1));
+    });
+  }
+  const ranked = [...rows.values()].sort((left, right) =>
+    (scores.get(right.id) ?? 0) - (scores.get(left.id) ?? 0) ||
+    right.created_at.localeCompare(left.created_at) || left.id - right.id
+  );
+  const rawRanks = ranked.map(row => row.rank).sort((left, right) => left - right);
+  const best = rawRanks[0] ?? -Number.EPSILON;
+  const worst = rawRanks.at(-1) ?? best;
+  return ranked.map((row, index) => ({
+    ...asSearchResult('messages', row),
+    rank: ranked.length === 1
+      ? best
+      : best + ((worst - best) * index) / (ranked.length - 1),
+  }));
+}
+
 export function search(query: string, options?: MemorySearchOptions): SearchResult[] {
   const db = getDb();
   const limit = options?.limit || 20;
   const results: SearchResult[] = [];
   lastSearchErrors = []; // Reset errors for this search
+  lastSearchReadiness = { status: 'ready', pendingGenerations: 0 };
+  const lifecycleCapabilities = getLifecycleSearchCapabilities(db);
+  const generationStorageAvailable = lifecycleCapabilities.storage;
+  const generationFtsAvailable = lifecycleCapabilities.fts;
+  const generationFtsReadinessAvailable = lifecycleCapabilities.readiness;
 
   const tables = options?.table
     ? [options.table]
@@ -364,8 +437,17 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
         sql = `
           SELECT m.id, m.content, m.project, m.timestamp as created_at, m.provenance, f.rank
           FROM messages_fts f
-          JOIN messages m ON m.id = f.rowid
+          JOIN published_messages m ON m.id = f.rowid
           WHERE messages_fts MATCH ?
+          ${generationStorageAvailable ? `AND NOT EXISTS (
+            SELECT 1
+            FROM host_ingest_generation_messages AS generated
+            JOIN host_ingest_state AS state
+              ON state.active_generation = generated.generation_id
+             AND state.source = generated.source
+             AND state.session_id = generated.session_id
+            WHERE generated.message_id = m.id
+          )` : ''}
           ${duplicateFilter(options, 'messages', 'm.id')}
           ${options?.project ? 'AND m.project = ?' : ''}
           ORDER BY f.rank
@@ -430,36 +512,84 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
     }
     params.push(limit);
 
-    try {
-      // db.query (#151) caches the compiled statement per SQL shape on this
-      // connection, so repeat searches skip recompilation. There are a bounded
-      // number of shapes (per table × with/without project/duplicate filters);
-      // each is cached on first use. Identical SQL + params → identical output.
-      const rows = db.query(sql).all(...params) as Array<{
-        id: number;
-        content: string;
-        project: string | null;
-        created_at: string;
-        provenance: Provenance | null;
-        rank: number;
-      }>;
-
-      for (const row of rows) {
-        results.push({
-          table,
-          id: row.id,
-          content: row.content,
-          project: row.project || undefined,
-          created_at: row.created_at,
-          provenance: row.provenance ?? null,
-          rank: row.rank
-        });
+    if (table === 'messages') {
+      const messageGroups: RankedSearchRow[][] = [];
+      try {
+        messageGroups.push(db.query(sql).all(...params) as RankedSearchRow[]);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        lastSearchErrors.push(`[messages] ${errorMsg}`);
       }
+
+      let activeGeneration = false;
+      if (generationStorageAvailable) {
+        try {
+          lastSearchReadiness = repairLifecycleSearchIndex(db, {
+            project: options?.project,
+            maxPages: 1,
+          });
+          activeGeneration = countActiveLifecycleGenerations(db, options?.project) > 0;
+        } catch {
+          lastSearchReadiness = {
+            status: 'retryable',
+            pendingGenerations: 1,
+            message: LIFECYCLE_SEARCH_RETRYABLE,
+          };
+        }
+      }
+      if (lastSearchReadiness.status === 'retryable') {
+        lastSearchErrors.push(`[messages:lifecycle] ${lastSearchReadiness.message}`);
+      }
+
+      if (activeGeneration && generationFtsAvailable && generationFtsReadinessAvailable) {
+        const generationParams: Array<string | number> = [query];
+        if (options?.project) generationParams.push(options.project);
+        generationParams.push(limit);
+        try {
+          const generationRows = db.prepare(`
+            SELECT generated.message_id AS id, generated.content, generated.project,
+              generated.timestamp AS created_at, generated.provenance, f.rank
+            FROM host_ingest_generation_messages_fts AS f
+            JOIN host_ingest_generation_messages AS generated
+              ON generated.message_id = f.rowid
+            JOIN host_ingest_generations AS generation
+              ON generation.generation_id = generated.generation_id
+             AND generation.status = 'active'
+             AND generation.fts_ready = 1
+            JOIN host_ingest_state AS state
+              ON state.active_generation = generated.generation_id
+             AND state.source = generated.source
+             AND state.session_id = generated.session_id
+            WHERE host_ingest_generation_messages_fts MATCH ?
+              AND generated.message_id IS NOT NULL
+              AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+              ${duplicateFilter(options, 'messages', 'generated.message_id')}
+              ${options?.project ? 'AND generated.project = ?' : ''}
+            ORDER BY f.rank LIMIT ?
+          `).all(...generationParams) as RankedSearchRow[];
+          messageGroups.push(generationRows);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          lastSearchReadiness = {
+            status: 'retryable',
+            pendingGenerations: 1,
+            message: LIFECYCLE_SEARCH_RETRYABLE,
+          };
+          lastSearchErrors.push(
+            `[messages:lifecycle] ${LIFECYCLE_SEARCH_RETRYABLE} (${errorMsg})`
+          );
+        }
+      }
+      results.push(...fuseMessageSearchGroups(messageGroups));
+      continue;
+    }
+
+    try {
+      const rows = db.query(sql).all(...params) as RankedSearchRow[];
+      for (const row of rows) results.push(asSearchResult(table, row));
     } catch (err) {
-      // FIX #7: Record errors instead of silently swallowing
       const errorMsg = err instanceof Error ? err.message : String(err);
       lastSearchErrors.push(`[${table}] ${errorMsg}`);
-      // Continue searching other tables even if one fails
     }
   }
 
@@ -595,7 +725,9 @@ export function vectorRowContentProvenance(
     };
   }
   if (sourceTable === 'messages') {
-    const msg = db.prepare('SELECT content, provenance FROM messages WHERE id = ?').get(sourceId) as any;
+    const msg = db.prepare(
+      `SELECT content, provenance FROM ${publishedRecordTable(sourceTable)} WHERE id = ?`
+    ).get(sourceId) as any;
     if (!msg) return empty;
     return {
       content: msg.content?.slice(0, 200) || '',
@@ -632,8 +764,8 @@ export function vectorRowContentProvenance(
 export function recentMessages(limit: number = 10, project?: string): Message[] {
   const db = getDb();
   const sql = project
-    ? 'SELECT * FROM messages WHERE project = ? ORDER BY timestamp DESC LIMIT ?'
-    : 'SELECT * FROM messages ORDER BY timestamp DESC LIMIT ?';
+    ? 'SELECT * FROM published_messages WHERE project = ? ORDER BY timestamp DESC LIMIT ?'
+    : 'SELECT * FROM published_messages ORDER BY timestamp DESC LIMIT ?';
   const params = project ? [project, limit] : [limit];
   return db.prepare(sql).all(...params) as Message[];
 }
@@ -673,8 +805,8 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
   // so a careless caller cannot demote curated knowledge below neutral.
   const importance = Math.max(5, clampImportance(entry.importance, 8));
   const stmt = db.prepare(`
-    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, parent_loa_id, session_id, project, tags, message_count, importance, provenance)
-    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance)
+    INSERT INTO loa_entries (title, description, fabric_extract, message_range_start, message_range_end, snapshot_max_message_id, parent_loa_id, session_id, project, tags, message_count, importance, provenance, source_ids)
+    VALUES ($title, $description, $fabric_extract, $message_range_start, $message_range_end, $snapshot_max_message_id, $parent_loa_id, $session_id, $project, $tags, $message_count, $importance, $provenance, $source_ids)
   `);
   const result = stmt.run({
     $title: entry.title,
@@ -682,15 +814,99 @@ export function createLoaEntry(entry: Omit<LoaEntry, 'id' | 'created_at'>): numb
     $fabric_extract: entry.fabric_extract,
     $message_range_start: entry.message_range_start || null,
     $message_range_end: entry.message_range_end || null,
+    $snapshot_max_message_id: entry.snapshot_max_message_id ?? entry.message_range_end ?? null,
     $parent_loa_id: entry.parent_loa_id || null,
     $session_id: entry.session_id || null,
     $project: entry.project || null,
     $tags: entry.tags || null,
     $message_count: entry.message_count || null,
     $importance: importance,
-    $provenance: entry.provenance ?? null
+    $provenance: entry.provenance ?? null,
+    $source_ids: entry.source_ids ?? null
   });
   return result.lastInsertRowid as number;
+}
+
+export function createLoaEntryFromMessages(
+  entry: Omit<LoaEntry, 'id' | 'created_at'>,
+  messages: readonly Message[]
+): number {
+  const db = getDb();
+  const messageIds = messages.map(message => {
+    if (!Number.isSafeInteger(message.id) || message.id! < 1) {
+      throw new Error('LoA source messages must have persisted IDs');
+    }
+    return message.id!;
+  });
+
+  return db.transaction(() => {
+    const physicalIds = new Set<number>();
+    const generationBackedIds = new Set<number>();
+    for (const idChunk of chunked(messageIds)) {
+      const physicalRows = db.prepare(`
+        SELECT id FROM messages WHERE id IN (${idChunk.map(() => '?').join(',')})
+      `).all(...idChunk) as Array<{ id: number }>;
+      for (const row of physicalRows) physicalIds.add(row.id);
+      const generationRows = db.prepare(`
+        SELECT generated.message_id AS id
+        FROM host_ingest_generation_messages AS generated
+        JOIN host_ingest_state AS state
+          ON state.active_generation = generated.generation_id
+         AND state.source = generated.source
+         AND state.session_id = generated.session_id
+        WHERE generated.message_id IN (${idChunk.map(() => '?').join(',')})
+      `).all(...idChunk) as Array<{ id: number }>;
+      for (const row of generationRows) generationBackedIds.add(row.id);
+    }
+    const pinSources = messageIds.some(id =>
+      generationBackedIds.has(id) || !physicalIds.has(id)
+    );
+    const loaId = createLoaEntry(pinSources ? {
+      ...entry,
+      message_range_start: undefined,
+      message_range_end: undefined,
+      source_ids: null,
+    } : entry);
+    if (!pinSources) return loaId;
+
+    const insertSource = db.prepare(`
+      INSERT INTO loa_message_sources (
+        loa_id, ordinal, message_id, session_id, timestamp, role, content,
+        project, importance, provenance
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const [ordinal, message] of messages.entries()) {
+      insertSource.run(
+        loaId,
+        ordinal,
+        message.id!,
+        message.session_id,
+        message.timestamp,
+        message.role,
+        message.content,
+        message.project ?? null,
+        message.importance ?? 5,
+        message.provenance ?? null
+      );
+    }
+    db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?').run(
+      JSON.stringify({ table: 'loa_message_sources', loa_id: loaId }),
+      loaId
+    );
+    return loaId;
+  })();
+}
+
+export function invalidateRecordEmbedding(
+  db: ReturnType<typeof getDb>,
+  sourceTable: ProvenanceTable,
+  sourceId: number
+): boolean {
+  return deleteRecordEmbeddingsByIdsInTransaction(
+    db,
+    sourceTable,
+    [sourceId]
+  ) > 0;
 }
 
 export function getLoaEntry(id: number): LoaEntry | undefined {
@@ -703,14 +919,119 @@ export function getLastLoaEntry(): LoaEntry | undefined {
   return db.prepare('SELECT * FROM loa_entries ORDER BY created_at DESC LIMIT 1').get() as LoaEntry | undefined;
 }
 
+function getPinnedLoaMessages(loaId: number): Message[] {
+  const db = getDb();
+  const statement = db.prepare(`
+    SELECT message_id AS id, session_id, timestamp, role, content, project,
+      importance, provenance, ordinal
+    FROM loa_message_sources
+    WHERE loa_id = ? AND ordinal > ? AND content <> ''
+    ORDER BY ordinal LIMIT ?
+  `);
+  const messages: Message[] = [];
+  let ordinal = -1;
+  for (;;) {
+    const batch = statement.all(loaId, ordinal, SQLITE_SAFE_CHUNK_SIZE) as Array<
+      Message & { ordinal: number }
+    >;
+    if (batch.length === 0) break;
+    for (const message of batch) {
+      ordinal = message.ordinal;
+      const { ordinal: _ordinal, ...source } = message;
+      messages.push(source);
+    }
+  }
+  return messages;
+}
+
+function getGenerationLoaMessages(generationId: string): Message[] {
+  const db = getDb();
+  const statement = db.prepare(`
+    SELECT message_id AS id, session_id, timestamp, role, content, project,
+      importance, provenance, ordinal
+    FROM host_ingest_generation_messages
+    WHERE generation_id = ? AND ordinal > ? AND message_id IS NOT NULL
+      AND content IS NOT NULL
+      AND (source <> 'grok' OR source_position IS NOT NULL)
+    ORDER BY ordinal LIMIT ?
+  `);
+  const messages: Message[] = [];
+  let ordinal = -1;
+  for (;;) {
+    const batch = statement.all(generationId, ordinal, SQLITE_SAFE_CHUNK_SIZE) as Array<
+      Message & { ordinal: number }
+    >;
+    if (batch.length === 0) break;
+    for (const message of batch) {
+      ordinal = message.ordinal;
+      const { ordinal: _ordinal, ...source } = message;
+      messages.push(source);
+    }
+  }
+  return messages;
+}
+
 export function getLoaMessages(loaId: number): Message[] {
   const db = getDb();
   const loa = getLoaEntry(loaId);
-  if (!loa || !loa.message_range_start || !loa.message_range_end) {
+  if (!loa) return [];
+
+  if (loa.source_ids) {
+    try {
+      const sources = JSON.parse(loa.source_ids) as unknown;
+      if (
+        typeof sources === 'object' && sources !== null &&
+        (sources as { table?: unknown }).table === 'loa_message_sources' &&
+        (sources as { loa_id?: unknown }).loa_id === loaId
+      ) {
+        return getPinnedLoaMessages(loaId);
+      }
+      if (
+        typeof sources === 'object' && sources !== null &&
+        (sources as { table?: unknown }).table === 'host_ingest_generation_messages' &&
+        typeof (sources as { generation_id?: unknown }).generation_id === 'string'
+      ) {
+        return getGenerationLoaMessages((sources as { generation_id: string }).generation_id);
+      }
+      if (
+        Array.isArray(sources) &&
+        sources.every(source =>
+          typeof source === 'object' && source !== null &&
+          (source as { table?: unknown }).table === 'messages' &&
+          Number.isSafeInteger((source as { id?: unknown }).id)
+        )
+      ) {
+        const ids = sources.map(source => (source as { id: number }).id);
+        const messages: Message[] = [];
+        for (const idChunk of chunked(ids)) {
+          messages.push(...db.prepare(`
+            SELECT * FROM published_messages WHERE id IN (${idChunk.map(() => '?').join(',')})
+          `).all(...idChunk) as Message[]);
+        }
+        const order = new Map(ids.map((id, index) => [id, index]));
+        return messages.sort((left, right) =>
+          (order.get(left.id!) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.id!) ?? Number.MAX_SAFE_INTEGER)
+        );
+      }
+    } catch {
+      return [];
+    }
+  }
+
+  if (!loa.message_range_start || !loa.message_range_end) {
     return [];
   }
-  return db.prepare('SELECT * FROM messages WHERE id >= ? AND id <= ? ORDER BY timestamp')
-    .all(loa.message_range_start, loa.message_range_end) as Message[];
+  if (loa.session_id) {
+    return db.prepare(`
+      SELECT * FROM published_messages
+      WHERE id >= ? AND id <= ? AND session_id = ?
+      ORDER BY timestamp
+    `).all(loa.message_range_start, loa.message_range_end, loa.session_id) as Message[];
+  }
+  return db.prepare(`
+    SELECT * FROM published_messages WHERE id >= ? AND id <= ? ORDER BY timestamp
+  `).all(loa.message_range_start, loa.message_range_end) as Message[];
 }
 
 export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; startId: number | null; endId: number | null } {
@@ -720,15 +1041,16 @@ export function getMessagesSinceLastLoa(limit?: number): { messages: Message[]; 
   let sql: string;
   let params: number[];
 
-  if (lastLoa?.message_range_end) {
+  const cursor = lastLoa?.snapshot_max_message_id ?? lastLoa?.message_range_end;
+  if (cursor !== undefined && cursor !== null) {
     sql = limit
-      ? 'SELECT * FROM messages WHERE id > ? ORDER BY timestamp LIMIT ?'
-      : 'SELECT * FROM messages WHERE id > ? ORDER BY timestamp';
-    params = limit ? [lastLoa.message_range_end, limit] : [lastLoa.message_range_end];
+      ? 'SELECT * FROM published_messages WHERE id > ? ORDER BY timestamp LIMIT ?'
+      : 'SELECT * FROM published_messages WHERE id > ? ORDER BY timestamp';
+    params = limit ? [cursor, limit] : [cursor];
   } else {
     sql = limit
-      ? 'SELECT * FROM messages ORDER BY timestamp LIMIT ?'
-      : 'SELECT * FROM messages ORDER BY timestamp';
+      ? 'SELECT * FROM published_messages ORDER BY timestamp LIMIT ?'
+      : 'SELECT * FROM published_messages ORDER BY timestamp';
     params = limit ? [limit] : [];
   }
 
@@ -757,7 +1079,7 @@ export function getStats(): Stats {
   const count = (sql: string) => (db.prepare(sql).get() as { count: number }).count;
 
   const sessions = count('SELECT COUNT(*) as count FROM sessions');
-  const messages = count('SELECT COUNT(*) as count FROM messages');
+  const messages = count('SELECT COUNT(*) as count FROM published_messages');
   const decisions = count('SELECT COUNT(*) as count FROM decisions');
   const decisions_active = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'active'");
   const decisions_superseded = count("SELECT COUNT(*) as count FROM decisions WHERE status = 'superseded'");

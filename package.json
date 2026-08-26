@@ -41,6 +41,7 @@
     "lint": "tsc --noEmit -p tsconfig.lint.json",
     "build:codex-plugin": "bun run scripts/build-codex-plugin.ts",
     "test:e2e:codex-plugin": "bun run build && bun run scripts/e2e-codex-plugin.ts",
+    "test:e2e:grok-lifecycle": "bun run build && bun run scripts/e2e-grok-lifecycle.ts",
     "test:e2e:pi-integration": "bun run build && bun run scripts/e2e-pi-integration.ts",
     "test:e2e:opencode": "bun run build && bun run scripts/e2e-opencode.ts",
     "check:version": "bun run scripts/check-version.ts",

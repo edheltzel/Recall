@@ -15,7 +15,7 @@ const defaultOutputRoot = join(repoRoot, 'plugins', 'recall', 'skills');
 export const routes: Record<string, string> = {
   'recall-add': 'Prefer the `memory_add` MCP tool. Use the CLI examples below only when the MCP server is unavailable.',
   'recall-doctor': 'This remains a local CLI diagnostic. Run `recall doctor`; the Codex plugin does not rewrite Codex-owned configuration.',
-  'recall-dump': 'Use the `memory_dump` MCP tool with `source: "codex"` and explicit visible `messages`. MCP does not expose lifecycle auto-capture or a supported Codex transcript path.',
+  'recall-dump': 'Codex lifecycle hooks capture supported transcripts automatically. Use `memory_dump` only for an explicit supplemental snapshot of visible messages.',
   'recall-loa': 'Prefer `loa_show` for a known entry and `memory_recall` to browse recent entries. Use CLI-only quote/list variants when needed.',
   'recall-recent': 'Prefer `memory_recall` for recent cross-table context. Use the CLI when an exact table-specific recent listing is required.',
   'recall-scout': 'Use the plugin MCP tools `memory_search`, `memory_hybrid_search`, and `context_for_agent` for the memory-first steps; keep the workflow sensitive-data boundary intact.',
