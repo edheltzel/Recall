@@ -109,7 +109,7 @@ MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.
 | host_ingest_embedding_invalidations | Pending semantic-index cleanup for an activated lifecycle generation | No |
 | loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
-| loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
+| loa_entries | Library of Alexandria entries (Automatic-capture LoA and Curated LoA); extract body in `fabric_extract` (column name, not the writer); includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
 | learnings | Problems solved and patterns discovered; includes `confidence` (high/medium/low) and `importance` (1-10) columns | Yes |
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |
@@ -243,7 +243,24 @@ graph TD
 
 The hook self-spawns in background so the session exits immediately (non-blocking).
 
-The current Claude lifecycle adapter tries Claude Haiku first and falls back to a local Ollama model (configurable via `RECALL_OLLAMA_MODEL`).
+Automatic-capture LoA uses the Extractor cascade: default `claude-cli` (Haiku) then `ollama` (`Recall_OLLAMA_MODEL`, default `qwen2.5:3b`). Curated LoA (`recall loa`, dump extract) uses the `fabric` Extractor. Optional per-path config is below. `OLLAMA_URL` is the shared Ollama endpoint for embeddings and the automatic `ollama` Extractor; it is not a config.json field.
+
+### Extractor config
+
+Optional file: `~/.agents/Recall/config.json`. Install never writes it. Missing file = the split defaults above. Bad JSON or an illegal Extractor ID fails that path closed.
+
+Automatic-capture LoA may use `claude-cli` or `ollama`. Curated LoA may use `fabric` only. File selects IDs and fallback lists. `RECALL_FABRIC_MODEL` overrides curated `model`; `Recall_OLLAMA_MODEL` overrides the automatic Ollama `model`.
+
+```json
+{
+  "extractor": {
+    "automatic": { "id": "claude-cli", "model": "haiku", "fallback": [{ "id": "ollama", "model": "qwen2.5:3b" }] },
+    "curated":   { "id": "fabric", "model": "claude-haiku-4-5" }
+  }
+}
+```
+
+Terms: [CONTEXT.md](../CONTEXT.md). Extractor is the model backend that produces LoA, not a Host and not the ingest/filter/persist path.
 
 ## Technical Details
 

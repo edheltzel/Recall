@@ -182,9 +182,9 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 │  recall add decision  ───┤         → Filter noise (tool results)         │
 │  recall add learning  ───┤         → Dedup check (.extraction_tracker)   │
 │  memory_add (MCP)  ───┤         → Acquire lock                        │
-│                       │         → Claude Haiku extract                │
+│                       │         → Automatic-capture Extractor         │
+│                       │           (claude-cli, then ollama)           │
 │                       │           (>120K? chunk → meta-extract)       │
-│                       │           (fallback: Ollama)                  │
 │                       │         → Quality gate                        │
 │                       │           (requires SUMMARY + MAIN IDEAS)     │
 │                       │              │                                │
@@ -268,7 +268,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
 - **Cross-host ingestion** — Codex and Grok lifecycle hooks write immediately through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
-- **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
+- **Library of Alexandria** — Automatic-capture LoA from session extract (importance 6, excluded from reserved L1 LoA slots). Curated LoA from `recall loa` / dump via the `fabric` Extractor (`extract_wisdom`); default importance 8, reserved L1 slots. Optional per-path Extractor config: [architecture](docs/architecture.md#extractor-config)
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `recall-add` agent skill
 - **Codebase scouting** — `/recall-scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output

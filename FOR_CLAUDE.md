@@ -188,16 +188,16 @@ When you need information about past work or project context, follow this priori
 
 ## How Extraction Works
 
-When a session ends, the `RecallExtract` hook:
+When a session ends, the `RecallExtract` hook writes Automatic-capture LoA:
 
 1. Reads the conversation JSONL file
-2. Sends it to Claude Haiku with an extraction prompt
+2. Runs the Automatic-capture Extractor (default `claude-cli`, then `ollama`)
 3. Parses the response into structured sections (summary, ideas, decisions, errors, insights)
 4. Appends to `~/.claude/MEMORY/DISTILLED.md` and updates `HOT_RECALL.md`
 5. Updates `SESSION_INDEX.json` for searchable lookup
 6. Tracks extraction state in `.extraction_tracker.json`
 
-A cron job (`RecallBatchExtract.ts`) runs every 30 minutes to catch any sessions that weren't extracted at end (crashes, interruptions, etc.).
+A cron job (`RecallBatchExtract.ts`) runs every 30 minutes to catch any sessions that weren't extracted at end (crashes, interruptions, etc.). Curated LoA is `recall loa`. `memory_dump` defaults to `skip_fabric: true` (basic summary); set `skip_fabric: false` to run the `fabric` Extractor. Optional config file: `~/.agents/Recall/config.json` (schema in the architecture guide in the Recall repo).
 
 ## Database Location
 
