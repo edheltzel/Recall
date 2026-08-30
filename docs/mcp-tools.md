@@ -32,7 +32,7 @@ memory_search({ query: "kubernetes auth", project: "my-app", table: "decisions",
 memory_search({ query: "kubernetes auth", project: "my-app", bias_type: "decisions", limit: 10 })
 ```
 
-**When to bias:** use `bias_type: "decisions"` for “what did we decide,” `"learnings"` for “what did we learn,” `"breadcrumbs"` for “where did we leave off,” `"loa"` for curated summaries, and `"messages"` for raw conversation traces.
+**When to bias:** use `bias_type: "decisions"` for “what did we decide,” `"learnings"` for “what did we learn,” `"breadcrumbs"` for “where did we leave off,” `"loa"` for LoA extracts (Automatic-capture or Curated), and `"messages"` for raw conversation traces.
 
 ---
 
@@ -166,7 +166,7 @@ Persist an explicitly supplied conversation session into SQLite. Claude, OpenCod
 | session_id | string | no | generated | Stable session identifier supplied by the host |
 | source | string | no | `mcp` | Host source: `claude`, `opencode`, `pi`, `codex`, `grok`, `jcode`, or `mcp` |
 | messages | array | no | — | Explicit `{ role, content, timestamp? }` messages. Required when the host has no native transcript adapter. |
-| skip_fabric | boolean | no | true | Skip Fabric processing (faster; uses a basic summary instead of `extract_wisdom`) |
+| skip_fabric | boolean | no | true | Skip the fabric Extractor and write a basic summary |
 
 **Returns:** The session ID, source, imported message count, and LoA entry ID when a summary was created.
 
@@ -220,5 +220,5 @@ decision_update({ id: 17, action: "revert" })
 | Marking work-in-progress state | `memory_add` with `type: "breadcrumb"` |
 | Marking a decision as replaced or rolled back | `decision_update` |
 | End of session | `memory_dump` |
-| Viewing curated knowledge | `loa_show` |
+| Viewing an LoA entry | `loa_show` |
 | Quick database health check | `memory_stats` |

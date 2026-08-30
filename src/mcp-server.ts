@@ -675,7 +675,7 @@ server.tool(
 			let output = "## Recent Memory Context\n\n";
 
 			if (loa.length > 0) {
-				output += "### Library of Alexandria (Curated Knowledge)\n";
+				output += "### Library of Alexandria\n";
 				for (const e of loa) {
 					const preview = e.fabric_extract.slice(0, 300).replace(/\n/g, " ");
 					output += `- **LoA #${e.id}** [${e.project || "no-project"}] ${e.created_at?.split("T")[0]} (${provenanceLabel(e.provenance)}): ${e.title}\n  ${preview}...\n`;
@@ -727,7 +727,7 @@ server.tool(
 // Tool: loa_show - Show full LoA entry
 server.tool(
 	"loa_show",
-	"Show a full Library of Alexandria entry with its Fabric extract_wisdom content.",
+	"Show a full Library of Alexandria entry. The body is fabric_extract (column name, not the writer).",
 	{
 		id: z.number().describe("LoA entry ID"),
 	},
@@ -750,7 +750,7 @@ server.tool(
 ${loa.parent_loa_id ? `**Continues:** LoA #${loa.parent_loa_id}` : ""}
 ${loa.tags ? `**Tags:** ${loa.tags}` : ""}
 
-## Fabric Extract
+## Extract
 
 ${loa.fabric_extract}`;
 
@@ -1026,7 +1026,7 @@ server.tool(
 			.boolean()
 			.default(true)
 			.describe(
-				"Skip Fabric extract_wisdom (faster, uses basic summary). Default: true for speed.",
+				"Skip the fabric Extractor and write a basic summary. Default: true for speed.",
 			),
 	},
 	async ({ title, project, session_id, source, messages, skip_fabric }) => {

@@ -37,7 +37,7 @@ recall_memory_memory_search({ query: "database choice", table: "decisions" })   
 recall_memory_memory_search({ query: "database choice", bias_type: "decisions" })  // decisions first, broader context kept
 ```
 
-Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for curated summaries, `messages` for raw conversation traces.
+Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for LoA extracts (Automatic-capture or Curated), `messages` for raw conversation traces.
 
 ### recall_memory_memory_hybrid_search
 
@@ -75,7 +75,7 @@ Get database statistics (record counts, database size).
 
 ### recall_memory_loa_show
 
-Show a full Library of Alexandria entry with its extracted wisdom.
+Show a full LoA entry (Automatic-capture or Curated). The body is the extract column, not proof Fabric ran.
 
 ### recall_memory_context_for_agent
 
@@ -103,7 +103,7 @@ recall search "database choice" --bias-type decisions  # Prefer decisions, keep 
 recall search "auth" --show-provenance # Show Record Provenance for every result
 recall provenance backfill             # Classify legacy unknown-provenance rows (dry-run; --execute to apply)
 recall stats                           # Database statistics
-recall loa list                        # Browse curated knowledge
+recall loa list                        # Browse LoA entries
 recall onboard                         # Interactive L0 identity setup (run once per user)
 recall path                            # Show DB + install paths (diagnostics)
 recall doctor --fix                    # Repair drifted/missing Recall symlinks

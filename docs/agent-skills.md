@@ -16,7 +16,7 @@ Flush the current session to the database and capture a Library of Alexandria en
 
 What it does:
 1. Imports the current session's messages into SQLite
-2. Creates a curated LoA entry with Fabric extract_wisdom analysis
+2. Creates a Curated LoA entry via the fabric Extractor (or a basic summary with `--skip-fabric`)
 3. Makes everything immediately searchable
 
 This skill is user-invoked only — dumping a session is always your call, never the model's. Claude uses `disable-model-invocation: true`; the generated Codex adapter uses `agents/openai.yaml` with `allow_implicit_invocation: false`.

@@ -3,7 +3,7 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 import type { ExtractionProvider } from '../../extraction-provider';
 
-const CLAUDE_CLI_MODEL = 'haiku';
+const DEFAULT_CLAUDE_CLI_MODEL = 'haiku';
 const MAX_DIRECT_CHARS = 120000;
 const CHUNK_SIZE = 80000;
 
@@ -71,11 +71,11 @@ Extract ONLY what actually happened. Follow this format EXACTLY:
 [One sentence about impact on infrastructure]`;
 }
 
-function runClaude(claudePath: string, input: string): string | null {
+function runClaude(claudePath: string, input: string, model: string): string | null {
   try {
     const result = execFileSync(
       claudePath,
-      ['-p', '--model', CLAUDE_CLI_MODEL, '--output-format', 'text', '--setting-sources', ''],
+      ['-p', '--model', model, '--output-format', 'text', '--setting-sources', ''],
       {
         input,
         encoding: 'utf-8',
@@ -96,13 +96,13 @@ function runClaude(claudePath: string, input: string): string | null {
   }
 }
 
-async function extractDirect(messages: string, claudePath: string): Promise<string | null> {
+async function extractDirect(messages: string, claudePath: string, model: string): Promise<string | null> {
   const truncated = messages.length > MAX_DIRECT_CHARS ? messages.slice(-MAX_DIRECT_CHARS) : messages;
   const input = `${getExtractionPrompt()}\n\n---\n\nExtract the key information from this AI coding session transcript:\n\n${truncated}`;
-  const text = runClaude(claudePath, input);
+  const text = runClaude(claudePath, input, model);
   if (text) {
-    console.error(`[FabricExtract] Claude CLI extraction successful (model=${CLAUDE_CLI_MODEL}, ${text.length} chars)`);
-    logExtract(`Claude CLI extraction successful: model=${CLAUDE_CLI_MODEL}, output_chars=${text.length}`);
+    console.error(`[FabricExtract] Claude CLI extraction successful (model=${model}, ${text.length} chars)`);
+    logExtract(`Claude CLI extraction successful: model=${model}, output_chars=${text.length}`);
   } else {
     console.error('[FabricExtract] Claude CLI returned empty/short response');
   }
@@ -123,7 +123,7 @@ function splitChunks(messages: string): string[] {
   return chunks;
 }
 
-async function extractChunked(messages: string, claudePath: string): Promise<string | null> {
+async function extractChunked(messages: string, claudePath: string, model: string): Promise<string | null> {
   const chunks = splitChunks(messages);
   console.error(`[FabricExtract] CHUNKED: Splitting ${messages.length} chars into ${chunks.length} chunks`);
   logExtract(`CHUNKED: ${messages.length} chars -> ${chunks.length} chunks`);
@@ -131,7 +131,7 @@ async function extractChunked(messages: string, claudePath: string): Promise<str
   const partials: string[] = [];
   for (let index = 0; index < chunks.length; index++) {
     console.error(`[FabricExtract] CHUNKED: Extracting chunk ${index + 1}/${chunks.length} (${chunks[index].length} chars)`);
-    const result = await extractDirect(chunks[index], claudePath);
+    const result = await extractDirect(chunks[index], claudePath, model);
     if (result) partials.push(`--- Chunk ${index + 1}/${chunks.length} ---\n${result}`);
     if (index < chunks.length - 1) await new Promise(resolve => setTimeout(resolve, 2000));
   }
@@ -158,7 +158,7 @@ async function extractChunked(messages: string, claudePath: string): Promise<str
 ## SESSION CONTEXT
 [One comprehensive sentence about the full session's impact]`;
   const input = `${systemPrompt}\n\n---\n\nMerge these ${partials.length} partial extractions into one comprehensive summary:\n\n${partials.join('\n\n')}`;
-  const merged = runClaude(claudePath, input);
+  const merged = runClaude(claudePath, input, model);
   if (merged) {
     logExtract(`CHUNKED: Meta-extraction successful, output_chars=${merged.length}`);
     return merged;
@@ -166,16 +166,19 @@ async function extractChunked(messages: string, claudePath: string): Promise<str
   return partials.map(partial => partial.replace(/^--- Chunk \d+\/\d+ ---\n/, '')).join('\n\n');
 }
 
-export const claudeExtractionProvider: ExtractionProvider = {
-  id: 'claude-cli',
-  async extract(messages) {
-    const claudePath = findClaudeCli();
-    if (!claudePath) {
-      console.error('[FabricExtract] claude CLI not found in PATH');
-      return null;
-    }
-    return messages.length > MAX_DIRECT_CHARS
-      ? extractChunked(messages, claudePath)
-      : extractDirect(messages, claudePath);
-  },
-};
+export function createClaudeExtractionProvider(model: string = DEFAULT_CLAUDE_CLI_MODEL): ExtractionProvider {
+  return {
+    id: 'claude-cli',
+    async extract(messages) {
+      const claudePath = findClaudeCli();
+      if (!claudePath) {
+        console.error('[FabricExtract] claude CLI not found in PATH');
+        return null;
+      }
+      return messages.length > MAX_DIRECT_CHARS
+        ? extractChunked(messages, claudePath, model)
+        : extractDirect(messages, claudePath, model);
+    },
+  };
+}
+

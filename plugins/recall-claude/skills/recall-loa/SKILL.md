@@ -1,9 +1,9 @@
 ---
 name: "recall-loa"
-description: "Browse and search the Library of Alexandria — curated knowledge entries with extracted wisdom"
+description: "Browse Library of Alexandria entries — Automatic-capture LoA and Curated LoA"
 ---
 
-List, view, and search Library of Alexandria (LoA) entries. LoA entries are curated knowledge captures with Fabric-extracted insights, message lineage, and project context.
+List, view, and search Library of Alexandria (LoA) entries. Entries may be Automatic-capture LoA or Curated LoA. Curated LoA from `recall loa` uses the fabric Extractor.
 
 ## Usage
 
@@ -11,7 +11,7 @@ List, view, and search Library of Alexandria (LoA) entries. LoA entries are cura
 # List recent entries
 recall loa list
 
-# Show full entry with Fabric extract
+# Show full extract body
 recall loa show <id>
 
 # View raw source messages
@@ -31,7 +31,7 @@ recall loa list
 # Show last 20 entries
 recall loa list -l 20
 
-# View full Fabric-extracted wisdom for entry #5
+# View extract body for entry #5
 recall loa show 5
 
 # See the raw conversation messages behind entry #12

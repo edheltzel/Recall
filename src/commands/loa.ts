@@ -59,7 +59,7 @@ export async function runLoa(title: string, options: LoaOptions): Promise<void> 
     return;
   }
 
-  console.log(`Processing ${messages.length} messages through Fabric extract_wisdom...`);
+  console.log(`Processing ${messages.length} messages through the fabric Extractor...`);
 
   // Format messages for Fabric
   const fabricInput = formatMessagesForExtraction(messages);
@@ -104,7 +104,7 @@ export async function runLoa(title: string, options: LoaOptions): Promise<void> 
     }
   }
 
-  console.log(`\n--- Fabric Extract Preview ---`);
+  console.log(`\n--- Extract Preview ---`);
   const preview = fabricExtract.slice(0, 500);
   console.log(preview + (fabricExtract.length > 500 ? '...' : ''));
 }
@@ -170,7 +170,7 @@ export function runLoaShow(loaId: number): void {
     console.log(`Tags:       ${loa.tags}`);
   }
 
-  console.log(`\n--- Fabric Extract ---\n`);
+  console.log(`\n--- Extract ---\n`);
   console.log(loa.fabric_extract);
 }
 

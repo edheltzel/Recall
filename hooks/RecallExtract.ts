@@ -3,8 +3,8 @@
  * RecallExtract.ts - Extract Context for Future Sessions (Recall)
  *
  * PURPOSE:
- * Extracts structured context from Claude Code session transcripts using
- * Anthropic's Haiku API. Gives your AI persistent memory across sessions.
+ * Extracts structured context from Claude Code session transcripts via the
+ * Automatic-capture Extractor (default `claude-cli`, then `ollama`).
  *
  * TRIGGER: Stop (SessionEnd)
  *
@@ -20,7 +20,7 @@
  * FLOW:
  * 1. Get current session's conversation JSONL
  * 2. Extract just the message content (skip metadata)
- * 3. Extract via claude CLI using Claude Code's auth (fallback: Ollama local LLM)
+ * 3. Run the Automatic-capture Extractor cascade
  * 4. Parse output and update all 6 memory files
  *
  * PERFORMANCE:
@@ -554,8 +554,8 @@ function logDualWrite(result: DualWriteResult): void {
 }
 
 /**
- * Run extraction and update all memory files
- * Priority: Anthropic API > Nano local LLM
+ * Run extraction and update all memory files.
+ * Extractor order comes from resolved automatic config (default claude-cli, then ollama).
  */
 async function extractAndAppend(conversationPath: string, cwd: string): Promise<void> {
   try {
