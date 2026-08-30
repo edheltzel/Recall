@@ -10,6 +10,7 @@ import {
   importConversations,
   parseSlackConversations,
 } from '../../src/lib/conversation-import';
+import { ExtractorConfigError } from '../../src/lib/extraction';
 
 const EXTRACT_FIXTURE = `## ONE SENTENCE SUMMARY
 Imported conversations can become structured memory.
@@ -216,6 +217,41 @@ describe('importConversations', () => {
     expect(loa.message_range_start).toBeGreaterThan(0);
     expect(loa.message_range_end).toBeGreaterThanOrEqual(loa.message_range_start);
     expect(loa.message_count).toBe(2);
+  });
+
+  test('does not fall back to a basic summary when curated Extractor config fails', async () => {
+    const file = join(tempDir, 'config-fail.json');
+    writeFileSync(file, JSON.stringify([
+      {
+        uuid: 'claude-config-fail',
+        name: 'Config fail',
+        chat_messages: [
+          { sender: 'human', created_at: '2026-05-31T10:00:00Z', text: 'Please import this conversation.' },
+          { sender: 'assistant', created_at: '2026-05-31T10:00:01Z', text: 'I can normalize it first.' },
+        ],
+      },
+    ]));
+
+    const result = await importConversations(
+      file,
+      { format: 'claude-ai' },
+      {
+        extractor: async () => {
+          throw new ExtractorConfigError('curated Extractor id "ollama" is not allowed', 'curated');
+        },
+      },
+    );
+
+    expect(result.sessionsImported).toBe(1);
+    expect(result.extractionFallbacks).toBe(0);
+    expect(result.extractedSessions).toBe(0);
+    expect(result.structuredWrites.loa).toBe(0);
+    expect(result.errors.some(error => error.includes('ollama'))).toBe(true);
+
+    const db = readDb();
+    const loaCount = (db.prepare('SELECT COUNT(*) c FROM loa_entries').get() as { c: number }).c;
+    db.close();
+    expect(loaCount).toBe(0);
   });
 
   test('returns zero sessions for unrecognized JSON under auto without throwing', async () => {

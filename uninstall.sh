@@ -98,6 +98,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/correction-detector.ts"
   "$CLAUDE_DIR/hooks/lib/events.ts"
   "$CLAUDE_DIR/hooks/lib/extract-core.ts"
+  "$CLAUDE_DIR/hooks/lib/extractor-config.ts"
   "$CLAUDE_DIR/hooks/lib/extract-model.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-lock.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-migration.ts"

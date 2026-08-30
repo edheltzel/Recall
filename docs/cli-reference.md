@@ -71,7 +71,7 @@ recall loa write "VPN Config" -p infra        # Tag with project
 recall loa write "VPN Part 2" -c 1            # Continue from previous entry (chain)
 recall loa write "Auth System" -t "auth"      # Add tags
 recall loa list                               # List recent entries
-recall loa show 1                             # View full Fabric extract for entry #1
+recall loa show 1                             # View extract body for entry #1
 recall loa quote 1                            # View raw source messages for entry #1
 ```
 
@@ -126,7 +126,7 @@ Stores a freeform observation or preference. The `-i` flag sets importance on a 
 
 ```bash
 recall loa list                         # Recent LoA entries
-recall loa show 1                       # Full Fabric extract for entry #1
+recall loa show 1                       # Extract body for entry #1
 recall loa quote 1                      # Raw source messages for entry #1
 recall recent                           # Recent records across all tables
 recall recent decisions                 # Recent decisions only

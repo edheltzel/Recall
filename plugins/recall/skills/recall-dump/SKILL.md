@@ -11,7 +11,7 @@ Codex lifecycle hooks capture supported transcripts automatically. Use `memory_d
 
 The canonical workflow below remains authoritative, but equivalent behavior is not assumed across hosts.
 
-Dump the current conversation session into the Recall SQLite database, making all messages immediately searchable. Also creates a curated LoA (Library of Alexandria) entry with extracted wisdom.
+Dump the current conversation session into the Recall SQLite database, making all messages immediately searchable. Also creates a Curated LoA entry via the fabric Extractor unless `--skip-fabric` is set.
 
 Run this at the end of every session or when you want to persist the current conversation mid-session.
 
@@ -28,7 +28,7 @@ recall dump "<title>"
 - `-p <project>` — Tag with a project name
 - `-t <tags>` — Comma-separated tags
 - `-c <id>` — Continue from a previous LoA entry (creates a chain)
-- `--skip-fabric` — Skip Fabric extraction (faster, import only)
+- `--skip-fabric` — Skip the fabric Extractor and write a basic summary
 
 ## Examples
 
@@ -42,6 +42,6 @@ recall dump "API redesign session" -p my-api
 # Continue a previous conversation thread
 recall dump "Auth refactor part 2" -c 15
 
-# Quick import without Fabric extraction
+# Persist messages with a basic summary instead of the fabric Extractor
 recall dump "Quick fix session" --skip-fabric
 ```

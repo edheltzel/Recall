@@ -2,8 +2,9 @@
 
 import type { Message } from '../types/index.js';
 import { extractWisdomWithFabric, MAX_FABRIC_INPUT_BYTES } from '../providers/fabric.js';
+import { ExtractorConfigError, requireCuratedExtractor, resolveExtractorConfig } from './extractor-config.js';
 
-export { MAX_FABRIC_INPUT_BYTES };
+export { MAX_FABRIC_INPUT_BYTES, ExtractorConfigError };
 
 export interface BasicSummaryStats {
   total: number;
@@ -59,9 +60,8 @@ Session captured in ${stats.total} ${label} frame${stats.total === 1 ? '' : 's'}
 - ${stats.total} total verbatim ${label} frame${stats.total === 1 ? '' : 's'}
 `;
 }
-
 /**
- * Generate a basic extraction-shaped summary when Haiku/Fabric is unavailable.
+ * Generate a basic extraction-shaped summary when the Extractor is skipped or unavailable.
  */
 export function generateBasicSummary(messages: Array<Pick<Message, 'role' | 'content'>>): string {
   const userMessages = messages.filter(m => m.role === 'user');
@@ -99,8 +99,15 @@ export function formatMessagesForExtraction(messages: Array<Pick<Message, 'role'
 }
 
 /**
- * Run Fabric's extract_wisdom pattern with the configured Haiku model.
+ * Run the curated `fabric` Extractor with the resolved model.
  */
-export function runFabricExtract(content: string): string {
-  return extractWisdomWithFabric(content);
+export function runFabricExtract(
+  content: string,
+  deps: {
+    resolve?: typeof resolveExtractorConfig;
+    extract?: typeof extractWisdomWithFabric;
+  } = {},
+): string {
+  const curated = requireCuratedExtractor((deps.resolve ?? resolveExtractorConfig)());
+  return (deps.extract ?? extractWisdomWithFabric)(content, curated.primary.model);
 }

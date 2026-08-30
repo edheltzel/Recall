@@ -20,7 +20,7 @@
 //                 (JSONL import, conversation import, dump, PreCompact flush)
 //                 captures raw transcript text without semantic rewriting.
 // - loa_entries → 'extracted' — every LoA writer stores machine-generated
-//                 content (Fabric/Haiku extracts, basic-summary fallback, or
+//                 content (Extractor output, basic-summary fallback, or
 //                 prior DISTILLED.md extraction output via import-legacy).
 // - decisions   → 'extracted' iff category = 'auto-extracted' (the marker the
 //                 extraction writers stamp). Other rows: unknown.

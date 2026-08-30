@@ -3,6 +3,7 @@ import { coreDump } from '../../src/commands/dump';
 import { getDb } from '../../src/db/connection';
 import { createLoaEntry, getLoaMessages } from '../../src/lib/memory';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
+import { ExtractorConfigError } from '../../src/lib/extraction';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 
 beforeAll(() => setupTestDb());
@@ -296,5 +297,42 @@ describe('portable explicit session dump', () => {
       SELECT 1 AS present FROM embeddings
       WHERE source_table = 'loa_entries' AND source_id = ?
     `).get(first.loaId!)).toEqual({ present: 1 });
+  });
+
+  test('does not write a basic-summary LoA when curated Extractor config fails', async () => {
+    const sessionId = 'extractor-config-fail-dump';
+    const result = await coreDump('Config fail', {
+      skipFabric: false,
+      skipEmbed: true,
+      extract: () => {
+        throw new ExtractorConfigError('curated Extractor id "ollama" is not allowed', 'curated');
+      },
+      session: {
+        source: 'mcp',
+        sessionId,
+        project: 'recall-test',
+        filePath: `mcp://${sessionId}`,
+        messages: [
+          {
+            session_id: sessionId,
+            timestamp: '2026-08-30T00:00:00.000Z',
+            role: 'user',
+            content: 'hello',
+            project: 'recall-test',
+          },
+        ],
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ollama');
+    expect(result.loaId).toBeUndefined();
+    expect(result.messageCount).toBe(1);
+
+    const db = getDb();
+    const loa = db.prepare(
+      `SELECT fabric_extract FROM loa_entries WHERE session_id = ?`,
+    ).all(sessionId) as Array<{ fabric_extract: string }>;
+    expect(loa).toEqual([]);
   });
 });

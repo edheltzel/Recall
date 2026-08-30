@@ -311,7 +311,7 @@ program
   .command('import-conversations <path>')
   .description('Import Claude.ai, ChatGPT, or Slack JSON conversation exports')
   .option('--format <format>', 'Format: auto, claude-ai, chatgpt, slack', 'auto')
-  .option('--no-extract', 'Import raw messages only; skip Haiku extraction')
+  .option('--no-extract', 'Import raw messages only; skip the curated Extractor')
   .option('--dry-run', 'Preview what would be imported without making changes')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-p, --project <name>', 'Override project name for imported records')
@@ -329,11 +329,11 @@ program
 // recall loa - Library of Alexandria
 const loaCmd = program
   .command('loa')
-  .description('Library of Alexandria - curated knowledge capture');
+  .description('Library of Alexandria — Automatic-capture and Curated LoA');
 
 loaCmd
   .command('write <title>')
-  .description('Capture messages since last LoA entry with Fabric extract_wisdom')
+  .description('Capture Curated LoA since the last entry via the fabric Extractor')
   .option('-p, --project <name>', 'Project name')
   .option('-c, --continues <id>', 'Continue from a previous LoA entry')
   .option('-t, --tags <tags>', 'Comma-separated tags')
@@ -350,7 +350,7 @@ loaCmd
 
 loaCmd
   .command('show <id>')
-  .description('Show full LoA entry with Fabric extract')
+  .description('Show full LoA extract body')
   .action((id) => {
     runLoaShow(parseInt(id, 10));
     closeDb();
@@ -469,7 +469,7 @@ program
   .option('-c, --continues <id>', 'Continue from a previous LoA entry')
   .option('-t, --tags <tags>', 'Comma-separated tags')
   .option('-n, --limit <n>', 'Max messages to process')
-  .option('--skip-fabric', 'Skip Fabric extraction (import only)')
+  .option('--skip-fabric', 'Skip the fabric Extractor and write a basic summary')
   .action(async (title, options) => {
     await runDump(title, {
       project: options.project,

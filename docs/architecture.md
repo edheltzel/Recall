@@ -70,7 +70,7 @@ Host-neutral CLI and MCP logic lives outside `src/hosts/`.
 
 Native host adapters own config shapes, paths, transcript parsing, and native command discovery under `src/hosts/`.
 
-Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extraction cascade depends only on the `ExtractionProvider` interface.
+Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extraction cascade depends only on the host-neutral Extractor execution-adapter interface.
 
 Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agents/Recall`) instead of a host configuration directory.
 
@@ -224,7 +224,7 @@ graph TD
     D --> E{Size > 120K chars?}
     E -->|Yes| F[Chunk + Meta-Extract]
     E -->|No| G[Single Extraction]
-    F --> H[Run native extraction provider]
+    F --> H[Run Automatic-capture Extractor]
     G --> H
     H --> I{Quality Gate}
     I -->|Pass| J[Store to Memory Files]
@@ -247,7 +247,7 @@ Automatic-capture LoA uses the Extractor cascade: default `claude-cli` (Haiku) t
 
 ### Extractor config
 
-Optional file: `~/.agents/Recall/config.json`. Install never writes it. Missing file = the split defaults above. Bad JSON or an illegal Extractor ID fails that path closed.
+Optional file: `~/.agents/Recall/config.json`. Install never writes it. Missing file = the split defaults above. Unparseable JSON fails both paths. An illegal Extractor ID fails that path closed.
 
 Automatic-capture LoA may use `claude-cli` or `ollama`. Curated LoA may use `fabric` only. File selects IDs and fallback lists. `RECALL_FABRIC_MODEL` overrides curated `model`; `Recall_OLLAMA_MODEL` overrides the automatic Ollama `model`.
 

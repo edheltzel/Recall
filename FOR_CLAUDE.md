@@ -27,7 +27,7 @@ memory_search({ query: "database choice", table: "decisions" })      // decision
 memory_search({ query: "database choice", bias_type: "decisions" })  // decisions first, broader context kept
 ```
 
-Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for curated summaries, `messages` for raw conversation traces.
+Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for LoA extracts (Automatic-capture or Curated), `messages` for raw conversation traces.
 
 Lead with global search — leave `table` unset so a phrasing mismatch still finds the record. A global query with zero keyword hits auto-falls back to semantic search (labeled `showing semantic matches:`); set `table` only when you intentionally want to scope to one type and accept an empty result if nothing matches there.
 
@@ -98,7 +98,7 @@ memory_dump({ title: "Working on auth refactor", skip_fabric: true })
 
 - `title` (required): Descriptive title for this session
 - `project` (optional): Override project name
-- `skip_fabric` (optional, default: true): Skip Fabric extraction for speed
+- `skip_fabric` (optional, default: true): Skip the fabric Extractor and write a basic summary
 
 After dumping, open a new session and use `memory_search` to query the dumped conversation.
 
@@ -108,7 +108,7 @@ Get database statistics (record counts, database size).
 
 ### loa_show
 
-Show a full Library of Alexandria entry with its extracted wisdom.
+Show a full LoA entry (Automatic-capture or Curated). The body is the extract column, not proof Fabric ran.
 
 ## Agent Skills
 
@@ -146,7 +146,7 @@ recall search "database choice" --bias-type decisions  # Prefer decisions, keep 
 recall search "auth" --show-provenance # Show Record Provenance for every result
 recall provenance backfill             # Classify legacy unknown-provenance rows (dry-run; --execute to apply)
 recall stats                           # Database statistics
-recall loa list                        # Browse curated knowledge
+recall loa list                        # Browse LoA entries
 recall dump "Session title"            # Capture current session
 recall onboard                         # Interactive L0 identity setup (run once per user)
 recall pin decisions 42 10             # Pin a record to high importance
