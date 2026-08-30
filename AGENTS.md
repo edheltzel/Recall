@@ -129,7 +129,7 @@ Before adding code or content, search for an existing definition and extend it. 
 
 - **Add a CLI command**: Create `src/commands/foo.ts`, wire it in `src/index.ts`
 - **Add an MCP tool**: Add handler in `src/mcp-server.ts`
-- **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
+- **Modify extraction**: Automatic-capture LoA cascade in `hooks/lib/extract-model.ts` plus the config resolver in `hooks/lib/`; Curated LoA in `src/commands/loa.ts` via the `src/` re-export. Stop-hook remains `hooks/RecallExtract.ts` (self-contained, no build step).
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
 - **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills` and `~/.omp/agent/skills`; Pi discovers it through the root native package manifest). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so legacy/uninstall cleanup removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
@@ -166,6 +166,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 - **Install is opinionated: `~/.agents/Recall` is the only install root** (Ed, 2026-08-19). Users do not choose a custom or relocated install directory. Do not re-propose relocated-root discovery, default-root locator/symlink machinery, foreign-root activation, or user-facing `RECALL_DIR` relocation; PR #254 was closed after exactly that cascade grew on it (see its closing comment). `RECALL_DB_PATH` (database file location) is a separate, pre-existing override and is unaffected.
 - **Graph capabilities: build on CodeGraph, never from scratch** (Ed, 2026-07-13). Any future graph/edge/related-memories feature must be scoped as a Recall↔CodeGraph integration, not a new edge table + traversal engine in `recall.db`. This generalizes the #196→#214 knowledge-graph revert; do not re-propose an in-Recall graph layer. (Recall decision #2892.)
+- **Extractor config** (Ed, 2026-08-27, #258): optional `~/.agents/Recall/config.json`; install never writes it. Canonical resolver in `hooks/lib/`; `src/` re-exports. Automatic-capture LoA allowlist `claude-cli` \| `ollama`; Curated LoA allowlist `fabric`. File selects IDs and fallback lists. `RECALL_FABRIC_MODEL` and `Recall_OLLAMA_MODEL` override matching file model fields. `OLLAMA_URL` is the existing shared Ollama endpoint (embeddings and automatic `ollama` Extractor), not a config.json field. Missing file = split defaults. Bad JSON / illegal ID = that path fails closed. Schema: [`docs/architecture.md`](docs/architecture.md). Terms: [`CONTEXT.md`](CONTEXT.md).
 
 ## Child DOX Index
 

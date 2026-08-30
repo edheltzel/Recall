@@ -137,7 +137,7 @@ memory_stats()
 
 ## loa_show
 
-Show a full Library of Alexandria entry with its Fabric `extract_wisdom` content. LoA entries are curated knowledge summaries extracted from session conversations.
+Show a full Library of Alexandria entry. The body is the `fabric_extract` column (name, not the writer). Entries may be Automatic-capture LoA or Curated LoA; only Curated LoA from `recall loa` or `memory_dump` with `skip_fabric: false` is Fabric `extract_wisdom` output.
 
 **Parameters**
 
@@ -145,7 +145,7 @@ Show a full Library of Alexandria entry with its Fabric `extract_wisdom` content
 |------|------|----------|---------|-------------|
 | id | number | yes | — | LoA entry ID (use `memory_search` or `memory_recall` to find IDs) |
 
-**Returns:** Full LoA record including title, summary, insights, quotes, and any Fabric-extracted wisdom.
+**Returns:** Full LoA record including title, extract body, and metadata. Do not assume every entry is Fabric `extract_wisdom`.
 
 ```js
 loa_show({ id: 1 })

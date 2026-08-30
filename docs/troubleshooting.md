@@ -54,15 +54,13 @@ Then re-run `./install.sh`.
 
 ### "Fabric extraction failed"
 
-Fabric is optional — only needed for `recall loa write` and `recall dump`. Core functionality (search, add, MCP tools) works without it. 
+Fabric is the `fabric` Extractor for Curated LoA. `recall loa write` requires it and fails closed if Fabric is missing. `recall dump` tries Fabric and, on failure, writes a basic summary (not a second Extractor). Core search, add, and MCP tools work without Fabric.
 
 Verify Fabric works:
 
 ```bash
 echo "test" | fabric --pattern extract_wisdom
 ```
-
-If Fabric isn't installed, Recall falls back to an inline extraction prompt (lower quality but functional).
 
 ### "MCP server not connecting"
 

@@ -89,7 +89,7 @@ Verify with `grok --version`. Deselect Grok in the interactive installer when it
 
 ### Fabric (Optional — recommended)
 
-Fabric provides the `extract_wisdom` pattern used for rich Library of Alexandria (LoA) entries. Recall falls back to an inline prompt if Fabric is not available, but Fabric extractions are higher quality. Requires **Go 1.22+**.
+Fabric is the `fabric` Extractor for Curated LoA (`recall loa`, dump extract). Automatic-capture LoA does not use Fabric. Requires **Go 1.22+**.
 
 ```bash
 # macOS / Linux (Go required)
@@ -221,12 +221,12 @@ When a session ends, the `Stop` hook triggers `RecallExtract.ts`, which:
 
 1. Reads the session's JSONL conversation file from `~/.claude/projects/`
 2. Extracts the text content (skipping tool results and thinking blocks)
-3. Sends the text to Claude Haiku for structured extraction
+3. Runs the Automatic-capture Extractor (default `claude-cli`, then `ollama`)
 4. Applies a quality gate — rejects extractions missing required sections
 5. Appends results to six memory files in `~/.claude/MEMORY/` (full archive, hot recall, session index, decisions, rejections, error patterns)
 6. Tracks extraction state per-file to prevent duplicates and enable 24-hour retries
 
-If the Anthropic API is unavailable, the hook falls back to a local Ollama model. Set `Recall_OLLAMA_MODEL` to change which model is used (default: `qwen2.5:3b`).
+If `claude-cli` is unavailable, the hook falls back to a local Ollama model. Set `Recall_OLLAMA_MODEL` to change which model is used (default: `qwen2.5:3b`). Optional per-path Extractor config (IDs and models): [architecture](architecture.md#extractor-config). `OLLAMA_URL` is the shared Ollama endpoint (embeddings and automatic `ollama` Extractor).
 
 The hook self-spawns in the background so the session exits immediately — extraction is non-blocking.
 
@@ -249,9 +249,10 @@ crontab -e
 | `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
 | `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
 | `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. First in the shared resolver used by both `RecallStart` (read) and `recall onboard` (write); see [Identity & Onboarding](cli-reference.md#identity--onboarding). |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL for vector embeddings |
+| `OLLAMA_URL` | `http://localhost:11434` | Shared Ollama server URL (embeddings and automatic `ollama` Extractor) |
 | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
-| `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model used for extraction when Anthropic API is unavailable |
+| `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for the automatic Extractor |
+| `RECALL_FABRIC_MODEL` | `claude-haiku-4-5` | Fabric `-m` model for Curated LoA |
 | `RECALL_BASE_DIR` | `~/.claude` | Base directory for document imports |
 | `RECALL_NO_GUM` | `0` | Set to `1` to skip the optional [`gum`](https://github.com/charmbracelet/gum) auto-install and use the bash UI for installer/update/uninstall. Same effect as the `--no-gum` flag, but persistent across all runs. |
 | `RECALL_VERBOSE` | `0` | Set to `1` to bypass output capture for `bun install` / `bun run build` (useful when debugging install failures). |

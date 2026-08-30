@@ -20,3 +20,23 @@ The absence of a declared provenance value for a legacy memory record. Unknown p
 ## Frictionless Memory Capture
 
 Recall's core product posture: it captures and curates memory in the background through hooks, imports, and agent workflows without asking the user to classify records, fill forms, or interrupt normal agent use.
+
+## LoA
+
+**Automatic-capture LoA**:
+An extracted Library of Alexandria entry created by terminal session capture without an explicit user LoA command.
+_Avoid_: hook LoA, Stop-hook LoA, Fabric extract (the column name is not the writer)
+
+**Curated LoA**:
+A Library of Alexandria entry created by an explicit user or agent LoA command.
+_Avoid_: manual LoA, Fabric LoA
+
+## Extractor
+
+**Extractor**:
+The model backend that turns source text into extracted memory.
+_Avoid_: provider, adapter, host
+
+**Host**:
+A coding-agent product Recall integrates with.
+_Avoid_: extractor, provider (when meaning the model backend)

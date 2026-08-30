@@ -24,6 +24,7 @@ TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from
 
 - Hooks are SELF-CONTAINED: never import from `src/`. Shared hook logic lives in `lib/` here.
 - Generic hook helpers depend on `lib/events.ts`, `lib/extraction-provider.ts`, and the native-provider registry in `lib/hosts/`; native payloads, path encoding, commands, auth, and recursion guards stay in a host adapter.
+- Extractor config resolver is canonical in `lib/` (hooks consume it; `src/` re-exports). Automatic-capture LoA allowlist is `claude-cli` \| `ollama`. Do not parse `config.json` in a second schema.
 - Documented DRY exception: small utilities (e.g. bun-path resolution) are intentionally duplicated inside `RecallExtract.ts` / `RecallBatchExtract.ts` so they never reach into `src/`. Do not "DRY this up."
 - DB-path resolution is centralized in `lib/db-path.ts` — the CLI and every hook agree through it.
 - Identity-path resolution is centralized in `lib/identity-path.ts` — `recall onboard` and the shared session-start assembler agree through it. The global identity root is fixed at `~/.agents/Recall`; do not add env-based or discovered root relocation.
@@ -40,7 +41,7 @@ TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from
 
 - Add a hook helper: create `lib/<name>.ts` (standalone), then add its installed path to `uninstall.sh:RECALL_HOOK_LIB_FILES`; `tests/install/uninstall.test.ts` audits parity with the recursive installer.
 - Modify extraction: edit `RecallExtract.ts`; the quality gate is `lib/extraction-quality.ts` (requires SUMMARY + MAIN IDEAS).
-- The host-neutral extraction cascade + topic/summary helpers live in `lib/extract-model.ts`; native providers register through `lib/hosts/index.ts`, with Claude-specific behavior in `lib/hosts/claude/extraction-provider.ts`. Reuse the provider interface; don't call a native model command from generic hook code.
+- The host-neutral extraction cascade + topic/summary helpers live in `lib/extract-model.ts`; they honor the resolved automatic Extractor. Native providers register through `lib/hosts/index.ts`, with Claude-specific behavior in `lib/hosts/claude/extraction-provider.ts`. Reuse the provider interface; don't call a native model command from generic hook code.
 - Mid-session learning loop logic is `lib/insession.ts` (pure/dbPath-injectable: config, cadence, window slice, lock-cooperative extraction). `RecallInSession.ts` is the thin hook wrapper.
 - Correction capture (#52) is the pure `lib/correction-detector.ts` (two-pass strong/weak+directive/negative classifier) plus `handleCorrection`/`correctionAllowed`/`readCorrectionsConfig` in `lib/insession.ts`. It writes VERBATIM user text, so it `scrub()`s before `writeLearningsBatch` and rate-limits 1-per-3 prompts via the MONOTONIC `prompts_seen`/`last_correction_turn` columns (never the per-window `turns_seen`, which `resetWindow` zeroes).
 - Reuse `lib/extraction-{lock,semaphore,tracker}.ts` for locking/concurrency/dedup state — don't reinvent it.
