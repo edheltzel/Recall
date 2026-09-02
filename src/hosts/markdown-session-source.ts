@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
-import { basename, join } from 'path';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
 import type { Message } from '../types/index.js';
 import {
   findAllMarkdownDropFiles,
+  findLatestMarkdownDrop,
   findMarkdownDropFiles,
   listMarkdownDropDirs,
   markdownDropDirName,
@@ -13,28 +14,13 @@ import type { ParsedSession, SessionSource } from './session-source.js';
 
 export {
   findAllMarkdownDropFiles,
+  findLatestMarkdownDrop,
   findMarkdownDropFiles,
   listMarkdownDropDirs,
   markdownDropDirName,
   markdownDropHostId,
   MARKDOWN_DROP_DIR_SUFFIX,
 };
-
-export function findLatestMarkdownDrop(dropDir: string): string | null {
-  if (!existsSync(dropDir)) return null;
-  let latest: string | null = null;
-  let latestTime = 0;
-  for (const file of readdirSync(dropDir)) {
-    if (!file.endsWith('.md') || file.startsWith('.')) continue;
-    const full = join(dropDir, file);
-    const modified = statSync(full).mtimeMs;
-    if (modified > latestTime) {
-      latestTime = modified;
-      latest = full;
-    }
-  }
-  return latest;
-}
 
 /** Parse the explicit markdown-drop contract used by OpenCode and Pi adapters. */
 export function parseMarkdownDrop(filePath: string): { sessionId: string; messages: Omit<Message, 'id'>[] } | null {

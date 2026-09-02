@@ -5,23 +5,25 @@
  * Catalog only. Does not insert transcript bodies into Recall SQLite, does
  * not join `recall host-hook` / host-ingest / LifecycleHost, and does not
  * replace JSONL as the CLI transcript source.
+ *
+ * IDE reads are composerData prefix + per-bubble primary-key lookups. They
+ * do not LIKE-scan bubbleId rows or copy transcript text onto the catalog.
  */
 
 import { createHash } from 'crypto';
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { basename, dirname, join, relative, sep } from 'path';
 import { homedir, platform } from 'os';
-import { Database } from 'bun:sqlite';
+import { Database, constants } from 'bun:sqlite';
 
 export type CursorStoreKind = 'ide-vscdb' | 'cli-jsonl' | 'chats-blob';
 export type CursorCatalogQuality = 'transcript' | 'breadcrumbs';
 
+/** Production catalog metadata. No transcript body. */
 export interface CursorCatalogTurn {
   role: 'user' | 'assistant';
   timestamp?: string;
   workspace?: string;
-  /** Catalog field for parser tests; never written to query/search. */
-  text?: string;
 }
 
 export interface CursorCatalogSession {
@@ -38,6 +40,11 @@ export interface CursorCatalogSession {
   turns: CursorCatalogTurn[];
 }
 
+/** Test-only turn parser result. Not attached to catalogCursorSessions. */
+export interface CursorTestTurn extends CursorCatalogTurn {
+  text: string;
+}
+
 export interface CursorCatalogOptions {
   cwd?: string;
   home?: string;
@@ -45,11 +52,14 @@ export interface CursorCatalogOptions {
   ideUserDir?: string;
   cliRoot?: string;
   includeSubagents?: boolean;
+  /** Cap on workspaceStorage state.vscdb opens. globalStorage is always included. */
+  maxWorkspaceDbs?: number;
 }
 
 const COMPOSER_PREFIX = 'composerData:';
 const BUBBLE_PREFIX = 'bubbleId::';
 const SQLITE_BUSY_MS = 5000;
+export const MAX_WORKSPACE_STATE_DBS = 8;
 
 export function cursorIdeUserDir(
   home: string = homedir(),
@@ -87,6 +97,24 @@ export function cursorChatsDir(cliRoot: string, cwd: string): string {
   return join(cliRoot, 'chats', digest);
 }
 
+/**
+ * Walk up from a JSONL path until the directory named `agent-transcripts`,
+ * then return its parent basename (`projects/<encoded>`). Nested
+ * `agent-transcripts/<session>/<session>.jsonl` layouts stay attributed to
+ * the encoded project, not `agent-transcripts`.
+ */
+export function encodedProjectFromTranscriptPath(filePath: string): string | undefined {
+  let current = dirname(filePath);
+  while (current && current !== dirname(current)) {
+    if (basename(current) === 'agent-transcripts') {
+      const encoded = basename(dirname(current));
+      return encoded || undefined;
+    }
+    current = dirname(current);
+  }
+  return undefined;
+}
+
 function millisToIso(value: unknown): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     const date = new Date(value);
@@ -112,29 +140,150 @@ function fileSize(path: string): number {
   }
 }
 
-function listStateDatabases(ideUserDir: string): string[] {
+function sqliteUri(dbPath: string): string {
+  const absolute = dbPath.startsWith('/') ? dbPath : join(process.cwd(), dbPath);
+  const encoded = absolute.split('/').map(encodeURIComponent).join('/');
+  return `file://${encoded}?mode=ro&immutable=1`;
+}
+
+function openCursorKv(dbPath: string): Database {
+  const flags = constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_URI;
+  let db: Database;
+  try {
+    db = new Database(sqliteUri(dbPath), flags);
+  } catch {
+    db = new Database(dbPath, { readonly: true });
+  }
+  db.exec('PRAGMA query_only = ON');
+  db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_MS}`);
+  return db;
+}
+
+function listStateDatabases(
+  ideUserDir: string,
+  maxWorkspaceDbs: number = MAX_WORKSPACE_STATE_DBS,
+): string[] {
   const found: string[] = [];
   const globalDb = join(ideUserDir, 'globalStorage', 'state.vscdb');
   if (existsSync(globalDb)) found.push(globalDb);
+
   const workspaceRoot = join(ideUserDir, 'workspaceStorage');
-  if (!existsSync(workspaceRoot)) return found;
+  if (!existsSync(workspaceRoot) || maxWorkspaceDbs <= 0) return found;
+
+  const workspaces: Array<{ path: string; mtime: number }> = [];
   try {
     for (const entry of readdirSync(workspaceRoot, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const dbPath = join(workspaceRoot, entry.name, 'state.vscdb');
-      if (existsSync(dbPath)) found.push(dbPath);
+      try {
+        if (!existsSync(dbPath)) continue;
+        workspaces.push({ path: dbPath, mtime: statSync(dbPath).mtimeMs });
+      } catch {
+        continue;
+      }
     }
   } catch {
     return found;
   }
+
+  workspaces.sort((a, b) => b.mtime - a.mtime);
+  for (const workspace of workspaces.slice(0, maxWorkspaceDbs)) {
+    found.push(workspace.path);
+  }
   return found;
+}
+
+interface ComposerHeader {
+  bubbleId: string;
+  type?: number;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function parseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function bubbleHeadersFromComposer(headersJson: unknown, bubblesJson: unknown): ComposerHeader[] {
+  const headers: ComposerHeader[] = [];
+  const seen = new Set<string>();
+  const push = (bubbleId: string, type?: number) => {
+    if (!bubbleId || seen.has(bubbleId)) return;
+    seen.add(bubbleId);
+    headers.push({ bubbleId, type });
+  };
+
+  const raw = parseJson(headersJson);
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === 'string') {
+        push(item);
+        continue;
+      }
+      const rec = asObject(item);
+      const id = rec && (rec.bubbleId ?? rec.id);
+      if (rec && typeof id === 'string') {
+        push(id, typeof rec.type === 'number' ? rec.type : undefined);
+      }
+    }
+  }
+
+  if (headers.length === 0) {
+    const bubbles = parseJson(bubblesJson);
+    if (Array.isArray(bubbles)) {
+      for (const item of bubbles) {
+        if (typeof item === 'string') push(item);
+        else {
+          const rec = asObject(item);
+          const id = rec && (rec.bubbleId ?? rec.id);
+          if (typeof id === 'string') push(id);
+        }
+      }
+    }
+  }
+  return headers;
+}
+
+function bubbleKey(composerId: string, bubbleId: string): string {
+  return `${BUBBLE_PREFIX}${composerId}:${bubbleId}`;
+}
+
+function lookupBubbleMeta(
+  db: Database,
+  composerId: string,
+  bubbleId: string,
+): { type?: number; timestamp?: string; workspace?: string } | undefined {
+  const row = db.prepare(`
+    SELECT json_extract(value, '$.type') AS type,
+           json_extract(value, '$.timestamp') AS timestamp,
+           json_extract(value, '$.workspaceProjectDir') AS workspaceProjectDir
+    FROM cursorDiskKV
+    WHERE key = ?
+  `).get(bubbleKey(composerId, bubbleId)) as {
+    type: number | string | null;
+    timestamp: number | string | null;
+    workspaceProjectDir: string | null;
+  } | undefined;
+  if (!row) return undefined;
+  return {
+    type: row.type == null ? undefined : Number(row.type),
+    timestamp: millisToIso(row.timestamp),
+    workspace: row.workspaceProjectDir?.trim() || undefined,
+  };
 }
 
 function catalogVscdb(dbPath: string): CursorCatalogSession[] {
   let db: Database | null = null;
   try {
-    db = new Database(dbPath, { readonly: true });
-    db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_MS}`);
+    db = openCursorKv(dbPath);
     const tables = db.prepare(
       `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cursorDiskKV'`
     ).get() as { name: string } | undefined;
@@ -145,64 +294,43 @@ function catalogVscdb(dbPath: string): CursorCatalogSession[] {
              json_extract(value, '$.composerId') AS composerId,
              json_extract(value, '$.name') AS name,
              json_extract(value, '$.createdAt') AS createdAt,
-             json_extract(value, '$.lastUpdatedAt') AS lastUpdatedAt
+             json_extract(value, '$.lastUpdatedAt') AS lastUpdatedAt,
+             json_extract(value, '$.workspaceProjectDir') AS workspaceProjectDir,
+             json_extract(value, '$.fullConversationHeadersOnly') AS headers,
+             json_extract(value, '$.conversationHeaders') AS conversationHeaders,
+             json_extract(value, '$.bubbles') AS bubbles
       FROM cursorDiskKV
-      WHERE key LIKE 'composerData:%'
+      WHERE key GLOB 'composerData:*'
     `).all() as Array<{
       key: string;
       composerId: string | null;
       name: string | null;
       createdAt: number | string | null;
       lastUpdatedAt: number | string | null;
-    }>;
-
-    const bubbles = db.prepare(`
-      SELECT key,
-             json_extract(value, '$.type') AS type,
-             json_extract(value, '$.text') AS text,
-             json_extract(value, '$.rawText') AS rawText,
-             json_extract(value, '$.timestamp') AS timestamp,
-             json_extract(value, '$.workspaceProjectDir') AS workspaceProjectDir
-      FROM cursorDiskKV
-      WHERE key LIKE 'bubbleId::%'
-    `).all() as Array<{
-      key: string;
-      type: number | string | null;
-      text: string | null;
-      rawText: string | null;
-      timestamp: number | string | null;
       workspaceProjectDir: string | null;
+      headers: unknown;
+      conversationHeaders: unknown;
+      bubbles: unknown;
     }>;
-
-    const turnsByComposer = new Map<string, CursorCatalogTurn[]>();
-    const workspaceByComposer = new Map<string, string>();
-    for (const bubble of bubbles) {
-      const rest = bubble.key.startsWith(BUBBLE_PREFIX)
-        ? bubble.key.slice(BUBBLE_PREFIX.length)
-        : '';
-      const composerId = rest.split(':')[0];
-      if (!composerId) continue;
-      const text = String(bubble.text ?? bubble.rawText ?? '').trim();
-      if (!text) continue;
-      const role: CursorCatalogTurn['role'] = Number(bubble.type) === 1 ? 'user' : 'assistant';
-      const workspace = bubble.workspaceProjectDir?.trim() || undefined;
-      if (workspace && !workspaceByComposer.has(composerId)) {
-        workspaceByComposer.set(composerId, workspace);
-      }
-      const turns = turnsByComposer.get(composerId) ?? [];
-      turns.push({
-        role,
-        timestamp: millisToIso(bubble.timestamp),
-        workspace,
-        text,
-      });
-      turnsByComposer.set(composerId, turns);
-    }
 
     return composers.map(composer => {
       const sessionId = String(composer.composerId || composer.key.slice(COMPOSER_PREFIX.length) || composer.key);
-      const turns = turnsByComposer.get(sessionId) ?? [];
-      const workspace = workspaceByComposer.get(sessionId);
+      const headers = bubbleHeadersFromComposer(
+        composer.headers ?? composer.conversationHeaders,
+        composer.bubbles,
+      );
+      let workspace = composer.workspaceProjectDir?.trim() || undefined;
+      const turns: CursorCatalogTurn[] = [];
+      for (const header of headers) {
+        const meta = lookupBubbleMeta(db!, sessionId, header.bubbleId);
+        if (!workspace && meta?.workspace) workspace = meta.workspace;
+        const type = header.type ?? meta?.type;
+        turns.push({
+          role: type === 1 ? 'user' : 'assistant',
+          timestamp: meta?.timestamp ?? millisToIso(composer.lastUpdatedAt) ?? millisToIso(composer.createdAt),
+          workspace: meta?.workspace ?? workspace,
+        });
+      }
       return {
         store: 'ide-vscdb' as const,
         sessionId,
@@ -217,6 +345,65 @@ function catalogVscdb(dbPath: string): CursorCatalogSession[] {
         turns,
       };
     });
+  } catch {
+    return [];
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Test-only: point-lookup bubble text for a composer. Not used by catalogCursorSessions.
+ */
+export function parseCursorVscdbTurnsForTest(dbPath: string, composerId: string): CursorTestTurn[] {
+  let db: Database | null = null;
+  try {
+    db = openCursorKv(dbPath);
+    const composer = db.prepare(`
+      SELECT json_extract(value, '$.fullConversationHeadersOnly') AS headers,
+             json_extract(value, '$.conversationHeaders') AS conversationHeaders,
+             json_extract(value, '$.bubbles') AS bubbles
+      FROM cursorDiskKV
+      WHERE key = ?
+    `).get(`${COMPOSER_PREFIX}${composerId}`) as {
+      headers: unknown;
+      conversationHeaders: unknown;
+      bubbles: unknown;
+    } | undefined;
+    if (!composer) return [];
+    const headers = bubbleHeadersFromComposer(
+      composer.headers ?? composer.conversationHeaders,
+      composer.bubbles,
+    );
+    const turns: CursorTestTurn[] = [];
+    const lookup = db.prepare(`
+      SELECT json_extract(value, '$.type') AS type,
+             json_extract(value, '$.text') AS text,
+             json_extract(value, '$.rawText') AS rawText,
+             json_extract(value, '$.timestamp') AS timestamp,
+             json_extract(value, '$.workspaceProjectDir') AS workspaceProjectDir
+      FROM cursorDiskKV
+      WHERE key = ?
+    `);
+    for (const header of headers) {
+      const row = lookup.get(bubbleKey(composerId, header.bubbleId)) as {
+        type: number | string | null;
+        text: string | null;
+        rawText: string | null;
+        timestamp: number | string | null;
+        workspaceProjectDir: string | null;
+      } | undefined;
+      const text = String(row?.text ?? row?.rawText ?? '').trim();
+      if (!text) continue;
+      const type = header.type ?? (row?.type == null ? undefined : Number(row.type));
+      turns.push({
+        role: type === 1 ? 'user' : 'assistant',
+        timestamp: millisToIso(row?.timestamp),
+        workspace: row?.workspaceProjectDir?.trim() || undefined,
+        text,
+      });
+    }
+    return turns;
   } catch {
     return [];
   } finally {
@@ -266,14 +453,13 @@ function jsonlText(content: unknown): string {
     .trim();
 }
 
-function parseCliJsonl(filePath: string): CursorCatalogSession | null {
+function* iterJsonlTurns(filePath: string): Generator<CursorTestTurn> {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
   } catch {
-    return null;
+    return;
   }
-  const turns: CursorCatalogTurn[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -292,26 +478,31 @@ function parseCliJsonl(filePath: string): CursorCatalogSession | null {
     if (roleRaw !== 'user' && roleRaw !== 'assistant') continue;
     const text = jsonlText(parsed.message?.content ?? parsed.content);
     if (!text) continue;
-    turns.push({ role: roleRaw, text });
+    yield { role: roleRaw, text };
   }
-  if (turns.length === 0) return null;
-  const encodedProject = basename(dirname(dirname(filePath)));
-  const workspace = decodeCursorProjectDir(encodedProject);
+}
+
+function parseCliJsonl(filePath: string): CursorCatalogSession | null {
+  const bodies = [...iterJsonlTurns(filePath)];
+  if (bodies.length === 0) return null;
+  const encodedProject = encodedProjectFromTranscriptPath(filePath);
+  const workspace = encodedProject ? decodeCursorProjectDir(encodedProject) : undefined;
   let updatedAt: string | undefined;
   try {
     updatedAt = new Date(statSync(filePath).mtimeMs).toISOString();
   } catch {
     updatedAt = undefined;
   }
-  for (const turn of turns) {
-    turn.timestamp = updatedAt;
-    turn.workspace = workspace;
-  }
+  const turns: CursorCatalogTurn[] = bodies.map(body => ({
+    role: body.role,
+    timestamp: updatedAt,
+    workspace,
+  }));
   return {
     store: 'cli-jsonl',
     sessionId: basename(filePath, '.jsonl'),
     workspace,
-    project: basename(workspace),
+    project: workspace ? basename(workspace) : undefined,
     updatedAt,
     size: fileSize(filePath),
     messageCount: turns.length,
@@ -319,6 +510,11 @@ function parseCliJsonl(filePath: string): CursorCatalogSession | null {
     quality: 'transcript',
     turns,
   };
+}
+
+/** Test-only JSONL bodies. Not attached to catalogCursorSessions. */
+export function parseCursorJsonlTurnsForTest(filePath: string): CursorTestTurn[] {
+  return [...iterJsonlTurns(filePath)];
 }
 
 function catalogChatsBlobs(chatsDir: string): CursorCatalogSession[] {
@@ -363,9 +559,10 @@ export function catalogCursorSessions(options: CursorCatalogOptions = {}): Curso
   const includeSubagents = options.includeSubagents
     ?? env.RECALL_INCLUDE_SUBAGENTS === '1';
   const cwd = options.cwd ?? process.cwd();
+  const maxWorkspaceDbs = options.maxWorkspaceDbs ?? MAX_WORKSPACE_STATE_DBS;
 
   const sessions: CursorCatalogSession[] = [];
-  for (const dbPath of listStateDatabases(ideUserDir)) {
+  for (const dbPath of listStateDatabases(ideUserDir, maxWorkspaceDbs)) {
     sessions.push(...catalogVscdb(dbPath));
   }
 

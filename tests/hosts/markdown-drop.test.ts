@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseMarkdownDrop, listMarkdownDropDirs, findAllMarkdownDropFiles } from '../../src/hosts/markdown-session-source';
+import { parseMarkdownDrop, listMarkdownDropDirs, findAllMarkdownDropFiles, findLatestMarkdownDrop } from '../../src/hosts/markdown-session-source';
+import { findMarkdownDropFiles } from '../../hooks/lib/markdown-drop';
 import { findMarkdownSessions } from '../../hooks/RecallBatchExtract';
 
 const REPO = join(import.meta.dir, '..', '..');
@@ -48,6 +49,24 @@ describe('shared drop-dir ingest', () => {
       const precompact = readFileSync(join(REPO, 'pi', 'RecallPreCompact.ts'), 'utf-8');
       expect(extract).toContain('Host parser — not a template');
       expect(precompact).toContain('Host parser — not a template');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('findLatestMarkdownDrop is max-mtime over findMarkdownDropFiles', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-md-latest-'));
+    try {
+      writeFileSync(join(root, 'older.md'), '[USER]: older portable request here.\n');
+      writeFileSync(join(root, 'newer.md'), '[USER]: newer portable request here.\n');
+      const now = Date.now() / 1000;
+      utimesSync(join(root, 'older.md'), now - 60, now - 60);
+      utimesSync(join(root, 'newer.md'), now, now);
+      const files = findMarkdownDropFiles(root, 'acme');
+      expect(files).toHaveLength(2);
+      const latestFromScan = files.reduce((a, b) => a.mtime >= b.mtime ? a : b);
+      expect(findLatestMarkdownDrop(root)).toBe(latestFromScan.path);
+      expect(findLatestMarkdownDrop(root)).toBe(join(root, 'newer.md'));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -1,10 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'crypto';
 import { Database } from 'bun:sqlite';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { catalogCursorSessions, cursorChatsDir } from '../../src/hosts/cursor-capture';
+import {
+  catalogCursorSessions,
+  cursorChatsDir,
+  encodedProjectFromTranscriptPath,
+  parseCursorJsonlTurnsForTest,
+  parseCursorVscdbTurnsForTest,
+  MAX_WORKSPACE_STATE_DBS,
+} from '../../src/hosts/cursor-capture';
 import { initDb, closeDb } from '../../src/db/connection';
 import { search } from '../../src/lib/memory';
 
@@ -66,16 +73,89 @@ describe('Cursor capture catalog', () => {
       expect(ide?.project).toBe('api');
       expect(ide?.messageCount).toBe(2);
       expect(ide?.turns.map(t => t.role)).toEqual(['user', 'assistant']);
-      expect(ide?.turns[0].text).toBe('Why is this stale?');
+      expect(ide?.turns[0]).not.toHaveProperty('text');
       expect(ide?.quality).toBe('transcript');
+
+      const parsedTurns = parseCursorVscdbTurnsForTest(vscdb, 'composer-7');
+      expect(parsedTurns.map(t => t.role)).toEqual(['user', 'assistant']);
+      expect(parsedTurns[0].text).toBe('Why is this stale?');
 
       const jsonl = sessions.find(s => s.store === 'cli-jsonl');
       expect(jsonl?.sessionId).toBe('cli-chat-1');
       expect(jsonl?.messageCount).toBe(2);
+      expect(jsonl?.project).toBe('api');
       expect(jsonl?.turns.map(t => t.role)).toEqual(['user', 'assistant']);
-      expect(jsonl?.turns[1].text).toBe('The cache key omitted the locale.');
+      expect(jsonl?.turns[0]).not.toHaveProperty('text');
       expect(jsonl?.sourcePath.endsWith('.jsonl')).toBe(true);
       expect(sessions.some(s => s.sourcePath.includes('subagents'))).toBe(false);
+      expect(parseCursorJsonlTurnsForTest(jsonl!.sourcePath)[1].text).toBe(
+        'The cache key omitted the locale.',
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('nested agent-transcripts/<session>/<session>.jsonl uses the encoded project dir', () => {
+    const nested = join(
+      '/home',
+      '.cursor',
+      'projects',
+      'Users-x-api',
+      'agent-transcripts',
+      'cli-chat-1',
+      'cli-chat-1.jsonl',
+    );
+    expect(encodedProjectFromTranscriptPath(nested)).toBe('Users-x-api');
+    expect(encodedProjectFromTranscriptPath(
+      join('/home', '.cursor', 'projects', 'Users-x-api', 'agent-transcripts', 'cli-chat-1.jsonl'),
+    )).toBe('Users-x-api');
+
+    const root = mkdtempSync(join(tmpdir(), 'recall-cursor-nested-'));
+    try {
+      const cliRoot = join(root, '.cursor');
+      const nestedDir = join(cliRoot, 'projects', 'Users-x-api', 'agent-transcripts', 'cli-chat-1');
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(
+        join(nestedDir, 'cli-chat-1.jsonl'),
+        readFileSync(join(FIXTURES, 'agent-transcript.jsonl')),
+      );
+      const sessions = catalogCursorSessions({
+        cliRoot,
+        cwd: '/work/api',
+        ideUserDir: join(root, 'no-ide'),
+      });
+      const jsonl = sessions.find(s => s.store === 'cli-jsonl');
+      expect(jsonl?.project).toBe('api');
+      expect(jsonl?.workspace).toBe('/Users/x/api');
+      expect(jsonl?.sessionId).toBe('cli-chat-1');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('workspaceStorage vscdb opens are capped', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-cursor-ws-'));
+    try {
+      const ideUserDir = join(root, 'Cursor', 'User');
+      mkdirSync(join(ideUserDir, 'globalStorage'), { recursive: true });
+      writeVscdb(join(ideUserDir, 'globalStorage', 'state.vscdb'));
+      const now = Date.now() / 1000;
+      for (let i = 0; i < MAX_WORKSPACE_STATE_DBS + 3; i++) {
+        const dir = join(ideUserDir, 'workspaceStorage', `ws-${i}`);
+        mkdirSync(dir, { recursive: true });
+        const dbPath = join(dir, 'state.vscdb');
+        writeVscdb(dbPath);
+        utimesSync(dbPath, now - i, now - i);
+      }
+      const sessions = catalogCursorSessions({
+        ideUserDir,
+        cliRoot: join(root, '.cursor'),
+        cwd: '/work/api',
+        maxWorkspaceDbs: MAX_WORKSPACE_STATE_DBS,
+      });
+      const vscdbSessions = sessions.filter(s => s.store === 'ide-vscdb');
+      expect(vscdbSessions.length).toBe(1 + MAX_WORKSPACE_STATE_DBS);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -105,10 +185,12 @@ describe('Cursor capture catalog', () => {
     }
   });
 
-  test('JSONL remains the CLI transcript source', () => {
+  test('JSONL remains the CLI transcript source and catalog does not bubble-scan', () => {
     const source = readFileSync(join(import.meta.dir, '..', '..', 'src', 'hosts', 'cursor-capture.ts'), 'utf-8');
     expect(source).toContain("store: 'cli-jsonl'");
     expect(source).toContain('agent-transcripts');
+    expect(source).toContain("mode=ro&immutable=1");
+    expect(source).not.toContain("LIKE 'bubbleId::%'");
     expect(source).not.toMatch(/from ['"].*host-hook/);
     expect(source).not.toMatch(/from ['"].*host-ingest/);
   });
@@ -124,7 +206,12 @@ describe('Cursor capture catalog', () => {
       const ideUserDir = join(root, 'Cursor', 'User');
       mkdirSync(join(ideUserDir, 'globalStorage'), { recursive: true });
       writeVscdb(join(ideUserDir, 'globalStorage', 'state.vscdb'));
-      catalogCursorSessions({ ideUserDir, cliRoot: join(root, '.cursor'), cwd: '/work/api' });
+      const cataloged = catalogCursorSessions({
+        ideUserDir,
+        cliRoot: join(root, '.cursor'),
+        cwd: '/work/api',
+      });
+      expect(JSON.stringify(cataloged)).not.toContain('Why is this stale?');
       const hits = search('stale', { limit: 20 });
       expect(hits).toEqual([]);
     } finally {

@@ -70,6 +70,15 @@ export function findMarkdownDropFiles(dir: string, project: string): MarkdownDro
   return sessions;
 }
 
+/** Latest `*.md` drop by mtime. Same scan as batch extract (`findMarkdownDropFiles`). */
+export function findLatestMarkdownDrop(dropDir: string): string | null {
+  let latest: MarkdownDropFile | null = null;
+  for (const file of findMarkdownDropFiles(dropDir, '')) {
+    if (!latest || file.mtime > latest.mtime) latest = file;
+  }
+  return latest?.path ?? null;
+}
+
 export function findAllMarkdownDropFiles(memoryDir: string): MarkdownDropFile[] {
   return listMarkdownDropDirs(memoryDir).flatMap(({ host, dir }) => findMarkdownDropFiles(dir, host));
 }
