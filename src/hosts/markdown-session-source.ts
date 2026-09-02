@@ -1,22 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
-import { basename, join } from 'path';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
 import type { Message } from '../types/index.js';
-
-export function findLatestMarkdownDrop(dropDir: string): string | null {
-  if (!existsSync(dropDir)) return null;
-  let latest: string | null = null;
-  let latestTime = 0;
-  for (const file of readdirSync(dropDir)) {
-    if (!file.endsWith('.md') || file.startsWith('.')) continue;
-    const full = join(dropDir, file);
-    const modified = statSync(full).mtimeMs;
-    if (modified > latestTime) {
-      latestTime = modified;
-      latest = full;
-    }
-  }
-  return latest;
-}
+import { findLatestMarkdownDrop } from '../../hooks/lib/markdown-drop.js';
+import type { ParsedSession, SessionSource } from './session-source.js';
 
 /** Parse the explicit markdown-drop contract used by OpenCode and Pi adapters. */
 export function parseMarkdownDrop(filePath: string): { sessionId: string; messages: Omit<Message, 'id'>[] } | null {
@@ -63,4 +49,22 @@ export function parseMarkdownDrop(filePath: string): { sessionId: string; messag
     }
   }
   return messages.length > 0 ? { sessionId, messages } : null;
+}
+
+/** Discover the latest markdown drop from a host-owned MEMORY/<host>-sessions dir. */
+export function discoverMarkdownDropSession(
+  dropDir: string,
+  source: SessionSource,
+  project: string = source,
+): ParsedSession | null {
+  const filePath = findLatestMarkdownDrop(dropDir);
+  if (!filePath) return null;
+  const parsed = parseMarkdownDrop(filePath);
+  return parsed && parsed.messages.length > 0 ? {
+    source,
+    sessionId: parsed.sessionId,
+    project,
+    messages: parsed.messages.map(message => ({ ...message, project })),
+    filePath,
+  } : null;
 }

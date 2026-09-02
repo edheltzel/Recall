@@ -7,6 +7,7 @@ export const SESSION_SOURCES = [
   'codex',
   'grok',
   'jcode',
+  'cursor',
   'mcp',
 ] as const;
 

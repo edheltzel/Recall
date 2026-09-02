@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Why is this stale?"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The cache key omitted the locale."}]}}
+{"type":"turn_ended"}
+{"role":"system","message":{"content":[{"type":"text","text":"control line should be skipped"}]}}

@@ -203,6 +203,7 @@ describe('host hook payload routing', () => {
         additionalContext: '## Recall context',
       },
     });
+    expect(JSON.parse(result.stdout ?? '{}')).not.toHaveProperty('additional_context');
     expect(result.ingest).toBeUndefined();
   });
 

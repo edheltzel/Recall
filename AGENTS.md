@@ -32,7 +32,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
 - `pi/` — Pi package extensions for native lifecycle capture and memory injection
 - `scripts/` — dev / CI helper scripts (version check, e2e)
-- `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`)
+- `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`) plus tiny host-wire snippets under `templates/cursor/`
 - `assets/` — README banner + VHS demo tapes / gifs
 
 Key root files: `AGENTS.md` (canonical guide), `CLAUDE.md` (symlink to it), `CHANGELOG.md`, `FOR_CLAUDE.md` / `FOR_OPENCODE.md` / `FOR_PI.md` (host usage guides), `CONTEXT.md`, `install.sh` / `update.sh` / `uninstall.sh`, `package.json`, `tsconfig.json`.

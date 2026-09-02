@@ -109,6 +109,8 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/pid-utils.ts"
   "$CLAUDE_DIR/hooks/lib/db-path.ts"
   "$CLAUDE_DIR/hooks/lib/identity-path.ts"
+  "$CLAUDE_DIR/hooks/lib/session-start-context.ts"
+  "$CLAUDE_DIR/hooks/lib/markdown-drop.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
   "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
   "$CLAUDE_DIR/hooks/lib/session-progress.ts"

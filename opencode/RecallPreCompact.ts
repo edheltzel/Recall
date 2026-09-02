@@ -1,4 +1,6 @@
-// opencode/RecallPreCompact.ts
+// Host parser — not a template. Compaction inject is OpenCode-specific;
+// new hosts should call `recall start` rather than copy this file.
+//
 // Injects Recall memory context into OpenCode session compaction summaries.
 //
 // When OpenCode compresses a long session, this hook ensures persistent

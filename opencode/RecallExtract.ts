@@ -1,4 +1,7 @@
-// opencode/RecallExtract.ts
+// Host parser — not a template. New drop-dir hosts write markdown into
+// MEMORY/<host>-sessions/ for shared ingest (hooks/lib/markdown-drop.ts +
+// parseMarkdownDrop). Do not copy this file pair to add a host.
+//
 // Recall session extraction plugin for OpenCode
 //
 // Hooks into session.idle to export the session as markdown, dropping it into

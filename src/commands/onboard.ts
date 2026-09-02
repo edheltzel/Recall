@@ -34,7 +34,7 @@ import { resolveIdentityPath } from '../../hooks/lib/identity-path.js';
 // L0 identity files are silently truncated at load by hooks/RecallStart.ts.
 // Mirror that constant here so the onboarding UX can warn the user before the
 // truncation ever happens.
-const MAX_L0_CHARS = 1200;
+import { MAX_L0_CHARS } from '../../hooks/lib/session-start-context.js';
 
 // ───────────────────────────────────────────────────────────────────────
 // Public CLI options

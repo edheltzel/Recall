@@ -18,6 +18,7 @@ describe('native host boundaries', () => {
       'codex',
       'grok',
       'jcode',
+      'cursor',
       'mcp',
     ]);
   });

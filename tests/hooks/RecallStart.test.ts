@@ -198,14 +198,13 @@ describe('queryDb', () => {
 // UNIT TESTS — gatherContext
 // =====================================================================
 describe('gatherContext', () => {
-  test('returns header and empty-state message when DB is empty', async () => {
+  test('returns a short degrade line when DB is empty and identity is missing', async () => {
     createTestDb().close();
-    const { gatherContext } = await importHook();
+    const { gatherContext, MEMORY_UNAVAILABLE } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('## Recall — Session Memory (tiered)');
-    // v2 empty-state: no identity, no L1 — hint plus the L2/L3 pointer line
-    expect(output).toContain('on demand');
+    expect(output).toBe(MEMORY_UNAVAILABLE);
+    expect(output).not.toContain('### L0 — Identity');
   });
 
   test('includes decisions in L1 when decisions exist', async () => {
@@ -385,24 +384,20 @@ describe('Schema correctness', () => {
 describe('Edge cases: missing and empty state', () => {
   test('gracefully handles non-existent database', async () => {
     process.env.RECALL_DB_PATH = join(tempDir, 'no-such-file.db');
-    const { gatherContext } = await importHook();
+    const { gatherContext, MEMORY_UNAVAILABLE } = await importHook();
     const output = gatherContext();
 
-    expect(output).toContain('## Recall — Session Memory (tiered)');
-    // v2: empty state shows either the empty hint or the on-demand pointer.
-    // Content is deliberately terse — we just care that it's non-empty.
+    expect(output).toBe(MEMORY_UNAVAILABLE);
     expect(output.length).toBeGreaterThan(0);
   });
 
   test('gracefully handles empty tables', async () => {
     createTestDb().close();
-    const { gatherContext } = await importHook();
+    const { gatherContext, MEMORY_UNAVAILABLE } = await importHook();
     const output = gatherContext();
 
-    // v2: no L1 section emitted when all tables are empty
     expect(output).not.toContain('### L1 — Top Memory');
-    // Always emits the header and the on-demand pointer
-    expect(output).toContain('## Recall — Session Memory (tiered)');
+    expect(output).toBe(MEMORY_UNAVAILABLE);
   });
 
   test('handles decisions with NULL reasoning and created_at', async () => {
@@ -593,7 +588,7 @@ describe('Safety: no recursive spawning', () => {
     const { stdout } = await runHookProcess();
 
     // Output should be just memory context, not multiple copies
-    const headerCount = (stdout.match(/## Recall — Session Memory \(tiered\)/g) || []).length;
+    const headerCount = (stdout.match(/## Recall — Memory unavailable this session/g) || []).length;
     expect(headerCount).toBe(1);
   });
 
