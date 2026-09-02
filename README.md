@@ -333,11 +333,10 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**Codex CLI**](docs/CODEX_INTEGRATION.md) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin; verified lifecycle contract |
 | [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
 | [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
+| [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
 
 Unattended lifecycle writes pass the scrub gate from [#50](https://github.com/edheltzel/Recall/issues/50). Agent Skill bodies remain canonical under [#228](https://github.com/edheltzel/Recall/issues/228). Installer-owned files follow surgical ownership from [#236](https://github.com/edheltzel/Recall/issues/236), while broader atomic config-write parity remains tracked in [#124](https://github.com/edheltzel/Recall/issues/124).
-
-**Candidate** — [Cursor](https://cursor.com): both `.cursor/hooks.json` and MCP are first-class; the integration model maps cleanly onto Recall's existing hook architecture. Tracked but not started.
 
 Have an agent you'd like to see supported? [Open an issue](https://github.com/edheltzel/Recall/issues) — Recall is designed to be agent-agnostic, and any host that speaks MCP is a candidate.
 

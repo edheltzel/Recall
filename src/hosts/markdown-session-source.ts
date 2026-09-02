@@ -1,6 +1,24 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { basename, join } from 'path';
 import type { Message } from '../types/index.js';
+import {
+  findAllMarkdownDropFiles,
+  findMarkdownDropFiles,
+  listMarkdownDropDirs,
+  markdownDropDirName,
+  markdownDropHostId,
+  MARKDOWN_DROP_DIR_SUFFIX,
+} from '../../hooks/lib/markdown-drop.js';
+import type { ParsedSession, SessionSource } from './session-source.js';
+
+export {
+  findAllMarkdownDropFiles,
+  findMarkdownDropFiles,
+  listMarkdownDropDirs,
+  markdownDropDirName,
+  markdownDropHostId,
+  MARKDOWN_DROP_DIR_SUFFIX,
+};
 
 export function findLatestMarkdownDrop(dropDir: string): string | null {
   if (!existsSync(dropDir)) return null;
@@ -63,4 +81,22 @@ export function parseMarkdownDrop(filePath: string): { sessionId: string; messag
     }
   }
   return messages.length > 0 ? { sessionId, messages } : null;
+}
+
+/** Discover the latest markdown drop from a host-owned MEMORY/<host>-sessions dir. */
+export function discoverMarkdownDropSession(
+  dropDir: string,
+  source: SessionSource,
+  project: string = source,
+): ParsedSession | null {
+  const filePath = findLatestMarkdownDrop(dropDir);
+  if (!filePath) return null;
+  const parsed = parseMarkdownDrop(filePath);
+  return parsed && parsed.messages.length > 0 ? {
+    source,
+    sessionId: parsed.sessionId,
+    project,
+    messages: parsed.messages.map(message => ({ ...message, project })),
+    filePath,
+  } : null;
 }

@@ -1,4 +1,6 @@
-// pi/RecallPreCompact.ts
+// Host parser — not a template. before_agent inject is Pi-specific;
+// new hosts should call `recall start` rather than copy this file.
+//
 // Pi extension: injects Recall memory into system prompt before every agent turn.
 //
 // VERIFIED AGAINST PI 0.81.1:

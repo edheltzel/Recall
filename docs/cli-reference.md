@@ -180,13 +180,21 @@ Supported tables for backfill: `loa`, `decisions`, `learnings`, `breadcrumbs`, `
 ## Identity & Onboarding
 
 ```bash
+recall start                            # Render L0/L1 session-start memory (markdown)
+recall start --format cursor            # Cursor sessionStart wrapper: { "additional_context": "..." }
 recall onboard                          # Interactive L0 identity interview (writes identity.md)
 recall onboard --print --yes            # Preview rendered markdown without writing
 recall onboard --project                # Write project-local (./.atlas-recall/identity.md)
 recall onboard --out /path/identity.md  # Write to an explicit path
 ```
 
-`recall onboard` creates the L0 tier that `RecallStart` injects at the top of every
+`recall start` is the shared L0/L1 inject renderer. Claude SessionStart and Codex
+SessionStart call the same assembler (published caps: L0 1200 chars, L1 6000,
+total 8000). Empty DB + missing `identity.md` exits 0 with a short degrade line.
+Cursor inject uses `--format cursor` (`{ additional_context }`); Codex keeps
+`hookSpecificOutput.additionalContext`.
+
+`recall onboard` creates the L0 tier that `recall start` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
 `--project` > the global identity. The global resolver preserves an existing
 user-owned `~/.claude/MEMORY/identity.md`; otherwise it selects the canonical
@@ -194,7 +202,7 @@ file under the Recall install root, `~/.agents/Recall/MEMORY/identity.md`. If a
 file already exists, the command asks for confirmation and writes a `.bak` copy
 before overwriting.
 
-The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `RecallStart`
+The renderer warns when output exceeds `MAX_L0_CHARS=1200` — `recall start`
 silently truncates beyond that threshold.
 
 ## Importance
@@ -441,6 +449,7 @@ recall path --json                      # Same, as JSON
 recall migrate --to /new/path/recall.db # Relocate the database and rewrite MCP configs
 recall migrate --to ... --dry-run       # Preview the migration plan
 recall onboard                          # Interactive L0 identity interview (see Onboard)
+recall start                            # Render L0/L1 session-start memory (see Identity & Onboarding)
 ```
 
 `recall init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.

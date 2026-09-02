@@ -10,6 +10,29 @@ MCP tool names (`memory_search`, `memory_add`, etc.) remain stable. 1.0.0 is
 intentionally reserved for a later, deliberate milestone — see the versioning
 note in the 0.9.0 entry.
 
+## [Unreleased]
+
+### Added
+
+- **`recall start`** — public L0/L1 session-start renderer. Claude `RecallStart.ts`
+  is a thin wrapper; Codex SessionStart `renderContext` calls the same assembler
+  (`hooks/lib/session-start-context.ts`). Published caps remain 1200 / 6000 / 8000
+  chars. Empty DB + missing `identity.md` exits 0 with a short degrade line.
+- **Shared drop-dir ingest** — `MEMORY/*-sessions/` is scanned generically.
+  OpenCode and Pi keep their host parsers; adding a third drop-dir host does not
+  mean copying `RecallExtract.ts` / `RecallPreCompact.ts`. `host-ingest.ts` stays
+  Codex/Grok/jcode live ingest.
+- **Cursor capture catalog** — on-disk parser of IDE `state.vscdb`
+  (cursorDiskKV composers/bubbles), CLI `agent-transcripts/**/*.jsonl`, and
+  fail-soft `~/.cursor/chats/<md5(cwd)>/` blobs. Catalog only; JSONL remains the
+  CLI transcript source. Cursor does not join `recall host-hook`.
+- **Cursor inject** — `~/.cursor/hooks.json` sessionStart wrapper
+  `{ additional_context }` via `recall start --format cursor`, plus MCP
+  (`recall-mcp`) and a user rule. Idempotent hooks.json merge. No marketplace
+  plugin.
+- **Tiny install snippets** under `templates/cursor/` (hook JSON, MCP, rule,
+  one-liner).
+
 ## [0.10.0] - 2026-08-26 - "cross-host lifecycle capture"
 
 ### Added

@@ -10,8 +10,10 @@ memory-aware agent definition.
 ## Ownership
 
 - `RecallExtract.ts` — plugin: exports the session on `session.idle` via
-  `opencode export <id>`, writing a markdown drop that `RecallBatchExtract.ts` consumes
-- `RecallPreCompact.ts` — plugin: pushes Recall context into compaction output
+  `opencode export <id>`, writing a markdown drop that `RecallBatchExtract.ts` consumes.
+  Host parser, not a template for adding drop-dir hosts.
+- `RecallPreCompact.ts` — plugin: pushes Recall context into compaction output.
+  Host parser, not a template.
 - `lib/session-export.ts` — pure helpers shared by the plugins and the tests
 - `recall-memory.md` — agent definition
 
