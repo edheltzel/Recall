@@ -1,4 +1,7 @@
-// pi/RecallExtract.ts
+// Host parser — not a template. New drop-dir hosts write markdown into
+// MEMORY/<host>-sessions/ for shared ingest (hooks/lib/markdown-drop.ts +
+// parseMarkdownDrop). Do not copy this file pair to add a host.
+//
 // Pi extension: exports session as markdown to Recall's drop directory on shutdown.
 //
 // Pi sessions use tree-structured JSONL (id/parentId) unlike Claude Code's linear format.

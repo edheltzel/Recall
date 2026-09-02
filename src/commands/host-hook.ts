@@ -1,4 +1,3 @@
-import { spawnSync } from 'child_process';
 import {
   closeSync,
   existsSync,
@@ -11,7 +10,7 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { fileURLToPath } from 'url';
+import { gatherContext, MEMORY_UNAVAILABLE } from '../../hooks/lib/session-start-context.js';
 import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport, streamGrokSessionExport } from '../hosts/grok-lifecycle.js';
 import {
@@ -495,21 +494,11 @@ export async function handleGrokHostHook(
 }
 
 function renderRecallContext(): string {
-  const candidates = [
-    fileURLToPath(new URL('../hooks/RecallStart.ts', import.meta.url)),
-    fileURLToPath(new URL('../../hooks/RecallStart.ts', import.meta.url)),
-  ];
-  const hookPath = candidates.find(existsSync);
-  if (!hookPath) throw new Error('RecallStart hook is not installed beside Recall');
-  const result = spawnSync(process.execPath, [hookPath], {
-    encoding: 'utf-8',
-    maxBuffer: 1024 * 1024,
-    timeout: 10_000,
-    env: process.env,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`RecallStart failed (${result.status})`);
-  return result.stdout.trim();
+  try {
+    return gatherContext();
+  } catch {
+    return MEMORY_UNAVAILABLE;
+  }
 }
 
 function parsePayload(raw: string): HookPayload {

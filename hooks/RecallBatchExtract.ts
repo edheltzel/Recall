@@ -30,18 +30,13 @@ import {
   markAsFailed as trackerMarkAsFailed,
 } from './lib/extraction-tracker';
 import { getDbPath } from './lib/sqlite-writers';
+import { findAllMarkdownDropFiles, findMarkdownDropFiles } from './lib/markdown-drop';
 
 const CLAUDE_DIR = join(process.env.HOME!, '.claude');
 const PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
 const RECALL_HOME = process.env.RECALL_HOME || join(process.env.HOME!, '.agents', 'Recall');
 const MEMORY_DIR = join(RECALL_HOME, 'MEMORY');
 const SESSION_EXTRACT = join(RECALL_HOME, 'shared', 'hooks', 'RecallExtract.ts');
-
-// OpenCode drop directory — plugin exports markdown sessions here
-const OPENCODE_DROP_DIR = join(MEMORY_DIR, 'opencode-sessions');
-
-// Pi drop directory — extension exports linearized markdown sessions here
-const PI_DROP_DIR = join(MEMORY_DIR, 'pi-sessions');
 
 /**
  * Resolve bun path dynamically — don't assume ~/.bun/bin
@@ -215,27 +210,11 @@ export function findAllConversations(): { path: string; size: number; project: s
 }
 
 /**
- * Find markdown session files in a drop directory for a given platform
+ * Find markdown session files in a drop directory for a given platform.
+ * Shared with src/hosts/markdown-session-source.ts via hooks/lib/markdown-drop.ts.
  */
 export function findMarkdownSessions(dir: string, project: string): { path: string; size: number; project: string; mtime: number }[] {
-  const sessions: { path: string; size: number; project: string; mtime: number }[] = [];
-
-  if (!existsSync(dir)) return sessions;
-
-  try {
-    const files = readdirSync(dir)
-      .filter(f => f.endsWith('.md') && !f.startsWith('.'));
-
-    for (const file of files) {
-      const fullPath = join(dir, file);
-      try {
-        const stat = statSync(fullPath);
-        sessions.push({ path: fullPath, size: stat.size, project, mtime: stat.mtimeMs });
-      } catch {}
-    }
-  } catch {}
-
-  return sessions;
+  return findMarkdownDropFiles(dir, project);
 }
 
 /**
@@ -305,7 +284,7 @@ function projectDirToCwd(projectDir: string): string {
  * Run extraction on a single file using RecallExtract's --reextract mode
  * Returns true only if extraction actually succeeded (quality gate passed)
  *
- * Handles both JSONL (Claude Code) and markdown (OpenCode/Pi) files.
+ * Handles both JSONL (Claude Code) and markdown (drop-dir hosts) files.
  * For markdown files, passes the content directly as a
  * pre-formatted transcript using --reextract-md flag.
  */
@@ -356,10 +335,9 @@ async function main() {
   const dbPath = getDbPath();
   const tracker = loadTracker(dbPath);
   const claudeConversations = findAllConversations();
-  const opencodeConversations = findMarkdownSessions(OPENCODE_DROP_DIR, 'opencode');
-  const piConversations = findMarkdownSessions(PI_DROP_DIR, 'pi');
-  const conversations = [...claudeConversations, ...opencodeConversations, ...piConversations];
-  log(`Found ${claudeConversations.length} Claude Code JSONL + ${opencodeConversations.length} OpenCode + ${piConversations.length} Pi markdown files`);
+  const markdownConversations = findAllMarkdownDropFiles(MEMORY_DIR);
+  const conversations = [...claudeConversations, ...markdownConversations];
+  log(`Found ${claudeConversations.length} Claude Code JSONL + ${markdownConversations.length} markdown drop-dir files`);
 
   const candidates = findCandidates(conversations, tracker);
   log(`${candidates.length} files need extraction (${conversations.length - candidates.length} already up-to-date)`);
@@ -389,8 +367,9 @@ async function main() {
     const sizeKB = Math.round(candidate.size / 1024);
     log(`Extracting: ${candidate.project} | ${sizeKB}KB | ${candidate.reason}`);
 
-    // For markdown sessions (OpenCode/Pi), project is a platform name ('opencode', 'pi').
-    // projectDirToCwd only works for Claude Code's encoded paths — skip it for platforms.
+    // For markdown sessions (drop-dir hosts), project is the host id
+    // ('opencode', 'pi', or any later *-sessions host).
+    // projectDirToCwd only works for Claude Code's encoded paths — skip it for drop-dir.
     const isMarkdown = candidate.path.endsWith('.md');
     const cwd = isMarkdown ? candidate.project : projectDirToCwd(candidate.project);
     const success = extractFile(candidate.path, cwd);

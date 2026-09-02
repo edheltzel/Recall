@@ -16,6 +16,7 @@ import { runImportConversations } from './commands/import-conversations.js';
 import { runLoa, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
 import { runDump } from './commands/dump.js';
 import { runHostHook } from './commands/host-hook.js';
+import { runStart } from './commands/start.js';
 import { runImportLegacy } from './commands/import-legacy.js';
 import { runScrubArchive } from './commands/scrub-archive.js';
 import { runImportTelos, runTelosList, runTelosShow, runTelosSearch } from './commands/import-telos.js';
@@ -480,7 +481,21 @@ program
     closeDb();
   });
 
+// recall start — shared L0/L1 inject renderer. Hosts call this instead of
+// forking RecallStart.ts. Hidden host-hook stays ingest-only (plus Codex
+// SessionStart, which uses the same assembler).
+program
+  .command('start')
+  .description('Render L0/L1 session-start memory (markdown; --format cursor wraps { additional_context })')
+  .option('--format <format>', 'Output format: markdown (default) or cursor', 'markdown')
+  .action((options) => {
+    runStart({ format: options.format === 'cursor' ? 'cursor' : 'markdown' });
+    closeDb();
+  });
+
 // Internal lifecycle adapter entry point. Host plugins own invocation.
+// Stays ingest-only for Codex/Grok/jcode (Codex SessionStart injects via
+// the shared assembler, not a forked RecallStart). Cursor never joins.
 program
   .command('host-hook <host>', { hidden: true })
   .action(async (host) => {
@@ -819,7 +834,7 @@ program
   .option('-v, --vector', 'Use vector search only (semantic)')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

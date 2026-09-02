@@ -65,6 +65,7 @@ describe('npm package: files whitelist', () => {
     expect(has('FOR_CLAUDE.md')).toBe(true);
     expect(has('FOR_OPENCODE.md')).toBe(true);
     expect(has('FOR_PI.md')).toBe(true);
+    expect(hasUnder('templates/cursor/')).toBe(true);
   });
 
   // #235: the agent skills are the sole command surface since #228, so the pack
