@@ -4,6 +4,8 @@
 
 This guide covers everything needed to install Recall: prerequisites, what the installer does, verification, session extraction setup, and environment variables.
 
+> **First run?** Walk through [Getting Started](getting-started.md) for install, first commands, where the database lives, how a session starts, and how MCP/hooks get wired.
+
 > **Not sure which command to run** (install vs. update vs. uninstall, npm vs. source, re-install, custom DB path, recovery)? See **[Managing Recall — which command do I run?](lifecycle.md)** for the decision table.
 
 ---
@@ -325,4 +327,4 @@ copy remains available in the pre-purge snapshot.
 
 ---
 
-*Next: [CLI Reference](cli-reference.md) | [MCP Tools](mcp-tools.md) | [Troubleshooting](troubleshooting.md)*
+*Next: [Getting Started](getting-started.md) | [CLI Reference](cli-reference.md) | [MCP Tools](mcp-tools.md) | [Troubleshooting](troubleshooting.md)*

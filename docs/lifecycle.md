@@ -89,4 +89,4 @@ Run `recall uninstall --help` for the canonical forwarded flag list. The exact r
 
 ---
 
-*See also: [Installation](installation.md) · [Upgrading](upgrading.md) · [CLI Reference](cli-reference.md) · [Troubleshooting](troubleshooting.md)*
+*See also: [Getting Started](getting-started.md) · [Installation](installation.md) · [Upgrading](upgrading.md) · [CLI Reference](cli-reference.md) · [Troubleshooting](troubleshooting.md)*
