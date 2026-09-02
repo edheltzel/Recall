@@ -14,11 +14,21 @@ describe('Déjà vu-style install snippets', () => {
       expect(statSync(full).size).toBeLessThan(800);
     }
     const hooks = readFileSync(join(SNIPPETS, 'hooks.json'), 'utf-8');
-    expect(JSON.parse(hooks).hooks.sessionStart[0].command).toBe('recall start --format cursor');
+    const hookCommand = JSON.parse(hooks).hooks.sessionStart[0].command;
+    expect(hookCommand).toBe('recall start --format cursor');
+    expect(hookCommand).not.toMatch(/^[/~]/);
+    expect(hookCommand).not.toContain('$HOME');
+    expect(hookCommand).not.toContain('~/.bun');
     const mcp = JSON.parse(readFileSync(join(SNIPPETS, 'mcp.json'), 'utf-8'));
     expect(mcp.mcpServers['recall-memory'].command).toBe('recall-mcp');
     expect(JSON.stringify(mcp)).not.toContain('mem-mcp');
-    expect(readFileSync(join(SNIPPETS, 'one-liner.sh'), 'utf-8')).toContain('recall start --format cursor');
+    const oneLiner = readFileSync(join(SNIPPETS, 'one-liner.sh'), 'utf-8');
+    expect(oneLiner).toContain('recall start --format cursor');
+    expect(oneLiner).toContain('Cursor.app');
+    expect(oneLiner).toContain('no-op');
+    expect(oneLiner).toContain('~/.bun/bin');
+    expect(oneLiner).not.toMatch(/\/Users\//);
+    expect(oneLiner).not.toContain('hooks/Recall');
     expect(readFileSync(join(SNIPPETS, 'rule.md'), 'utf-8')).toContain('recall-memory');
   });
 

@@ -336,6 +336,8 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
 
+Cursor sessionStart uses unqualified `recall start --format cursor` (`templates/cursor/`). Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor or a shell where `recall` resolves is fine.
+
 Unattended lifecycle writes pass the scrub gate from [#50](https://github.com/edheltzel/Recall/issues/50). Agent Skill bodies remain canonical under [#228](https://github.com/edheltzel/Recall/issues/228). Installer-owned files follow surgical ownership from [#236](https://github.com/edheltzel/Recall/issues/236), while broader atomic config-write parity remains tracked in [#124](https://github.com/edheltzel/Recall/issues/124).
 
 Have an agent you'd like to see supported? [Open an issue](https://github.com/edheltzel/Recall/issues) — Recall is designed to be agent-agnostic, and any host that speaks MCP is a candidate.

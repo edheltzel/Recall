@@ -31,7 +31,9 @@ note in the 0.9.0 entry.
   (`recall-mcp`) and a user rule. Idempotent hooks.json merge. No marketplace
   plugin.
 - **Tiny install snippets** under `templates/cursor/` (hook JSON, MCP, rule,
-  one-liner).
+  one-liner). `hooks.json` stays unqualified `recall start --format cursor`.
+  Cursor.app GUI PATH typically lacks `~/.bun/bin`, so sessionStart is a no-op
+  until `recall` is on that app PATH (CLI Cursor / a resolving shell is fine).
 
 ## [0.10.0] - 2026-08-26 - "cross-host lifecycle capture"
 
