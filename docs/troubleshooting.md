@@ -2,6 +2,8 @@
 
 ← [Back to README](../README.md)
 
+New install? The first-run walkthrough is [Getting Started](getting-started.md).
+
 ## First Step: Run Doctor
 
 ```bash
