@@ -16,6 +16,7 @@ export {
   MAX_L1_CHARS,
   MAX_TOTAL_CHARS,
   MEMORY_UNAVAILABLE,
+  resolveSessionStartCwd,
   detectProject,
   queryDb,
   buildL0,

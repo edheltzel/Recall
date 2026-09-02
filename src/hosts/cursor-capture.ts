@@ -338,7 +338,8 @@ function catalogVscdb(dbPath: string): CursorCatalogSession[] {
         project: workspace ? basename(workspace) : composer.name ?? undefined,
         createdAt: millisToIso(composer.createdAt),
         updatedAt: millisToIso(composer.lastUpdatedAt),
-        size: fileSize(dbPath),
+        // Composer rows are not the container DB; JSONL keeps per-file size.
+        size: 0,
         messageCount: turns.length,
         sourcePath: dbPath,
         quality: 'transcript' as const,

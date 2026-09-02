@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'crypto';
 import { Database } from 'bun:sqlite';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -75,6 +75,8 @@ describe('Cursor capture catalog', () => {
       expect(ide?.turns.map(t => t.role)).toEqual(['user', 'assistant']);
       expect(ide?.turns[0]).not.toHaveProperty('text');
       expect(ide?.quality).toBe('transcript');
+      expect(ide?.size).toBe(0);
+      expect(ide?.size).not.toBe(statSync(vscdb).size);
 
       const parsedTurns = parseCursorVscdbTurnsForTest(vscdb, 'composer-7');
       expect(parsedTurns.map(t => t.role)).toEqual(['user', 'assistant']);
@@ -87,6 +89,7 @@ describe('Cursor capture catalog', () => {
       expect(jsonl?.turns.map(t => t.role)).toEqual(['user', 'assistant']);
       expect(jsonl?.turns[0]).not.toHaveProperty('text');
       expect(jsonl?.sourcePath.endsWith('.jsonl')).toBe(true);
+      expect(jsonl?.size).toBe(statSync(jsonl!.sourcePath).size);
       expect(sessions.some(s => s.sourcePath.includes('subagents'))).toBe(false);
       expect(parseCursorJsonlTurnsForTest(jsonl!.sourcePath)[1].text).toBe(
         'The cache key omitted the locale.',
@@ -191,6 +194,7 @@ describe('Cursor capture catalog', () => {
     expect(source).toContain('agent-transcripts');
     expect(source).toContain("mode=ro&immutable=1");
     expect(source).not.toContain("LIKE 'bubbleId::%'");
+    expect(source).not.toMatch(/size:\s*fileSize\(dbPath\)/);
     expect(source).not.toMatch(/from ['"].*host-hook/);
     expect(source).not.toMatch(/from ['"].*host-ingest/);
   });

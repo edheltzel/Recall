@@ -31,8 +31,23 @@ export const L1_LOA_FALLBACK_CAP = 6;
 export const MEMORY_UNAVAILABLE =
   '## Recall — Memory unavailable this session\n_Use `memory_search` to query memory manually._';
 
-export function detectProject(): string | undefined {
-  const cwd = process.cwd();
+/**
+ * Cursor user-level sessionStart runs with cwd `~/.cursor/`. Prefer the
+ * always-on project dirs those hosts export so git-remote/basename and
+ * project-local identity.md follow the workspace, not the hooks.json dir.
+ */
+export function resolveSessionStartCwd(
+  env: NodeJS.ProcessEnv = process.env,
+  fallbackCwd: string = process.cwd(),
+): string {
+  const cursor = env.CURSOR_PROJECT_DIR?.trim();
+  if (cursor) return cursor;
+  const claude = env.CLAUDE_PROJECT_DIR?.trim();
+  if (claude) return claude;
+  return fallbackCwd;
+}
+
+export function detectProject(cwd: string = resolveSessionStartCwd()): string | undefined {
   try {
     const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd,
@@ -125,8 +140,8 @@ function tableColumns(table: string): Set<string> {
   }
 }
 
-export function buildL0(): string | undefined {
-  const path = resolveIdentityPath({ project: 'existing' });
+export function buildL0(cwd: string = resolveSessionStartCwd()): string | undefined {
+  const path = resolveIdentityPath({ project: 'existing', cwd });
   try {
     const content = readFileSync(path, 'utf-8').trim();
     if (!content) return undefined;
@@ -307,8 +322,9 @@ export function gatherContext(): string {
   try {
     sweepExpiredBreadcrumbs();
 
-    const project = detectProject();
-    const l0 = buildL0();
+    const cwd = resolveSessionStartCwd();
+    const project = detectProject(cwd);
+    const l0 = buildL0(cwd);
     const l1Rows = assembleL1(project);
     const l1Text = renderL1(l1Rows);
 
