@@ -8,8 +8,6 @@ import {
   catalogCursorSessions,
   cursorChatsDir,
   encodedProjectFromTranscriptPath,
-  parseCursorJsonlTurnsForTest,
-  parseCursorVscdbTurnsForTest,
   MAX_WORKSPACE_STATE_DBS,
 } from '../../src/hosts/cursor-capture';
 import { initDb, closeDb } from '../../src/db/connection';
@@ -65,35 +63,26 @@ describe('Cursor capture catalog', () => {
         ideUserDir,
         cliRoot,
         cwd: '/work/api',
-        includeSubagents: false,
       });
 
       const ide = sessions.find(s => s.store === 'ide-vscdb');
       expect(ide?.sessionId).toBe('composer-7');
+      expect(ide?.workspace).toBe('/work/api');
       expect(ide?.project).toBe('api');
       expect(ide?.messageCount).toBe(2);
-      expect(ide?.turns.map(t => t.role)).toEqual(['user', 'assistant']);
-      expect(ide?.turns[0]).not.toHaveProperty('text');
+      expect(ide).not.toHaveProperty('turns');
       expect(ide?.quality).toBe('transcript');
       expect(ide?.size).toBe(0);
       expect(ide?.size).not.toBe(statSync(vscdb).size);
-
-      const parsedTurns = parseCursorVscdbTurnsForTest(vscdb, 'composer-7');
-      expect(parsedTurns.map(t => t.role)).toEqual(['user', 'assistant']);
-      expect(parsedTurns[0].text).toBe('Why is this stale?');
 
       const jsonl = sessions.find(s => s.store === 'cli-jsonl');
       expect(jsonl?.sessionId).toBe('cli-chat-1');
       expect(jsonl?.messageCount).toBe(2);
       expect(jsonl?.project).toBe('api');
-      expect(jsonl?.turns.map(t => t.role)).toEqual(['user', 'assistant']);
-      expect(jsonl?.turns[0]).not.toHaveProperty('text');
+      expect(jsonl).not.toHaveProperty('turns');
       expect(jsonl?.sourcePath.endsWith('.jsonl')).toBe(true);
       expect(jsonl?.size).toBe(statSync(jsonl!.sourcePath).size);
       expect(sessions.some(s => s.sourcePath.includes('subagents'))).toBe(false);
-      expect(parseCursorJsonlTurnsForTest(jsonl!.sourcePath)[1].text).toBe(
-        'The cache key omitted the locale.',
-      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -180,7 +169,7 @@ describe('Cursor capture catalog', () => {
       const blob = present.find(s => s.store === 'chats-blob');
       expect(blob).toBeDefined();
       expect(blob?.quality).toBe('breadcrumbs');
-      expect(blob?.turns).toEqual([]);
+      expect(blob).not.toHaveProperty('turns');
       expect(blob?.messageCount).toBe(0);
       expect(createHash('md5').update(cwd).digest('hex')).toBe(chats.split('/').pop());
     } finally {

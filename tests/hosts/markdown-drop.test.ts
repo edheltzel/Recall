@@ -2,8 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseMarkdownDrop, listMarkdownDropDirs, findAllMarkdownDropFiles, findLatestMarkdownDrop } from '../../src/hosts/markdown-session-source';
-import { findMarkdownDropFiles } from '../../hooks/lib/markdown-drop';
+import { parseMarkdownDrop } from '../../src/hosts/markdown-session-source';
+import {
+  findAllMarkdownDropFiles,
+  findLatestMarkdownDrop,
+  findMarkdownDropFiles,
+  listMarkdownDropDirs,
+} from '../../hooks/lib/markdown-drop';
 import { findMarkdownSessions } from '../../hooks/RecallBatchExtract';
 
 const REPO = join(import.meta.dir, '..', '..');

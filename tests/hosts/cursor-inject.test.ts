@@ -6,15 +6,14 @@ import {
   CURSOR_SESSION_START_COMMAND,
   cursorMcpSnippet,
   mergeCursorHooksJson,
-  renderCursorSessionStart,
 } from '../../src/hosts/cursor-inject';
-import { MEMORY_UNAVAILABLE } from '../../hooks/lib/session-start-context';
+import { MEMORY_UNAVAILABLE, wrapCursorSessionStart } from '../../hooks/lib/session-start-context';
 
 const REPO = join(import.meta.dir, '..', '..');
 
 describe('Cursor inject wire', () => {
   test('wrapper stdout is JSON.parse-able { additional_context } with no hookSpecificOutput', () => {
-    const stdout = renderCursorSessionStart('L0 identity\nL1 ranked');
+    const stdout = wrapCursorSessionStart('L0 identity\nL1 ranked');
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
     expect(parsed).toEqual({ additional_context: 'L0 identity\nL1 ranked' });
     expect(parsed).not.toHaveProperty('hookSpecificOutput');
@@ -22,7 +21,7 @@ describe('Cursor inject wire', () => {
   });
 
   test('empty assembler output still wraps additional_context', () => {
-    const parsed = JSON.parse(renderCursorSessionStart(MEMORY_UNAVAILABLE));
+    const parsed = JSON.parse(wrapCursorSessionStart(MEMORY_UNAVAILABLE));
     expect(parsed.additional_context).toBe(MEMORY_UNAVAILABLE);
     expect(parsed.hookSpecificOutput).toBeUndefined();
   });
@@ -62,6 +61,6 @@ describe('Cursor inject wire', () => {
     expect(pluginDirs.some(name => name.toLowerCase().includes('cursor'))).toBe(false);
     const injectSource = readFileSync(join(REPO, 'src', 'hosts', 'cursor-inject.ts'), 'utf-8');
     expect(injectSource).not.toMatch(/\bmarketplace\b/);
-    expect(renderCursorSessionStart('x')).not.toContain('hookSpecificOutput');
+    expect(wrapCursorSessionStart('x')).not.toContain('hookSpecificOutput');
   });
 });

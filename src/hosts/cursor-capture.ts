@@ -6,13 +6,14 @@
  * not join `recall host-hook` / host-ingest / LifecycleHost, and does not
  * replace JSONL as the CLI transcript source.
  *
- * IDE reads are composerData prefix + per-bubble primary-key lookups. They
- * do not LIKE-scan bubbleId rows or copy transcript text onto the catalog.
+ * IDE reads are composerData prefix; messageCount is headers.length.
+ * Workspace stays on the session row. They do not LIKE-scan bubbleId rows,
+ * look up per-bubble rows, or copy transcript text onto the catalog.
  */
 
 import { createHash } from 'crypto';
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
-import { basename, dirname, join, relative, sep } from 'path';
+import { basename, dirname, join } from 'path';
 import { homedir, platform } from 'os';
 import { Database, constants } from 'bun:sqlite';
 
@@ -20,12 +21,6 @@ export type CursorStoreKind = 'ide-vscdb' | 'cli-jsonl' | 'chats-blob';
 export type CursorCatalogQuality = 'transcript' | 'breadcrumbs';
 
 /** Production catalog metadata. No transcript body. */
-export interface CursorCatalogTurn {
-  role: 'user' | 'assistant';
-  timestamp?: string;
-  workspace?: string;
-}
-
 export interface CursorCatalogSession {
   store: CursorStoreKind;
   sessionId: string;
@@ -37,12 +32,6 @@ export interface CursorCatalogSession {
   messageCount: number;
   sourcePath: string;
   quality: CursorCatalogQuality;
-  turns: CursorCatalogTurn[];
-}
-
-/** Test-only turn parser result. Not attached to catalogCursorSessions. */
-export interface CursorTestTurn extends CursorCatalogTurn {
-  text: string;
 }
 
 export interface CursorCatalogOptions {
@@ -51,13 +40,11 @@ export interface CursorCatalogOptions {
   env?: NodeJS.ProcessEnv;
   ideUserDir?: string;
   cliRoot?: string;
-  includeSubagents?: boolean;
   /** Cap on workspaceStorage state.vscdb opens. globalStorage is always included. */
   maxWorkspaceDbs?: number;
 }
 
 const COMPOSER_PREFIX = 'composerData:';
-const BUBBLE_PREFIX = 'bubbleId::';
 const SQLITE_BUSY_MS = 5000;
 export const MAX_WORKSPACE_STATE_DBS = 8;
 
@@ -252,34 +239,6 @@ function bubbleHeadersFromComposer(headersJson: unknown, bubblesJson: unknown): 
   return headers;
 }
 
-function bubbleKey(composerId: string, bubbleId: string): string {
-  return `${BUBBLE_PREFIX}${composerId}:${bubbleId}`;
-}
-
-function lookupBubbleMeta(
-  db: Database,
-  composerId: string,
-  bubbleId: string,
-): { type?: number; timestamp?: string; workspace?: string } | undefined {
-  const row = db.prepare(`
-    SELECT json_extract(value, '$.type') AS type,
-           json_extract(value, '$.timestamp') AS timestamp,
-           json_extract(value, '$.workspaceProjectDir') AS workspaceProjectDir
-    FROM cursorDiskKV
-    WHERE key = ?
-  `).get(bubbleKey(composerId, bubbleId)) as {
-    type: number | string | null;
-    timestamp: number | string | null;
-    workspaceProjectDir: string | null;
-  } | undefined;
-  if (!row) return undefined;
-  return {
-    type: row.type == null ? undefined : Number(row.type),
-    timestamp: millisToIso(row.timestamp),
-    workspace: row.workspaceProjectDir?.trim() || undefined,
-  };
-}
-
 function catalogVscdb(dbPath: string): CursorCatalogSession[] {
   let db: Database | null = null;
   try {
@@ -319,18 +278,7 @@ function catalogVscdb(dbPath: string): CursorCatalogSession[] {
         composer.headers ?? composer.conversationHeaders,
         composer.bubbles,
       );
-      let workspace = composer.workspaceProjectDir?.trim() || undefined;
-      const turns: CursorCatalogTurn[] = [];
-      for (const header of headers) {
-        const meta = lookupBubbleMeta(db!, sessionId, header.bubbleId);
-        if (!workspace && meta?.workspace) workspace = meta.workspace;
-        const type = header.type ?? meta?.type;
-        turns.push({
-          role: type === 1 ? 'user' : 'assistant',
-          timestamp: meta?.timestamp ?? millisToIso(composer.lastUpdatedAt) ?? millisToIso(composer.createdAt),
-          workspace: meta?.workspace ?? workspace,
-        });
-      }
+      const workspace = composer.workspaceProjectDir?.trim() || undefined;
       return {
         store: 'ide-vscdb' as const,
         sessionId,
@@ -340,10 +288,9 @@ function catalogVscdb(dbPath: string): CursorCatalogSession[] {
         updatedAt: millisToIso(composer.lastUpdatedAt),
         // Composer rows are not the container DB; JSONL keeps per-file size.
         size: 0,
-        messageCount: turns.length,
+        messageCount: headers.length,
         sourcePath: dbPath,
         quality: 'transcript' as const,
-        turns,
       };
     });
   } catch {
@@ -353,123 +300,18 @@ function catalogVscdb(dbPath: string): CursorCatalogSession[] {
   }
 }
 
-/**
- * Test-only: point-lookup bubble text for a composer. Not used by catalogCursorSessions.
- */
-export function parseCursorVscdbTurnsForTest(dbPath: string, composerId: string): CursorTestTurn[] {
-  let db: Database | null = null;
-  try {
-    db = openCursorKv(dbPath);
-    const composer = db.prepare(`
-      SELECT json_extract(value, '$.fullConversationHeadersOnly') AS headers,
-             json_extract(value, '$.conversationHeaders') AS conversationHeaders,
-             json_extract(value, '$.bubbles') AS bubbles
-      FROM cursorDiskKV
-      WHERE key = ?
-    `).get(`${COMPOSER_PREFIX}${composerId}`) as {
-      headers: unknown;
-      conversationHeaders: unknown;
-      bubbles: unknown;
-    } | undefined;
-    if (!composer) return [];
-    const headers = bubbleHeadersFromComposer(
-      composer.headers ?? composer.conversationHeaders,
-      composer.bubbles,
-    );
-    const turns: CursorTestTurn[] = [];
-    const lookup = db.prepare(`
-      SELECT json_extract(value, '$.type') AS type,
-             json_extract(value, '$.text') AS text,
-             json_extract(value, '$.rawText') AS rawText,
-             json_extract(value, '$.timestamp') AS timestamp,
-             json_extract(value, '$.workspaceProjectDir') AS workspaceProjectDir
-      FROM cursorDiskKV
-      WHERE key = ?
-    `);
-    for (const header of headers) {
-      const row = lookup.get(bubbleKey(composerId, header.bubbleId)) as {
-        type: number | string | null;
-        text: string | null;
-        rawText: string | null;
-        timestamp: number | string | null;
-        workspaceProjectDir: string | null;
-      } | undefined;
-      const text = String(row?.text ?? row?.rawText ?? '').trim();
-      if (!text) continue;
-      const type = header.type ?? (row?.type == null ? undefined : Number(row.type));
-      turns.push({
-        role: type === 1 ? 'user' : 'assistant',
-        timestamp: millisToIso(row?.timestamp),
-        workspace: row?.workspaceProjectDir?.trim() || undefined,
-        text,
-      });
-    }
-    return turns;
-  } catch {
-    return [];
-  } finally {
-    try { db?.close(); } catch { /* ignore */ }
-  }
-}
-
-function walkJsonlFiles(root: string, includeSubagents: boolean): string[] {
-  const found: string[] = [];
-  const stack = [root];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    let entries: Array<{ isDirectory(): boolean; isFile(): boolean; name: string }>;
-    try {
-      entries = readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const full = join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (!includeSubagents && entry.name === 'subagents') continue;
-        stack.push(full);
-        continue;
-      }
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      const rel = relative(root, full).split(sep);
-      if (!includeSubagents && rel.includes('subagents')) continue;
-      found.push(full);
-    }
-  }
-  return found;
-}
-
-function jsonlText(content: unknown): string {
-  if (typeof content === 'string') return content.trim();
-  if (!Array.isArray(content)) return '';
-  return content
-    .map(part => {
-      if (typeof part === 'string') return part;
-      if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-        return part.text;
-      }
-      return '';
-    })
-    .join('\n')
-    .trim();
-}
-
-function* iterJsonlTurns(filePath: string): Generator<CursorTestTurn> {
+function parseCliJsonl(filePath: string): CursorCatalogSession | null {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
   } catch {
-    return;
+    return null;
   }
+  let messageCount = 0;
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let parsed: {
-      role?: unknown;
-      type?: unknown;
-      message?: { content?: unknown; role?: unknown };
-      content?: unknown;
-    };
+    let parsed: { role?: unknown; type?: unknown; message?: { role?: unknown } };
     try {
       parsed = JSON.parse(trimmed);
     } catch {
@@ -477,15 +319,9 @@ function* iterJsonlTurns(filePath: string): Generator<CursorTestTurn> {
     }
     const roleRaw = String(parsed.role ?? parsed.message?.role ?? parsed.type ?? '').toLowerCase();
     if (roleRaw !== 'user' && roleRaw !== 'assistant') continue;
-    const text = jsonlText(parsed.message?.content ?? parsed.content);
-    if (!text) continue;
-    yield { role: roleRaw, text };
+    messageCount++;
   }
-}
-
-function parseCliJsonl(filePath: string): CursorCatalogSession | null {
-  const bodies = [...iterJsonlTurns(filePath)];
-  if (bodies.length === 0) return null;
+  if (messageCount === 0) return null;
   const encodedProject = encodedProjectFromTranscriptPath(filePath);
   const workspace = encodedProject ? decodeCursorProjectDir(encodedProject) : undefined;
   let updatedAt: string | undefined;
@@ -494,11 +330,6 @@ function parseCliJsonl(filePath: string): CursorCatalogSession | null {
   } catch {
     updatedAt = undefined;
   }
-  const turns: CursorCatalogTurn[] = bodies.map(body => ({
-    role: body.role,
-    timestamp: updatedAt,
-    workspace,
-  }));
   return {
     store: 'cli-jsonl',
     sessionId: basename(filePath, '.jsonl'),
@@ -506,16 +337,10 @@ function parseCliJsonl(filePath: string): CursorCatalogSession | null {
     project: workspace ? basename(workspace) : undefined,
     updatedAt,
     size: fileSize(filePath),
-    messageCount: turns.length,
+    messageCount,
     sourcePath: filePath,
     quality: 'transcript',
-    turns,
   };
-}
-
-/** Test-only JSONL bodies. Not attached to catalogCursorSessions. */
-export function parseCursorJsonlTurnsForTest(filePath: string): CursorTestTurn[] {
-  return [...iterJsonlTurns(filePath)];
 }
 
 function catalogChatsBlobs(chatsDir: string): CursorCatalogSession[] {
@@ -535,7 +360,6 @@ function catalogChatsBlobs(chatsDir: string): CursorCatalogSession[] {
           sourcePath: full,
           quality: 'breadcrumbs',
           updatedAt: new Date(stat.mtimeMs).toISOString(),
-          turns: [],
         });
       } catch {
         continue;
@@ -557,8 +381,6 @@ export function catalogCursorSessions(options: CursorCatalogOptions = {}): Curso
   const home = options.home ?? env.HOME ?? homedir();
   const ideUserDir = options.ideUserDir ?? cursorIdeUserDir(home, env);
   const cliRoot = options.cliRoot ?? cursorCliRoot(home, env);
-  const includeSubagents = options.includeSubagents
-    ?? env.RECALL_INCLUDE_SUBAGENTS === '1';
   const cwd = options.cwd ?? process.cwd();
   const maxWorkspaceDbs = options.maxWorkspaceDbs ?? MAX_WORKSPACE_STATE_DBS;
 
@@ -574,8 +396,9 @@ export function catalogCursorSessions(options: CursorCatalogOptions = {}): Curso
         if (!project.isDirectory()) continue;
         const agentRoot = join(transcriptsRoot, project.name, 'agent-transcripts');
         if (!existsSync(agentRoot)) continue;
-        for (const file of walkJsonlFiles(agentRoot, includeSubagents)) {
-          const parsed = parseCliJsonl(file);
+        for (const rel of new Bun.Glob('**/*.jsonl').scanSync({ cwd: agentRoot, onlyFiles: true })) {
+          if (rel.split(/[/\\]/).includes('subagents')) continue;
+          const parsed = parseCliJsonl(join(agentRoot, rel));
           if (parsed) sessions.push(parsed);
         }
       }

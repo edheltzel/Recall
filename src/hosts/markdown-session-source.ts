@@ -1,26 +1,8 @@
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import type { Message } from '../types/index.js';
-import {
-  findAllMarkdownDropFiles,
-  findLatestMarkdownDrop,
-  findMarkdownDropFiles,
-  listMarkdownDropDirs,
-  markdownDropDirName,
-  markdownDropHostId,
-  MARKDOWN_DROP_DIR_SUFFIX,
-} from '../../hooks/lib/markdown-drop.js';
+import { findLatestMarkdownDrop } from '../../hooks/lib/markdown-drop.js';
 import type { ParsedSession, SessionSource } from './session-source.js';
-
-export {
-  findAllMarkdownDropFiles,
-  findLatestMarkdownDrop,
-  findMarkdownDropFiles,
-  listMarkdownDropDirs,
-  markdownDropDirName,
-  markdownDropHostId,
-  MARKDOWN_DROP_DIR_SUFFIX,
-};
 
 /** Parse the explicit markdown-drop contract used by OpenCode and Pi adapters. */
 export function parseMarkdownDrop(filePath: string): { sessionId: string; messages: Omit<Message, 'id'>[] } | null {

@@ -7,15 +7,9 @@
  * snippets/tests. Cursor never joins `recall host-hook`.
  */
 
-import { wrapCursorSessionStart, gatherContext } from '../../hooks/lib/session-start-context.js';
-
 export const CURSOR_SESSION_START_COMMAND = 'recall start --format cursor';
 export const CURSOR_MCP_COMMAND = 'recall-mcp';
 export const CURSOR_MCP_SERVER_NAME = 'recall-memory';
-
-export function renderCursorSessionStart(context: string = gatherContext()): string {
-  return wrapCursorSessionStart(context);
-}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -27,8 +21,7 @@ function commandOf(entry: unknown): string {
 }
 
 function isRecallSessionStart(entry: unknown): boolean {
-  const command = commandOf(entry);
-  return command.includes('recall start') || command.includes('recall-cursor-session-start');
+  return commandOf(entry).includes('recall start');
 }
 
 /**
