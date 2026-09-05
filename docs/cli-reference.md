@@ -4,6 +4,8 @@
 
 The `recall` command is the primary interface for Recall. All subcommands operate on the SQLite database at `~/.agents/Recall/recall.db`.
 
+New to Recall? Start with the [Getting Started](getting-started.md) first-run tutorial.
+
 ---
 
 ## Search

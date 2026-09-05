@@ -57,6 +57,8 @@ Four things that set Recall apart from cloud-hosted memory layers and from agent
 
 ## Quick Start
 
+First-run walkthrough (install, first commands, where the database lives, how a session starts, how MCP/hooks get wired): **[Getting Started](docs/getting-started.md)**.
+
 Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
 
 ```bash
@@ -346,6 +348,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
+| [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |
 | [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |
 | [Managing Recall](docs/lifecycle.md)       | Which command when: install, update, uninstall, custom DB, recovery       |
 | [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |
