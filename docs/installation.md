@@ -67,8 +67,6 @@ npm install -g @anthropic-ai/claude-code
 
 Verify: `claude --version` — [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code)
 
-**Preferred attach** is the native plugin, not this installer: see [Claude Integration](CLAUDE_INTEGRATION.md). The installer still owns Claude lifecycle hooks.
-
 ### OpenCode (Optional)
 
 If OpenCode is installed, Recall registers its MCP entry and native plugins.
@@ -81,9 +79,9 @@ Use `./install.sh --skip-opencode` when OpenCode should remain untouched.
 
 If `grok` is installed, Recall adds the managed user-level lifecycle hook documented in [Grok Integration](GROK_INTEGRATION.md). The hook exports completed sessions through the public Grok CLI and writes them immediately to `recall.db`. It does not add automatic session-start injection.
 
-Verify with `grok --version`. Deselect Grok in the interactive installer when it should remain untouched. Grok has no working plugin/extension install path; this installer is the only supported attach. See [Grok Integration](GROK_INTEGRATION.md).
+Verify with `grok --version`. Deselect Grok in the interactive installer when it should remain untouched.
 
-**Claude Code, Codex, Pi, and omp** prefer their native plugin/extension (or native skill home for omp). **Cursor** stays snippets under `templates/cursor/` — no marketplace plugin. See the [README Quick Start](../README.md#quick-start), [Codex Integration](CODEX_INTEGRATION.md), [Pi Integration](PI_INTEGRATION.md), [omp Integration](OMP_INTEGRATION.md), and [JCode Integration](JCODE_INTEGRATION.md).
+Codex uses its native marketplace plugin instead of this installer. JCode currently remains MCP and skills only; see [Codex Integration](CODEX_INTEGRATION.md) and [JCode Integration](JCODE_INTEGRATION.md).
 
 ---
 
@@ -129,9 +127,7 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not
 relocatable. `RECALL_DB_PATH` and `install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-**Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension (see [README Quick Start](../README.md#quick-start)). Use `./install.sh` / `recall install` for Grok, for Claude hooks, and for detected hosts that still need installer-owned files.
-
-Clone the repository to a permanent directory (not `/tmp`) when you need the installer script or a local marketplace root:
+Clone the repository to a permanent directory (not `/tmp`), then run the installer:
 
 ```bash
 git clone https://github.com/edheltzel/Recall.git

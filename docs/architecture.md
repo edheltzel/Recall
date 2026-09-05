@@ -74,15 +74,15 @@ Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extr
 
 Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agents/Recall`) instead of a host configuration directory.
 
-Codex's preferred attach is the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`. Its `.mcp.json` registers `recall-memory`, `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical sources, and plugin hooks provide supported transcript capture and session-start context. See [Codex Integration](CODEX_INTEGRATION.md).
+Codex is distributed as the native plugin in `plugins/recall/`, discovered through `.agents/plugins/marketplace.json`. Its `.mcp.json` registers `recall-memory`, `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical sources, and plugin hooks provide supported transcript capture and session-start context. See [Codex Integration](CODEX_INTEGRATION.md).
 
 Grok lifecycle capture is installer-owned. A managed global hook runs `grok export <session-id>` and writes immediately through `src/lib/host-ingest.ts`; Grok has no verified automatic injection surface. See [Grok Integration](GROK_INTEGRATION.md).
 
 The same ingest seam owns scrub, native session IDs, source/project attribution, persistent message keys, watermarks, and terminal finalization. JCode does not call it because the bounded live probe did not prove safe history ordering or additive configuration. See [JCode Integration](JCODE_INTEGRATION.md).
 
-Claude Code's preferred attach is the native plugin in `plugins/recall-claude/` (skills + MCP). The lifecycle installer continues to own hooks and reconciles legacy duplicate surfaces; see [Claude Integration](CLAUDE_INTEGRATION.md).
+Claude Code can install the native plugin in `plugins/recall-claude/` for skills + MCP while the lifecycle installer continues to own hooks and reconciles legacy duplicate surfaces; see [Claude Integration](CLAUDE_INTEGRATION.md).
 
-Pi's preferred attach is the native package: Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`.
+Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`.
 
 Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
