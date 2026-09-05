@@ -6,8 +6,6 @@
 
 Native host plugin bundles distributed directly from the Recall repository. One bundle per host: each host's plugin primitive is used natively rather than through a shared cross-host abstraction.
 
-Published authoring docs (package shape, builders, marketplace catalogs, validate) live in `docs/CLAUDE_INTEGRATION.md` and `docs/CODEX_INTEGRATION.md`. Do not treat those pages as end-user install cookbooks.
-
 ## Ownership
 
 - `recall/` — Codex native plugin manifest, MCP registration, lifecycle hooks, and generated `recall-*` skill adapters
