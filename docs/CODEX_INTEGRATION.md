@@ -2,7 +2,9 @@
 
 [Back to README](../README.md)
 
-Recall is packaged for Codex with Codex's native plugin primitive. The checked-in marketplace manifest is `.agents/plugins/marketplace.json`, and the plugin bundle is `plugins/recall/`.
+**Preferred install:** Codex's native plugin. It owns MCP, skills, and lifecycle hooks.
+
+The checked-in marketplace catalog is `.agents/plugins/marketplace.json`. The plugin bundle is `plugins/recall/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
 
 The plugin owns three distinct surfaces:
 
@@ -10,7 +12,7 @@ The plugin owns three distinct surfaces:
 - `skills/` contains generated adapters from the canonical `agent-skills/` sources.
 - `hooks/hooks.json` provides automatic transcript capture and session-start context.
 
-## Install
+## Install (preferred)
 
 Install Recall first so `recall`, `recall-mcp`, and the SQLite schema are available:
 
@@ -26,9 +28,9 @@ codex plugin marketplace add /absolute/path/to/Recall
 codex plugin add recall@recall-marketplace
 ```
 
-The repository path is deliberate for the current checked-in marketplace. A future remote marketplace can remove that local-clone prerequisite after its distribution and update policy are defined.
+The local repository path is required for the current checked-in marketplace. A future remote marketplace can drop that clone prerequisite after its distribution policy is defined.
 
-Codex owns plugin installation and removal. `install.sh` does not duplicate the Codex marketplace, MCP, skills, or hooks.
+Codex owns plugin installation and removal. `install.sh` does not duplicate the Codex marketplace, MCP, skills, or hooks. There is no installer-script fallback for Codex — the native plugin is the only supported attach path.
 
 ## MCP and skills
 

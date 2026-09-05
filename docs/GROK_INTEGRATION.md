@@ -2,6 +2,8 @@
 
 [Back to README](../README.md)
 
+Grok has **no working plugin or extension install path**. Live headless sessions do not compose plugin hooks, so the installer-owned global hook is the only supported attach. Do not look for `grok plugin install`.
+
 Recall supports Grok Build CLI through three separate surfaces:
 
 - MCP provides the nine query and write tools when `recall-memory` is configured in Grok.
