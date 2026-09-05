@@ -93,8 +93,8 @@ Browse and view Library of Alexandria entries.
 
 ## Installation
 
-Skill names stay `recall-*` (the canonical `agent-skills/` namespace). Claude and Codex load them from their native plugins; Pi loads them from the native package; omp loads them from `~/.omp/agent/skills/recall-*`. Installer per-file links remain for hosts without a plugin attach. Canonicals live under `~/.agents/Recall/shared/skills/<name>/`. Source files are in `agent-skills/` in the Recall repository.
+Skill canonicals live under `~/.agents/Recall/shared/skills/<name>/`; per-file symlinks are created in each host's skills directory during setup. Source files are in `agent-skills/` in the Recall repository.
 
-The Codex plugin adapters are generated with `bun run build:codex-plugin` and packaged with the native plugin bundle documented in [Codex Integration](CODEX_INTEGRATION.md). Claude copies are generated with `bun run build:claude-plugin`; see [Claude Integration](CLAUDE_INTEGRATION.md).
+The Codex plugin adapters are generated with `bun run build:codex-plugin` and packaged with the native plugin bundle documented in [Codex Integration](CODEX_INTEGRATION.md).
 
-If installer-linked skills are missing after an update, re-run `./install.sh` to relink them. That is not the preferred attach for Claude, Codex, Pi, or omp.
+If skills are missing after an update, re-run `./install.sh` to relink them.

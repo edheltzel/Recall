@@ -12,36 +12,30 @@ Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP
 
 Recall requires [Bun](https://bun.sh) (`bun:sqlite` and Bun-native hooks). Put Bun on `PATH` first.
 
-Install binaries and the database once:
-
 ```bash
+# Primary — install from npm with Bun, then configure detected hosts
 bun install -g recall-memory
-recall init
+recall install
+
+# Secondary — one-shot via npx (Bun must still be on PATH)
+npx --package=recall-memory recall install
 ```
 
-Then attach each harness with its **native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Commands and ownership are in the README Quick Start table and the per-host guides: [Claude](CLAUDE_INTEGRATION.md), [Codex](CODEX_INTEGRATION.md), [Pi](PI_INTEGRATION.md), [omp](OMP_INTEGRATION.md).
+`recall install` runs the canonical setup (MCP server, hooks, agent skills, guides) for installer-managed detected hosts. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
-| Harness | Preferred attach |
-| --- | --- |
-| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace`. Hooks still need `recall install`. |
-| Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
-| Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
-| omp | Native skills at `~/.omp/agent/skills/recall-*` (`recall install` when `omp` is detected). |
-| Grok | `recall install` / `./install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
-| Cursor | Merge `templates/cursor/` snippets. No marketplace plugin. |
-
-`recall install` (or `./install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+Install from source instead:
 
 ```bash
-# Source checkout (builds from the working tree, then the same installer-owned setup)
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
 ./install.sh
 ```
 
-Do not clone into `/tmp` — `bun link` points back at the checkout.
+`./install.sh` builds from the working tree (`bun install`, `bun run build`, `bun link`) and then runs the same canonical setup. Do not clone into `/tmp` — `bun link` points back at the checkout.
 
-After any attach, **restart each configured agent** so it loads the plugin, extension, or snippets.
+Codex is **not** wired by `recall install`. It uses the native plugin marketplace; see [Codex Integration](CODEX_INTEGRATION.md). Cursor is also not auto-installed; see [MCP and hooks](#5-how-mcp-and-hooks-get-wired) below.
+
+After any install, **restart each configured agent** so it loads MCP, hooks, and skills.
 
 Which command when (npm vs source, re-install, custom DB path) lives in [Managing Recall](lifecycle.md).
 
@@ -112,10 +106,10 @@ Then **open a new session in your agent**. What happens next depends on the host
 
 | Host | Session-start injection | How it starts |
 |------|-------------------------|---------------|
-| Claude Code | Yes — installer-owned `RecallStart` SessionStart hook | Preferred: native plugin for skills/MCP ([Claude Integration](CLAUDE_INTEGRATION.md)), plus `recall install` for hooks. Restart Claude Code. |
-| Codex CLI | Yes — plugin `SessionStart` → `additionalContext` | Preferred: native plugin ([Codex Integration](CODEX_INTEGRATION.md)), then start a Codex session. |
+| Claude Code | Yes — `RecallStart` SessionStart hook | Restart Claude Code after install. The hook injects L0/L1 automatically. |
+| Codex CLI | Yes — plugin `SessionStart` → `additionalContext` | Install the native plugin ([Codex Integration](CODEX_INTEGRATION.md)), then start a Codex session. |
 | Cursor | Beta — `sessionStart` `{ additional_context }` | Merge the snippets under `templates/cursor/`. The hook command is unqualified `recall start --format cursor`. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor, or a shell where `recall` resolves, is fine. |
-| Pi | Beta — `before_agent_start` | Preferred: `pi install npm:recall-memory`. See [Pi Integration](PI_INTEGRATION.md). |
+| Pi | Beta — `before_agent_start` | Restart Pi after install. See [Pi Integration](PI_INTEGRATION.md). |
 | OpenCode | No verified compaction injection | MCP + skills + `session.idle` capture. See [OpenCode Integration](OPENCODE_INTEGRATION.md). |
 | Grok | No automatic injection | Capture is installer-owned; search via MCP. See [Grok Integration](GROK_INTEGRATION.md). |
 | JCode | No | MCP and skills only. See [JCode Integration](JCODE_INTEGRATION.md). |
@@ -124,7 +118,7 @@ Then **open a new session in your agent**. What happens next depends on the host
 
 ## 5. How MCP and hooks get wired
 
-`recall install` (or `./install.sh`) wires **installer-owned** hosts: Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter/config. Claude, Codex, and Pi skills/MCP/extensions prefer the native plugin or package. You do not register MCP or hooks by hand unless you are on a host neither the plugin nor the installer owns.
+`recall install` (or `./install.sh`) is what wires installer-managed hosts. You do not register MCP or hooks by hand unless you are on a host the installer does not own.
 
 ### MCP (`recall-mcp`)
 
@@ -136,12 +130,10 @@ It exposes nine tools against the same SQLite file as the CLI:
 
 Per-host registration:
 
-- **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer removes the duplicate user-scope entry.
-- **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
-- **omp** — no MCP registration. Native skills only; see [omp Integration](OMP_INTEGRATION.md).
-- **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.
+- **Claude Code** — user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). If the [Claude native plugin](CLAUDE_INTEGRATION.md) is active, the plugin owns MCP and the installer removes the duplicate user-scope entry.
+- **OpenCode / Pi / Grok** — installer writes the host's MCP config when that CLI is detected.
 - **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `install.sh` does not duplicate it.
-- **Cursor** — snippets only. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`). No marketplace plugin.
+- **Cursor** — not auto-installed. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`).
 
 Full tool reference: [MCP Tools](mcp-tools.md).
 
@@ -166,7 +158,7 @@ Other hosts:
 
 ### Agent skills (`recall-*`)
 
-Claude, Codex, and Pi load skills from their native plugin/package. omp loads them from `~/.omp/agent/skills/recall-*`. The installer still links canonicals for hosts without a plugin attach. In Claude Code, invoke them as slash skills — the hyphenated names are the skill names:
+The installer links the nine canonical skills from `agent-skills/` into each host's skill home. In Claude Code, invoke them as slash skills — the hyphenated names are the skill names:
 
 | Skill | Slash | What it wraps |
 |-------|-------|----------------|

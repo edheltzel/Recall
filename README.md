@@ -61,52 +61,41 @@ First-run walkthrough (install, first commands, where the database lives, how a 
 
 Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
 
-Install the binaries and database once:
-
 ```bash
+# Primary — install from npm with Bun, then configure
 bun install -g recall-memory
-recall init
-```
-
-Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
-
-Then attach each coding agent with **that harness's native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Plugin source lives in this repository; that does not mean a given machine already has it installed.
-
-| Harness | Preferred install | Notes |
-| --- | --- | --- |
-| **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace` | Plugin owns the nine `recall-*` skills and `recall-memory` MCP. Claude hooks stay installer-owned (`recall install`) because plugin hooks *merge* with `settings.json` and would double-capture. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
-| **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
-| **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
-| **omp** | Native skill home `~/.omp/agent/skills/recall-*` | omp's plugin/skill surface. No `omp plugin install recall@…` package ships yet; `recall install` links the nine `recall-*` skills into that native directory when `omp` is detected. See [omp Integration](docs/OMP_INTEGRATION.md). |
-| **Grok** | `recall install` / `./install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
-| **Cursor** | Merge snippets under `templates/cursor/` | Marketplace plugin is locked off. |
-
-```bash
-recall stats        # Database overview
-recall doctor       # Health check
-```
-
-Restart each attached agent so it loads the plugin, extension, or snippets.
-
-<details>
-<summary>Installer script (Grok, Claude hooks, detected hosts without a plugin attach yet)</summary>
-
-`recall install` still initializes installer-owned surfaces: Claude lifecycle hooks, Grok's global hook, OpenCode, omp skill links, and Pi's MCP adapter/config alongside the native Pi package. It is the **only** supported install for Grok. It is not the preferred attach path for Claude, Codex, Pi, or omp.
-
-```bash
-# Packaged
 recall install
 
-# One-shot (Bun must be on PATH)
+# Secondary — one-shot via npx (Bun must be on PATH)
 npx --package=recall-memory recall install
+```
 
-# Source checkout
+`recall install` runs the canonical setup (MCP server, hooks, agent skills,
+guides) for installer-managed detected hosts. Prefer `bun install -g`: with
+`npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH
+(nvm/fnm shells can hide it).
+
+<details>
+<summary>Install from source instead</summary>
+
+```bash
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
 ./install.sh
 ```
 
 </details>
+
+Verify it works:
+
+```bash
+recall stats        # Database overview
+recall doctor       # Health check
+```
+
+Restart your agent (Claude Code, Pi, OpenCode, or Grok) to load the installed integration.
+
+**Claude Code and Codex:** the preferred method is authoring and maintaining the native plugin packages in this repository — package shape, builders (`bun run build:claude-plugin` / `build:codex-plugin`), in-repo marketplace catalogs, and validate commands. See [Claude Integration](docs/CLAUDE_INTEGRATION.md) and [Codex Integration](docs/CODEX_INTEGRATION.md). Loading a built package onto a machine is secondary. Claude lifecycle hooks stay installer-owned. Plugin source in the repo does not mean a given machine has it installed. **Cursor** stays snippets under `templates/cursor/` — no marketplace plugin.
 
 ### First run: set your identity
 
@@ -324,12 +313,10 @@ If you're an AI agent reading this repository:
 | What you need                                                  | Where to find it                     |
 | -------------------------------------------------------------- | ------------------------------------ |
 | **Using Recall from Claude Code** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](FOR_CLAUDE.md)     |
-| **Installing the Claude Code plugin**                          | [`docs/CLAUDE_INTEGRATION.md`](docs/CLAUDE_INTEGRATION.md) |
+| **Authoring the Claude Code plugin**                           | [`docs/CLAUDE_INTEGRATION.md`](docs/CLAUDE_INTEGRATION.md) |
 | **Using Recall from OpenCode**                                 | [`FOR_OPENCODE.md`](FOR_OPENCODE.md) |
-| **Installing the Pi native package**                           | [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) |
 | **Using Recall from Pi**                                       | [`FOR_PI.md`](FOR_PI.md)             |
-| **Installing the Codex plugin**                                | [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) |
-| **Installing omp skills**                                      | [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md) |
+| **Authoring the Codex plugin**                                 | [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) |
 | **Using Recall from Grok**                                     | [`docs/GROK_INTEGRATION.md`](docs/GROK_INTEGRATION.md) |
 | **Using Recall from JCode**                                    | [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md) |
 | **Developing Recall** (build, test, conventions)               | [`CLAUDE.md`](CLAUDE.md)             |
@@ -341,7 +328,7 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | Agent | MCP + skills | Automatic capture | Automatic injection | Status |
 | --- | :---: | :---: | :---: | --- |
 | [**Claude Code**](https://claude.com/claude-code) | ✅ | ✅ Stop and PreCompact extraction | ✅ SessionStart L0/L1 | **Stable** reference implementation |
-| [**Pi**](https://pi.dev/) | ✅ | ⚠ Beta shutdown capture | ⚠ Beta before-agent context | Native package (`pi install`); MCP adapter/config still separate |
+| [**Pi**](https://pi.dev/) | ✅ | ⚠ Beta shutdown capture | ⚠ Beta before-agent context | Native package plus separate MCP adapter/config |
 | [**OpenCode**](https://opencode.ai/) | ✅ | ⚠ Beta `session.idle` capture | ❌ Compaction injection not verified | Runtime verified against OpenCode 1.18.5 |
 | [**Codex CLI**](docs/CODEX_INTEGRATION.md) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin; verified lifecycle contract |
 | [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
@@ -367,11 +354,10 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [Architecture](docs/architecture.md)       | Database, search, extraction pipeline                                     |
 | Codebase Map (local)                       | Interactive visual map at `.agents/atlas/artifacts/2026-06-10-recall-codebase-map.html` — generated from the codegraph index, not committed (`.agents/` is gitignored) |
 | [Agent Skills](docs/agent-skills.md)       | Canonical `recall-*` workflows and host-specific packaging                |
-| [Codex Integration](docs/CODEX_INTEGRATION.md) | Preferred native plugin install: MCP, skills, automatic capture, session-start injection |
-| [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Preferred native plugin install; installer still owns Claude hooks |
-| [Pi Integration](docs/PI_INTEGRATION.md) | Preferred native package (`pi install`); MCP adapter/config remains separate |
-| [omp Integration](docs/OMP_INTEGRATION.md) | Preferred native skill home; no marketplace plugin package yet |
-| [Grok Integration](docs/GROK_INTEGRATION.md) | Installer-script only: automatic capture; no plugin path |
+| [Codex Integration](docs/CODEX_INTEGRATION.md) | Authoring the native Codex plugin (shape, builder, marketplace, validate) |
+| [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Authoring the native Claude plugin; installer still owns hooks |
+| [Pi Integration](docs/PI_INTEGRATION.md)   | Native package, separate MCP setup, lifecycle coverage, and host limits  |
+| [Grok Integration](docs/GROK_INTEGRATION.md) | Installer-owned automatic capture and explicit injection boundary |
 | [JCode Integration](docs/JCODE_INTEGRATION.md) | Live-probe evidence and current MCP/skills-only boundary |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |

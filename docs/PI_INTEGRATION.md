@@ -2,9 +2,9 @@
 
 [Back to README](../README.md)
 
-**Preferred install:** Pi's native package (`pi install`). It owns the two Recall extensions and the nine `recall-*` Agent Skills.
+Recall uses the native Pi mechanisms that exist today, but Pi does not have one bundle primitive that spans extensions, skills, and MCP.
 
-Pi packages cannot declare MCP servers. After the native package is installed, register `pi-mcp-adapter` and the owned `recall-memory` entry in `mcp.json`. `recall install --yes` runs those native steps in order — it is a coordinator, not a replacement for the Pi package.
+The one-step Recall installer coordinates several separately owned Pi surfaces instead of pretending they are one plugin.
 
 ## Verified Pi surface
 
@@ -38,26 +38,27 @@ Extensions, skills, and their lifecycle handlers can therefore travel together a
 
 MCP cannot join that unit because `mcp` is not a Pi package resource.
 
-## Install (preferred)
+## Install
 
-Install the Recall binaries, then attach Pi through its native package:
-
-```bash
-bun install -g recall-memory
-recall init
-pi install npm:recall-memory
-```
-
-From a source checkout, the equivalent native attach is `pi install /absolute/path/to/Recall`.
-
-That command loads extensions and skills. It does **not** register MCP or put `recall` / `recall-mcp` on `PATH`. Complete the MCP half:
+If Recall is already installed as a global package, run one integration command:
 
 ```bash
-pi install npm:pi-mcp-adapter
 recall install --yes
 ```
 
-`recall install --yes` (or `./install.sh --yes` from a checkout) performs these separate operations in order:
+For a one-shot package install with Bun already on `PATH`, use:
+
+```bash
+npx --package=recall-memory recall install --yes
+```
+
+From a source checkout, the equivalent one-step command is:
+
+```bash
+./install.sh --yes
+```
+
+The installer performs these separate operations in order:
 
 1. Installs or preserves `pi-mcp-adapter` in Pi's configured home.
 2. Registers the Recall root as a native Pi package for the two extensions and nine skills.
@@ -71,7 +72,9 @@ An existing adapter is preserved if npm is temporarily unavailable.
 
 A fresh install fails instead of claiming success when the adapter or native Recall package cannot be installed.
 
-Do not treat `pi install npm:recall-memory` as a complete Recall install. It is the preferred **extensions + skills** attach; MCP still needs the adapter and config.
+Do not use `pi install npm:recall-memory` as the full installation command.
+
+That command can load Recall's extensions and skills, but it cannot register `recall-memory` with an MCP client or ensure the `recall` and `recall-mcp` executables are on `PATH`.
 
 ## What MCP covers
 
@@ -146,7 +149,9 @@ Pi's `package.json#pi` manifest has only extensions, skills, prompts, and themes
 
 Therefore Recall on Pi has no single installable artifact with the same completeness as those plugin bundles.
 
-The preferred Pi attach is still the native package (`pi install`). Completeness requires separate MCP adapter/config, which `recall install` can coordinate. Recall does not introduce a cross-host bundle abstraction to hide that difference.
+The Recall installer is one human step, but the resulting state remains visibly separate: a Pi package, an MCP adapter package, an MCP config entry, and Recall-owned guide files.
+
+Recall does not introduce a cross-host bundle abstraction to hide that difference.
 
 Pi also does not make MCP available when extensions are disabled, and it cannot auto-capture ephemeral sessions that have no persisted session file.
 
