@@ -143,14 +143,15 @@ exit Pi first.
 
 ## How Pi Is Installed
 
-Pi packages can carry Recall's two extensions and nine Agent Skills together.
-Pi packages cannot register an MCP server.
+**Preferred attach:** Pi's native package.
 
-`recall install` therefore coordinates separate native pieces: the Recall Pi package, the `pi-mcp-adapter` package, the owned `recall-memory` entry in `mcp.json`, and this guide.
-It also removes pre-package Recall extension and skill symlinks so Pi never loads two copies.
+```
+pi install npm:recall-memory
+```
 
-Do not treat `pi install npm:recall-memory` as a complete Recall install.
-It omits the MCP adapter/configuration and does not guarantee that `recall` or `recall-mcp` is on `PATH`.
+Pi packages can carry Recall's two extensions and nine Agent Skills together. Pi packages cannot register an MCP server, so `pi install npm:recall-memory` is not a complete Recall install — it omits the MCP adapter/configuration and does not guarantee that `recall` or `recall-mcp` is on `PATH`.
+
+`recall install` coordinates the remaining native pieces: the Recall Pi package (if not already attached), the `pi-mcp-adapter` package, the owned `recall-memory` entry in `mcp.json`, and this guide. It also removes pre-package Recall extension and skill symlinks so Pi never loads two copies.
 
 See [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) for the verified Pi capability matrix and the explicit differences from Codex and Claude plugin bundles.
 

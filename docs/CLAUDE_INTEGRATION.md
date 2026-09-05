@@ -2,18 +2,15 @@
 
 [Back to README](../README.md)
 
-Recall ships two Claude Code surfaces, and they own different things:
+**Preferred install:** Claude Code's native plugin. It owns the nine `recall-*` skills and the `recall-memory` MCP server.
 
-- The **lifecycle installer** (`install.sh`) owns hooks — `Stop`, `SessionStart`, `PreCompact` — which is how Recall captures sessions automatically and injects the tiered L0/L1 context block.
-- The **native plugin** owns the nine `recall-*` skills and the `recall-memory` MCP server, packaged behind one manifest instead of user-level configuration.
+Claude lifecycle hooks are **not** in the plugin. Plugin hooks *merge* with `settings.json` rather than replacing them, so shipping `Stop` / `SessionStart` / `PreCompact` in the bundle would double-capture for anyone who also ran `recall install`. Auto-capture, tiered L0/L1 injection, and pre-compaction flushing stay installer-owned.
 
-The checked-in marketplace manifest is `.claude-plugin/marketplace.json`, and the plugin bundle is `plugins/recall-claude/`.
+The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plugin bundle is `plugins/recall-claude/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
 
-Running only the installer is still fully supported; the plugin is additive.
+## Install (preferred)
 
-## Install
-
-Install Recall first so `recall-mcp` is on `PATH`:
+Install Recall so `recall-mcp` is on `PATH` and the database exists:
 
 ```bash
 bun install -g recall-memory
@@ -27,7 +24,15 @@ claude plugin marketplace add /absolute/path/to/Recall
 claude plugin install recall@recall-marketplace
 ```
 
-The repository path is deliberate for the current checked-in marketplace. A future remote marketplace can remove that local-clone prerequisite after its distribution and update policy are defined.
+The local repository path is required for the current checked-in marketplace. A future remote marketplace can drop that clone prerequisite after its distribution policy is defined.
+
+### Hooks and the installer (required for automatic capture)
+
+```bash
+recall install
+```
+
+With the plugin active, `recall install` / `./update.sh` keep the Claude hooks and skip duplicate skill symlinks and the user-scope `recall-memory` MCP entry. Running only the plugin gives skills and MCP, not automatic capture.
 
 ## What MCP covers
 
@@ -83,9 +88,7 @@ claude plugin uninstall recall@recall-marketplace
 
 ## What the plugin does not cover
 
-**Lifecycle hooks are not in the bundle.** Plugin hooks *merge* with `settings.json` hooks rather than replacing them, so shipping `Stop`/`SessionStart`/`PreCompact` in the plugin would run every capture twice for anyone who also ran `install.sh` — duplicate extractions into the same database. Auto-capture, tiered L0/L1 injection, and pre-compaction flushing therefore remain lifecycle-installed.
-
-This is the one place where the plugin is deliberately not self-sufficient: a plugin-only user gets skills and MCP, not automatic capture.
+**Lifecycle hooks are not in the bundle.** This is the one place where the plugin is deliberately not self-sufficient: a plugin-only user gets skills and MCP, not automatic capture.
 
 ## Differences from the Codex package
 
@@ -116,10 +119,17 @@ The following are unresolved rather than guessed:
 
 None of these block the nine MCP operations or the skill surface.
 
-## Development verification
+## Maintaining the package
 
-`bun run build:claude-plugin` regenerates the bundle's skills from the canonical `agent-skills/` sources.
+Maintainer-only. Not the install path.
 
-`bun test tests/plugins/claude-plugin.test.ts` asserts one plugin identity across the manifests, that the checked-in skills are byte-identical to their canonical sources, and that no hooks ship in the bundle.
+Canonical skills live in `agent-skills/`. Regenerate the Claude payload with `bun run build:claude-plugin` (`scripts/build-claude-plugin.ts`). Do not hand-edit `plugins/recall-claude/skills/`. Skill names stay `recall-*`.
 
-`bun run test:e2e:claude-plugin` builds Recall, then against the **current local Claude CLI**: validates both manifests in strict mode, installs the plugin into a disposable `HOME`, asserts nine skills and the MCP server load from the bundle, seeds a legacy install and proves the migration removes both duplicates twice over without touching a user-authored skill, exercises all nine MCP tools against a disposable `RECALL_DB_PATH`, and verifies that neither the production database nor the real `~/.claude` changed.
+```bash
+claude plugin validate plugins/recall-claude --strict
+claude plugin validate . --strict
+bun test tests/plugins/claude-plugin.test.ts
+bun run test:e2e:claude-plugin
+```
+
+The unit test asserts one plugin identity, byte-identical skills, and that no hooks ship in the bundle. The e2e test validates both manifests in strict mode against the current local Claude CLI into a disposable `HOME`.
