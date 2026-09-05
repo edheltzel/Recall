@@ -8,7 +8,7 @@ User-facing published documentation: installation, CLI / MCP / agent-skill refer
 
 ## Ownership
 
-- Reference & guides — `installation.md`, `cli-reference.md`, `mcp-tools.md`, `agent-skills.md`, `architecture.md`, `troubleshooting.md`, `releasing.md`, `upgrading.md`, `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`, `CODEX_INTEGRATION.md`, `GROK_INTEGRATION.md`, `JCODE_INTEGRATION.md`, `CLAUDE_INTEGRATION.md`
+- Reference & guides — `getting-started.md`, `installation.md`, `cli-reference.md`, `mcp-tools.md`, `agent-skills.md`, `architecture.md`, `troubleshooting.md`, `releasing.md`, `upgrading.md`, `OPENCODE_INTEGRATION.md`, `PI_INTEGRATION.md`, `CODEX_INTEGRATION.md`, `GROK_INTEGRATION.md`, `JCODE_INTEGRATION.md`, `CLAUDE_INTEGRATION.md`
 - `adr/` — architectural decision records
 - `agents/` — agent skill docs (`issue-tracker.md`, `triage-labels.md`, `board-status.md`, `domain.md`, `worker-flow.md`, `dox-framework.md`)
 
