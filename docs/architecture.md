@@ -17,7 +17,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ├── shared/
 │   ├── hooks/                          # Canonical hook files (.ts)
 │   │   └── lib/                        # Hook helpers (.ts)
-│   ├── skills/                         # Agent Skill canonicals (recall-*)
+│   ├── skills/                         # Agent Skill canonicals (do-recall-*)
 │   └── extract_prompt.md               # Extraction prompt template
 ├── claude/
 │   └── Recall_GUIDE.md                 # Guide for Claude Code
@@ -315,7 +315,8 @@ Sourced by all three scripts. Key functions:
 | `recall_register_all_hooks` | Registers every installer-owned Claude hook whose source file exists. Safe to re-run — missing registrations are added and present registrations are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
-| `recall_copy_runtime_files` | Refreshes canonical hooks, hook helpers, Agent Skills, the Claude guide, and `extract_prompt.md`; re-links managed host files with collision backups; removes legacy `/Recall:*` slash-command symlinks |
+| `recall_copy_runtime_files` | Refreshes canonical hooks, hook helpers, the Claude guide, and `extract_prompt.md`; re-links managed host files with collision backups; removes legacy `/Recall:*` slash-command symlinks; delegates Agent Skills to `recall_install_claude_skills` |
+| `recall_install_claude_skills` | Claude skill install — install.sh's Skills step and `recall_copy_runtime_files` (update.sh) both route here. Copies canonicals via `_recall_copy_skill_files` (which also drops retired `recall-*` canonicals and host links), then links per file or hands Claude's surface to the native plugin when it is active. `recall_install_omp_platform` is a separate omp linker that shares the same copy+cleanup helper |
 | `recall_install_pi_platform` | Coordinates Pi's separate native package, `pi-mcp-adapter`, owned `mcp.json` entry, guide, and legacy-shadow cleanup; safe to re-run |
 | `recall_append_memory_section` | Shared Claude/Pi append path: completes an unterminated final line, inserts one blank separator, then writes the generated pointer |
 | `recall_memory_section_mutate` / `recall_configure_claude_md` | Shared Claude/Pi ownership classifier plus Claude bootstrap entry point. Marked sections and normalized exact legacy-generated bodies are refreshed on install/update and removable on uninstall; unmarked customized/external sections survive. Remove the marker before taking external ownership. A Recall-specific `~/.claude/rules/memory.md` takes precedence during install/update and leaves `CLAUDE.md` unchanged |
@@ -337,7 +338,7 @@ All use `: "${VAR:=default}"` so an override set *before* `source`
 sticks. The test harness uses this to drive the lib against a tmpdir
 `CLAUDE_DIR` without touching the real home.
 
-### Agent skill: `recall-update`
+### Agent skill: `do-recall-update`
 
 Check-only. Reads the current version, polls GitHub Releases, and
 prints the exact `cd <path> && ./update.sh` recipe. **Never runs

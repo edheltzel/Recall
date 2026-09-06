@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { spawn, spawnSync } from 'child_process';
@@ -190,24 +190,26 @@ async function main(): Promise<void> {
   // Seed the exact pre-package shape so the live installer must remove it
   // without leaving duplicate extension or skill discovery paths.
   const legacyExtensionCanonical = join(testRecallHome, 'pi', 'extensions', 'RecallExtract.ts');
-  const legacySkillCanonical = join(testRecallHome, 'shared', 'skills', 'recall-add', 'SKILL.md');
+  const legacySkillCanonical = join(testRecallHome, 'shared', 'skills', 'do-recall-add', 'SKILL.md');
   mkdirSync(dirname(legacyExtensionCanonical), { recursive: true });
   mkdirSync(dirname(legacySkillCanonical), { recursive: true });
   mkdirSync(join(testPiHome, 'extensions'), { recursive: true });
-  mkdirSync(join(testPiHome, 'skills', 'recall-add'), { recursive: true });
+  mkdirSync(join(testPiHome, 'skills', 'do-recall-add'), { recursive: true });
   writeFileSync(legacyExtensionCanonical, '// legacy Recall extension\n');
   writeFileSync(legacySkillCanonical, '# legacy Recall skill\n');
   symlinkSync(legacyExtensionCanonical, join(testPiHome, 'extensions', 'RecallExtract.ts'));
-  symlinkSync(legacySkillCanonical, join(testPiHome, 'skills', 'recall-add', 'SKILL.md'));
+  symlinkSync(legacySkillCanonical, join(testPiHome, 'skills', 'do-recall-add', 'SKILL.md'));
 
   console.log(`pi.version=${run('pi', ['--version'], env).trim()}`);
   installPiSurfaces(env);
   installPiSurfaces(env);
 
-  if (existsSync(join(testPiHome, 'extensions', 'RecallExtract.ts'))) {
+  // lstatSync, not existsSync: existsSync follows the link and reads false for a
+  // surviving DANGLING symlink, which would still shadow the native Pi package.
+  if (lstatSync(join(testPiHome, 'extensions', 'RecallExtract.ts'), { throwIfNoEntry: false })) {
     throw new Error('legacy Recall extension still shadows the native Pi package');
   }
-  if (existsSync(join(testPiHome, 'skills', 'recall-add', 'SKILL.md'))) {
+  if (lstatSync(join(testPiHome, 'skills', 'do-recall-add', 'SKILL.md'), { throwIfNoEntry: false })) {
     throw new Error('legacy Recall skill still shadows the native Pi package');
   }
 
@@ -264,29 +266,34 @@ export default function (pi) {
   const skillNames = response?.data?.commands
     ?.filter((command: { source?: string }) => command.source === 'skill')
     .map((command: { name: string }) => command.name)
-    .sort();
+    .sort() ?? [];
   const expectedSkills = [
-    'skill:recall-add',
-    'skill:recall-doctor',
-    'skill:recall-dump',
-    'skill:recall-loa',
-    'skill:recall-recent',
-    'skill:recall-scout',
-    'skill:recall-search',
-    'skill:recall-stats',
-    'skill:recall-update',
+    'skill:do-recall-add',
+    'skill:do-recall-doctor',
+    'skill:do-recall-dump',
+    'skill:do-recall-loa',
+    'skill:do-recall-recent',
+    'skill:do-recall-scout',
+    'skill:do-recall-search',
+    'skill:do-recall-stats',
+    'skill:do-recall-update',
   ];
-  if (JSON.stringify(skillNames) !== JSON.stringify(expectedSkills)) {
-    throw new Error(`unexpected Pi skills: ${JSON.stringify(skillNames)}`);
+  const doRecallSkills = skillNames.filter((name: string) => name.startsWith('skill:do-recall-'));
+  if (JSON.stringify(doRecallSkills) !== JSON.stringify(expectedSkills)) {
+    throw new Error(`unexpected Pi Recall skills: ${JSON.stringify(doRecallSkills)}; all=${JSON.stringify(skillNames)}`);
+  }
+  const leftover = skillNames.filter((name: string) => name.startsWith('skill:recall-'));
+  if (leftover.length) {
+    throw new Error(`pre-rename Pi skill names still registered: ${JSON.stringify(leftover)}`);
   }
 
   const piTools = JSON.parse(readFileSync(probeOutput, 'utf-8')) as string[];
-  const expectedPiTools = mcpTools.map(name => `recall_memory_${name}`).sort();
-  const actualPiTools = piTools.filter(name => name.startsWith('recall_memory_')).sort();
+  const expectedPiTools = mcpTools.map(name => `recall-memory_${name}`).sort();
+  const actualPiTools = piTools.filter(name => name.startsWith('recall-memory_')).sort();
   if (JSON.stringify(actualPiTools) !== JSON.stringify(expectedPiTools)) {
     throw new Error(`unexpected Recall tools in Pi: ${JSON.stringify(actualPiTools)}; all=${JSON.stringify(piTools)}`);
   }
-  console.log(`pi.skills_verified=${skillNames.length}`);
+  console.log(`pi.skills_verified=${doRecallSkills.length}`);
   console.log(`pi.mcp_tools_verified=${actualPiTools.length}`);
 
   const captured = join(testRecallHome, 'MEMORY', 'pi-sessions', 'pi-session.md');

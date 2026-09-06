@@ -43,12 +43,12 @@ describe('install.sh completion sentinel (#27)', () => {
     recallDir = join(tempRoot, '.agents', 'Recall');
     fakeRepo = join(tempRoot, 'repo');
     marker = join(recallDir, '.install-incomplete');
-    cmdCanonical = join(recallDir, 'shared', 'skills', 'recall-scout', 'SKILL.md');
-    cmdTarget = join(claudeDir, 'skills', 'recall-scout', 'SKILL.md');
+    cmdCanonical = join(recallDir, 'shared', 'skills', 'do-recall-scout', 'SKILL.md');
+    cmdTarget = join(claudeDir, 'skills', 'do-recall-scout', 'SKILL.md');
 
     mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(join(fakeRepo, 'agent-skills', 'recall-scout'), { recursive: true });
-    writeFileSync(join(fakeRepo, 'agent-skills', 'recall-scout', 'SKILL.md'), '# scout\n');
+    mkdirSync(join(fakeRepo, 'agent-skills', 'do-recall-scout'), { recursive: true });
+    writeFileSync(join(fakeRepo, 'agent-skills', 'do-recall-scout', 'SKILL.md'), '# scout\n');
     writeFileSync(join(fakeRepo, 'package.json'), JSON.stringify({ version: '9.9.9' }));
   });
 
@@ -123,7 +123,7 @@ describe('install.sh completion sentinel (#27)', () => {
     const r = runDriver([
       'recall_create_install_root',
       'recall_mark_install_incomplete',
-      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/recall-scout/SKILL.md" "${cmdCanonical}"`,
+      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/do-recall-scout/SKILL.md" "${cmdCanonical}"`,
       '# interrupted here — before recall_link',
     ]);
     expect(r.status).toBe(0);
@@ -137,7 +137,7 @@ describe('install.sh completion sentinel (#27)', () => {
     runDriver([
       'recall_create_install_root',
       'recall_mark_install_incomplete',
-      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/recall-scout/SKILL.md" "${cmdCanonical}"`,
+      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/do-recall-scout/SKILL.md" "${cmdCanonical}"`,
     ]);
     expect(existsSync(cmdTarget)).toBe(false);
 
@@ -145,7 +145,7 @@ describe('install.sh completion sentinel (#27)', () => {
     const r = runDriver([
       'recall_create_install_root',
       'recall_mark_install_incomplete',
-      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/recall-scout/SKILL.md" "${cmdCanonical}"`,
+      `recall_copy_canonical "$RECALL_REPO_DIR/agent-skills/do-recall-scout/SKILL.md" "${cmdCanonical}"`,
       `recall_link "${cmdTarget}" "${cmdCanonical}"`,
       'recall_finalize_install true',
     ]);
@@ -171,7 +171,7 @@ describe('install.sh completion sentinel (#27)', () => {
   // derives its skill probes from whatever canonicals exist, so before this floor a
   // partial/absent copy step (bad pack, partial checkout, interrupt) left `missing`
   // empty and verification passed green on a blank surface. The fakeRepo fixture
-  // ships one source skill (agent-skills/recall-scout/SKILL.md) but no canonical was
+  // ships one source skill (agent-skills/do-recall-scout/SKILL.md) but no canonical was
   // copied here, so the floor must fail red.
   test('verify fails red when source ships skills but zero canonicals exist', () => {
     const r = runDriver(['recall_verify_install']);

@@ -38,7 +38,7 @@ MCP is the primary interactive cross-host seam. The plugin exposes `memory_searc
 
 They query and write the same SQLite store as the CLI. Set `RECALL_DB_PATH` in the plugin process environment when the store is not at the default path.
 
-The nine `recall-*` skill adapters are generated from the canonical Agent Skills established by [#228](https://github.com/edheltzel/Recall/issues/228). Do not edit the generated plugin copies by hand.
+The nine `do-recall-*` skill adapters are generated from the canonical Agent Skills established by [#228](https://github.com/edheltzel/Recall/issues/228). Do not edit the generated plugin copies by hand.
 
 ## Automatic lifecycle support
 

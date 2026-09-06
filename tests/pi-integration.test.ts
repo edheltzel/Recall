@@ -299,9 +299,9 @@ describe('installer Pi integration', () => {
     const piHome = join(fakeHome, '.pi', 'agent');
     const backupDir = join(sandbox, 'backup');
     const customExtension = join(piHome, 'extensions', 'RecallExtract.ts');
-    const customSkill = join(piHome, 'skills', 'recall-add', 'SKILL.md');
+    const customSkill = join(piHome, 'skills', 'do-recall-add', 'SKILL.md');
     mkdirSync(join(piHome, 'extensions'), { recursive: true });
-    mkdirSync(join(piHome, 'skills', 'recall-add'), { recursive: true });
+    mkdirSync(join(piHome, 'skills', 'do-recall-add'), { recursive: true });
     writeFileSync(customExtension, '// user-customized extension\n');
     writeFileSync(customSkill, '# user-customized skill\n');
 
@@ -327,7 +327,7 @@ describe('installer Pi integration', () => {
       expect(existsSync(customSkill)).toBe(false);
       expect(readFileSync(join(backupDir, 'collisions', '.pi', 'agent', 'extensions', 'RecallExtract.ts'), 'utf-8'))
         .toContain('user-customized extension');
-      expect(readFileSync(join(backupDir, 'collisions', '.pi', 'agent', 'skills', 'recall-add', 'SKILL.md'), 'utf-8'))
+      expect(readFileSync(join(backupDir, 'collisions', '.pi', 'agent', 'skills', 'do-recall-add', 'SKILL.md'), 'utf-8'))
         .toContain('user-customized skill');
     } finally {
       rmSync(sandbox, { recursive: true, force: true });

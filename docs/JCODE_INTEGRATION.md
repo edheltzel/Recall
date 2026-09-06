@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-Recall MCP connectivity and the canonical `recall-*` Agent Skills can be used from JCode. Automatic transcript capture and automatic session-start injection are not currently supported.
+Recall MCP connectivity and the canonical `do-recall-*` Agent Skills can be used from JCode. Automatic transcript capture and automatic session-start injection are not currently supported.
 
 This boundary is deliberate. Recall does not read JCode's private session files or overwrite its hook configuration when the stable public surfaces cannot yet guarantee safe composition and ordering.
 
@@ -24,7 +24,7 @@ These results do not prove that a future adapter is impossible. They prove that 
 | Surface | Status |
 | --- | --- |
 | MCP query and write tools | Supported when configured in JCode |
-| Canonical `recall-*` skills | Supported |
+| Canonical `do-recall-*` skills | Supported |
 | Automatic transcript capture | Not shipped |
 | Automatic L0/L1 injection | Not shipped |
 | Private history-file integration | Intentionally rejected |

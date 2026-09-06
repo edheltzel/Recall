@@ -48,7 +48,7 @@ which documents all nine with their parameters and return shapes.
 
 ## Codebase Scouting
 
-Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in `agent-skills/recall-scout/SKILL.md`. This guide supplies only the tool-name mapping:
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in `agent-skills/do-recall-scout/SKILL.md`. This guide supplies only the tool-name mapping:
 
 | Canonical step | Your tool / invocation |
 |------|---------|

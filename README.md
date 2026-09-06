@@ -129,7 +129,7 @@ survives as a single entry.
 
 ### Updating
 
-From inside Claude Code, `/recall-update` prints the current vs. latest
+From inside Claude Code, `/do-recall-update` prints the current vs. latest
 release and the exact command to run. From a shell:
 
 ```bash
@@ -270,8 +270,8 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **Cross-host ingestion** — Codex and Grok lifecycle hooks write immediately through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
 - **Library of Alexandria** — Automatic-capture LoA from session extract (importance 6, excluded from reserved L1 LoA slots). Curated LoA from `recall loa` / dump via the `fabric` Extractor (`extract_wisdom`); default importance 8, reserved L1 slots. Optional per-path Extractor config: [architecture](docs/architecture.md#extractor-config)
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
-- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `recall-add` agent skill
-- **Codebase scouting** — `/recall-scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
+- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `do-recall-add` agent skill
+- **Codebase scouting** — `/do-recall-scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
 - **Benchmark harness** — `recall benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
 - **Onboarding** — `recall onboard` runs a 7-question interview that writes your L0 identity file
 

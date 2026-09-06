@@ -8,8 +8,8 @@ Native host plugin bundles distributed directly from the Recall repository. One 
 
 ## Ownership
 
-- `recall/` — Codex native plugin manifest, MCP registration, lifecycle hooks, and generated `recall-*` skill adapters
-- `recall-claude/` — Claude Code native plugin manifest, MCP registration, and the nine `recall-*` skills
+- `recall/` — Codex native plugin manifest, MCP registration, lifecycle hooks, and generated `do-recall-*` skill adapters
+- `recall-claude/` — Claude Code native plugin manifest, MCP registration, and the nine `do-recall-*` skills
 
 The repository-level marketplace manifests are owned with their bundles even though they live outside this subtree: `.agents/plugins/marketplace.json` (Codex) and `.claude-plugin/marketplace.json` (Claude).
 

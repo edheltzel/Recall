@@ -76,8 +76,8 @@ describe('npm package: files whitelist', () => {
   // agent-skills/ prefix alone (which passes with just 1 of 9 present).
   test('bundles all 9 agent-skills/<name>/SKILL.md', () => {
     const skills = [
-      'recall-add', 'recall-doctor', 'recall-dump', 'recall-loa', 'recall-recent',
-      'recall-scout', 'recall-search', 'recall-stats', 'recall-update',
+      'do-recall-add', 'do-recall-doctor', 'do-recall-dump', 'do-recall-loa', 'do-recall-recent',
+      'do-recall-scout', 'do-recall-search', 'do-recall-stats', 'do-recall-update',
     ];
     for (const name of skills) {
       expect(has(`agent-skills/${name}/SKILL.md`)).toBe(true);

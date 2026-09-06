@@ -138,16 +138,20 @@ RECALL_HOOK_NAMES=(
 # Agent Skills — subdirectory names under */skills/ that Recall owns
 # (mirrors agent-skills/*/ in the repo). Hardcoded rather than derived from
 # the checkout so uninstall works even against a stale/removed source tree.
+# The pre-rename recall-* surface comes from RECALL_LEGACY_SKILL_NAMES in
+# lib/install-lib.sh (sourced above): installs from before the do-recall-*
+# rename carry those dirs, and uninstall must remove both eras.
 RECALL_SKILL_NAMES=(
-  recall-add
-  recall-doctor
-  recall-dump
-  recall-loa
-  recall-recent
-  recall-scout
-  recall-search
-  recall-stats
-  recall-update
+  do-recall-add
+  do-recall-doctor
+  do-recall-dump
+  do-recall-loa
+  do-recall-recent
+  do-recall-scout
+  do-recall-search
+  do-recall-stats
+  do-recall-update
+  "${RECALL_LEGACY_SKILL_NAMES[@]}"
 )
 
 # ── Summary + confirmation ───────────────────────────────────────────────────
@@ -165,7 +169,7 @@ print_summary() {
   echo ""
   echo "Will REMOVE (integration symlinks; canonical runtime files stay unless --purge):"
   echo "  • ~/.claude/commands/Recall/ (legacy, and lowercase ~/.claude/commands/recall/ if present)"
-  echo "  • ~/.claude/skills/recall-*/ (all 9 Recall-owned skills)"
+  echo "  • ~/.claude/skills/do-recall-*/ (all 9 Recall-owned skills, plus legacy recall-* dirs)"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json and ~/.claude.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"
@@ -243,25 +247,17 @@ remove_guide() {
   fi
 }
 
-# Remove Recall-owned skill directories from a */skills/ root. Only touches
+# Remove Recall-owned skill entries from a */skills/ root. Only touches
 # names in RECALL_SKILL_NAMES — never wipes the whole skills/ directory,
 # since it may hold skills owned by other tools.
 #
-# Args: SKILLS_ROOT (e.g. "$CLAUDE_DIR/skills")
+# Ownership rule lives in lib/install-lib.sh:_recall_remove_managed_skill_dirs_from
+# (managed-unlink only). Args: SKILLS_ROOT
 remove_skills_from() {
   local skills_root="$1"
-  [[ -d "$skills_root" ]] || return 0
-
-  local name dir removed=0
-  for name in "${RECALL_SKILL_NAMES[@]}"; do
-    dir="$skills_root/$name"
-    if [[ -d "$dir" ]]; then
-      run rm -rf "$dir"
-      removed=$((removed + 1))
-    fi
-  done
-  if [[ $removed -gt 0 ]]; then
-    log_success "Removed $removed Recall skill dir(s) from $skills_root"
+  _recall_remove_managed_skill_dirs_from "$skills_root" "${RECALL_SKILL_NAMES[@]}"
+  if [[ ${_RECALL_REMOVED_SKILL_LINKS:-0} -gt 0 ]]; then
+    log_success "Removed $_RECALL_REMOVED_SKILL_LINKS Recall skill symlink(s) from $skills_root"
   fi
 }
 

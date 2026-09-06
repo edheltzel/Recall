@@ -7,7 +7,7 @@ Grok has **no working plugin or extension install path**. Live headless sessions
 Recall supports Grok Build CLI through three separate surfaces:
 
 - MCP provides the nine query and write tools when `recall-memory` is configured in Grok.
-- The canonical `recall-*` Agent Skills provide the shared workflows.
+- The canonical `do-recall-*` Agent Skills provide the shared workflows.
 - An installer-owned global lifecycle hook captures Grok transcripts automatically.
 
 Automatic capture does not imply automatic memory injection. Grok capture is supported, but session-start injection is not.

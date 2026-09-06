@@ -59,11 +59,11 @@ describe('Claude native plugin package', () => {
     // The reverse of the Codex adaptation: Codex cannot read disable-model-invocation
     // and needed agents/openai.yaml, so the Codex adapters strip it. Claude's own
     // loader consumes the field, so the bundle must keep it.
-    expect(readFileSync(join(bundleRoot, 'skills/recall-dump/SKILL.md'), 'utf-8'))
+    expect(readFileSync(join(bundleRoot, 'skills/do-recall-dump/SKILL.md'), 'utf-8'))
       .toContain('disable-model-invocation: true');
-    expect(readFileSync(join(bundleRoot, 'skills/recall-scout/SKILL.md'), 'utf-8'))
+    expect(readFileSync(join(bundleRoot, 'skills/do-recall-scout/SKILL.md'), 'utf-8'))
       .toContain('allowed-tools:');
-    expect(existsSync(join(bundleRoot, 'skills/recall-dump/agents/openai.yaml'))).toBe(false);
+    expect(existsSync(join(bundleRoot, 'skills/do-recall-dump/agents/openai.yaml'))).toBe(false);
   });
 
   test('plugin state reads Claude\'s own files and respects an explicit disable', () => {

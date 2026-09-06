@@ -4,7 +4,7 @@
 // Generated files are checked in so Codex's installed plugin cache is complete;
 // this script and the canonical skills remain the only authoring surfaces.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -13,15 +13,15 @@ const sourceRoot = join(repoRoot, 'agent-skills');
 const defaultOutputRoot = join(repoRoot, 'plugins', 'recall', 'skills');
 
 export const routes: Record<string, string> = {
-  'recall-add': 'Prefer the `memory_add` MCP tool. Use the CLI examples below only when the MCP server is unavailable.',
-  'recall-doctor': 'This remains a local CLI diagnostic. Run `recall doctor`; the Codex plugin does not rewrite Codex-owned configuration.',
-  'recall-dump': 'Codex lifecycle hooks capture supported transcripts automatically. Use `memory_dump` only for an explicit supplemental snapshot of visible messages.',
-  'recall-loa': 'Prefer `loa_show` for a known entry and `memory_recall` to browse recent entries. Use CLI-only quote/list variants when needed.',
-  'recall-recent': 'Prefer `memory_recall` for recent cross-table context. Use the CLI when an exact table-specific recent listing is required.',
-  'recall-scout': 'Use the plugin MCP tools `memory_search`, `memory_hybrid_search`, and `context_for_agent` for the memory-first steps; keep the workflow sensitive-data boundary intact.',
-  'recall-search': 'Prefer `memory_search`; use `memory_hybrid_search` for natural-language semantic retrieval. The CLI remains an explicit fallback.',
-  'recall-stats': 'Prefer the `memory_stats` MCP tool. The CLI is an explicit fallback.',
-  'recall-update': 'This remains check-only and CLI-backed. Never apply an update from an attached Codex session.',
+  'do-recall-add': 'Prefer the `memory_add` MCP tool. Use the CLI examples below only when the MCP server is unavailable.',
+  'do-recall-doctor': 'This remains a local CLI diagnostic. Run `recall doctor`; the Codex plugin does not rewrite Codex-owned configuration.',
+  'do-recall-dump': 'Codex lifecycle hooks capture supported transcripts automatically. Use `memory_dump` only for an explicit supplemental snapshot of visible messages.',
+  'do-recall-loa': 'Prefer `loa_show` for a known entry and `memory_recall` to browse recent entries. Use CLI-only quote/list variants when needed.',
+  'do-recall-recent': 'Prefer `memory_recall` for recent cross-table context. Use the CLI when an exact table-specific recent listing is required.',
+  'do-recall-scout': 'Use the plugin MCP tools `memory_search`, `memory_hybrid_search`, and `context_for_agent` for the memory-first steps; keep the workflow sensitive-data boundary intact.',
+  'do-recall-search': 'Prefer `memory_search`; use `memory_hybrid_search` for natural-language semantic retrieval. The CLI remains an explicit fallback.',
+  'do-recall-stats': 'Prefer the `memory_stats` MCP tool. The CLI is an explicit fallback.',
+  'do-recall-update': 'This remains check-only and CLI-backed. Never apply an update from an attached Codex session.',
 };
 
 export function addCodexRouting(source: string, route: string): string {
@@ -38,6 +38,13 @@ export function addCodexRouting(source: string, route: string): string {
 export function generateCodexPluginSkills(outputRoot: string = defaultOutputRoot): string[] {
   mkdirSync(outputRoot, { recursive: true });
   const skillNames = readdirSync(sourceRoot).filter(name => existsSync(join(sourceRoot, name, 'SKILL.md'))).sort();
+
+  // Drop generated directories that no longer have a canonical source, so a renamed or
+  // deleted skill cannot linger in the bundle (mirrors build-claude-plugin.ts).
+  for (const stale of readdirSync(outputRoot).filter(name => !skillNames.includes(name))) {
+    rmSync(join(outputRoot, stale), { recursive: true, force: true });
+  }
+
   for (const name of skillNames) {
     const route = routes[name];
     if (!route) throw new Error(`missing Codex route for ${name}`);
@@ -45,7 +52,7 @@ export function generateCodexPluginSkills(outputRoot: string = defaultOutputRoot
     const outputDir = join(outputRoot, name);
     mkdirSync(outputDir, { recursive: true });
     writeFileSync(join(outputDir, 'SKILL.md'), addCodexRouting(source, route));
-    if (name === 'recall-dump') {
+    if (name === 'do-recall-dump') {
       const metadataDir = join(outputDir, 'agents');
       mkdirSync(metadataDir, { recursive: true });
       writeFileSync(
