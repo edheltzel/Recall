@@ -114,7 +114,7 @@ Then **open a new session in your agent**. What happens next depends on the host
 |------|-------------------------|---------------|
 | Claude Code | Yes — installer-owned `RecallStart` SessionStart hook | Preferred: native plugin for skills/MCP ([Claude Integration](CLAUDE_INTEGRATION.md)), plus `recall install` for hooks. Restart Claude Code. |
 | Codex CLI | Yes — plugin `SessionStart` → `additionalContext` | Preferred: native plugin ([Codex Integration](CODEX_INTEGRATION.md)), then start a Codex session. |
-| Cursor | Beta — `sessionStart` `{ additional_context }` | Merge the snippets under `templates/cursor/`. The hook command is unqualified `recall start --format cursor`. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor, or a shell where `recall` resolves, is fine. |
+| Cursor | Beta — `sessionStart` `{ additional_context }` | Merge the snippets under `templates/cursor/`. The hook command is unqualified `recall start --format cursor`. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor, or a shell where `recall` resolves, is fine. Durable GUI PATH / `recall start --format cursor` accuracy is pending FM-321/327 — this table describes the as-built unqualified command, not that future fix. |
 | Pi | Beta — `before_agent_start` | Preferred: `pi install npm:recall-memory`. See [Pi Integration](PI_INTEGRATION.md). |
 | OpenCode | No verified compaction injection | MCP + skills + `session.idle` capture. See [OpenCode Integration](OPENCODE_INTEGRATION.md). |
 | Grok | No automatic injection | Capture is installer-owned; search via MCP. See [Grok Integration](GROK_INTEGRATION.md). |
@@ -216,5 +216,6 @@ From inside Claude Code, the same workflows are the `/recall-*` skills above. MC
 | [CLI Reference](cli-reference.md) | Every subcommand and flag |
 | [MCP Tools](mcp-tools.md) | Tool schemas for agents |
 | [Agent Skills](agent-skills.md) | Canonical `/recall-*` skill bodies |
+| [Harness API](api.md) | Thin `recall-memory/api` surface: start / drop / capture / inject |
 | [Troubleshooting](troubleshooting.md) | Start with `recall doctor` |
-| [Claude](CLAUDE_INTEGRATION.md) · [Codex](CODEX_INTEGRATION.md) · [Pi](PI_INTEGRATION.md) · [Grok](GROK_INTEGRATION.md) · [JCode](JCODE_INTEGRATION.md) · [OpenCode](OPENCODE_INTEGRATION.md) | Host-specific wiring |
+| [Claude](CLAUDE_INTEGRATION.md) · [Codex](CODEX_INTEGRATION.md) · [Pi](PI_INTEGRATION.md) · [omp](OMP_INTEGRATION.md) · [Grok](GROK_INTEGRATION.md) · [JCode](JCODE_INTEGRATION.md) · [OpenCode](OPENCODE_INTEGRATION.md) | Host-specific wiring |

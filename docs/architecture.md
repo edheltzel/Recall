@@ -86,6 +86,17 @@ Pi's preferred attach is the native package: Pi discovers the root package's `pi
 
 Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
+## Extension surface
+
+A new harness plugs in through existing seams, not a new Cursor marketplace plugin and not a `HostDescriptor`. The public library is `recall-memory/api` ([Harness API](api.md)):
+
+- **start** — `recall start` / `runStart` / `registerStartFormat` (in-process). Same L0/L1 assembler as Claude `RecallStart.ts`.
+- **drop** — `MEMORY/<host>-sessions/` markdown. No registry; the directory name is the extension point.
+- **capture** — Cursor `catalogCursorSessions` (catalog only). Dump `discoverCurrentSession` + `registerSessionSource`. Codex/Grok/jcode stay on hidden `recall host-hook`. Cursor never joins that pipe.
+- **inject** — Cursor `templates/cursor/` + `mergeCursorHooksJson`. Command is unqualified `recall start --format cursor`. Durable Cursor.app GUI PATH accuracy is pending FM-321/327.
+
+MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.
+
 ## Database Tables
 
 | Table | Purpose | FTS5 Indexed |
