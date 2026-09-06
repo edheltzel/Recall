@@ -199,7 +199,7 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 │  │ sessions ←── messages      │     │ DISTILLED.md    (archive)    │ │
 │  │ decisions    learnings     │     │ HOT_RECALL.md   (last 10)    │ │
 │  │ breadcrumbs  loa_entries   │     │ SESSION_INDEX.json           │ │
-│  │ embeddings (768-dim vecs)  │     │ DECISIONS.log                │ │
+│  │ embeddings (1024-dim vecs) │     │ DECISIONS.log                │ │
 │  │                            │     │ REJECTIONS.log               │ │
 │  │ FTS5 indexes (auto-sync)   │     │ ERROR_PATTERNS.json          │ │
 │  │ WAL mode · 0600 perms      │     └──────────────────────────────┘ │
@@ -246,7 +246,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 | Strategy             | Command                      | How it works                                                                                                            |
 | -------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | **Keyword**          | `recall search "query"`         | FTS5 full-text search across all tables. Use `-t decisions` to hard-filter, or `--bias-type decisions` to prefer decisions while keeping other matches. |
-| **Semantic**         | `recall embed semantic "query"` | Ollama embeddings → cosine similarity (requires Ollama)                                                                 |
+| **Semantic**         | `recall semantic "query"` / `recall "query" -v` | Ollama embeddings → cosine similarity (requires Ollama). There is no `recall embed semantic` verb. |
 | **Hybrid** (default) | `recall "query"`                | Both keyword + semantic, merged with Reciprocal Rank Fusion (k=60). Falls back to keyword-only if Ollama is unavailable |
 
 **Narrowing by record type — `table` vs `bias_type`.** Both let you steer results toward decisions, learnings, breadcrumbs, LoA entries, or raw messages, but they differ in strength:
@@ -333,6 +333,7 @@ If you're an AI agent reading this repository:
 | **Using Recall from Grok**                                     | [`docs/GROK_INTEGRATION.md`](docs/GROK_INTEGRATION.md) |
 | **Using Recall from JCode**                                    | [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md) |
 | **Developing Recall** (build, test, conventions)               | [`CLAUDE.md`](CLAUDE.md)             |
+| **Extending Recall** (start/drop/capture/inject, no fork)      | [`docs/api.md`](docs/api.md)         |
 
 ## Roadmap
 
@@ -349,7 +350,7 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
 
-Cursor sessionStart uses unqualified `recall start --format cursor` (`templates/cursor/`). Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor or a shell where `recall` resolves is fine.
+Cursor sessionStart uses unqualified `recall start --format cursor` (`templates/cursor/`). Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor or a shell where `recall` resolves is fine. Durable GUI PATH / `recall start --format cursor` accuracy is pending FM-321/327; do not invent a wrapper in the meantime.
 
 Unattended lifecycle writes pass the scrub gate from [#50](https://github.com/edheltzel/Recall/issues/50). Agent Skill bodies remain canonical under [#228](https://github.com/edheltzel/Recall/issues/228). Installer-owned files follow surgical ownership from [#236](https://github.com/edheltzel/Recall/issues/236), while broader atomic config-write parity remains tracked in [#124](https://github.com/edheltzel/Recall/issues/124).
 
@@ -360,6 +361,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
 | [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |
+| [Harness API](docs/api.md) | Thin `recall-memory/api` surface so a new harness can hook start/drop/capture/inject without forking core |
 | [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |
 | [Managing Recall](docs/lifecycle.md)       | Which command when: install, update, uninstall, custom DB, recovery       |
 | [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |

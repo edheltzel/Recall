@@ -34,6 +34,12 @@ note in the 0.9.0 entry.
   one-liner). `hooks.json` stays unqualified `recall start --format cursor`.
   Cursor.app GUI PATH typically lacks `~/.bun/bin`, so sessionStart is a no-op
   until `recall` is on that app PATH (CLI Cursor / a resolving shell is fine).
+  Durable GUI PATH / `recall start --format cursor` accuracy is pending
+  FM-321/327.
+- **`recall-memory/api`** — thin library export of the existing start, drop,
+  capture, and inject seams, plus in-process `registerStartFormat` /
+  `registerSessionSource`. Not a Cursor marketplace plugin and not a
+  `HostDescriptor`. See `docs/api.md`.
 
 ## [0.10.0] - 2026-08-26 - "cross-host lifecycle capture"
 
