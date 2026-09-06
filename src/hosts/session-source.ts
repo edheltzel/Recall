@@ -14,7 +14,8 @@ export const SESSION_SOURCES = [
 export type SessionSource = typeof SESSION_SOURCES[number];
 
 export interface ParsedSession {
-  source: SessionSource;
+  /** Builtin `SESSION_SOURCES` id, or a registered harness id. */
+  source: string;
   sessionId: string;
   project: string;
   messages: Omit<Message, 'id'>[];
@@ -22,6 +23,6 @@ export interface ParsedSession {
 }
 
 export interface SessionSourceAdapter {
-  id: SessionSource;
+  id: string;
   discover(): ParsedSession | null;
 }

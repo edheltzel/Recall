@@ -9,10 +9,11 @@ TypeScript source for the `recall` CLI (Commander), the `recall-mcp` MCP server,
 ## Ownership
 
 - `index.ts` — CLI entry (Commander)
+- `api.ts` — public `recall-memory/api` library entry (re-exports start/drop/capture/inject seams)
 - `commands/start.ts` — public `recall start` L0/L1 inject renderer
 - `mcp-server.ts` — MCP server entry (`@modelcontextprotocol/sdk`)
 - `version.ts` — version sourced from `package.json`
-- `commands/` — CLI subcommands · `db/` — connection + schema/FTS5 · `lib/` — host-neutral core memory, embeddings, import, project utils, immediate transcript ingest, lifecycle delegation (`lifecycle.ts` → install.sh/update.sh/uninstall.sh) · `hosts/` — native host paths, config schemas, transcript adapters, and native command discovery · `providers/` — external model-provider adapters · `types/` — shared types
+- `commands/` — CLI subcommands · `db/` — connection + schema/FTS5 · `lib/` — host-neutral core memory, embeddings, import, project utils, immediate transcript ingest, lifecycle delegation (`lifecycle.ts` → install.sh/update.sh/uninstall.sh), harness seam registry (`harness-seams.ts`) · `hosts/` — native host paths, config schemas, transcript adapters, and native command discovery · `providers/` — external model-provider adapters · `types/` — shared types
 
 Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `src/`) and build output (`dist/`, generated).
 
@@ -26,7 +27,8 @@ Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `
 - Recall-owned mutable state and logs resolve through `lib/runtime-paths.ts` (`RECALL_HOME`, default `~/.agents/Recall`) — never place generic runtime state under a native host's config directory.
 - Native host paths, transcript formats, config ownership, command lookup, and authentication assumptions belong under `hosts/`; host-neutral commands and MCP handlers depend on their interfaces rather than branching on host details.
 - Cursor capture is an on-disk catalog parser (`hosts/cursor-capture.ts`) of `state.vscdb` + CLI JSONL + fail-soft `~/.cursor/chats/<md5(cwd)>/` blobs. It does not join `recall host-hook`, `host-ingest`, or `LifecycleHost`, and does not dump transcript bodies into query.
-- Cursor inject (`hosts/cursor-inject.ts`) is sessionStart `{ additional_context }` via hooks.json + MCP (`recall-mcp`) + a rule, calling `recall start --format cursor`. Snippets live under `templates/cursor/`. Do not ship a Cursor marketplace plugin. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so sessionStart is a no-op until `recall` is on that app PATH; do not add a `~/.cursor/hooks` wrapper or a machine-specific prefix.
+- Cursor inject (`hosts/cursor-inject.ts`) is sessionStart `{ additional_context }` via hooks.json + MCP (`recall-mcp`) + a rule, calling `recall start --format cursor`. Snippets live under `templates/cursor/`. Do not ship a Cursor marketplace plugin. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so sessionStart is a no-op until `recall` is on that app PATH; durable PATH accuracy is pending FM-321/327 — do not add a `~/.cursor/hooks` wrapper or a machine-specific prefix.
+- Public harness extension surface is `src/api.ts` (`recall-memory/api`) plus `lib/harness-seams.ts`. Register hooks are in-process (`registerStartFormat`, `registerSessionSource`). Drop-dir hosts extend via `MEMORY/<host>-sessions/`, not a registry. Do not add a `HostDescriptor` or Cursor `host-hook` glue. Published types are `src/api.public.d.ts` (copied to `dist/api.d.ts`) because `tsup --dts` cannot follow the existing `src/` → `hooks/` imports without widening `rootDir`.
 - Markdown drop-dir ingest is shared (`hosts/markdown-session-source.ts` + `hooks/lib/markdown-drop.ts`). Do not add a drop-dir branch to `lib/host-ingest.ts`.
 - Supported native lifecycle transcripts enter SQLite only through `lib/host-ingest.ts`, which owns scrub, source/project attribution, native session IDs, persistent dedup keys, watermarks, bounded shadow generations outside live messages/FTS, checkpoint-CAS pointer activation through `published_messages`, delta-only FTS publication with project-scoped typed readiness and bounded independent repair, retention-aware exact terminal lineage with immutable resume cursors, prune-preserving replace-on-resume finalization, and current-publication semantic filtering with version-matched embedding invalidation and atomically dirtied vector caches. Thin, bounded-stream host payload routing belongs in `commands/host-hook.ts`.
 - Lifecycle-aware prune mutations fail closed with retryable readiness when lifecycle schema objects are unavailable.
@@ -42,6 +44,7 @@ Not owned here: lifecycle hooks (`hooks/` — standalone, must NOT import from `
 - Add an MCP tool: add a handler in `mcp-server.ts`.
 - Extend core memory ops (search/add/import) in `lib/memory.ts` — don't duplicate them in a command.
 - Add a native lifecycle host by keeping its parser in `hosts/` and routing its supported public hook/export surface through `commands/host-hook.ts` and `lib/host-ingest.ts`. Cursor is not a lifecycle host: capture is the on-disk parser, inject is `recall start`.
+- Add a drop-dir or snippet harness through `recall-memory/api` (`docs/api.md`) rather than forking core.
 
 ## Verification
 

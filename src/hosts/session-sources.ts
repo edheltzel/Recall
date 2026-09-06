@@ -1,3 +1,4 @@
+import { registeredSessionSources } from '../lib/harness-seams.js';
 import { claudeSessionSource } from './claude-session-source.js';
 import { openCodeSessionSource } from './opencode-session-source.js';
 import { piSessionSource } from './pi-session-source.js';
@@ -10,7 +11,7 @@ export const nativeSessionSources: readonly SessionSourceAdapter[] = [
 ];
 
 export function discoverCurrentSession(
-  adapters: readonly SessionSourceAdapter[] = nativeSessionSources,
+  adapters: readonly SessionSourceAdapter[] = [...nativeSessionSources, ...registeredSessionSources()],
 ): ParsedSession | null {
   for (const adapter of adapters) {
     const session = adapter.discover();
