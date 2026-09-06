@@ -223,8 +223,8 @@ describe('update.sh', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-commands-legacy-'));
     try {
       const fakeRepo = join(tempRoot, 'repo');
-      mkdirSync(join(fakeRepo, 'agent-skills', 'recall-scout'), { recursive: true });
-      writeFileSync(join(fakeRepo, 'agent-skills', 'recall-scout', 'SKILL.md'), '# scout\n');
+      mkdirSync(join(fakeRepo, 'agent-skills', 'do-recall-scout'), { recursive: true });
+      writeFileSync(join(fakeRepo, 'agent-skills', 'do-recall-scout', 'SKILL.md'), '# scout\n');
       // _recall_copy_hook_files (also called by recall_copy_runtime_files)
       // bails with a non-zero return when this is missing — provide the
       // minimal fixture so the driver's `set -e` doesn't abort early.
@@ -266,7 +266,7 @@ describe('update.sh', () => {
       expect(existsSync(join(cmdDir, 'mine.md'))).toBe(true);
       expect(existsSync(cmdCanonicalDir)).toBe(false);
       // The replacing skill is installed.
-      expect(existsSync(join(tempRoot, '.claude', 'skills', 'recall-scout', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(tempRoot, '.claude', 'skills', 'do-recall-scout', 'SKILL.md'))).toBe(true);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

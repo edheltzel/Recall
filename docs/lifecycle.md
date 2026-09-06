@@ -23,7 +23,7 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 | Re-install / repair a broken install | `recall install` (packaged) or `./install.sh` (source) — both idempotent |
 | Upgrade to the latest release — source checkout | `recall update` (or `./update.sh`) |
 | Upgrade a packaged (npm) install | `bun install -g recall-memory@latest` then `recall install` |
-| Just check for a newer release | `recall update --check` — or `/recall-update` in Claude Code |
+| Just check for a newer release | `recall update --check` — or `/do-recall-update` in Claude Code |
 | Uninstall, keep your memory database | `recall uninstall` (or `./uninstall.sh`) |
 | Uninstall **and** destroy the database + backups | `recall uninstall --purge` |
 | Install to / move the DB to a custom path | `./install.sh --db-path <path>` (new) · `recall migrate --to <path>` (existing) |
@@ -63,7 +63,7 @@ Both run the same canonical steps and are **idempotent** — re-running repairs 
 
 **Source / git checkout — `recall update`** (delegates to `./update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, force-re-registers the hooks, and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
 
-Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--force`, `--no-migrate`, `--no-confirm`. Check-only, without changing anything: `recall update --check`, or `/recall-update` from inside Claude Code (see [Agent Skills](agent-skills.md)).
+Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--force`, `--no-migrate`, `--no-confirm`. Check-only, without changing anything: `recall update --check`, or `/do-recall-update` from inside Claude Code (see [Agent Skills](agent-skills.md)).
 
 Two situations the original scripts didn't spell out:
 

@@ -8,7 +8,7 @@ Pi packages cannot declare MCP servers. After the native package is installed, r
 
 ## Verified Pi surface
 
-This integration was verified on 2026-07-22 against the installed `@earendil-works/pi-coding-agent` 0.81.1 CLI and its matching official documentation.
+This integration was verified on 2026-09-03 against the installed `@earendil-works/pi-coding-agent` 0.84.4 CLI and `pi-mcp-adapter` 2.32.1.
 
 The live probes were:
 
@@ -89,7 +89,7 @@ The separately configured `recall-memory` server exposes all nine Recall operati
 - `memory_dump`
 - `decision_update`
 
-Recall enables the adapter's direct-tool mode by default, which exposes them with the normalized `recall_memory_` server prefix inside Pi.
+Recall enables the adapter's direct-tool mode by default. With the adapter's default `toolPrefix: "server"`, Pi registers those tools as `recall-memory_<tool>` — hyphens in the server name are preserved (`sanitizeServerPrefix` keeps `[A-Za-z0-9_-]`). An older hyphen-stripped `recall_memory_` prefix is not the current contract.
 
 An existing explicit `directTools` preference is preserved during reinstall.
 

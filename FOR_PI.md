@@ -21,75 +21,75 @@ If no identity exists, recommend `recall onboard` via Bash.
 
 ## Your MCP Tools
 
-These tools are available via the `recall-memory` MCP server. Recall enables the adapter's direct-tool mode by default, which normalizes the server prefix to `recall_memory_`; an existing explicit `directTools` preference is preserved:
+These tools are available via the `recall-memory` MCP server. Recall enables the adapter's direct-tool mode by default, which registers each operation as `recall-memory_<tool>` (pi-mcp-adapter 2.32 keeps hyphens in the server name); an existing explicit `directTools` preference is preserved:
 
 On the first Pi session after adding the server, `pi-mcp-adapter` populates its metadata cache in the background and keeps the operations available through its `mcp` proxy tool.
 After one Pi reload or restart, the nine direct names below are registered from that cache.
 If a direct name is not present yet, call the same base operation through `mcp`, for example `mcp({ server: "recall-memory", tool: "memory_search", args: '{"query":"deployment"}' })`.
 
-### recall_memory_memory_search
+### recall-memory_memory_search
 
 Search all memory with FTS5 full-text search. **Use this BEFORE asking the user to repeat anything.** Use `table` for a hard filter; use `bias_type` to prefer one type while preserving other matches.
 
 ```
-recall_memory_memory_search({ query: "kubernetes auth", project: "my-app" })
-recall_memory_memory_search({ query: "database choice", table: "decisions" })      // decisions only
-recall_memory_memory_search({ query: "database choice", bias_type: "decisions" })  // decisions first, broader context kept
+recall-memory_memory_search({ query: "kubernetes auth", project: "my-app" })
+recall-memory_memory_search({ query: "database choice", table: "decisions" })      // decisions only
+recall-memory_memory_search({ query: "database choice", bias_type: "decisions" })  // decisions first, broader context kept
 ```
 
 Bias quick picks: `decisions` for “what did we decide,” `learnings` for “what did we learn,” `breadcrumbs` for “where did we leave off,” `loa` for LoA extracts (Automatic-capture or Curated), `messages` for raw conversation traces.
 
-### recall_memory_memory_hybrid_search
+### recall-memory_memory_hybrid_search
 
 Combines keyword (FTS5) and semantic (embedding) search. Best for natural language queries.
 
 ```
-recall_memory_memory_hybrid_search({ query: "how did we handle rate limiting" })
+recall-memory_memory_hybrid_search({ query: "how did we handle rate limiting" })
 ```
 
-### recall_memory_memory_recall
+### recall-memory_memory_recall
 
 Get recent context — LoA entries, decisions, breadcrumbs. Good for session start.
 
 ```
-recall_memory_memory_recall({ limit: 5, project: "my-app" })
+recall-memory_memory_recall({ limit: 5, project: "my-app" })
 ```
 
-### recall_memory_memory_add
+### recall-memory_memory_add
 
 Record structured information during sessions:
 
 ```
-recall_memory_memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and extensions" })
-recall_memory_memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail: "Not :param like better-sqlite3" })
-recall_memory_memory_add({ type: "breadcrumb", content: "Auth refactor in progress, do not touch middleware yet" })
-recall_memory_memory_add({ type: "decision", content: "Ship onboarding first", importance: 9 })
+recall-memory_memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and extensions" })
+recall-memory_memory_add({ type: "learning", content: "bun:sqlite uses $param syntax", detail: "Not :param like better-sqlite3" })
+recall-memory_memory_add({ type: "breadcrumb", content: "Auth refactor in progress, do not touch middleware yet" })
+recall-memory_memory_add({ type: "decision", content: "Ship onboarding first", importance: 9 })
 ```
 
 The optional `importance` parameter (integer 1-10, default 5) controls
 L1 tier ranking at session start. LoA entries have a floor of 5.
 
-### recall_memory_memory_stats
+### recall-memory_memory_stats
 
 Get database statistics (record counts, database size).
 
-### recall_memory_loa_show
+### recall-memory_loa_show
 
 Show a full LoA entry (Automatic-capture or Curated). The body is the extract column, not proof Fabric ran.
 
-### recall_memory_context_for_agent
+### recall-memory_context_for_agent
 
 Get context to pass to a subagent before delegating tasks:
 
 ```
-recall_memory_context_for_agent({ agent_task: "implement the auth middleware", project: "my-app" })
+recall-memory_context_for_agent({ agent_task: "implement the auth middleware", project: "my-app" })
 ```
 
-### recall_memory_memory_dump
+### recall-memory_memory_dump
 
-Persist caller-supplied visible messages as a session and LoA entry. Use the `recall-dump` skill so the explicit user-consent gate is preserved.
+Persist caller-supplied visible messages as a session and LoA entry. Use the `do-recall-dump` skill so the explicit user-consent gate is preserved.
 
-### recall_memory_decision_update
+### recall-memory_decision_update
 
 Change an existing decision's status by ID when it is superseded, reverted, or confirmed.
 
@@ -112,12 +112,12 @@ recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP confi
 
 ## Codebase Scouting
 
-Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`agent-skills/recall-scout/SKILL.md`](agent-skills/recall-scout/SKILL.md). This guide supplies only the tool-name mapping:
+Canonical workflow — memory-first, sensitive-data boundary, opt-in artifacts — lives in [`agent-skills/do-recall-scout/SKILL.md`](agent-skills/do-recall-scout/SKILL.md). This guide supplies only the tool-name mapping:
 
 | Canonical step | Your tool / invocation |
 |---|---|
-| Invoke the workflow | `recall-scout` Agent Skill (discovered from Recall's native Pi package) |
-| "Search Recall first" (memory-first) | `recall_memory_memory_search` (keyword), `recall_memory_memory_hybrid_search` (natural language) |
+| Invoke the workflow | `do-recall-scout` Agent Skill (discovered from Recall's native Pi package) |
+| "Search Recall first" (memory-first) | `recall-memory_memory_search` (keyword), `recall-memory_memory_hybrid_search` (natural language) |
 | Persist a report (only if endorsed) | Write to `.agents/atlas/artifacts/YYYY-MM-DD-scout-<focus>.md` |
 
 ## Lifecycle scripts
@@ -158,12 +158,12 @@ See [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) for the verified Pi capab
 ## Core Rules
 
 1. **Search before asking** — Before asking the user to repeat information, search memory first. Use `bias_type` when a likely record type should come first without hiding other context; use `table` only when you need one type exclusively.
-2. **Record decisions** — When architectural decisions are made, use `recall_memory_memory_add` to record them
-3. **Delegate with context** — Before spawning subagents, call `recall_memory_context_for_agent` to give them relevant history
-4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` (the `recall-dump` skill) to persist the conversation
+2. **Record decisions** — When architectural decisions are made, use `recall-memory_memory_add` to record them
+3. **Delegate with context** — Before spawning subagents, call `recall-memory_context_for_agent` to give them relevant history
+4. **Capture sessions** — At the end of a session, run `recall dump "Descriptive Title"` (the `do-recall-dump` skill) to persist the conversation
 5. **Onboarding check** — At session start, if the L0 identity tier is empty, suggest `recall onboard` once. Do not nag on subsequent turns.
-6. **Never store secrets** — `recall_memory_memory_add` and `recall dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
-7. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall_memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
+6. **Never store secrets** — `recall-memory_memory_add` and `recall dump` persist content verbatim into `recall.db`, and stored records can resurface in future sessions' L0/L1 context. Redact API keys, tokens, passwords, and credential-bearing snippets before recording (e.g. `[REDACTED:api-key]`). When dumping a session that touched credentials, say so and confirm with the user first.
+7. **Record corrections** — When the user corrects you ("no, actually…", "that's wrong, use X"), record it immediately: `recall-memory_memory_add({ type: "learning", content: "<what was wrong → what is right>", confidence: "high", importance: 7 })`. Corrections are the highest-signal and most perishable memory; do not wait for session end.
 
 ## How Extraction Works
 

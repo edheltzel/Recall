@@ -25,7 +25,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `hooks/` — self-contained Claude lifecycle hooks + cron jobs, plus the installer-owned Grok hook descriptor
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
-- `agent-skills/` — canonical Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills` and `~/.omp/agent/skills`, discovered by Pi through the root package manifest, and generated into native host plugin payloads — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
+- `agent-skills/` — canonical Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills` and `~/.omp/agent/skills`, discovered by Pi through the root package manifest, and generated into native host plugin payloads — the single `do-recall-*` command surface (the former `/Recall:*` slash commands, #228)
 - `plugins/` — native host plugin bundles, one per host: Codex in `plugins/recall/`, Claude Code in `plugins/recall-claude/`, each packaging MCP plus its own skill payload
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts, plus the dependency-free `jsonc-mcp.ts` runtime helper they shell out to for JSONC config edits
@@ -64,7 +64,7 @@ This applies to every agent and every planning surface (`EnterPlanMode`, design 
 
 ## Scout Artifacts Directory (MANDATORY)
 
-Codebase scout reports (`recall-scout`, see `agent-skills/recall-scout/SKILL.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
+Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKILL.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
 
 - Generated scout reports and agent artifacts → `.agents/atlas/artifacts/`
 - This directory is **opt-in**: write to it only when it already exists or the user explicitly asks for a saved report
@@ -177,7 +177,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`tests/AGENTS.md`](tests/AGENTS.md) — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - [`benchmarks/AGENTS.md`](benchmarks/AGENTS.md) — wake-up context-efficiency benchmark harness
 - [`docs/AGENTS.md`](docs/AGENTS.md) — user-facing published docs, ADRs, agent skill docs (never plans/specs)
-- [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
+- [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `do-recall-*` Agent Skill definitions
 - [`plugins/AGENTS.md`](plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 - [`opencode/AGENTS.md`](opencode/AGENTS.md) — OpenCode adapter plugins, their shared helpers, and the runtime contract they must satisfy
 
