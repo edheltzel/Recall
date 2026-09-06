@@ -5,19 +5,29 @@
 
 import {
   MEMORY_UNAVAILABLE,
+  gatherContext,
   renderSessionStart,
   type SessionStartFormat,
 } from '../../hooks/lib/session-start-context.js';
+import { getRegisteredStartFormat } from '../lib/harness-seams.js';
 
 export type { SessionStartFormat };
+export { MEMORY_UNAVAILABLE, gatherContext, renderSessionStart, wrapCursorSessionStart } from '../../hooks/lib/session-start-context.js';
 
 export interface StartOptions {
-  format?: SessionStartFormat;
+  /** Built-in `markdown` | `cursor`, or a format registered via `registerStartFormat`. */
+  format?: string;
 }
 
 export function runStart(options: StartOptions = {}): void {
-  const format = options.format === 'cursor' ? 'cursor' : 'markdown';
+  const requested = options.format ?? 'markdown';
+  const registered = getRegisteredStartFormat(requested);
+  const format: SessionStartFormat = requested === 'cursor' ? 'cursor' : 'markdown';
   try {
+    if (registered) {
+      process.stdout.write(registered(gatherContext()));
+      return;
+    }
     process.stdout.write(renderSessionStart(format));
     if (format === 'markdown') process.stdout.write('\n');
   } catch {

@@ -189,7 +189,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   sessionId: string;
   messageCount: number;
   loaId?: number;
-  source: SessionSource;
+  source: string;
   error?: string;
 }> {
   const session = options.session || discoverCurrentSession();

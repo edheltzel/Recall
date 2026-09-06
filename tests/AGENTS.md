@@ -8,7 +8,7 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 
 ## Ownership
 
-`tests/**` mirroring the source areas — `commands/`, `db/`, `hooks/`, `hosts/`, `lib/`, `plugins/`, `integration/`, `benchmarks/`, `install/` — plus `fixtures/` (static fixtures, incl. extraction samples) and the shared harness `helpers/setup.ts`. Also `mcp-server.test.ts`, `version.test.ts`.
+`tests/**` mirroring the source areas — `commands/`, `db/`, `hooks/`, `hosts/`, `lib/`, `plugins/`, `integration/`, `benchmarks/`, `install/` — plus `fixtures/` (static fixtures, incl. extraction samples) and the shared harness `helpers/setup.ts`. Also `api.test.ts` (`recall-memory/api`), `mcp-server.test.ts`, `version.test.ts`.
 
 ## Local Contracts
 

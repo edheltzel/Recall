@@ -197,7 +197,10 @@ Cursor inject uses `--format cursor` (`{ additional_context }`); Codex keeps
 `hookSpecificOutput.additionalContext`. The `templates/cursor/` sessionStart
 command stays unqualified `recall start --format cursor`. Cursor.app GUI PATH
 typically lacks `~/.bun/bin`, so that hook is a no-op until `recall` is on the
-app PATH. CLI Cursor / a shell where `recall` resolves is fine.
+app PATH. CLI Cursor / a shell where `recall` resolves is fine. Durable GUI
+PATH / `recall start --format cursor` accuracy is pending FM-321/327; this
+section describes the as-built unqualified command, not a wrapper or
+machine-specific prefix.
 
 `recall onboard` creates the L0 tier that `recall start` injects at the top of every
 session. Precedence for the output path: `--out` > `RECALL_IDENTITY_PATH` env var >
