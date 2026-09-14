@@ -75,6 +75,11 @@ Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKI
 
 ## Agent skills
 
+### Version control and GitHub
+
+- Use GitButler (`but`) for all version-control operations; load the `but` skill before using it. Do not run raw `git` commands or bypass GitButler's workspace state.
+- Use `gh` for GitHub issues, pull requests, reviews, and Actions. Use `but` for the underlying branches, commits, and pushes.
+
 ### Issue tracker
 
 Issues and PRDs are tracked in GitHub Issues for `edheltzel/Recall`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
@@ -93,7 +98,7 @@ This is a single-context repo: use root `CONTEXT.md` when present and root `docs
 
 ### Worker flow
 
-Workers run in an isolated worktree (`/ce-worktree`): verify `pwd` is the worktree root and use worktree-relative paths before the first edit, so changes never leak into the main checkout. See `docs/agents/worker-flow.md`.
+Workers use coordinator-assigned GitButler branches and exclusive file ownership; load the `but` skill before branch or workspace operations. See [`docs/agents/worker-flow.md`](docs/agents/worker-flow.md) for shared-workspace and isolation rules.
 
 ## DRY — Single Source of Truth (MANDATORY)
 
