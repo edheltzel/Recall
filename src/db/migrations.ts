@@ -698,6 +698,18 @@ export const MIGRATIONS: Migration[] = [
     recreateGenerationFts(db);
     rebuildGenerationFts(db);
   },
+
+  // Refresh persisted visibility predicates for native omp branch snapshots.
+  (db) => {
+    ensureGenerationFtsColumns(db);
+    recreateGenerationFts(db);
+    rebuildGenerationFts(db);
+    const hasState = Boolean(db.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'host_ingest_state'
+    `).get());
+    if (hasState) db.exec(PUBLISHED_MESSAGES_SCHEMA);
+  },
 ];
 
 // ---------------------------------------------------------------------------

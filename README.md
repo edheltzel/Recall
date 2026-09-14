@@ -77,7 +77,7 @@ Then attach each coding agent with **that harness's native plugin or extension**
 | **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace` | Plugin owns the nine `recall-*` skills and `recall-memory` MCP. Claude hooks stay installer-owned (`recall install`) because plugin hooks *merge* with `settings.json` and would double-capture. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
 | **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
 | **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
-| **omp** | Native skill home `~/.omp/agent/skills/recall-*` | omp's plugin/skill surface. No `omp plugin install recall@…` package ships yet; `recall install` links the nine `recall-*` skills into that native directory when `omp` is detected. See [omp Integration](docs/OMP_INTEGRATION.md). |
+| **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |
 | **Grok** | `recall install` / `./install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
 | **Cursor** | Merge snippets under `templates/cursor/` | Marketplace plugin is locked off. |
 
@@ -260,14 +260,14 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ## What You Get
 
-- **Auto-captured session memory** — Claude Code extracts incrementally; Codex and Grok write supported transcript content directly to SQLite; Pi and OpenCode use their documented host adapters
+- **Auto-captured session memory** — Claude Code extracts incrementally; Codex, Grok, and omp write supported transcript content directly to SQLite; Pi and OpenCode use their documented host adapters
 - **MCP server (`recall-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
 - **Tiered RecallStart (v0.7.0+)** — resolved L0 identity + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
 - **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `recall pin` / `recall unpin` / `recall importance backfill`
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
-- **Cross-host ingestion** — Codex and Grok lifecycle hooks write immediately through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
+- **Cross-host ingestion** — Codex, Grok, and omp write through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
 - **Library of Alexandria** — Automatic-capture LoA from session extract (importance 6, excluded from reserved L1 LoA slots). Curated LoA from `recall loa` / dump via the `fabric` Extractor (`extract_wisdom`); default importance 8, reserved L1 slots. Optional per-path Extractor config: [architecture](docs/architecture.md#extractor-config)
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `do-recall-add` agent skill
@@ -329,7 +329,7 @@ If you're an AI agent reading this repository:
 | **Installing the Pi native package**                           | [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) |
 | **Using Recall from Pi**                                       | [`FOR_PI.md`](FOR_PI.md)             |
 | **Installing the Codex plugin**                                | [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) |
-| **Installing omp skills**                                      | [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md) |
+| **Installing omp capture**                                     | [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md) |
 | **Using Recall from Grok**                                     | [`docs/GROK_INTEGRATION.md`](docs/GROK_INTEGRATION.md) |
 | **Using Recall from JCode**                                    | [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md) |
 | **Developing Recall** (build, test, conventions)               | [`CLAUDE.md`](CLAUDE.md)             |
@@ -346,6 +346,7 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**OpenCode**](https://opencode.ai/) | ✅ | ⚠ Beta `session.idle` capture | ❌ Compaction injection not verified | Runtime verified against OpenCode 1.18.5 |
 | [**Codex CLI**](docs/CODEX_INTEGRATION.md) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin; verified lifecycle contract |
 | [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
+| [**omp**](docs/OMP_INTEGRATION.md) | Skills via installer; MCP separate | Native main-session `session_stop` | Not installed | Verified with omp 18.1.21; unreleased |
 | [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
 | [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
@@ -372,7 +373,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [Codex Integration](docs/CODEX_INTEGRATION.md) | Preferred native plugin install: MCP, skills, automatic capture, session-start injection |
 | [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Preferred native plugin install; installer still owns Claude hooks |
 | [Pi Integration](docs/PI_INTEGRATION.md) | Preferred native package (`pi install`); MCP adapter/config remains separate |
-| [omp Integration](docs/OMP_INTEGRATION.md) | Preferred native skill home; no marketplace plugin package yet |
+| [omp Integration](docs/OMP_INTEGRATION.md) | Native extension package: automatic turn-completion capture, separate skills/MCP |
 | [Grok Integration](docs/GROK_INTEGRATION.md) | Installer-script only: automatic capture; no plugin path |
 | [JCode Integration](docs/JCODE_INTEGRATION.md) | Live-probe evidence and current MCP/skills-only boundary |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |

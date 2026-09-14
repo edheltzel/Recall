@@ -14,6 +14,8 @@ note in the 0.9.0 entry.
 
 ### Added
 
+- **Native omp capture** through the root package's `omp.extensions` manifest. Main-session `session_stop` snapshots use the shared scrubbed, deduplicated lifecycle ingest path, including active-branch reconciliation and existing-database migration. Skills/MCP stay separate. Verified with omp 18.1.21; setup and limits in [omp Integration](docs/OMP_INTEGRATION.md).
+
 - **`recall start`** — public L0/L1 session-start renderer. Claude `RecallStart.ts`
   is a thin wrapper; Codex SessionStart `renderContext` calls the same assembler
   (`hooks/lib/session-start-context.ts`). Published caps remain 1200 / 6000 / 8000
@@ -21,7 +23,7 @@ note in the 0.9.0 entry.
 - **Shared drop-dir ingest** — `MEMORY/*-sessions/` is scanned generically.
   OpenCode and Pi keep their host parsers; adding a third drop-dir host does not
   mean copying `RecallExtract.ts` / `RecallPreCompact.ts`. `host-ingest.ts` stays
-  Codex/Grok/jcode live ingest.
+  on the shared native lifecycle ingest path.
 - **Cursor capture catalog** — on-disk parser of IDE `state.vscdb`
   (cursorDiskKV composers/bubbles), CLI `agent-transcripts/**/*.jsonl`, and
   fail-soft `~/.cursor/chats/<md5(cwd)>/` blobs. Catalog only; JSONL remains the

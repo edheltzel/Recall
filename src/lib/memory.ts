@@ -562,7 +562,7 @@ export function search(query: string, options?: MemorySearchOptions): SearchResu
              AND state.session_id = generated.session_id
             WHERE host_ingest_generation_messages_fts MATCH ?
               AND generated.message_id IS NOT NULL
-              AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+              AND (generated.source NOT IN ('grok', 'omp') OR generated.source_position IS NOT NULL)
               ${duplicateFilter(options, 'messages', 'generated.message_id')}
               ${options?.project ? 'AND generated.project = ?' : ''}
             ORDER BY f.rank LIMIT ?
@@ -952,7 +952,7 @@ function getGenerationLoaMessages(generationId: string): Message[] {
     FROM host_ingest_generation_messages
     WHERE generation_id = ? AND ordinal > ? AND message_id IS NOT NULL
       AND content IS NOT NULL
-      AND (source <> 'grok' OR source_position IS NOT NULL)
+      AND (source NOT IN ('grok', 'omp') OR source_position IS NOT NULL)
     ORDER BY ordinal LIMIT ?
   `);
   const messages: Message[] = [];
