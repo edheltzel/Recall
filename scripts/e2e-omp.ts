@@ -54,35 +54,75 @@ async function run(args: string[], command = 'omp') {
   } finally { clearTimeout(timer); }
 }
 
+interface CapturedMessage {
+  id: number;
+  session_id: string;
+  message_key: string | null;
+  source: string | null;
+  role: string;
+  content: string;
+}
+
+function capturedMessages(): CapturedMessage[] {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.query<CapturedMessage, []>(`
+      SELECT message.id, message.session_id, identity.source, identity.message_key, message.role, message.content
+      FROM published_messages AS message
+      LEFT JOIN active_host_ingest_messages AS identity
+        ON identity.message_id = message.id AND identity.session_id = message.session_id
+      ORDER BY identity.source_position, message.id
+    `).all();
+  } finally {
+    db.close();
+  }
+}
+
 try {
   writeFileSync(join(agent, 'models.yml'), `providers:\n  recall-smoke:\n    baseUrl: http://127.0.0.1:${server.port}/v1\n    api: openai-completions\n    auth: none\n    models:\n      - id: recall-smoke\n        name: Recall smoke\n        reasoning: false\n        input: [text]\n        contextWindow: 128000\n        maxTokens: 1024\n        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}\n`);
   writeFileSync(join(agent, 'config.yml'), 'compaction:\n  enabled: false\n');
-  await run([join(root, 'dist', 'index.js'), 'init'], 'bun');
   const packed: unknown = JSON.parse(await run(['pack', root, '--json', '--pack-destination', scratch, '--ignore-scripts'], 'npm'));
   const packages = Array.isArray(packed) ? packed : packed && typeof packed === 'object' ? Object.values(packed) : [];
   assert(packages[0] && typeof packages[0].filename === 'string');
   await run(['-xzf', join(scratch, packages[0].filename), '-C', scratch], 'tar');
+  const packagedCli = join(scratch, 'package', 'dist', 'index.js');
+  await run([packagedCli, 'init'], 'bun');
   await run(['plugin', 'link', join(scratch, 'package')]);
   const flags = ['--print', '--model', 'recall-smoke/recall-smoke', '--no-skills', '--no-rules', '--no-lsp', '--no-title'];
-  await run([...flags, 'Remember the cobalt orchard decision.']);
-  let db = new Database(dbPath, { readonly: true });
-  assert.equal(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions WHERE source = 'omp'").get()?.n, 1);
-  assert.equal(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM published_messages').get()?.n, 2);
-  db.close();
-  await run([...flags, '--continue', 'Keep the cobalt orchard decision.']);
-  db = new Database(dbPath, { readonly: true });
-  assert.equal(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions WHERE source = 'omp'").get()?.n, 1);
-  assert.equal(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM published_messages').get()?.n, 4);
-  assert.equal(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM published_messages WHERE content LIKE '%cobalt orchard%'").get()?.n, 2);
-  db.close();
+  const firstAnswer = await run([...flags, 'Remember the cobalt orchard decision.']);
+  assert.match(firstAnswer, /Native capture answer 1\./, 'first assistant turn completed');
+  assert.equal(requests, 1);
+  const firstMessages = capturedMessages();
+  assert.deepEqual(firstMessages.map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'Remember the cobalt orchard decision.' },
+    { role: 'assistant', content: 'Native capture answer 1.' },
+  ], 'first capture preserves exact roles and content');
+  assert(firstMessages.every(message => message.source === 'omp' && message.message_key?.startsWith('native:')), 'capture retains omp attribution and native identities');
+  const sessionId = firstMessages[0]?.session_id;
+  assert(sessionId);
+  const secondAnswer = await run([...flags, '--continue', 'Keep the cobalt orchard decision.']);
+  assert.match(secondAnswer, /Native capture answer 2\./, 'resumed assistant turn completed');
   assert.equal(requests, 2);
-  const search = await run([join(root, 'dist', 'index.js'), 'cobalt orchard'], 'bun');
+  const resumedMessages = capturedMessages();
+  assert.deepEqual(resumedMessages.map(({ role, content }) => ({ role, content })), [
+    { role: 'user', content: 'Remember the cobalt orchard decision.' },
+    { role: 'assistant', content: 'Native capture answer 1.' },
+    { role: 'user', content: 'Keep the cobalt orchard decision.' },
+    { role: 'assistant', content: 'Native capture answer 2.' },
+  ], 'resume preserves exact ordered roles and content');
+  assert.deepEqual(resumedMessages.slice(0, firstMessages.length), firstMessages, 'resume preserves existing message identities');
+  assert(resumedMessages.every(message => message.session_id === sessionId), 'resume stays in the same session');
+  assert(resumedMessages.every(message => message.source === 'omp' && message.message_key?.startsWith('native:')), 'resumed capture retains omp attribution and native identities');
+  assert.equal(new Set(resumedMessages.map(message => message.id)).size, 4, 'message IDs stay distinct');
+  assert.equal(new Set(resumedMessages.map(message => message.message_key)).size, 4, 'native identities stay distinct');
+  const search = await run([packagedCli, 'cobalt orchard'], 'bun');
   assert.match(search, /Remember the cobalt orchard decision/);
+  assert.match(search, /Keep the cobalt orchard decision/);
   await run(['plugin', 'uninstall', 'recall-memory']);
-  await run([...flags, '--continue', 'This turn must not be captured.']);
-  db = new Database(dbPath, { readonly: true });
-  assert.equal(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM published_messages').get()?.n, 4);
-  db.close();
+  const uncapturedAnswer = await run([...flags, '--continue', 'This turn must not be captured.']);
+  assert.match(uncapturedAnswer, /Native capture answer 3\./, 'post-uninstall assistant turn completed');
+  assert.equal(requests, 3, 'post-uninstall turn reached the model');
+  assert.deepEqual(capturedMessages(), resumedMessages, 'completed post-uninstall turn leaves captured history unchanged');
   console.log('PASS native plugin link, session_stop capture, resume deduplication, and uninstall.');
 } finally {
   server.stop(true);
