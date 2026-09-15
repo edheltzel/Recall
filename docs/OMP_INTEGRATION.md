@@ -6,7 +6,7 @@ Recall's native omp extension captures the active conversation into SQLite after
 
 ## Install from this checkout
 
-Requires Bun on `PATH` and an initialized Recall database. Verified with omp 18.1.21.
+Requires Bun on `PATH` and an initialized Recall database. Capture was verified with omp 18.1.21; the strengthened E2E assertions were also verified with omp 18.2.0.
 
 Build a clean package before linking. Linking the repository root would also expose development-only configuration, such as its `.mcp.json`, to omp.
 
@@ -49,7 +49,11 @@ bun run test:e2e:omp
 omp plugin uninstall recall-memory
 ```
 
-The runtime check packs the distributable and links its extracted directory into a disposable omp home, serves deterministic replies over localhost, and verifies real `session_stop` capture, resume without duplicated history, CLI search, and uninstall stopping capture. It uses a disposable database and checks that the normal database and omp plugin registry remain unchanged. No model credentials or external model requests are needed.
+The runtime check packs the distributable, links it into a disposable omp home, and uses the packaged CLI for initialization, capture, and search. A deterministic localhost model drives real headless omp turns. The check compares exact ordered roles and text, preserves earlier message IDs and native keys across resume, and verifies search results. After uninstall, it requires a third model request and the expected assistant answer before checking that the complete captured snapshot remains unchanged.
+
+During the script, before-and-after checks compare existence, size, modification time, and inode for the default production database, its WAL and SHM files, and the default omp plugin lockfile. These checks do not prove byte-identical preservation of all live state, cover nondefault production locations, or cover the preceding build. Test children receive disposable configuration and database paths, not live model credentials. Executables still resolve through inherited `PATH`; this is not a network or filesystem sandbox.
+
+This verifies the packed local-link integration in headless text mode. It does not exercise npm registry installation, real model providers, interactive sessions, compaction, subagents, or failure recovery.
 
 Restart omp after uninstalling. Saved Recall memory remains. `recall uninstall` removes installer-owned skills, not the separately managed omp plugin; uninstall the plugin through omp before removing Recall's runtime.
 
