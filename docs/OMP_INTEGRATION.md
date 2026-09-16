@@ -6,7 +6,7 @@ Recall's native omp extension captures the active conversation into SQLite after
 
 ## Install from this checkout
 
-Requires Bun on `PATH` and an initialized Recall database. Capture was verified with omp 18.1.21; the strengthened E2E assertions were also verified with omp 18.2.0.
+Requires Bun, npm, and omp on `PATH`, plus an initialized Recall database. Capture was verified with omp 18.1.21; the strengthened E2E assertions were also verified with omp 18.2.0.
 
 Build a clean package before linking. Linking the repository root would also expose development-only configuration, such as its `.mcp.json`, to omp.
 
