@@ -48,7 +48,7 @@ The bundled `.mcp.json` carries no `env` block, so the server resolves its datab
 
 An existing Recall install keeps working. It also keeps its own copies of what the plugin now ships, and Claude does **not** resolve that for you:
 
-- **Skills.** `~/.claude/skills/recall-*` and the plugin's nine skills both load.
+- **Skills.** `~/.claude/skills/do-recall-*` and the plugin's nine skills both load.
 - **MCP.** Claude namespaces plugin components, so the plugin registers as `plugin:recall:recall-memory` while a user-scope `recall-memory` keeps its own name. Both connect, and the same nine tools are exposed twice from two processes.
 
 Claude collapses the two MCP entries only when they resolve to an identical command and environment. `install.sh` writes `bun run <path>` plus an `env` block, so a real existing install always duplicates.
@@ -61,7 +61,7 @@ Claude collapses the two MCP entries only when they resolve to an identical comm
 
 With the plugin active they:
 
-1. Remove the `~/.claude/skills/recall-*` symlinks that point into `~/.agents/Recall/shared/skills/`. Only Recall-owned symlinks are removed; real files, user-authored skills, and other tools' links are left alone, and a skill directory is deleted only when it is already empty.
+1. Remove the `~/.claude/skills/do-recall-*` symlinks that point into `~/.agents/Recall/shared/skills/`. Only Recall-owned symlinks are removed; real files, user-authored skills, and other tools' links are left alone, and a skill directory is deleted only when it is already empty.
 2. Remove the user-scope `recall-memory` MCP registration, so the plugin's is the only one left.
 3. Leave hooks and canonical files untouched.
 
@@ -112,7 +112,7 @@ Skills are copied rather than symlinked into the bundle. Claude drops symlinks t
 
 The following are unresolved rather than guessed:
 
-- **End-to-end enforcement of `disable-model-invocation` for plugin-shipped skills is unverified.** The installed CLI carries the runtime enforcement for the field, and the bundle ships it unchanged, but confirming that a plugin-loaded `recall-dump` is explicit-only needs an authenticated session — and `claude plugin validate --strict` does not inspect skill frontmatter at all, so passing validation is not evidence.
+- **End-to-end enforcement of `disable-model-invocation` for plugin-shipped skills is unverified.** The installed CLI carries the runtime enforcement for the field, and the bundle ships it unchanged, but confirming that a plugin-loaded `do-recall-dump` is explicit-only needs an authenticated session — and `claude plugin validate --strict` does not inspect skill frontmatter at all, so passing validation is not evidence.
 - Skill *invocation* names under a plugin. `claude plugin details` lists all nine by their canonical names; the namespacing observed for MCP was not separately confirmed for skills.
 - Remote marketplace publication, update, and release ownership.
 - The installed plugin-cache path as a durable runtime dependency.

@@ -6,7 +6,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { spawnSync } from 'child_process';
@@ -97,8 +97,8 @@ async function main(): Promise<void> {
   // ── A legacy lifecycle install, exactly as today's users have it ───────────
   const installRoot = join(testRecallHome, 'install-root');
   const canonicalSkills = join(installRoot, 'shared', 'skills');
-  const skillNames = ['recall-add', 'recall-doctor', 'recall-dump', 'recall-loa', 'recall-recent',
-    'recall-scout', 'recall-search', 'recall-stats', 'recall-update'];
+  const skillNames = ['do-recall-add', 'do-recall-doctor', 'do-recall-dump', 'do-recall-loa', 'do-recall-recent',
+    'do-recall-scout', 'do-recall-search', 'do-recall-stats', 'do-recall-update'];
   // Seeded by the installer's own linker rather than hand-rolled symlinks, so the
   // migration is tested against whatever format recall_link actually produces and
   // this test cannot drift from production.
@@ -112,6 +112,15 @@ async function main(): Promise<void> {
       throw new Error(`legacy seed did not create a canonical for ${name}`);
     }
   }
+  // Pre-rename leftover sitting next to the new names — the surface install/update
+  // must drop even when the Claude plugin then takes ownership of do-recall-*.
+  const leftoverName = 'recall-add';
+  const leftoverCanonical = join(canonicalSkills, leftoverName, 'SKILL.md');
+  mkdirSync(join(canonicalSkills, leftoverName), { recursive: true });
+  writeFileSync(leftoverCanonical, '# leftover pre-rename canonical\n');
+  mkdirSync(join(testClaudeHome, 'skills', leftoverName), { recursive: true });
+  // Use a real symlink so cleanup's readlink $RECALL_DIR/* match applies.
+  symlinkSync(leftoverCanonical, join(testClaudeHome, 'skills', leftoverName, 'SKILL.md'));
   // A user-authored skill that migration must never touch.
   mkdirSync(join(testClaudeHome, 'skills', 'user-owned'), { recursive: true });
   writeFileSync(join(testClaudeHome, 'skills', 'user-owned', 'SKILL.md'), '---\nname: user-owned\n---\nmine\n');
@@ -174,9 +183,15 @@ async function main(): Promise<void> {
   for (const pass of [1, 2]) {
     runInstallLib('recall_install_claude_skills\nrecall_configure_mcp', env);
     for (const name of skillNames) {
-      if (existsSync(join(testClaudeHome, 'skills', name))) {
-        throw new Error(`pass ${pass}: legacy skill link survived migration: ${name}`);
+      if (lstatSync(join(testClaudeHome, 'skills', name), { throwIfNoEntry: false })) {
+        throw new Error(`pass ${pass}: lifecycle skill link survived plugin migration: ${name}`);
       }
+    }
+    if (lstatSync(join(testClaudeHome, 'skills', leftoverName, 'SKILL.md'), { throwIfNoEntry: false })) {
+      throw new Error(`pass ${pass}: pre-rename ${leftoverName} skill link survived plugin migration`);
+    }
+    if (existsSync(join(canonicalSkills, leftoverName))) {
+      throw new Error(`pass ${pass}: pre-rename ${leftoverName} canonical survived plugin migration`);
     }
     if (!existsSync(join(testClaudeHome, 'skills', 'user-owned', 'SKILL.md'))) {
       throw new Error(`pass ${pass}: migration removed a user-authored skill`);
@@ -184,7 +199,7 @@ async function main(): Promise<void> {
     if (readJson(join(testHome, '.claude.json')).mcpServers?.['recall-memory']) {
       throw new Error(`pass ${pass}: duplicate recall-memory registration survived migration`);
     }
-    if (!existsSync(join(canonicalSkills, 'recall-add', 'SKILL.md'))) {
+    if (!existsSync(join(canonicalSkills, 'do-recall-add', 'SKILL.md'))) {
       throw new Error(`pass ${pass}: canonical skills were removed`);
     }
   }

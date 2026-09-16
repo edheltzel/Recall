@@ -15,7 +15,7 @@ import {
   deleteRecordEmbeddingsBySelectionInTransaction,
 } from '../lib/embedding-store.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
-import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from '../lib/extraction.js';
+import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract, ExtractorConfigError } from '../lib/extraction.js';
 import { discoverCurrentSession } from '../hosts/session-sources.js';
 import type { ParsedSession, SessionSource } from '../hosts/session-source.js';
 
@@ -30,6 +30,8 @@ interface DumpOptions {
   skipFabric?: boolean;
   /** Test/internal seam; normal CLI and MCP behavior still attempts LoA embedding. */
   skipEmbed?: boolean;
+  /** Test/internal seam; production uses runFabricExtract. */
+  extract?: (content: string) => string;
 }
 
 const EXPLICIT_DUMP_DESCRIPTION = 'Explicit memory dump.';
@@ -282,8 +284,17 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   } else {
     try {
       const conversationText = formatMessagesForExtraction(importedMessages);
-      fabricExtract = runFabricExtract(conversationText);
-    } catch {
+      fabricExtract = (options.extract ?? runFabricExtract)(conversationText);
+    } catch (error) {
+      if (error instanceof ExtractorConfigError) {
+        return {
+          success: false,
+          sessionId: session.sessionId,
+          messageCount: importedCount,
+          source: session.source,
+          error: error.message,
+        };
+      }
       fabricExtract = generateBasicSummary(importedMessages);
     }
   }

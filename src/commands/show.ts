@@ -135,7 +135,7 @@ export function runShow(table: string, id: number): void {
       if (row.tags) {
         console.log(`Tags:       ${row.tags}`);
       }
-      console.log(`\n--- Fabric Extract ---\n`);
+      console.log(`\n--- Extract ---\n`);
       console.log(row.fabric_extract);
       break;
     }

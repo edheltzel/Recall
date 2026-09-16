@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { basename, dirname, extname, join, relative } from 'path';
 import { addMessagesBatch, createSession, sessionExists } from './memory.js';
-import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract } from './extraction.js';
+import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract, ExtractorConfigError } from './extraction.js';
 import { writeStructuredExtraction, type StructuredExtractionResult } from './structured-extraction.js';
 import type { Message } from '../types/index.js';
 
@@ -503,7 +503,8 @@ async function runStructuredExtraction(
 
   try {
     extracted = await extractor(transcript, session);
-  } catch {
+  } catch (error) {
+    if (error instanceof ExtractorConfigError) throw error;
     extracted = generateBasicSummary(session.messages);
     fallback = true;
   }

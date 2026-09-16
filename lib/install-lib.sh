@@ -1271,7 +1271,13 @@ recall_remove_legacy_slash_commands() {
 # Copy every file from each agent-skills/<name>/ directory into its canonical
 # home under $RECALL_SHARED_SKILLS_DIR/<name>/. Idempotent — recall_copy_canonical
 # overwrites unconditionally so re-runs always pick up the latest source.
+#
+# Converges the retired recall-* surface FIRST so a missing agent-skills/
+# source cannot skip cleanup (early return below) and leave leftover
+# canonicals for _recall_link_skills_to to re-publish.
 _recall_copy_skill_files() {
+  recall_remove_legacy_skill_names
+
   local skills_src="$RECALL_REPO_DIR/agent-skills"
   [[ -d "$skills_src" ]] || return 0
 
@@ -1293,9 +1299,13 @@ _recall_copy_skill_files() {
 # Per-file symlinks (never directory-level), matching recall_link's collision
 # rule everywhere else in this file.
 #
+# Converges leftover recall-* canonicals before linking so an omp-only call
+# cannot republish a stale name even when copy early-returned.
+#
 # Args: TARGET_ROOT (e.g. "$CLAUDE_DIR/skills")
 _recall_link_skills_to() {
   local target_root="$1"
+  recall_remove_legacy_skill_names
   [[ -d "$RECALL_SHARED_SKILLS_DIR" ]] || return 0
 
   local skill_dir skill_name f base
@@ -1307,6 +1317,92 @@ _recall_link_skills_to() {
       base="$(basename "$f")"
       recall_link "$target_root/$skill_name/$base" "$f"
     done
+  done
+}
+
+# Skill directories were renamed recall-* → do-recall-*. The pre-rename names
+# are shared with uninstall.sh (which removes both eras) and with the cleanup
+# below (which converges existing installs).
+RECALL_LEGACY_SKILL_NAMES=(
+  recall-add recall-doctor recall-dump recall-loa recall-recent
+  recall-scout recall-search recall-stats recall-update
+)
+
+# Remove Recall-managed skill entries from a host skills root.
+# Args: SKILLS_ROOT NAME [NAME...]
+# Unlinks only symlinks whose target resolves into $RECALL_DIR. Real files,
+# user-authored skills, and foreign links are never touched. A skill directory
+# is removed only when that leaves it empty. Honors uninstall DRY_RUN.
+# Sets _RECALL_REMOVED_SKILL_LINKS to the unlink count.
+_recall_remove_managed_skill_dirs_from() {
+  local skills_root="$1"
+  shift
+  _RECALL_REMOVED_SKILL_LINKS=0
+  [[ -d "$skills_root" ]] || return 0
+  [[ $# -gt 0 ]] || return 0
+
+  local name dir f target removed=0
+  for name in "$@"; do
+    dir="$skills_root/$name"
+    if [[ -L "$dir" ]]; then
+      # directory-level link from a pre-#228 install shape
+      if [[ "$(readlink "$dir")" == "$RECALL_DIR"/* ]]; then
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+          echo "  [dry-run] would rm -f $dir"
+        else
+          rm -f "$dir"
+        fi
+        removed=$((removed + 1))
+      fi
+      continue
+    fi
+    [[ -d "$dir" ]] || continue
+    for f in "$dir"/*; do
+      [[ -L "$f" ]] || continue
+      target="$(readlink "$f")"
+      case "$target" in
+        "$RECALL_DIR"/*)
+          if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            echo "  [dry-run] would rm -f $f"
+          else
+            rm -f "$f"
+          fi
+          removed=$((removed + 1))
+          ;;
+      esac
+    done
+    if [[ "${DRY_RUN:-false}" != "true" ]]; then
+      rmdir "$dir" 2>/dev/null || true
+    fi
+  done
+  _RECALL_REMOVED_SKILL_LINKS=$removed
+}
+
+_recall_remove_legacy_skill_dirs_from() {
+  _recall_remove_managed_skill_dirs_from "$1" "${RECALL_LEGACY_SKILL_NAMES[@]}"
+  if [[ ${_RECALL_REMOVED_SKILL_LINKS:-0} -gt 0 ]]; then
+    log_success "Removed $_RECALL_REMOVED_SKILL_LINKS legacy recall-* skill symlink(s) from $1"
+  fi
+}
+
+# The recall-* → do-recall-* rename left existing installs carrying the old
+# canonicals under $RECALL_SHARED_SKILLS_DIR plus per-file symlinks in every
+# host skills dir; remove them so the retired surface doesn't sit next to the
+# renamed one. Same ownership rule as recall_remove_legacy_slash_commands:
+# only Recall-managed symlinks are unlinked — user-authored files survive,
+# and a directory is removed only when that leaves it empty. The old
+# canonicals are Recall-owned copies and are removed outright.
+recall_remove_legacy_skill_names() {
+  local skills_root name
+  for skills_root in "$CLAUDE_DIR/skills" "$OMP_CONFIG_DIR/skills" "$PI_CONFIG_DIR/skills"; do
+    _recall_remove_legacy_skill_dirs_from "$skills_root"
+  done
+
+  for name in "${RECALL_LEGACY_SKILL_NAMES[@]}"; do
+    if [[ -d "$RECALL_SHARED_SKILLS_DIR/$name" ]]; then
+      rm -rf "$RECALL_SHARED_SKILLS_DIR/$name"
+      log_info "Removed legacy skill canonicals: $RECALL_SHARED_SKILLS_DIR/$name"
+    fi
   done
 }
 
@@ -1370,7 +1466,7 @@ _recall_unlink_claude_skill_links() {
   done
 
   if [[ $removed -gt 0 ]]; then
-    log_success "Removed $removed legacy skill symlink(s) — the Claude plugin now owns the recall-* surface"
+    log_success "Removed $removed legacy skill symlink(s) — the Claude plugin now owns the do-recall-* surface"
   fi
 }
 
@@ -1423,6 +1519,10 @@ _recall_unregister_legacy_claude_mcp() {
 # CLAUDE_CODE_DETECTED. Skills are the single command surface (#228); the old
 # /Recall:* slash commands are gone. Canonicals are always refreshed (Pi, omp,
 # and doctor read them); only the ~/.claude/skills links are conditional.
+#
+# Rename cleanup lives in _recall_copy_skill_files, which this function and
+# recall_install_omp_platform both call, so leftover recall-* canonicals are
+# gone before any host is linked.
 recall_install_claude_skills() {
   _recall_copy_skill_files
   if recall_claude_plugin_active; then

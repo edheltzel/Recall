@@ -61,7 +61,7 @@ Records marked as duplicates by [`recall dedup`](#dedup) are hidden from every s
 recall dump "Session Title"             # Import session + capture LoA entry
 ```
 
-Combines `recall import` and `recall loa write` in one step. Run this at the end of every session to persist the conversation and extract a Fabric summary into the Library of Alexandria. The title should describe what was accomplished in the session.
+Combines `recall import` and Curated LoA capture in one step. Run this at the end of every session to persist the conversation and run the `fabric` Extractor. The title should describe what was accomplished in the session. `--skip-fabric` writes a basic summary instead.
 
 ### Library of Alexandria (LoA)
 
@@ -71,11 +71,11 @@ recall loa write "VPN Config" -p infra        # Tag with project
 recall loa write "VPN Part 2" -c 1            # Continue from previous entry (chain)
 recall loa write "Auth System" -t "auth"      # Add tags
 recall loa list                               # List recent entries
-recall loa show 1                             # View full Fabric extract for entry #1
+recall loa show 1                             # View extract body for entry #1
 recall loa quote 1                            # View raw source messages for entry #1
 ```
 
-LoA is the primary knowledge capture mechanism. Raw transcripts are high-noise; LoA entries contain Fabric-extracted insights, message lineage, continuation chains, and project context. Chaining (`-c <id>`) links a new entry to a prior one, forming a thread of related sessions.
+LoA is the primary knowledge capture mechanism. Raw transcripts are high-noise; Curated LoA entries contain `fabric` Extractor output, message lineage, continuation chains, and project context. Chaining (`-c <id>`) links a new entry to a prior one, forming a thread of related sessions. Automatic-capture LoA is written by session extract, not this command. Extractor config: [architecture](architecture.md#extractor-config).
 
 ### Decisions
 
@@ -126,7 +126,7 @@ Stores a freeform observation or preference. The `-i` flag sets importance on a 
 
 ```bash
 recall loa list                         # Recent LoA entries
-recall loa show 1                       # Full Fabric extract for entry #1
+recall loa show 1                       # Extract body for entry #1
 recall loa quote 1                      # Raw source messages for entry #1
 recall recent                           # Recent records across all tables
 recall recent decisions                 # Recent decisions only

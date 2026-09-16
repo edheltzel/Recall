@@ -2,18 +2,24 @@
 
 [← Back to README](../README.md)
 
-## Migration note: `/Recall:*` slash commands → `recall-*` Agent Skills
+## Migration note: `recall-*` skills renamed to `do-recall-*`
 
-The `/Recall:*` Claude Code slash commands were retired in favor of [Agent Skills](agent-skills.md) (issue #228) — same bodies, one `recall-*` namespace across Claude Code, Pi, and omp. `install.sh` / `update.sh` remove the stale `~/.claude/commands/Recall/` symlinks automatically on the next run.
+All nine Agent Skills gained a `do-` prefix — `recall-dump` is now `do-recall-dump`, `recall-scout` is now `do-recall-scout`, and so on. Same bodies, same behavior; only the names changed. `install.sh` / `update.sh` remove the retired `recall-*` skill links and canonicals automatically on the next run (and `uninstall.sh` removes both eras).
 
-One thing the installer can't reach: **your own files**. If a personal rules file (e.g. `~/.claude/rules/memory.md`) or project doc references `/Recall:dump` or another `/Recall:*` command, update it to the `/recall-*` form by hand.
+One thing the installer can't reach: **your own files**. If a personal rules file (e.g. `~/.claude/rules/memory.md`) or project doc invokes `/recall-dump` or another old skill name, update it to the `/do-recall-*` form by hand.
+
+## Migration note: `/Recall:*` slash commands → Agent Skills (historical)
+
+The `/Recall:*` Claude Code slash commands were retired in favor of [Agent Skills](agent-skills.md) (issue #228) — same bodies, one namespace across Claude Code, Pi, and omp. `install.sh` / `update.sh` remove the stale `~/.claude/commands/Recall/` symlinks automatically on the next run.
+
+If a personal rules file or project doc still references a `/Recall:*` command, update it to the current `/do-recall-*` skill form by hand.
 
 ## Check for a new release
 
 From inside Claude Code:
 
 ```
-/recall-update
+/do-recall-update
 ```
 
 This is a **check-only** command — it prints the current vs. latest

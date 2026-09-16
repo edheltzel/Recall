@@ -60,10 +60,10 @@ describe('Codex native plugin package', () => {
       expect(actual).toContain('equivalent behavior is not assumed across hosts');
     }
     expect(
-      readFileSync(join(repoRoot, 'plugins/recall/skills/recall-dump/agents/openai.yaml'), 'utf-8')
+      readFileSync(join(repoRoot, 'plugins/recall/skills/do-recall-dump/agents/openai.yaml'), 'utf-8')
     ).toContain('allow_implicit_invocation: false');
     expect(
-      readFileSync(join(repoRoot, 'plugins/recall/skills/recall-dump/SKILL.md'), 'utf-8')
+      readFileSync(join(repoRoot, 'plugins/recall/skills/do-recall-dump/SKILL.md'), 'utf-8')
     ).not.toContain('disable-model-invocation');
   });
 });

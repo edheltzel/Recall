@@ -1,24 +1,24 @@
-# agent-skills — `recall-*` Agent Skills
+# agent-skills — `do-recall-*` Agent Skills
 
 > Child DOX. Root `AGENTS.md` carries repo-wide rules; this file owns local detail for `agent-skills/`.
 
 ## Purpose
 
-Agent Skill definitions (one `SKILL.md` per skill directory, per the [agentskills.io](https://agentskills.io) standard) for the `recall-*` namespace — the canonical command source across skill hosts. The lifecycle installer symlinks canonicals into `~/.claude/skills/` and `~/.omp/agent/skills/`; Pi loads them through the root package's native `package.json#pi` manifest, while `scripts/build-codex-plugin.ts` and `scripts/build-claude-plugin.ts` generate the native plugin payloads.
+Agent Skill definitions (one `SKILL.md` per skill directory, per the [agentskills.io](https://agentskills.io) standard) for the `do-recall-*` namespace — the canonical command source across skill hosts. The lifecycle installer symlinks canonicals into `~/.claude/skills/` and `~/.omp/agent/skills/`; Pi loads them through the root package's native `package.json#pi` manifest, while `scripts/build-codex-plugin.ts` and `scripts/build-claude-plugin.ts` generate the native plugin payloads.
 
 ## Ownership
 
-`recall-add`, `recall-doctor`, `recall-dump`, `recall-loa`, `recall-recent`, `recall-scout`, `recall-search`, `recall-stats`, `recall-update` — each a directory containing `SKILL.md`.
+`do-recall-add`, `do-recall-doctor`, `do-recall-dump`, `do-recall-loa`, `do-recall-recent`, `do-recall-scout`, `do-recall-search`, `do-recall-stats`, `do-recall-update` — each a directory containing `SKILL.md`.
 
 ## Local Contracts
 
 - These are Markdown skill specs, not code; each maps to underlying `recall` CLI / MCP behavior — keep its body aligned with that command and with `docs/agent-skills.md`.
-- `recall-dump/SKILL.md` carries `disable-model-invocation: true` — dumping a session is always the user's call; do not remove that gate.
+- `do-recall-dump/SKILL.md` carries `disable-model-invocation: true` — dumping a session is always the user's call; do not remove that gate.
 - Codex does not accept every canonical frontmatter key. Keep host adaptations in `scripts/build-codex-plugin.ts` and verify the generated `plugins/recall/skills/` behavior; never infer parity from matching bytes.
 - Claude's plugin payload is byte-verbatim. Regenerate it with `scripts/build-claude-plugin.ts`; never hand-edit `plugins/recall-claude/skills/`.
 - Pi reads the canonical files directly through `package.json#pi`; do not generate or copy a second Pi skill tree.
-- `recall-scout/SKILL.md` output is chat-only by default; a persisted scout artifact goes to `.agents/atlas/artifacts/` (see root `AGENTS.md`), never under `agent-skills/` or `docs/`.
-- `recall-scout/SKILL.md` grounds its repo map / key paths / risks in **CodeGraph (primary)** via the external `codegraph` CLI: a `codegraph status --json` capability probe (on an unindexed repo scout **offers** `codegraph init` and runs it only on an explicit user yes — never auto-runs), a cheap orientation bundle (`status --json` + `files --max-depth 2 --no-metadata`), and at most two narrow `explore` calls under the query discipline pinned in the skill, with a grep/tree-walk backstop. CodeGraph is an enhancement, never a hard dependency — scout degrades gracefully when it isn't present.
+- `do-recall-scout/SKILL.md` output is chat-only by default; a persisted scout artifact goes to `.agents/atlas/artifacts/` (see root `AGENTS.md`), never under `agent-skills/` or `docs/`.
+- `do-recall-scout/SKILL.md` grounds its repo map / key paths / risks in **CodeGraph (primary)** via the external `codegraph` CLI: a `codegraph status --json` capability probe (on an unindexed repo scout **offers** `codegraph init` and runs it only on an explicit user yes — never auto-runs), a cheap orientation bundle (`status --json` + `files --max-depth 2 --no-metadata`), and at most two narrow `explore` calls under the query discipline pinned in the skill, with a grep/tree-walk backstop. CodeGraph is an enhancement, never a hard dependency — scout degrades gracefully when it isn't present.
 - The former `/Recall:*` slash commands (`commands/Recall/`) were retired in favor of these skills (#228); `install.sh`/`update.sh` clean up their symlinks. Do not reintroduce a parallel command surface.
 
 ## Work Guidance

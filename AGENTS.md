@@ -25,7 +25,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `hooks/` — self-contained Claude lifecycle hooks + cron jobs, plus the installer-owned Grok hook descriptor
 - `tests/` — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - `benchmarks/` — wake-up context-efficiency benchmark harness
-- `agent-skills/` — canonical Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills` and `~/.omp/agent/skills`, discovered by Pi through the root package manifest, and generated into native host plugin payloads — the single `recall-*` command surface (the former `/Recall:*` slash commands, #228)
+- `agent-skills/` — canonical Agent Skills (SKILL.md, one per skill dir) installed to `~/.claude/skills` and `~/.omp/agent/skills`, discovered by Pi through the root package manifest, and generated into native host plugin payloads — the single `do-recall-*` command surface (the former `/Recall:*` slash commands, #228)
 - `plugins/` — native host plugin bundles, one per host: Codex in `plugins/recall/`, Claude Code in `plugins/recall-claude/`, each packaging MCP plus its own skill payload
 - `docs/` — user-facing published docs + ADRs (`docs/adr/`) + agent skill docs (`docs/agents/`)
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts, plus the dependency-free `jsonc-mcp.ts` runtime helper they shell out to for JSONC config edits
@@ -64,7 +64,7 @@ This applies to every agent and every planning surface (`EnterPlanMode`, design 
 
 ## Scout Artifacts Directory (MANDATORY)
 
-Codebase scout reports (`recall-scout`, see `agent-skills/recall-scout/SKILL.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
+Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKILL.md`) are **chat-only by default — write nothing to disk.** When a scout report (or any generated agent artifact) is persisted, it MUST be written to `.agents/atlas/artifacts/` — and only there.
 
 - Generated scout reports and agent artifacts → `.agents/atlas/artifacts/`
 - This directory is **opt-in**: write to it only when it already exists or the user explicitly asks for a saved report
@@ -129,7 +129,7 @@ Before adding code or content, search for an existing definition and extend it. 
 
 - **Add a CLI command**: Create `src/commands/foo.ts`, wire it in `src/index.ts`
 - **Add an MCP tool**: Add handler in `src/mcp-server.ts`
-- **Modify extraction**: Edit `hooks/RecallExtract.ts` (self-contained, no build step)
+- **Modify extraction**: Automatic-capture LoA cascade in `hooks/lib/extract-model.ts` plus the config resolver in `hooks/lib/`; Curated LoA in `src/commands/loa.ts` via the `src/` re-export. Stop-hook remains `hooks/RecallExtract.ts` (self-contained, no build step).
 - **Add a hook helper**: Create `hooks/lib/foo.ts` — kept standalone so hooks don't import from `src/`
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
 - **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills` and `~/.omp/agent/skills`; Pi discovers it through the root native package manifest). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so legacy/uninstall cleanup removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
@@ -166,6 +166,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 - **Install is opinionated: `~/.agents/Recall` is the only install root** (Ed, 2026-08-19). Users do not choose a custom or relocated install directory. Do not re-propose relocated-root discovery, default-root locator/symlink machinery, foreign-root activation, or user-facing `RECALL_DIR` relocation; PR #254 was closed after exactly that cascade grew on it (see its closing comment). `RECALL_DB_PATH` (database file location) is a separate, pre-existing override and is unaffected.
 - **Graph capabilities: build on CodeGraph, never from scratch** (Ed, 2026-07-13). Any future graph/edge/related-memories feature must be scoped as a Recall↔CodeGraph integration, not a new edge table + traversal engine in `recall.db`. This generalizes the #196→#214 knowledge-graph revert; do not re-propose an in-Recall graph layer. (Recall decision #2892.)
+- **Extractor config** (Ed, 2026-08-27, #258): optional `~/.agents/Recall/config.json`; install never writes it. Canonical resolver in `hooks/lib/`; `src/` re-exports. Automatic-capture LoA allowlist `claude-cli` \| `ollama`; Curated LoA allowlist `fabric`. File selects IDs and fallback lists. `RECALL_FABRIC_MODEL` and `Recall_OLLAMA_MODEL` override matching file model fields. `OLLAMA_URL` is the existing shared Ollama endpoint (embeddings and automatic `ollama` Extractor), not a config.json field. Missing file = split defaults. Unparseable JSON fails both paths. An illegal ID fails that path closed. Schema: [`docs/architecture.md`](docs/architecture.md). Terms: [`CONTEXT.md`](CONTEXT.md).
 
 ## Child DOX Index
 
@@ -176,7 +177,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`tests/AGENTS.md`](tests/AGENTS.md) — `bun:test` suite mirroring source areas, plus install-lifecycle tests
 - [`benchmarks/AGENTS.md`](benchmarks/AGENTS.md) — wake-up context-efficiency benchmark harness
 - [`docs/AGENTS.md`](docs/AGENTS.md) — user-facing published docs, ADRs, agent skill docs (never plans/specs)
-- [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `recall-*` Agent Skill definitions
+- [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `do-recall-*` Agent Skill definitions
 - [`plugins/AGENTS.md`](plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 - [`opencode/AGENTS.md`](opencode/AGENTS.md) — OpenCode adapter plugins, their shared helpers, and the runtime contract they must satisfy
 
