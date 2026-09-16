@@ -1,6 +1,16 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Recall — Persistent Memory for Coding Agents" width="100%">
-</p>
+```
+██████╗ ███████╗ ██████╗ █████╗ ██╗     ██╗
+██╔══██╗██╔════╝██╔════╝██╔══██╗██║     ██║
+██████╔╝█████╗  ██║     ███████║██║     ██║
+██╔══██╗██╔══╝  ██║     ██╔══██║██║     ██║
+██║  ██║███████╗╚██████╗██║  ██║███████╗███████╗
+╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚══════╝
+```
+
+# Recall
+
+> [!NOTE]
+> EdHeltzel's Persistent Memory for Agents
 
 ## TL;DR
 
@@ -11,8 +21,6 @@ Recall is a retrieval-first memory layer: everything lands in one searchable dat
 
 Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
 
-
-# Recall — Persistent Memory for Any Agent Harness
 
 All coding agents forget when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session, across every agent you use.
 
