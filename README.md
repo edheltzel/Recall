@@ -52,7 +52,7 @@ Four things that set Recall apart from cloud-hosted memory layers and from agent
 
 - **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server, no API keys for retrieval. Nothing leaves your machine — no telemetry, no phone-home. Optional Ollama for embeddings (also local).
 - **Multi-agent native.** One memory layer across the agents you actually use. Claude Code, Pi, OpenCode, Codex, Grok, and JCode can share MCP memory. Automatic capture and injection depend on each host's supported lifecycle surfaces; see the capability matrix below.
-- **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and curated **Library of Alexandria** entries — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
+- **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and **Library of Alexandria** entries (Automatic-capture LoA and Curated LoA) — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
 - **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
 
 ## Quick Start
@@ -129,7 +129,7 @@ survives as a single entry.
 
 ### Updating
 
-From inside Claude Code, `/recall-update` prints the current vs. latest
+From inside Claude Code, `/do-recall-update` prints the current vs. latest
 release and the exact command to run. From a shell:
 
 ```bash
@@ -182,9 +182,9 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 │  recall add decision  ───┤         → Filter noise (tool results)         │
 │  recall add learning  ───┤         → Dedup check (.extraction_tracker)   │
 │  memory_add (MCP)  ───┤         → Acquire lock                        │
-│                       │         → Claude Haiku extract                │
+│                       │         → Automatic-capture Extractor         │
+│                       │           (claude-cli, then ollama)           │
 │                       │           (>120K? chunk → meta-extract)       │
-│                       │           (fallback: Ollama)                  │
 │                       │         → Quality gate                        │
 │                       │           (requires SUMMARY + MAIN IDEAS)     │
 │                       │              │                                │
@@ -235,7 +235,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your global or project-local `identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
 2. **During the session** — your agent searches memory via MCP tools (`memory_search`, `memory_hybrid_search`, `memory_recall`, `context_for_agent`) before falling back to git history. Decisions, learnings, and breadcrumbs are recorded in real-time with `memory_add`.
 3. **End of every turn** — A `Stop` hook fires `RecallExtract.ts`, which self-spawns a background process (non-blocking). It checks `.extraction_tracker.json` and only re-extracts if the conversation has grown meaningfully since last time — so capture is incremental, not just an "on exit" event.
-4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and sent to the `claude` CLI running Haiku (with chunking for large sessions >120K chars). Optional Ollama fallback if the CLI fails. A quality gate rejects low-quality extractions before they're stored.
+4. **Extraction pipeline** — The conversation JSONL is filtered, deduplicated, and run through the Automatic-capture Extractor (default `claude-cli`, then `ollama`; chunking for sessions >120K chars). A quality gate rejects low-quality extractions before they're stored. Optional per-path config: [architecture](docs/architecture.md#extractor-config).
 5. **PreCompact flush** — When Claude Code is about to compact its context, a `PreCompact` hook (`RecallPreCompact.ts`) flushes the in-flight messages first, so the squashed window is never lost.
 6. **Dual-write storage** — Results are written to SQLite (the only query surface — every CLI/MCP read hits this) and to markdown artifacts (`DISTILLED.md`, `HOT_RECALL.md`, etc., write-only, human-readable).
 7. **Batch catchup (optional)** — A cron job (`RecallBatchExtract.ts`) sweeps any sessions the Stop hook missed during crashes or interruptions, and ingests sessions dropped by the OpenCode plugin and Pi extension into `~/.agents/Recall/MEMORY/{opencode,pi}-sessions/`. `install.sh` prints the registration command at the end — opt in by running it once; nothing is auto-scheduled.
@@ -268,10 +268,10 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
 - **Cross-host ingestion** — Codex and Grok lifecycle hooks write immediately through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
-- **Library of Alexandria** — curated knowledge entries (session distillations, imported docs, telos goals, quotes) with Fabric `extract_wisdom` analysis. Default importance 8 — these get reserved L1 slots
+- **Library of Alexandria** — Automatic-capture LoA from session extract (importance 6, excluded from reserved L1 LoA slots). Curated LoA from `recall loa` / dump via the `fabric` Extractor (`extract_wisdom`); default importance 8, reserved L1 slots. Optional per-path Extractor config: [architecture](docs/architecture.md#extractor-config)
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
-- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `recall-add` agent skill
-- **Codebase scouting** — `/recall-scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
+- **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `do-recall-add` agent skill
+- **Codebase scouting** — `/do-recall-scout [focus]` produces a memory-first scout report (repo map, key paths, tests, risks, next steps) for orienting in an unfamiliar repo, with a strict no-secrets boundary and chat-only-by-default output
 - **Benchmark harness** — `recall benchmark run B` measures wake-up context efficiency against locked baselines so regressions are visible
 - **Onboarding** — `recall onboard` runs a 7-question interview that writes your L0 identity file
 

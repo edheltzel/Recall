@@ -41,6 +41,11 @@ note in the 0.9.0 entry.
   `registerSessionSource`. Not a Cursor marketplace plugin and not a
   `HostDescriptor`. See `docs/api.md`.
 
+### Changed
+
+- **Agent Skills renamed with a `do-` prefix** — all nine skills are now `do-recall-add`, `do-recall-doctor`, `do-recall-dump`, `do-recall-loa`, `do-recall-recent`, `do-recall-scout`, `do-recall-search`, `do-recall-stats`, `do-recall-update`. Same bodies, same behavior; only the names changed, so invocations become `/do-recall-<name>`. `install.sh` / `update.sh` remove the retired `recall-*` links and canonicals automatically; `uninstall.sh` removes both eras. Your own rules files that invoke the old names need a hand edit (see `docs/upgrading.md`).
+- **Pi direct MCP tool names follow `pi-mcp-adapter` 2.32** — with `directTools: true` (unchanged), the adapter's default `toolPrefix: "server"` keeps hyphens in the server name, so Pi registers `recall-memory_memory_search` rather than a hyphen-stripped `recall_memory_*`. Verified against Pi 0.84.4.
+
 ## [0.10.0] - 2026-08-26 - "cross-host lifecycle capture"
 
 ### Added

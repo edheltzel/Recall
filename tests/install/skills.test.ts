@@ -18,6 +18,7 @@ import {
   mkdtempSync,
   readlinkSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -39,6 +40,7 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
   let recallDir: string;
   let fakeRepo: string;
   let ompConfigDir: string;
+  let piConfigDir: string;
   let driverSeq = 0;
 
   beforeEach(() => {
@@ -47,17 +49,18 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     recallDir = join(tempRoot, '.agents', 'Recall');
     fakeRepo = join(tempRoot, 'repo');
     ompConfigDir = join(tempRoot, '.omp', 'agent');
+    piConfigDir = join(tempRoot, '.pi', 'agent');
 
     mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(join(fakeRepo, 'agent-skills', 'recall-doctor'), { recursive: true });
-    mkdirSync(join(fakeRepo, 'agent-skills', 'recall-stats'), { recursive: true });
+    mkdirSync(join(fakeRepo, 'agent-skills', 'do-recall-doctor'), { recursive: true });
+    mkdirSync(join(fakeRepo, 'agent-skills', 'do-recall-stats'), { recursive: true });
     writeFileSync(
-      join(fakeRepo, 'agent-skills', 'recall-doctor', 'SKILL.md'),
-      '---\nname: "source-command-recall-doctor"\n---\n# doctor\n',
+      join(fakeRepo, 'agent-skills', 'do-recall-doctor', 'SKILL.md'),
+      '---\nname: "source-command-do-recall-doctor"\n---\n# doctor\n',
     );
     writeFileSync(
-      join(fakeRepo, 'agent-skills', 'recall-stats', 'SKILL.md'),
-      '---\nname: "source-command-recall-stats"\n---\n# stats\n',
+      join(fakeRepo, 'agent-skills', 'do-recall-stats', 'SKILL.md'),
+      '---\nname: "source-command-do-recall-stats"\n---\n# stats\n',
     );
   });
 
@@ -75,6 +78,7 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
       `export RECALL_DIR="${recallDir}"`,
       `export RECALL_REPO_DIR="${fakeRepo}"`,
       `export OMP_CONFIG_DIR="${ompConfigDir}"`,
+      `export PI_CONFIG_DIR="${piConfigDir}"`,
       'export NO_COLOR=1',
       `source "${INSTALL_LIB}"`,
       ...body,
@@ -84,13 +88,41 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status ?? 1 };
   }
 
+  function seedLegacyRecallAdd(): {
+    legacyCanonicalDir: string;
+    claudeLegacy: string;
+    ompLegacyDir: string;
+    piLegacy: string;
+  } {
+    const legacyCanonicalDir = join(recallDir, 'shared', 'skills', 'recall-add');
+    const legacyCanonical = join(legacyCanonicalDir, 'SKILL.md');
+    const claudeLegacyDir = join(claudeDir, 'skills', 'recall-add');
+    const ompLegacyDir = join(ompConfigDir, 'skills', 'recall-add');
+    const piLegacyDir = join(piConfigDir, 'skills', 'recall-add');
+    mkdirSync(legacyCanonicalDir, { recursive: true });
+    writeFileSync(legacyCanonical, '# legacy canonical\n');
+    mkdirSync(claudeLegacyDir, { recursive: true });
+    symlinkSync(legacyCanonical, join(claudeLegacyDir, 'SKILL.md'));
+    writeFileSync(join(claudeLegacyDir, 'notes.md'), 'mine');
+    mkdirSync(join(ompConfigDir, 'skills'), { recursive: true });
+    symlinkSync(legacyCanonicalDir, ompLegacyDir);
+    mkdirSync(piLegacyDir, { recursive: true });
+    symlinkSync(legacyCanonical, join(piLegacyDir, 'SKILL.md'));
+    return {
+      legacyCanonicalDir,
+      claudeLegacy: join(claudeLegacyDir, 'SKILL.md'),
+      ompLegacyDir,
+      piLegacy: join(piLegacyDir, 'SKILL.md'),
+    };
+  }
+
   test('recall_install_claude_skills copies canonicals and symlinks per file into ~/.claude/skills', () => {
     const r = runDriver(['recall_install_claude_skills']);
     expect(r.status).toBe(0);
 
-    const doctorCanonical = join(recallDir, 'shared', 'skills', 'recall-doctor', 'SKILL.md');
-    const doctorTarget = join(claudeDir, 'skills', 'recall-doctor', 'SKILL.md');
-    const statsTarget = join(claudeDir, 'skills', 'recall-stats', 'SKILL.md');
+    const doctorCanonical = join(recallDir, 'shared', 'skills', 'do-recall-doctor', 'SKILL.md');
+    const doctorTarget = join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md');
+    const statsTarget = join(claudeDir, 'skills', 'do-recall-stats', 'SKILL.md');
 
     expect(existsSync(doctorCanonical)).toBe(true);
     expect(existsSync(doctorTarget)).toBe(true);
@@ -104,14 +136,14 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     expect(r1.status).toBe(0);
     const r2 = runDriver(['recall_install_claude_skills']);
     expect(r2.status).toBe(0);
-    expect(existsSync(join(claudeDir, 'skills', 'recall-doctor', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(true);
   });
 
   test('recall_install_omp_platform symlinks into $OMP_CONFIG_DIR/skills', () => {
     const r = runDriver(['recall_install_omp_platform']);
     expect(r.status).toBe(0);
 
-    const ompTarget = join(ompConfigDir, 'skills', 'recall-stats', 'SKILL.md');
+    const ompTarget = join(ompConfigDir, 'skills', 'do-recall-stats', 'SKILL.md');
     expect(existsSync(ompTarget)).toBe(true);
     expect(lstatSync(ompTarget).isSymbolicLink()).toBe(true);
   });
@@ -119,8 +151,8 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
   test('a foreign (non-Recall) symlink at the target is backed up, not silently overwritten', () => {
     const foreignFile = join(tempRoot, 'foreign-skill.md');
     writeFileSync(foreignFile, '# not ours');
-    const target = join(claudeDir, 'skills', 'recall-doctor', 'SKILL.md');
-    mkdirSync(join(claudeDir, 'skills', 'recall-doctor'), { recursive: true });
+    const target = join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md');
+    mkdirSync(join(claudeDir, 'skills', 'do-recall-doctor'), { recursive: true });
 
     const r = runDriver([
       `mkdir -p "$(dirname "${target}")"`,
@@ -129,14 +161,91 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     ]);
     expect(r.status).toBe(0);
     expect(readlinkSync(target)).toBe(
-      join(recallDir, 'shared', 'skills', 'recall-doctor', 'SKILL.md'),
+      join(recallDir, 'shared', 'skills', 'do-recall-doctor', 'SKILL.md'),
     );
+  });
+
+  // The recall-* → do-recall-* rename: installs from before it carry the old
+  // canonicals plus old-name host links. Cleanup runs inside _recall_copy_skill_files
+  // so every linker (Claude skills AND omp) drops the retired surface.
+  test('recall_install_claude_skills clears the pre-rename recall-* surface', () => {
+    const seeded = seedLegacyRecallAdd();
+
+    const r = runDriver(['recall_install_claude_skills']);
+    expect(r.status).toBe(0);
+    // lstatSync, not existsSync: existsSync follows the link and reads false
+    // for a surviving DANGLING symlink, masking a failed removal; lstat throws
+    // only when the link itself is gone.
+    expect(() => lstatSync(seeded.claudeLegacy)).toThrow();
+    expect(existsSync(join(claudeDir, 'skills', 'recall-add', 'notes.md'))).toBe(true);
+    expect(() => lstatSync(seeded.ompLegacyDir)).toThrow();
+    expect(() => lstatSync(seeded.piLegacy)).toThrow();
+    expect(existsSync(seeded.legacyCanonicalDir)).toBe(false);
+    expect(lstatSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md')).isSymbolicLink()).toBe(true);
+
+    const r2 = runDriver(['recall_install_claude_skills']);
+    expect(r2.status).toBe(0);
+    expect(() => lstatSync(seeded.claudeLegacy)).toThrow();
+  });
+
+  // Red-team: recall_install_omp_platform used to copy then link every leftover
+  // $RECALL_SHARED_SKILLS_DIR/*/ name, republishing recall-* onto omp.
+  test('recall_install_omp_platform does not re-link leftover recall-* canonicals', () => {
+    const seeded = seedLegacyRecallAdd();
+
+    const r = runDriver(['recall_install_omp_platform']);
+    expect(r.status).toBe(0);
+    expect(() => lstatSync(seeded.ompLegacyDir)).toThrow();
+    expect(existsSync(seeded.legacyCanonicalDir)).toBe(false);
+    expect(lstatSync(join(ompConfigDir, 'skills', 'do-recall-stats', 'SKILL.md')).isSymbolicLink()).toBe(true);
+    expect(() => lstatSync(join(ompConfigDir, 'skills', 'recall-add', 'SKILL.md'))).toThrow();
+  });
+
+  // Red-team: _recall_copy_skill_files returns 0 when agent-skills/ is absent,
+  // so cleanup at the end of copy never runs; omp then re-links leftover
+  // recall-* canonicals. The production path must still converge.
+  test('omp install converges leftover recall-* when agent-skills source is missing', () => {
+    const seeded = seedLegacyRecallAdd();
+    rmSync(join(fakeRepo, 'agent-skills'), { recursive: true, force: true });
+
+    const r = runDriver(['recall_install_omp_platform']);
+    expect(r.status).toBe(0);
+    expect(() => lstatSync(seeded.ompLegacyDir)).toThrow();
+    expect(existsSync(seeded.legacyCanonicalDir)).toBe(false);
+    expect(() => lstatSync(join(ompConfigDir, 'skills', 'recall-add', 'SKILL.md'))).toThrow();
+  });
+
+  // Red-team: plugin-active install unlinks ~/.claude/skills and returns, but
+  // leftover recall-* managed links must still be gone.
+  test('plugin-active install still removes managed recall-* links', () => {
+    const first = runDriver(['recall_install_claude_skills']);
+    expect(first.status).toBe(0);
+    expect(lstatSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md')).isSymbolicLink()).toBe(true);
+
+    const seeded = seedLegacyRecallAdd();
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(claudeDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        version: 2,
+        plugins: { 'recall@recall-marketplace': [{ scope: 'user', version: '0.10.0' }] },
+      }),
+    );
+
+    const r = runDriver(['recall_install_claude_skills']);
+    expect(r.status).toBe(0);
+    expect(() => lstatSync(seeded.claudeLegacy)).toThrow();
+    expect(existsSync(join(claudeDir, 'skills', 'recall-add', 'notes.md'))).toBe(true);
+    expect(() => lstatSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toThrow();
+    expect(existsSync(join(recallDir, 'shared', 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(true);
+    expect(existsSync(seeded.legacyCanonicalDir)).toBe(false);
   });
 });
 
 describe('Agent Skills uninstall (uninstall.sh)', () => {
   let tempRoot: string;
   let claudeDir: string;
+  let recallDir: string;
   let backupBase: string;
 
   function runUninstall(extraArgs: string[] = [], extraEnv: Record<string, string> = {}): RunResult {
@@ -151,6 +260,7 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
           CLAUDE_DIR: claudeDir,
           BACKUP_BASE: backupBase,
           HOME: claudeDir,
+          RECALL_DIR: recallDir,
           RECALL_SKIP_BUN_UNLINK: 'true',
           ...extraEnv,
         },
@@ -159,17 +269,24 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
     return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status ?? 1 };
   }
 
+  function plantManagedSkill(skillsRoot: string, name: string): { skillMd: string; dir: string } {
+    const canonical = join(recallDir, 'shared', 'skills', name, 'SKILL.md');
+    mkdirSync(join(recallDir, 'shared', 'skills', name), { recursive: true });
+    writeFileSync(canonical, `# ${name}\n`);
+    const dir = join(skillsRoot, name);
+    mkdirSync(dir, { recursive: true });
+    const skillMd = join(dir, 'SKILL.md');
+    symlinkSync(canonical, skillMd);
+    return { skillMd, dir };
+  }
+
   beforeEach(() => {
     tempRoot = mkdtempSync(join(tmpdir(), 'recall-skills-uninstall-'));
     claudeDir = join(tempRoot, '.claude');
+    recallDir = join(tempRoot, '.agents', 'Recall');
     backupBase = join(claudeDir, 'backups', 'recall');
     mkdirSync(backupBase, { recursive: true });
-
-    // Recall-owned skill
-    mkdirSync(join(claudeDir, 'skills', 'recall-doctor'), { recursive: true });
-    writeFileSync(join(claudeDir, 'skills', 'recall-doctor', 'SKILL.md'), '# doctor');
-
-    // Foreign, non-Recall skill in the same directory — MUST survive
+    plantManagedSkill(join(claudeDir, 'skills'), 'do-recall-doctor');
     mkdirSync(join(claudeDir, 'skills', 'some-other-skill'), { recursive: true });
     writeFileSync(join(claudeDir, 'skills', 'some-other-skill', 'SKILL.md'), '# not ours');
   });
@@ -181,13 +298,64 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
   test('removes only Recall-owned skill directories, preserves foreign ones', () => {
     const r = runUninstall();
     expect(r.status).toBe(0);
-    expect(existsSync(join(claudeDir, 'skills', 'recall-doctor'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor'))).toBe(false);
     expect(existsSync(join(claudeDir, 'skills', 'some-other-skill', 'SKILL.md'))).toBe(true);
   });
 
   test('--dry-run narrates without touching the filesystem', () => {
     const r = runUninstall(['--dry-run']);
     expect(r.status).toBe(0);
-    expect(existsSync(join(claudeDir, 'skills', 'recall-doctor'))).toBe(true);
+    expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(true);
+  });
+
+  test('legacy pre-rename recall-* skill dirs are removed too', () => {
+    plantManagedSkill(join(claudeDir, 'skills'), 'recall-doctor');
+    const r = runUninstall();
+    expect(r.status).toBe(0);
+    expect(existsSync(join(claudeDir, 'skills', 'recall-doctor'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor'))).toBe(false);
+  });
+
+  // Red-team: install cleanup preserves user notes.md next to a managed SKILL.md
+  // link; uninstall rm -rf of the named dir destroyed that file.
+  test('uninstall preserves user notes.md beside a managed recall-* skill link', () => {
+    const planted = plantManagedSkill(join(claudeDir, 'skills'), 'recall-add');
+    writeFileSync(join(planted.dir, 'notes.md'), 'mine');
+    const r = runUninstall();
+    expect(r.status).toBe(0);
+    expect(() => lstatSync(planted.skillMd)).toThrow();
+    expect(existsSync(join(planted.dir, 'notes.md'))).toBe(true);
+  });
+
+  test('without --skip-omp, both eras are removed from the omp skills root', () => {
+    const ompSkills = join(tempRoot, '.omp', 'agent', 'skills');
+    plantManagedSkill(ompSkills, 'do-recall-stats');
+    const leftover = plantManagedSkill(ompSkills, 'recall-add');
+    writeFileSync(join(leftover.dir, 'notes.md'), 'mine');
+    mkdirSync(join(ompSkills, 'user-skill'), { recursive: true });
+    writeFileSync(join(ompSkills, 'user-skill', 'SKILL.md'), '# mine');
+
+    const r = spawnSync(
+      'bash',
+      [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi'],
+      {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: {
+          ...process.env,
+          CLAUDE_DIR: claudeDir,
+          BACKUP_BASE: backupBase,
+          HOME: claudeDir,
+          RECALL_DIR: recallDir,
+          OMP_CONFIG_DIR: join(tempRoot, '.omp', 'agent'),
+          RECALL_SKIP_BUN_UNLINK: 'true',
+        },
+      },
+    );
+    expect(r.status).toBe(0);
+    expect(existsSync(join(ompSkills, 'do-recall-stats'))).toBe(false);
+    expect(() => lstatSync(leftover.skillMd)).toThrow();
+    expect(existsSync(join(leftover.dir, 'notes.md'))).toBe(true);
+    expect(existsSync(join(ompSkills, 'user-skill', 'SKILL.md'))).toBe(true);
   });
 });

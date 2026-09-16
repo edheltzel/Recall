@@ -10,7 +10,7 @@ export interface ImportConversationsOptions {
   project?: string;
 }
 
-export const NO_EXTRACT_WARNING = 'Warning: --no-extract imports raw conversation messages only. This can reduce search precision because the Haiku extraction filter will not create curated LoA, decisions, or learnings.';
+export const NO_EXTRACT_WARNING = 'Warning: --no-extract imports raw conversation messages only. This can reduce search precision because the curated Extractor will not create LoA, decisions, or learnings.';
 
 const FORMATS: ConversationFormat[] = ['auto', ...conversationSourceAdapters.map(adapter => adapter.source)];
 

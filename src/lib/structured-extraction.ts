@@ -1,4 +1,4 @@
-// Parse Fabric/Haiku extract_wisdom markdown into structured Recall records.
+// Parse Extractor markdown into structured Recall records.
 //
 // Hooks carry a self-contained mirror of this logic under hooks/lib/ so they can
 // keep working even if src/ is broken. Keep format changes in sync there.

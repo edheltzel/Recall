@@ -1,7 +1,7 @@
 import type { ExtractionProvider } from '../extraction-provider';
-import { claudeExtractionProvider } from './claude/extraction-provider';
+import { createClaudeExtractionProvider } from './claude/extraction-provider';
 
-/** Native providers enabled by this installation, kept outside the generic cascade. */
-export const nativeExtractionProviders: readonly ExtractionProvider[] = [
-  claudeExtractionProvider,
-];
+/** Native automatic Extractor factories. Cascade consumes these; do not import host adapters from extract-model. */
+export const nativeAutomaticFactories = {
+  'claude-cli': createClaudeExtractionProvider,
+} as const satisfies Record<string, (model: string) => ExtractionProvider>;

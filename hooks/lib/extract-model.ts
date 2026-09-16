@@ -6,13 +6,14 @@
 
 import { execSync } from 'child_process';
 import type { ExtractionProvider } from './extraction-provider';
-import { nativeExtractionProviders } from './hosts';
+import {
+  resolveExtractorConfig,
+  type AutomaticExtractorConfig,
+  type ResolvedExtractorConfig,
+} from './extractor-config';
+import { nativeAutomaticFactories } from './hosts';
 
-const LOCAL_OLLAMA_URL = `${process.env.OLLAMA_URL || 'http://localhost:11434'}/api/generate`;
-const LOCAL_OLLAMA_MODEL = process.env.Recall_OLLAMA_MODEL || 'qwen2.5:3b';
-
-function extractWithOllama(messages: string): string | null {
-  const systemPrompt = `You are an expert at extracting meaningful information from conversations. Extract in this exact format:
+const OLLAMA_EXTRACT_PROMPT = `You are an expert at extracting meaningful information from conversations. Extract in this exact format:
 
 ## ONE SENTENCE SUMMARY
 [Single sentence capturing the essence]
@@ -41,51 +42,84 @@ function extractWithOllama(messages: string): string | null {
 ## SESSION CONTEXT
 [One sentence about overall impact on the project or infrastructure]`;
 
-  try {
-    const truncated = messages.length > 8000 ? messages.slice(-8000) : messages;
-    const payload = JSON.stringify({
-      model: LOCAL_OLLAMA_MODEL,
-      prompt: `${systemPrompt}\n\n---\nCONVERSATION:\n${truncated}`,
-      stream: false,
-    });
-    const result = execSync(
-      `curl -s --connect-timeout 10 --max-time 180 -X POST ${LOCAL_OLLAMA_URL} -H "Content-Type: application/json" -d @-`,
-      {
-        input: payload,
-        encoding: 'utf-8',
-        timeout: 200000,
-        maxBuffer: 10 * 1024 * 1024,
-      },
-    );
-    const parsed = JSON.parse(result) as { response?: string };
-    if (parsed.response && parsed.response.trim().length > 50) {
-      console.error('[FabricExtract] Ollama extraction successful');
-      return parsed.response.trim();
-    }
-    return null;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[FabricExtract] Ollama extraction failed: ${message}`);
-    return null;
-  }
+export function createOllamaExtractionProvider(model: string): ExtractionProvider {
+  return {
+    id: 'ollama',
+    extract(messages: string): string | null {
+      const url = `${process.env.OLLAMA_URL || 'http://localhost:11434'}/api/generate`;
+      try {
+        const truncated = messages.length > 8000 ? messages.slice(-8000) : messages;
+        const payload = JSON.stringify({
+          model,
+          prompt: `${OLLAMA_EXTRACT_PROMPT}\n\n---\nCONVERSATION:\n${truncated}`,
+          stream: false,
+        });
+        const result = execSync(
+          `curl -s --connect-timeout 10 --max-time 180 -X POST ${url} -H "Content-Type: application/json" -d @-`,
+          {
+            input: payload,
+            encoding: 'utf-8',
+            timeout: 200000,
+            maxBuffer: 10 * 1024 * 1024,
+          },
+        );
+        const parsed = JSON.parse(result) as { response?: string };
+        if (parsed.response && parsed.response.trim().length > 50) {
+          console.error('[FabricExtract] Ollama extraction successful');
+          return parsed.response.trim();
+        }
+        return null;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[FabricExtract] Ollama extraction failed: ${message}`);
+        return null;
+      }
+    },
+  };
 }
 
-const ollamaExtractionProvider: ExtractionProvider = {
-  id: 'ollama',
-  extract: extractWithOllama,
+export interface AutomaticProviderFactories {
+  'claude-cli': (model: string) => ExtractionProvider;
+  ollama: (model: string) => ExtractionProvider;
+}
+
+const defaultAutomaticFactories: AutomaticProviderFactories = {
+  ...nativeAutomaticFactories,
+  ollama: createOllamaExtractionProvider,
 };
 
-export const DEFAULT_EXTRACTION_PROVIDERS: readonly ExtractionProvider[] = [
-  ...nativeExtractionProviders,
-  ollamaExtractionProvider,
-];
+export function automaticProvidersFromConfig(
+  automatic: AutomaticExtractorConfig,
+  factories: AutomaticProviderFactories = defaultAutomaticFactories,
+): ExtractionProvider[] {
+  return [automatic.primary, ...automatic.fallback].map(step => {
+    if (step.id === 'claude-cli') return factories['claude-cli'](step.model);
+    return factories.ollama(step.model);
+  });
+}
+
+function providersFromResolved(
+  resolved: ResolvedExtractorConfig,
+  factories: AutomaticProviderFactories = defaultAutomaticFactories,
+): ExtractionProvider[] | null {
+  if (!resolved.automatic.ok) {
+    console.error(`[FabricExtract] Automatic Extractor config failed: ${resolved.automatic.error}`);
+    return null;
+  }
+  return automaticProvidersFromConfig(resolved.automatic.value, factories);
+}
+
 
 /** Run providers in order and return the first usable extraction. */
 export async function runExtractionCascade(
   messages: string,
-  providers: readonly ExtractionProvider[] = DEFAULT_EXTRACTION_PROVIDERS,
+  providers?: readonly ExtractionProvider[],
+  resolve: typeof resolveExtractorConfig = resolveExtractorConfig,
+  factories: AutomaticProviderFactories = defaultAutomaticFactories,
 ): Promise<string | null> {
-  for (const provider of providers) {
+  const list = providers ?? providersFromResolved(resolve(), factories);
+  if (!list) return null;
+  for (const provider of list) {
     console.error(`[FabricExtract] Trying ${provider.id} extraction...`);
     const extracted = await provider.extract(messages);
     if (extracted) return extracted;

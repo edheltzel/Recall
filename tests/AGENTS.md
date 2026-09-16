@@ -24,6 +24,7 @@ Automated coverage for the CLI, MCP server, hooks, data layer, libraries, instal
 ## Work Guidance
 
 - Mirror the source layout: a test for `src/commands/foo.ts` goes in `tests/commands/`; a hook test in `tests/hooks/`.
+- Extractor config (#258): one behavior seam per runner — automatic cascade wiring, curated LoA/dump wiring. Resolver tests cover malformed JSON, allowlists, and `RECALL_FABRIC_MODEL` / `Recall_OLLAMA_MODEL` precedence. `OLLAMA_URL` is the shared Ollama endpoint, not an Extractor-config field. Inject fake backends; do not require live Claude CLI, Ollama, or Fabric.
 - `scripts/e2e-codex-plugin.ts` owns isolated current-CLI verification for the native Codex marketplace, all nine MCP tools, five lifecycle hooks, session-start context, immediate rows, deduplication, extraction, and cleanup.
 - `scripts/e2e-claude-plugin.ts` does the same for Claude, and additionally seeds a legacy lifecycle install to prove the migration removes the duplicate skill symlinks and MCP registration idempotently. It must isolate the Claude home too (`HOME` + `CLAUDE_DIR`), not just the database, and assert both were left unchanged.
 - `scripts/e2e-pi-integration.ts` owns the isolated current-CLI verification for Pi's separate package, MCP adapter/config, lifecycle capture, and all nine skills/tools.

@@ -12,7 +12,7 @@ import { probeSkillSurface } from '../../src/commands/doctor';
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'recall-doctor-skills-'));
+  root = mkdtempSync(join(tmpdir(), 'do-recall-doctor-skills-'));
 });
 
 afterEach(() => {
@@ -32,7 +32,7 @@ describe('probeSkillSurface', () => {
   });
 
   test('root with a skill canonical → PASS', () => {
-    const skillDir = join(root, 'shared', 'skills', 'recall-scout');
+    const skillDir = join(root, 'shared', 'skills', 'do-recall-scout');
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, 'SKILL.md'), '# scout\n');
     const r = probeSkillSurface(root);

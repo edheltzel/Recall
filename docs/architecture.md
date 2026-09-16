@@ -17,7 +17,7 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 ├── shared/
 │   ├── hooks/                          # Canonical hook files (.ts)
 │   │   └── lib/                        # Hook helpers (.ts)
-│   ├── skills/                         # Agent Skill canonicals (recall-*)
+│   ├── skills/                         # Agent Skill canonicals (do-recall-*)
 │   └── extract_prompt.md               # Extraction prompt template
 ├── claude/
 │   └── Recall_GUIDE.md                 # Guide for Claude Code
@@ -70,7 +70,7 @@ Host-neutral CLI and MCP logic lives outside `src/hosts/`.
 
 Native host adapters own config shapes, paths, transcript parsing, and native command discovery under `src/hosts/`.
 
-Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extraction cascade depends only on the `ExtractionProvider` interface.
+Lifecycle hooks use the same boundary under `hooks/lib/hosts/`; the generic extraction cascade depends only on the host-neutral Extractor execution-adapter interface.
 
 Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agents/Recall`) instead of a host configuration directory.
 
@@ -109,7 +109,7 @@ MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.
 | host_ingest_embedding_invalidations | Pending semantic-index cleanup for an activated lifecycle generation | No |
 | loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
-| loa_entries | Library of Alexandria curated knowledge with Fabric extraction; includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
+| loa_entries | Library of Alexandria entries (Automatic-capture LoA and Curated LoA); extract body in `fabric_extract` (column name, not the writer); includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
 | learnings | Problems solved and patterns discovered; includes `confidence` (high/medium/low) and `importance` (1-10) columns | Yes |
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |
@@ -224,7 +224,7 @@ graph TD
     D --> E{Size > 120K chars?}
     E -->|Yes| F[Chunk + Meta-Extract]
     E -->|No| G[Single Extraction]
-    F --> H[Run native extraction provider]
+    F --> H[Run Automatic-capture Extractor]
     G --> H
     H --> I{Quality Gate}
     I -->|Pass| J[Store to Memory Files]
@@ -243,7 +243,24 @@ graph TD
 
 The hook self-spawns in background so the session exits immediately (non-blocking).
 
-The current Claude lifecycle adapter tries Claude Haiku first and falls back to a local Ollama model (configurable via `RECALL_OLLAMA_MODEL`).
+Automatic-capture LoA uses the Extractor cascade: default `claude-cli` (Haiku) then `ollama` (`Recall_OLLAMA_MODEL`, default `qwen2.5:3b`). Curated LoA (`recall loa`, dump extract) uses the `fabric` Extractor. Optional per-path config is below. `OLLAMA_URL` is the shared Ollama endpoint for embeddings and the automatic `ollama` Extractor; it is not a config.json field.
+
+### Extractor config
+
+Optional file: `~/.agents/Recall/config.json`. Install never writes it. Missing file = the split defaults above. Unparseable JSON fails both paths. An illegal Extractor ID fails that path closed.
+
+Automatic-capture LoA may use `claude-cli` or `ollama`. Curated LoA may use `fabric` only. File selects IDs and fallback lists. `RECALL_FABRIC_MODEL` overrides curated `model`; `Recall_OLLAMA_MODEL` overrides the automatic Ollama `model`.
+
+```json
+{
+  "extractor": {
+    "automatic": { "id": "claude-cli", "model": "haiku", "fallback": [{ "id": "ollama", "model": "qwen2.5:3b" }] },
+    "curated":   { "id": "fabric", "model": "claude-haiku-4-5" }
+  }
+}
+```
+
+Terms: [CONTEXT.md](../CONTEXT.md). Extractor is the model backend that produces LoA, not a Host and not the ingest/filter/persist path.
 
 ## Technical Details
 
@@ -298,7 +315,8 @@ Sourced by all three scripts. Key functions:
 | `recall_register_all_hooks` | Registers every installer-owned Claude hook whose source file exists. Safe to re-run — missing registrations are added and present registrations are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
 | `recall_verify_global_link` | Invariant checker: confirms `~/.bun/bin/recall` and `recall-mcp` exist, are symlinks, and resolve to readable targets. Emits an `ls -la` diagnostic block on failure |
-| `recall_copy_runtime_files` | Refreshes canonical hooks, hook helpers, Agent Skills, the Claude guide, and `extract_prompt.md`; re-links managed host files with collision backups; removes legacy `/Recall:*` slash-command symlinks |
+| `recall_copy_runtime_files` | Refreshes canonical hooks, hook helpers, the Claude guide, and `extract_prompt.md`; re-links managed host files with collision backups; removes legacy `/Recall:*` slash-command symlinks; delegates Agent Skills to `recall_install_claude_skills` |
+| `recall_install_claude_skills` | Claude skill install — install.sh's Skills step and `recall_copy_runtime_files` (update.sh) both route here. Copies canonicals via `_recall_copy_skill_files` (which also drops retired `recall-*` canonicals and host links), then links per file or hands Claude's surface to the native plugin when it is active. `recall_install_omp_platform` is a separate omp linker that shares the same copy+cleanup helper |
 | `recall_install_pi_platform` | Coordinates Pi's separate native package, `pi-mcp-adapter`, owned `mcp.json` entry, guide, and legacy-shadow cleanup; safe to re-run |
 | `recall_append_memory_section` | Shared Claude/Pi append path: completes an unterminated final line, inserts one blank separator, then writes the generated pointer |
 | `recall_memory_section_mutate` / `recall_configure_claude_md` | Shared Claude/Pi ownership classifier plus Claude bootstrap entry point. Marked sections and normalized exact legacy-generated bodies are refreshed on install/update and removable on uninstall; unmarked customized/external sections survive. Remove the marker before taking external ownership. A Recall-specific `~/.claude/rules/memory.md` takes precedence during install/update and leaves `CLAUDE.md` unchanged |
@@ -320,7 +338,7 @@ All use `: "${VAR:=default}"` so an override set *before* `source`
 sticks. The test harness uses this to drive the lib against a tmpdir
 `CLAUDE_DIR` without touching the real home.
 
-### Agent skill: `recall-update`
+### Agent skill: `do-recall-update`
 
 Check-only. Reads the current version, polls GitHub Releases, and
 prints the exact `cd <path> && ./update.sh` recipe. **Never runs

@@ -547,7 +547,7 @@ export function probeSkillSurface(root: string): CheckResult {
     return {
       label,
       status: 'WARN',
-      message: 'No agent skill canonicals under shared/skills — the recall-* command surface is blank; re-run ./install.sh to converge',
+      message: 'No agent skill canonicals under shared/skills — the do-recall-* command surface is blank; re-run ./install.sh to converge',
     };
   }
   return { label, status: 'PASS', message: `${count} agent skill file(s) present` };
@@ -597,7 +597,7 @@ export function probeClaudePlugin(home: string, root: string): CheckResult {
   return {
     label,
     status: 'PASS',
-    message: `Active${state.version ? ` (v${state.version})` : ''} and sole owner of the recall-* skills and recall-memory MCP`,
+    message: `Active${state.version ? ` (v${state.version})` : ''} and sole owner of the do-recall-* skills and recall-memory MCP`,
   };
 }
 
