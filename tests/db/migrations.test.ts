@@ -1165,4 +1165,3 @@ describe('pinned automatic LoA sources migration (19 to 20)', () => {
     expect(messageColumns).toContain('fts_pending');
   });
 });
-

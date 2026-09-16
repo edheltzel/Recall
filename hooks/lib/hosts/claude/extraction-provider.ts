@@ -181,4 +181,3 @@ export function createClaudeExtractionProvider(model: string = DEFAULT_CLAUDE_CL
     },
   };
 }
-
