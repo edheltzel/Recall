@@ -106,8 +106,9 @@ fi
 : "${OPENCODE_CONFIG_DIR:=${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
 : "${PI_CONFIG_DIR:=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
 : "${GROK_CONFIG_DIR:=${GROK_HOME:-$HOME/.grok}}"
-# omp is skills-only (no MCP/hooks integration exists for it yet) — its
-# config dir is used solely as the target for `~/.omp/agent/skills`.
+# The lifecycle installer owns only omp skills; native capture is managed
+# separately through the package's omp extension. This config dir is solely
+# the target for `~/.omp/agent/skills`.
 : "${OMP_CONFIG_DIR:=$HOME/.omp/agent}"
 
 # Platform detection flags (populated by recall_detect_platforms,
@@ -1532,9 +1533,9 @@ recall_install_claude_skills() {
   _recall_link_skills_to "$CLAUDE_DIR/skills"
 }
 
-# omp integration is skills-only today — no MCP registration, hooks, or guide
-# exist for omp in this repo. Gated behind OMP_DETECTED like the other
-# platforms so we never create ~/.omp on a machine that doesn't use it.
+# The lifecycle installer owns only omp skills; native capture is package-managed
+# separately (see docs/OMP_INTEGRATION.md). Gate skill linking behind OMP_DETECTED
+# so we never create ~/.omp on a machine that doesn't use it.
 recall_install_omp_platform() {
   _recall_copy_skill_files
   _recall_link_skills_to "$OMP_CONFIG_DIR/skills"
