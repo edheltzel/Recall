@@ -14,7 +14,7 @@ note in the 0.9.0 entry.
 
 ### Added
 
-- **Native omp capture** through the root package's `omp.extensions` manifest. Main-session `session_stop` snapshots use the shared scrubbed, deduplicated lifecycle ingest path, including active-branch reconciliation and existing-database migration. Skills/MCP stay separate. Verified with omp 18.1.21; setup and limits in [omp Integration](docs/OMP_INTEGRATION.md).
+- **Native omp capture** through the root package's `omp.extensions` manifest. Main-session `session_stop` snapshots use the shared scrubbed, deduplicated lifecycle ingest path, including active-branch reconciliation and existing-database migration. Skills/MCP stay separate. Verified with omp 18.2.0; setup and limits in [omp Integration](docs/OMP_INTEGRATION.md).
   The native E2E check uses the packed CLI throughout, compares exact resumed message contents and stable identities, and requires a completed post-uninstall turn before accepting unchanged capture history.
 
 - **`recall start`** — public L0/L1 session-start renderer. Claude `RecallStart.ts`

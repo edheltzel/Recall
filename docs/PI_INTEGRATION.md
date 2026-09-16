@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-**Preferred install:** Pi's native package (`pi install`). It owns the two Recall extensions and the nine `recall-*` Agent Skills.
+**Preferred install:** Pi's native package (`pi install`). It owns the two Recall extensions and the nine `do-recall-*` Agent Skills.
 
 Pi packages cannot declare MCP servers. After the native package is installed, register `pi-mcp-adapter` and the owned `recall-memory` entry in `mcp.json`. `recall install --yes` runs those native steps in order — it is a coordinator, not a replacement for the Pi package.
 
