@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-Recall gives AI coding agents persistent memory across sessions. It's a CLI (`recall`), MCP server (`recall-mcp`), and extraction hook system that stores conversations, decisions, learnings, and breadcrumbs in SQLite with FTS5 search. It targets Claude Code first, with OpenCode, Pi, Codex, and Grok as additional lifecycle-supported hosts.
+Recall gives AI coding agents persistent memory across sessions. It's a CLI (`recall`), MCP server (`recall-mcp`), and extraction hook system that stores conversations, decisions, learnings, and breadcrumbs in SQLite with FTS5 search. It targets Claude Code first, with OpenCode, Pi, omp, Codex, and Grok as additional lifecycle-supported hosts.
 
 **If you're an AI agent that needs to _use_ Recall** (MCP tools, CLI commands, core rules), read [`FOR_CLAUDE.md`](FOR_CLAUDE.md) — it's the guide written specifically for you. This file (`AGENTS.md`) is for _developing_ the Recall codebase.
 
@@ -31,6 +31,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `lib/` — shared bash for the install / update / uninstall lifecycle scripts, plus the dependency-free `jsonc-mcp.ts` runtime helper they shell out to for JSONC config edits
 - `opencode/` — OpenCode host integration (plugins / hooks / guide)
 - `pi/` — Pi package extensions for native lifecycle capture and memory injection
+- `omp/` — native omp package extension for main-session turn-completion capture; setup and limits in [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md)
 - `scripts/` — dev / CI helper scripts (version check, e2e)
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`) plus tiny host-wire snippets under `templates/cursor/`
 - `assets/` — README banner + VHS demo tapes / gifs
@@ -75,6 +76,11 @@ Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKI
 
 ## Agent skills
 
+### Version control and GitHub
+
+- Use GitButler (`but`) for all version-control operations; load the `but` skill before using it. Do not run raw `git` commands or bypass GitButler's workspace state.
+- Use `gh` for GitHub issues, pull requests, reviews, and Actions. Use `but` for the underlying branches, commits, and pushes.
+
 ### Issue tracker
 
 Issues and PRDs are tracked in GitHub Issues for `edheltzel/Recall`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
@@ -93,7 +99,7 @@ This is a single-context repo: use root `CONTEXT.md` when present and root `docs
 
 ### Worker flow
 
-Workers run in an isolated worktree (`/ce-worktree`): verify `pwd` is the worktree root and use worktree-relative paths before the first edit, so changes never leak into the main checkout. See `docs/agents/worker-flow.md`.
+Workers use coordinator-assigned GitButler branches and exclusive file ownership; load the `but` skill before branch or workspace operations. See [`docs/agents/worker-flow.md`](docs/agents/worker-flow.md) for shared-workspace and isolation rules.
 
 ## DRY — Single Source of Truth (MANDATORY)
 
@@ -119,6 +125,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Uninstall preservation**: `--purge` snapshots canonical `identity.md` / `DISTILLED.md` with the databases and materializes them into Claude's MEMORY directory when that does not overwrite a foreign file. Installed root hooks and recursive `hooks/lib/` helpers must also appear in the matching `uninstall.sh` inventories; the uninstall test audits both.
 - **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
 - **Hook registration**: Claude events live in `~/.claude/settings.json`; Codex events live in `plugins/recall/hooks/hooks.json`; Grok capture uses the managed `~/.grok/hooks/RecallLifecycle.json` file.
+- **omp capture ownership**: the root `package.json#omp.extensions` loads `omp/recall.ts` through omp's native plugin manager. Only the awaited main-session `session_stop` event captures; native task/subagent sessions are excluded by omp. The installer still owns skills only. Keep native payload parsing under `src/hosts/` and persistence in the shared lifecycle ingest path; no duplicate database writer or Pi fallback.
 - **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.
 - **Input-scaled SQL bind lists**: any `IN (...)` or multi-row `VALUES` whose placeholder count grows with input MUST chunk through `src/lib/chunk.ts`'s `chunked()` (conservative 500, under SQLite's bind-variable limit) — never bind the whole list at once. Because hooks can't import `src/` (see above), a hook with an input-scaled list inlines a local equivalent. Partly enforced by `tests/lib/chunk-audit.test.ts`, which fails when a new input-scaled placeholder list appears in a file that doesn't already route some query through `chunked()` (and isn't allowlisted fixed-size). The guard is **file-granular**, not per-statement: a file that already calls `chunked()` anywhere is exempt wholesale, so a new un-chunked sibling `IN (...)` added to such a file (e.g. `memory.ts`, `dump.ts`, `aging.ts`, `dedup.ts` — the bulk-SQL files most likely to grow one) is NOT caught. Chunk those by hand and rely on review, not the guard, there.
 - **Shell-to-JS safety**: `install.sh` passes variables to `bun -e` via environment variables, never shell interpolation in JS strings.
@@ -167,6 +174,7 @@ When the user requests a durable behavior change, record it here or in the relev
 - **Install is opinionated: `~/.agents/Recall` is the only install root** (Ed, 2026-08-19). Users do not choose a custom or relocated install directory. Do not re-propose relocated-root discovery, default-root locator/symlink machinery, foreign-root activation, or user-facing `RECALL_DIR` relocation; PR #254 was closed after exactly that cascade grew on it (see its closing comment). `RECALL_DB_PATH` (database file location) is a separate, pre-existing override and is unaffected.
 - **Graph capabilities: build on CodeGraph, never from scratch** (Ed, 2026-07-13). Any future graph/edge/related-memories feature must be scoped as a Recall↔CodeGraph integration, not a new edge table + traversal engine in `recall.db`. This generalizes the #196→#214 knowledge-graph revert; do not re-propose an in-Recall graph layer. (Recall decision #2892.)
 - **Extractor config** (Ed, 2026-08-27, #258): optional `~/.agents/Recall/config.json`; install never writes it. Canonical resolver in `hooks/lib/`; `src/` re-exports. Automatic-capture LoA allowlist `claude-cli` \| `ollama`; Curated LoA allowlist `fabric`. File selects IDs and fallback lists. `RECALL_FABRIC_MODEL` and `Recall_OLLAMA_MODEL` override matching file model fields. `OLLAMA_URL` is the existing shared Ollama endpoint (embeddings and automatic `ollama` Extractor), not a config.json field. Missing file = split defaults. Unparseable JSON fails both paths. An illegal ID fails that path closed. Schema: [`docs/architecture.md`](docs/architecture.md). Terms: [`CONTEXT.md`](CONTEXT.md).
+- **Ponytail simplification** (Ed, 2026-09-16): apply concrete, verified code simplifications. Do not commit Ponytail benchmark reports or scoreboard artifacts, or treat published benchmark percentages as targets for this repo. Existing Recall benchmarks are separate and stay untouched unless requested.
 
 ## Child DOX Index
 

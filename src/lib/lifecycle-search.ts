@@ -77,7 +77,7 @@ export function countActiveLifecycleGenerations(
         WHERE message.generation_id = generation.generation_id
           AND message.project = ?
           AND message.content IS NOT NULL
-          AND (message.source <> 'grok' OR message.source_position IS NOT NULL)
+          AND (message.source NOT IN ('grok', 'omp') OR message.source_position IS NOT NULL)
       )` : ''}
   `).get(...(project ? [project] : [])) as { count: number };
   return row.count;
@@ -213,7 +213,7 @@ export function repairLifecycleSearchGenerationPage(
         if (row.message_id !== null) {
           remove.run(row.message_id);
           if (row.content !== null &&
-            (row.source !== 'grok' || row.source_position !== null)) {
+            ((row.source !== 'grok' && row.source !== 'omp') || row.source_position !== null)) {
             insert.run(row.message_id, row.content, row.project, generationId);
           }
         }
@@ -273,7 +273,7 @@ export function repairLifecycleSearchIndex(
           WHERE message.generation_id = generation.generation_id
             AND message.project = ?
             AND message.content IS NOT NULL
-            AND (message.source <> 'grok' OR message.source_position IS NOT NULL)
+            AND (message.source NOT IN ('grok', 'omp') OR message.source_position IS NOT NULL)
         )` : ''}
       ORDER BY generation.created_at, generation.generation_id
       LIMIT 1
