@@ -86,13 +86,15 @@ Pi's preferred attach is the native package: Pi discovers the root package's `pi
 
 Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
+omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. It sends active-branch snapshots from the awaited main-session `session_stop` event to the package-local CLI. The shared ingest path uses native IDs and source positions to reconcile branch visibility. See [omp Integration](OMP_INTEGRATION.md) for limits and separate skill/MCP ownership.
+
 ## Extension surface
 
 A new harness plugs in through existing seams, not a new Cursor marketplace plugin and not a `HostDescriptor`. The public library is `recall-memory/api` ([Harness API](api.md)):
 
 - **start** — `recall start` / `runStart` / `registerStartFormat` (in-process). Same L0/L1 assembler as Claude `RecallStart.ts`.
 - **drop** — `MEMORY/<host>-sessions/` markdown. No registry; the directory name is the extension point.
-- **capture** — Cursor `catalogCursorSessions` (catalog only). Dump `discoverCurrentSession` + `registerSessionSource`. Codex/Grok/jcode stay on hidden `recall host-hook`. Cursor never joins that pipe.
+- **capture** — Cursor `catalogCursorSessions` (catalog only). Dump `discoverCurrentSession` + `registerSessionSource`. Native lifecycle capture, including omp, uses hidden `recall host-hook`. Cursor never joins that pipe.
 - **inject** — Cursor `templates/cursor/` + `mergeCursorHooksJson`. Command is unqualified `recall start --format cursor`. Durable Cursor.app GUI PATH accuracy is pending FM-321/327.
 
 MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.

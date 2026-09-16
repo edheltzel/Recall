@@ -14,7 +14,12 @@ import { invalidateRecordEmbedding } from './memory.js';
 import { repairLifecycleSearchGenerationPage } from './lifecycle-search.js';
 import { scrub } from './write-safety.js';
 
-export type LifecycleHost = 'codex' | 'grok' | 'jcode';
+export type LifecycleHost = 'codex' | 'grok' | 'jcode' | 'omp';
+
+function usesSourcePosition(source: string): boolean {
+  return source === 'grok' || source === 'omp';
+}
+
 export type HostMessageRole = 'user' | 'assistant' | 'system';
 
 export interface HostTranscriptMessage {
@@ -619,9 +624,9 @@ function prepareBatchGeneration(
         if (current) {
           const nextContent = row.content === null ? null : current.content;
           const oldVisible = row.message_id !== null && row.content !== null &&
-            (first.source !== 'grok' || row.source_position !== null);
+            (!usesSourcePosition(first.source) || row.source_position !== null);
           const nextVisible = row.message_id !== null && nextContent !== null &&
-            (first.source !== 'grok' || current.source_position !== null);
+            (!usesSourcePosition(first.source) || current.source_position !== null);
           const searchChanged = Boolean(row.fts_pending) ||
             (nextVisible && !Boolean(row.generation_backed)) ||
             oldVisible !== nextVisible ||
@@ -645,14 +650,14 @@ function prepareBatchGeneration(
           }
           continue;
         }
-        const sourcePosition = first.source === 'grok' && !Boolean(last.incremental) &&
+        const sourcePosition = usesSourcePosition(first.source) && !Boolean(last.incremental) &&
           (last.reconcile_complete === null || Boolean(last.reconcile_complete))
           ? null
           : row.source_position;
         const nextVisible = row.message_id !== null && row.content !== null &&
-          (first.source !== 'grok' || sourcePosition !== null);
+          (!usesSourcePosition(first.source) || sourcePosition !== null);
         const oldVisible = row.message_id !== null && row.content !== null &&
-          (first.source !== 'grok' || row.source_position !== null);
+          (!usesSourcePosition(first.source) || row.source_position !== null);
         const searchChanged = Boolean(row.fts_pending) ||
           (nextVisible && !Boolean(row.generation_backed)) ||
           nextVisible !== oldVisible;
@@ -681,9 +686,9 @@ function prepareBatchGeneration(
       SELECT ordinal AS previous_ordinal,
         ROW_NUMBER() OVER (
           ORDER BY
-            CASE WHEN source = 'grok' THEN source_position IS NULL END,
-            CASE WHEN source = 'grok' THEN source_position END,
-            CASE WHEN source <> 'grok' THEN timestamp END,
+            CASE WHEN source IN ('grok', 'omp') THEN source_position IS NULL END,
+            CASE WHEN source IN ('grok', 'omp') THEN source_position END,
+            CASE WHEN source NOT IN ('grok', 'omp') THEN timestamp END,
             message_id,
             message_key
         ) AS next_ordinal
@@ -790,7 +795,7 @@ function prepareBatchTerminal(
   deadline?: number
 ): PreparedBatchTerminal | undefined {
   const { input, previous } = generation;
-  const reconciliationComplete = input.source === 'grok' && !input.incremental &&
+  const reconciliationComplete = usesSourcePosition(input.source) && !input.incremental &&
     (input.reconcileComplete ?? true);
   const resumed = (
     generation.newMessageCount > 0 || generation.reconciled > 0 || reconciliationComplete
@@ -798,7 +803,7 @@ function prepareBatchTerminal(
   if (!input.finalize || (previous?.finalized_at && !resumed)) return undefined;
 
   const activeWhere = `content IS NOT NULL AND message_id IS NOT NULL
-    AND (source <> 'grok' OR source_position IS NOT NULL)`;
+    AND (source NOT IN ('grok', 'omp') OR source_position IS NOT NULL)`;
   const stats = stage.db.prepare(`
     SELECT COUNT(*) AS total,
       COALESCE(SUM(CASE WHEN content IS NOT NULL THEN 1 ELSE 0 END), 0) AS active,
@@ -806,7 +811,7 @@ function prepareBatchTerminal(
       MIN(CASE WHEN content IS NOT NULL THEN message_id END) AS range_start,
       MAX(CASE WHEN content IS NOT NULL THEN message_id END) AS range_end
     FROM generation_messages
-    WHERE source <> 'grok' OR source_position IS NOT NULL
+    WHERE source NOT IN ('grok', 'omp') OR source_position IS NOT NULL
   `).get() as {
     total: number;
     active: number;
@@ -1247,7 +1252,7 @@ function activatePreparedGeneration(
 
   const { input, prepared, previous } = generation;
   upsertGeneratedSession(db, generation);
-  const reconciliationComplete = input.source === 'grok' && !input.incremental &&
+  const reconciliationComplete = usesSourcePosition(input.source) && !input.incremental &&
     (input.reconcileComplete ?? true);
   const resumed = (
     generation.newMessageCount > 0 || generation.reconciled > 0 || reconciliationComplete

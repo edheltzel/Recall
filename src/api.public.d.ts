@@ -28,6 +28,7 @@ export const SESSION_SOURCES: readonly [
   'codex',
   'grok',
   'jcode',
+  'omp',
   'cursor',
   'mcp',
 ];

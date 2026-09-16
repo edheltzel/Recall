@@ -107,7 +107,7 @@ WHEN old.message_id IS NOT NULL BEGIN
      AND state.session_id = generated.session_id
     WHERE generated.message_id = old.message_id
       AND generated.content IS NOT NULL
-      AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL)
+      AND (generated.source NOT IN ('grok', 'omp') OR generated.source_position IS NOT NULL)
   );
 END;
 CREATE TRIGGER IF NOT EXISTS host_ingest_generation_messages_fts_au
@@ -129,7 +129,7 @@ ON host_ingest_generation_messages BEGIN
   SELECT new.message_id, new.content, new.project, new.generation_id
   WHERE new.content IS NOT NULL
     AND new.message_id IS NOT NULL
-    AND (new.source <> 'grok' OR new.source_position IS NOT NULL)
+    AND (new.source NOT IN ('grok', 'omp') OR new.source_position IS NOT NULL)
     AND EXISTS (
       SELECT 1 FROM host_ingest_generations AS generation
       WHERE generation.generation_id = new.generation_id
@@ -157,7 +157,7 @@ JOIN host_ingest_state AS state
  AND state.session_id = generated.session_id
 WHERE generated.content IS NOT NULL
   AND generated.message_id IS NOT NULL
-  AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL);
+  AND (generated.source NOT IN ('grok', 'omp') OR generated.source_position IS NOT NULL);
 UPDATE host_ingest_generation_messages SET fts_pending = 0
 WHERE EXISTS (
   SELECT 1 FROM host_ingest_generations AS generation
@@ -567,7 +567,7 @@ JOIN host_ingest_state AS state
  AND state.session_id = generated.session_id
 WHERE generated.message_id IS NOT NULL
   AND generated.content IS NOT NULL
-  AND (generated.source <> 'grok' OR generated.source_position IS NOT NULL);
+  AND (generated.source NOT IN ('grok', 'omp') OR generated.source_position IS NOT NULL);
 `;
 
 // Per-source-table FTS5 DDL. Single source of truth: the CREATE_FTS /
