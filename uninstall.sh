@@ -15,7 +15,7 @@
 #   ./uninstall.sh --skip-opencode  # leave OpenCode integration alone
 #   ./uninstall.sh --skip-pi        # leave Pi integration alone
 #   ./uninstall.sh --skip-grok      # leave Grok lifecycle capture alone
-#   ./uninstall.sh --skip-omp       # leave omp integration alone
+#   ./uninstall.sh --skip-omp       # leave installer-owned omp skills alone
 #   ./uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
 #   ./uninstall.sh --help           # show this help
 #
@@ -601,8 +601,8 @@ remove_pi() {
 
 # ── omp removal ──────────────────────────────────────────────────────────────
 #
-# omp integration is skills-only (no MCP registration, hooks, or guide exist
-# for omp in this repo) — see recall_install_omp_platform in install-lib.sh.
+# The lifecycle uninstaller removes only omp skills. Native capture is managed
+# separately with `omp plugin uninstall recall-memory`.
 remove_omp() {
   remove_skills_from "$OMP_CONFIG_DIR/skills"
 }

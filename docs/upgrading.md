@@ -14,6 +14,10 @@ The `/Recall:*` Claude Code slash commands were retired in favor of [Agent Skill
 
 If a personal rules file or project doc still references a `/Recall:*` command, update it to the current `/do-recall-*` skill form by hand.
 
+## Adding native omp capture
+
+Existing omp skill links do not enable automatic capture. Build and link the native package using [omp Integration](OMP_INTEGRATION.md), then restart omp. Existing MCP configuration and skill links stay unchanged.
+
 ## Check for a new release
 
 From inside Claude Code:

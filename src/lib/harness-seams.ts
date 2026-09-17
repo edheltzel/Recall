@@ -88,7 +88,7 @@ export function describeHarnessSeams() {
     capture: {
       cursor: 'catalogCursorSessions',
       dump: 'discoverCurrentSession',
-      hostHook: 'hidden recall host-hook (Codex/Grok/jcode only; Cursor never joins)',
+      hostHook: 'hidden recall host-hook (Codex/Grok/omp capture; jcode reserved; Cursor never joins)',
     },
     inject: {
       cursorCommand: 'recall start --format cursor',

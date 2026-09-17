@@ -83,7 +83,7 @@ If `grok` is installed, Recall adds the managed user-level lifecycle hook docume
 
 Verify with `grok --version`. Deselect Grok in the interactive installer when it should remain untouched. Grok has no working plugin/extension install path; this installer is the only supported attach. See [Grok Integration](GROK_INTEGRATION.md).
 
-**Claude Code, Codex, Pi, and omp** prefer their native plugin/extension (or native skill home for omp). **Cursor** stays snippets under `templates/cursor/` — no marketplace plugin. See the [README Quick Start](../README.md#quick-start), [Codex Integration](CODEX_INTEGRATION.md), [Pi Integration](PI_INTEGRATION.md), [omp Integration](OMP_INTEGRATION.md), and [JCode Integration](JCODE_INTEGRATION.md).
+**Claude Code, Codex, Pi, and omp** prefer their native plugin/extension. omp capture is a separate native package attach; the installer only owns its skill links. **Cursor** stays snippets under `templates/cursor/` with no marketplace plugin. See the [README Quick Start](../README.md#quick-start), [Codex Integration](CODEX_INTEGRATION.md), [Pi Integration](PI_INTEGRATION.md), [omp Integration](OMP_INTEGRATION.md), and [JCode Integration](JCODE_INTEGRATION.md).
 
 ---
 
@@ -304,6 +304,8 @@ cd /path/to/Recall
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
+
+Separately installed omp capture is removed with `omp plugin uninstall recall-memory`, followed by an omp restart. The lifecycle uninstaller does not manage that native plugin registration.
 
 ### What is preserved (default)
 

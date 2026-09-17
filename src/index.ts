@@ -493,8 +493,8 @@ program
     closeDb();
   });
 
-// Internal lifecycle adapter entry point. Host plugins own invocation.
-// Stays ingest-only for Codex/Grok/jcode (Codex SessionStart injects via
+// Internal lifecycle adapter entry point. Native host integrations own invocation.
+// Stays ingest-only for Codex/Grok/jcode/omp (Codex SessionStart injects via
 // the shared assembler, not a forked RecallStart). Cursor never joins.
 program
   .command('host-hook <host>', { hidden: true })

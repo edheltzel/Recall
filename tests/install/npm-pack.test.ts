@@ -62,6 +62,7 @@ describe('npm package: files whitelist', () => {
     expect(hasUnder('agent-skills/')).toBe(true);
     expect(hasUnder('opencode/')).toBe(true);
     expect(hasUnder('pi/')).toBe(true);
+    expect(has('omp/recall.ts')).toBe(true);
     expect(has('FOR_CLAUDE.md')).toBe(true);
     expect(has('FOR_OPENCODE.md')).toBe(true);
     expect(has('FOR_PI.md')).toBe(true);
