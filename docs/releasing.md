@@ -41,36 +41,87 @@ strict semver and that the runtime fallback is non-authoritative. On tag or
 release runs, the tag name (with an optional leading `v`) must match
 `package.json.version` exactly.
 
-## Release recipe
+## Release commands
+
+Run from the repository root on clean `main`, with all intended changes reviewed,
+merged, and synchronized with `origin/main`. Bun, Git, npm, and authenticated `gh`
+must be available. Install dependencies first with `bun install --frozen-lockfile`.
 
 ```bash
-# 1. Edit CHANGELOG.md: move [Unreleased] items under a new [X.Y.Z] heading
-#    with today's date.
-${EDITOR:-vim} CHANGELOG.md
-
-# 2. Bump package.json to match.
-node -e '
-  const fs = require("fs");
-  const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-  pkg.version = process.argv[1];
-  fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-' "X.Y.Z"
-
-# 3. Commit + tag. Release tags are annotated (v0.9.0 onward), and a plain
-#    `git tag` fails under `tag.forceSignAnnotated=true` — always pass -a -m.
-git commit -am "chore(release): vX.Y.Z"
-git tag -a "vX.Y.Z" -m "vX.Y.Z — <codename>"
-git push origin main --follow-tags
-
-# 4. Create the GitHub release with notes extracted from CHANGELOG.
-gh release create "vX.Y.Z" \
-  --notes-file <(awk '/^## \[X\.Y\.Z\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md)
+npm run release:patch
+npm run release:minor
+npm run release:major
 ```
 
-The `awk` expression lifts everything between the `## [X.Y.Z]` heading
-and the next `## [` heading (the previous release). Because the script
-literally reads `CHANGELOG.md`, the release notes and the CHANGELOG can
-never diverge.
+These commands share `scripts/release.ts`. `npm run release -- patch` is equivalent
+to `npm run release:patch`.
+
+| Command | Starting at `0.10.0` | Tag |
+| --- | --- | --- |
+| `release:patch` | `0.10.1` | `v0.10.1` |
+| `release:minor` | `0.11.0` | `v0.11.0` |
+| `release:major` | `1.0.0` | `v1.0.0` |
+
+Preview the same preflight without changing files, commits, tags, or releases:
+
+```bash
+npm run release:patch -- --dry-run
+```
+
+Dry runs still require clean, synchronized `main` and GitHub access. Feature branches,
+detached checkouts, and `gitbutler/workspace` are not release targets.
+
+The command:
+
+1. Checks the clean checkout, canonical `CLAUDE.md` symlink, and exact remote `main` commit.
+2. Resolves the GitHub repository from `origin`'s push URL and checks existing local
+   tags, remote tags, and GitHub releases. Existing release versions are never overwritten.
+3. Increments `package.json.version` and writes that version into both native plugin
+   manifests: `plugins/recall/.codex-plugin/plugin.json` and
+   `plugins/recall-claude/.claude-plugin/plugin.json`.
+4. Moves nonempty `[Unreleased]` notes into a dated version heading, keeping an empty
+   `[Unreleased]` heading for future work.
+5. Checks the version guard, then runs lint, the test suite, and the build.
+6. Commits only the release files as `chore(release): vX.Y.Z`, verifies their committed
+   versions, and creates annotated tag `vX.Y.Z`.
+7. Pushes `main` and that tag atomically to `origin`. A rejected branch update cannot
+   leave a tag published alone.
+8. Creates the GitHub release with `--verify-tag`, the changelog notes as its body,
+   and `--latest`.
+
+This is the maintainer-approved direct-release exception to the normal PR workflow.
+Direct pushes to `main` must be permitted by repository rules. The command does not
+disable branch protection, force-push, merge feature work, or run `npm publish`.
+The existing Bun lockfile has no root version field to update.
+
+The bump starts from the package version, not the latest published tag. If the package
+is already ahead of published releases, the next release advances that package version.
+The command does not backfill old tags or change historical releases. If the next version
+is already published or is older than an existing stable release, reconcile the package
+version deliberately before retrying.
+
+## Recover a partial release
+
+A validation or publication failure exits nonzero. The script preserves files and
+history for inspection instead of resetting work or deleting tags automatically.
+
+- Before the commit: inspect the changed manifests and changelog. Fix the reported
+  validation failure. Restore only those release edits if you want to rerun a bump;
+  the clean-tree guard prevents accidentally bumping a dirty checkout again.
+- After the commit or tag, before a successful push: do not run another version bump.
+  Verify the release commit and annotated tag agree, fix the push failure, and retry
+  that same atomic push.
+- After the push, if GitHub release creation fails: leave the published commit and tag
+  intact. Save the matching version's changelog body into a temporary notes file and
+  create the missing release:
+
+```bash
+gh release create vX.Y.Z --repo edheltzel/Recall --verify-tag \
+  --title vX.Y.Z --notes-file /path/to/release-notes.txt --latest
+```
+
+Check whether GitHub already created the release before retrying after a network error.
+Never move an existing release tag to a different commit.
 
 ## `update.sh` and the check commands
 
@@ -95,10 +146,9 @@ For a surgical hotfix that fixes a single bug:
 
 1. Branch from `main`.
 2. Make the change + test.
-3. Bump the patch digit (0.7.11 → 0.7.12).
-4. Add a `## [0.7.12] — YYYY-MM-DD` entry to CHANGELOG with only a
-   `### Fixed` section.
-5. Follow the recipe above.
+3. Add the fix under `CHANGELOG.md`'s `[Unreleased]` section.
+4. Merge the reviewed fix into `main` and synchronize the local checkout.
+5. Run `npm run release:patch`.
 
 Keep hotfix scope surgical. If scope is growing, promote to a normal
 release so the entry captures `### Added` / `### Changed` too.

@@ -16,7 +16,7 @@ note in the 0.9.0 entry.
 
 - **Native omp capture** through the root package's `omp.extensions` manifest. Main-session `session_stop` snapshots use the shared scrubbed, deduplicated lifecycle ingest path, including active-branch reconciliation and existing-database migration. Skills/MCP stay separate. Verified with omp 18.2.0; setup and limits in [omp Integration](docs/OMP_INTEGRATION.md).
   The native E2E check uses the packed CLI throughout, compares exact resumed message contents and stable identities, and requires a completed post-uninstall turn before accepting unchanged capture history.
-
+- **Release commands**: `npm run release:major`, `release:minor`, and `release:patch` synchronize root/plugin versions and changelog, validate the release, atomically publish its commit and annotated tag, and create the matching GitHub release. `--dry-run` performs preflight without publishing.
 - **`recall start`** — public L0/L1 session-start renderer. Claude `RecallStart.ts`
   is a thin wrapper; Codex SessionStart `renderContext` calls the same assembler
   (`hooks/lib/session-start-context.ts`). Published caps remain 1200 / 6000 / 8000
