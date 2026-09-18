@@ -14,6 +14,7 @@ note in the 0.9.0 entry.
 
 ### Added
 
+- **Release commands**: `npm run release:major`, `release:minor`, and `release:patch` synchronize root/plugin versions and changelog, validate the release, atomically publish its commit and annotated tag, and create the matching GitHub release. `--dry-run` performs preflight without publishing.
 - **`recall start`** — public L0/L1 session-start renderer. Claude `RecallStart.ts`
   is a thin wrapper; Codex SessionStart `renderContext` calls the same assembler
   (`hooks/lib/session-start-context.ts`). Published caps remain 1200 / 6000 / 8000
