@@ -38,6 +38,7 @@ beforeEach(() => {
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
     GIT_AUTHOR_NAME: 'Release Test', GIT_AUTHOR_EMAIL: 'release@example.invalid',
     GIT_COMMITTER_NAME: 'Release Test', GIT_COMMITTER_EMAIL: 'release@example.invalid',
+    RELEASE_REAL_GIT: Bun.which('git')!,
     RELEASE_REMOTE: remote, RELEASE_RECORD: join(stage, 'github-release.json'),
   };
   writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bun
@@ -113,6 +114,22 @@ describe('release commands', () => {
     expect(git('status', '--porcelain')).toBe('');
     expect(git('tag', '--list')).toBe('');
     expect(existsSync(env.RELEASE_RECORD)).toBe(false);
+  });
+
+  test('redacts HTTPS remote credentials from command failures', () => {
+    const credential = 'release-user:synthetic-token';
+    git('remote', 'set-url', '--push', 'origin', `https://${credential}@github.com/test/recall.git`);
+    writeFileSync(join(stage, 'bin', 'git'), `#!/bin/sh
+if [ "$1" = "ls-remote" ]; then
+  printf 'fatal: unable to access %s\n' "$2" >&2
+  exit 1
+fi
+exec "$RELEASE_REAL_GIT" "$@"
+`, { mode: 0o755 });
+    const result = release();
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain('https://[REDACTED]@github.com/test/recall.git');
+    expect(result.output).not.toContain(credential);
   });
 
   test.each(['dirty', 'feature', 'unsynced', 'collision', 'collision-build', 'remote-tag', 'notes', 'github-auth', 'github-unavailable'])('rejects %s before modifying release files', condition => {

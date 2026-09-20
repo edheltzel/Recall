@@ -143,7 +143,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
 - **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills` and `~/.omp/agent/skills`; Pi discovers it through the root native package manifest). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so legacy/uninstall cleanup removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
 - **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
-- **Cut a release**: `npm run release:major`, `release:minor`, or `release:patch` from clean, synchronized `main`. `scripts/release.ts` synchronizes package/plugin versions, changelog, annotated tag, and GitHub release. See `docs/releasing.md` for preflight, dry run, and recovery.
+- **Cut a release**: See [`docs/releasing.md`](docs/releasing.md).
 
 ## Agent Context Files
 
