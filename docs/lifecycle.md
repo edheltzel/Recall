@@ -14,7 +14,7 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 |---|---|
 | Fresh install — Claude / Codex plugin | `bun install -g recall-memory` then `recall init`, then the host plugin command in [Claude](CLAUDE_INTEGRATION.md) / [Codex](CODEX_INTEGRATION.md) |
 | Fresh install — Pi native package | `bun install -g recall-memory` then `pi install npm:recall-memory`; MCP still needs the adapter ([Pi Integration](PI_INTEGRATION.md)) |
-| Fresh install — omp native skills | `bun install -g recall-memory` then `recall install` with `omp` detected ([omp Integration](OMP_INTEGRATION.md)) |
+| Fresh install — omp native capture | Build and link the clean packed checkout ([omp Integration](OMP_INTEGRATION.md)); skills remain installer-owned |
 | Fresh install — Grok (no plugin path) | `bun install -g recall-memory` then `recall install` ([Grok Integration](GROK_INTEGRATION.md)) |
 | Fresh install — Cursor snippets | Merge `templates/cursor/`; no marketplace plugin |
 | Fresh install — npm installer (Grok / Claude hooks / detected hosts) | `bun install -g recall-memory` then `recall install` |
@@ -37,12 +37,12 @@ The `recall update` / `recall uninstall` / `recall install` subcommands simply f
 
 ## Fresh install
 
-Recall installs runtime state under `~/.agents/Recall/`. **Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension (or omp's native skill home) — see the [Quick Start](../README.md#quick-start). The installer script is for Grok, Claude hooks, and detected hosts that still need installer-owned files.
+Recall installs runtime state under `~/.agents/Recall/`. **Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension; see the [Quick Start](../README.md#quick-start). The installer script is for Grok, Claude hooks, and detected hosts that still need installer-owned files.
 
 Pick the on-ramp that matches how you got Recall:
 
 - **Binaries first:** `bun install -g recall-memory` puts `recall` / `recall-mcp` on PATH, then `recall init` creates the database. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
-- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi) or native skill links (omp). Grok has no plugin path — run `recall install`.
+- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). omp skills remain installer-owned. Grok has no plugin path; run `recall install`.
 - **npx (one-shot installer):** `npx --package=recall-memory recall install` — installer-owned surfaces only, no global install. Bun must still be on PATH.
 - **Source / dev checkout:** `git clone … && cd Recall && ./install.sh`. This one **builds from your working tree** (`bun install` + `bun run build` + `bun link`). See the [Installation guide](installation.md) for prerequisites and the full step list.
 
