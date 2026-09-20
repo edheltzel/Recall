@@ -112,7 +112,7 @@ function acknowledgeLifecycleInvalidation(
          AND message.message_id = host_ingest_embedding_invalidations.message_id
         WHERE state.active_generation = host_ingest_embedding_invalidations.generation_id
           AND message.content = ?
-          AND (message.source <> 'grok' OR message.source_position IS NOT NULL)
+          AND (message.source NOT IN ('grok', 'omp') OR message.source_position IS NOT NULL)
       )
   `).run(sourceId, sourceContent);
 }

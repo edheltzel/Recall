@@ -13,6 +13,7 @@ import { join } from 'path';
 import { gatherContext, MEMORY_UNAVAILABLE } from '../../hooks/lib/session-start-context.js';
 import { parseCodexRollout } from '../hosts/codex-lifecycle.js';
 import { parseGrokExport, streamGrokSessionExport } from '../hosts/grok-lifecycle.js';
+import { parseOmpSession } from '../hosts/omp-lifecycle.js';
 import {
   createHostIngestBatch,
   HostIngestCheckpointConflictError,
@@ -52,6 +53,7 @@ interface HookPayload {
   is_subagent?: unknown;
   isSubagent?: unknown;
   reason?: unknown;
+  entries?: unknown;
 }
 
 export interface HostHookDependencies {
@@ -501,9 +503,9 @@ function renderRecallContext(): string {
   }
 }
 
-function parsePayload(raw: string): HookPayload {
-  if (Buffer.byteLength(raw, 'utf-8') > MAX_HOOK_INPUT_BYTES) {
-    throw new Error(`Hook payload exceeds ${MAX_HOOK_INPUT_BYTES} bytes`);
+export function parsePayload(raw: string, maxBytes = MAX_HOOK_INPUT_BYTES): HookPayload {
+  if (Buffer.byteLength(raw, 'utf-8') > maxBytes) {
+    throw new Error(`Hook payload exceeds ${maxBytes} bytes`);
   }
   let value: unknown;
   try {
@@ -529,6 +531,25 @@ export function handleHostHook(
   const ingestBatch = resolveIngestBatch(dependencies);
   const checkpoint = dependencies.checkpoint ?? getHostIngestCheckpoint;
 
+  if (host === 'omp') {
+    if (event !== 'sessionstop') {
+      throw new Error('omp lifecycle capture requires session_stop');
+    }
+    if (!sessionId) throw new Error('omp lifecycle capture requires session_id');
+    const parsed = parseOmpSession(payload.entries);
+    return {
+      ingest: ingestBatch([{
+        source: 'omp',
+        sessionId,
+        messages: parsed.messages,
+        cwd,
+        capturedAt,
+        incremental: false,
+        reconcileComplete: true,
+        finalize: true,
+      }]),
+    };
+  }
   if (payloadIsSubagent(payload) && !includeSubagents()) {
     return { skipped: 'subagent' };
   }
@@ -619,25 +640,26 @@ export function handleHostHook(
   return { skipped: 'jcode-probe-did-not-prove-safe-capture' };
 }
 
-async function readStdin(): Promise<string> {
+async function readStdin(maxBytes = MAX_HOOK_INPUT_BYTES): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of process.stdin) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > MAX_HOOK_INPUT_BYTES)
-      throw new Error(`Hook payload exceeds ${MAX_HOOK_INPUT_BYTES} bytes`);
+    if (bytes > maxBytes)
+      throw new Error(`Hook payload exceeds ${maxBytes} bytes`);
     chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString('utf-8');
 }
 
 export async function runHostHook(hostValue: string): Promise<void> {
-  if (!['codex', 'grok', 'jcode'].includes(hostValue)) {
+  if (!['codex', 'grok', 'jcode', 'omp'].includes(hostValue)) {
     throw new Error(`Unsupported lifecycle host: ${hostValue}`);
   }
+  const maxBytes = hostValue === 'omp' ? MAX_TRANSCRIPT_BYTES : MAX_HOOK_INPUT_BYTES;
   try {
-    const payload = parsePayload(await readStdin());
+    const payload = parsePayload(await readStdin(maxBytes), maxBytes);
     const result = hostValue === 'grok'
       ? await handleGrokHostHook(payload)
       : handleHostHook(hostValue as Exclude<LifecycleHost, 'grok'>, payload);
@@ -649,5 +671,6 @@ export async function runHostHook(hostValue: string): Promise<void> {
     process.stderr.write(
       `Recall ${hostValue} lifecycle capture skipped: ${error instanceof Error ? error.message : String(error)}\n`
     );
+    if (hostValue === 'omp') process.exitCode = 1;
   }
 }

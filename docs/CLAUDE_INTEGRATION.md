@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-**Preferred install:** Claude Code's native plugin. It owns the nine `recall-*` skills and the `recall-memory` MCP server.
+**Preferred install:** Claude Code's native plugin. It owns the nine `do-recall-*` skills and the `recall-memory` MCP server.
 
 Claude lifecycle hooks are **not** in the plugin. Plugin hooks *merge* with `settings.json` rather than replacing them, so shipping `Stop` / `SessionStart` / `PreCompact` in the bundle would double-capture for anyone who also ran `recall install`. Auto-capture, tiered L0/L1 injection, and pre-compaction flushing stay installer-owned.
 
@@ -123,7 +123,7 @@ None of these block the nine MCP operations or the skill surface.
 
 Maintainer-only. Not the install path.
 
-Canonical skills live in `agent-skills/`. Regenerate the Claude payload with `bun run build:claude-plugin` (`scripts/build-claude-plugin.ts`). Do not hand-edit `plugins/recall-claude/skills/`. Skill names stay `recall-*`.
+Canonical skills live in `agent-skills/`. Regenerate the Claude payload with `bun run build:claude-plugin` (`scripts/build-claude-plugin.ts`). Do not hand-edit `plugins/recall-claude/skills/`. Skill names use `do-recall-*`.
 
 ```bash
 claude plugin validate plugins/recall-claude --strict

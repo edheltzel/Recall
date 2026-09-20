@@ -34,7 +34,7 @@ bun -e 'import { describeHarnessSeams } from "./src/api.ts"; console.log(JSON.st
 |------|-------------------|---------------|
 | **start** | `recall start` renders L0/L1 via `hooks/lib/session-start-context.ts`. `--format cursor` wraps `{ additional_context }`. | `registerStartFormat(id, wrap)` — in-process, for `runStart({ format: id })`. The public CLI still accepts only `markdown` \| `cursor`. |
 | **drop** | Write markdown into `MEMORY/<host>-sessions/`. Batch extract scans `*-sessions` generically. | None. The directory name **is** the extension point. `parseMarkdownDrop` / `markdownDropDirName` are the helpers. |
-| **capture** | Cursor: `catalogCursorSessions()` (catalog only, no SQLite insert). Dump: `discoverCurrentSession()`. Codex/Grok/jcode stay on hidden `recall host-hook`. | `registerSessionSource(adapter)` — in-process, consulted by `discoverCurrentSession()`. Cannot replace builtin `SESSION_SOURCES` ids. |
+| **capture** | Cursor: `catalogCursorSessions()` (catalog only, no SQLite insert). Dump: `discoverCurrentSession()`. Native lifecycle capture, including omp, uses hidden `recall host-hook`. | `registerSessionSource(adapter)` — in-process, consulted by `discoverCurrentSession()`. Cannot replace builtin `SESSION_SOURCES` ids. |
 | **inject** | Cursor snippets under `templates/cursor/` call unqualified `recall start --format cursor`. Claude/Codex call the same assembler through their own hooks. | `mergeCursorHooksJson` is the Cursor hooks.json helper. Do not add a marketplace plugin. |
 
 MCP (`recall-mcp`, server name `recall-memory`) and Agent Skills (`agent-skills/`) are already cross-host. Point at [MCP Tools](mcp-tools.md) and [Agent Skills](agent-skills.md); do not fork those catalogs.
@@ -56,4 +56,4 @@ A new drop-dir host still does **not** copy `RecallExtract.ts` / `RecallPreCompa
 
 ## First-run and host attach
 
-Humans: [Getting Started](getting-started.md). Preferred plugin/extension attach for Claude, Codex, Pi, and omp is unchanged from the post-#284 docs; this API does not redo that install path.
+Humans: [Getting Started](getting-started.md). Native plugin/extension setup is documented per host; see [omp Integration](OMP_INTEGRATION.md) for its capture package. This API does not manage installation.

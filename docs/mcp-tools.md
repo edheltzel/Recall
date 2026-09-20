@@ -164,7 +164,7 @@ Persist an explicitly supplied conversation session into SQLite. Claude, OpenCod
 | title | string | yes | — | Descriptive title for this session dump |
 | project | string | no | — | Override the auto-detected project name |
 | session_id | string | no | generated | Stable session identifier supplied by the host |
-| source | string | no | `mcp` | Host source: `claude`, `opencode`, `pi`, `codex`, `grok`, `jcode`, or `mcp` |
+| source | string | no | `mcp` | Host source: `claude`, `opencode`, `pi`, `codex`, `grok`, `jcode`, `omp`, `cursor`, or `mcp` |
 | messages | array | no | — | Explicit `{ role, content, timestamp? }` messages. Required when the host has no native transcript adapter. |
 | skip_fabric | boolean | no | true | Skip the fabric Extractor and write a basic summary |
 

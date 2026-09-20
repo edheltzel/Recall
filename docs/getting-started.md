@@ -26,7 +26,7 @@ Then attach each harness with its **native plugin or extension** when it has one
 | Claude Code | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace`. Hooks still need `recall install`. |
 | Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
 | Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
-| omp | Native skills at `~/.omp/agent/skills/recall-*` (`recall install` when `omp` is detected). |
+| omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
 | Grok | `recall install` / `./install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
 | Cursor | Merge `templates/cursor/` snippets. No marketplace plugin. |
 
@@ -56,7 +56,7 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not relocat
 | `~/.agents/Recall/recall.db` | SQLite database (WAL mode). The only query surface. |
 | `~/.agents/Recall/MEMORY/identity.md` | Canonical L0 identity file (`recall onboard` writes this). |
 | `~/.agents/Recall/shared/hooks/` | Canonical lifecycle hook scripts |
-| `~/.agents/Recall/shared/skills/` | Canonical `recall-*` Agent Skill bodies |
+| `~/.agents/Recall/shared/skills/` | Canonical `do-recall-*` Agent Skill bodies |
 | `~/.agents/Recall/backups/` | Install/update/export snapshots |
 
 Override the database with `RECALL_DB_PATH` (legacy `MEM_DB_PATH` is still honored when `RECALL_DB_PATH` is unset). That moves the SQLite file only; it does not move the install root.
@@ -116,6 +116,7 @@ Then **open a new session in your agent**. What happens next depends on the host
 | Codex CLI | Yes — plugin `SessionStart` → `additionalContext` | Preferred: native plugin ([Codex Integration](CODEX_INTEGRATION.md)), then start a Codex session. |
 | Cursor | Beta — `sessionStart` `{ additional_context }` | Merge the snippets under `templates/cursor/`. The hook command is unqualified `recall start --format cursor`. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor, or a shell where `recall` resolves, is fine. Durable GUI PATH / `recall start --format cursor` accuracy is pending FM-321/327 — this table describes the as-built unqualified command, not that future fix. |
 | Pi | Beta — `before_agent_start` | Preferred: `pi install npm:recall-memory`. See [Pi Integration](PI_INTEGRATION.md). |
+| omp | No automatic injection | Pack and link the native extension for main-session `session_stop` capture, then restart omp. See [omp Integration](OMP_INTEGRATION.md). |
 | OpenCode | No verified compaction injection | MCP + skills + `session.idle` capture. See [OpenCode Integration](OPENCODE_INTEGRATION.md). |
 | Grok | No automatic injection | Capture is installer-owned; search via MCP. See [Grok Integration](GROK_INTEGRATION.md). |
 | JCode | No | MCP and skills only. See [JCode Integration](JCODE_INTEGRATION.md). |
@@ -138,7 +139,7 @@ Per-host registration:
 
 - **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer removes the duplicate user-scope entry.
 - **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
-- **omp** — no MCP registration. Native skills only; see [omp Integration](OMP_INTEGRATION.md).
+- **omp** — no MCP registration. Native capture and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
 - **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.
 - **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `install.sh` does not duplicate it.
 - **Cursor** — snippets only. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`). No marketplace plugin.
@@ -162,25 +163,12 @@ Other hosts:
 - **Codex** — plugin hooks (`SessionStart`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`) write through `recall host-hook` internally. You do not invoke that command.
 - **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` → `recall host-hook grok`. Capture only; no session-start injection.
 - **OpenCode / Pi** — native plugins/extensions drop transcripts for the shared batch extractor (`RecallBatchExtract.ts`). Optional cron is printed at the end of install; nothing is auto-scheduled.
+- **omp** — the native extension captures the active main-session branch on awaited `session_stop`; see [omp Integration](OMP_INTEGRATION.md).
 - **Cursor** — merge `templates/cursor/hooks.json`. Command stays `recall start --format cursor`. Cursor is not a `recall host-hook` host.
 
-### Agent skills (`recall-*`)
+### Agent skills (`do-recall-*`)
 
-Claude, Codex, and Pi load skills from their native plugin/package. omp loads them from `~/.omp/agent/skills/recall-*`. The installer still links canonicals for hosts without a plugin attach. In Claude Code, invoke them as slash skills — the hyphenated names are the skill names:
-
-| Skill | Slash | What it wraps |
-|-------|-------|----------------|
-| `recall-dump` | `/recall-dump Session Title` | `recall dump` — flush this session + LoA entry |
-| `recall-search` | `/recall-search kubernetes auth` | `recall search` |
-| `recall-recent` | `/recall-recent` | `recall recent` |
-| `recall-scout` | `/recall-scout [focus]` | memory-first repo scout |
-| `recall-stats` | `/recall-stats` | `recall stats` |
-| `recall-add` | `/recall-add` | `recall add` (decision / learning / breadcrumb) |
-| `recall-doctor` | `/recall-doctor` | `recall doctor` |
-| `recall-update` | `/recall-update` | version check only; it does not run `update.sh` |
-| `recall-loa` | `/recall-loa` | browse LoA entries |
-
-`/recall-dump` is user-invoked only. Skill reference: [Agent Skills](agent-skills.md).
+Recall's nine canonical skill names, invocations, host packaging, and explicit-only dump rule live in [Agent Skills](agent-skills.md). In Claude Code, invoke them as `/do-recall-<name>`.
 
 ---
 
@@ -203,7 +191,7 @@ recall stats
 
 Bare `recall "query"` is hybrid search. Use `recall "query" -k` for keyword-only, `recall "query" -v` or `recall semantic "query"` for vector-only (needs Ollama). There is no `recall embed semantic` verb — embeddings are `recall embed backfill` / `recall embed stats` / `recall embed reindex`.
 
-From inside Claude Code, the same workflows are the `/recall-*` skills above. MCP tools (`memory_search`, `memory_add`, `memory_dump`, …) are what the model calls mid-session.
+From inside Claude Code, the same workflows are the `/do-recall-*` skills. MCP tools (`memory_search`, `memory_add`, `memory_dump`, …) are what the model calls mid-session.
 
 ---
 
@@ -215,7 +203,7 @@ From inside Claude Code, the same workflows are the `/recall-*` skills above. MC
 | [Managing Recall](lifecycle.md) | Install vs update vs uninstall, custom DB path, recovery |
 | [CLI Reference](cli-reference.md) | Every subcommand and flag |
 | [MCP Tools](mcp-tools.md) | Tool schemas for agents |
-| [Agent Skills](agent-skills.md) | Canonical `/recall-*` skill bodies |
+| [Agent Skills](agent-skills.md) | Canonical `/do-recall-*` skill bodies |
 | [Harness API](api.md) | Thin `recall-memory/api` surface: start / drop / capture / inject |
 | [Troubleshooting](troubleshooting.md) | Start with `recall doctor` |
 | [Claude](CLAUDE_INTEGRATION.md) · [Codex](CODEX_INTEGRATION.md) · [Pi](PI_INTEGRATION.md) · [omp](OMP_INTEGRATION.md) · [Grok](GROK_INTEGRATION.md) · [JCode](JCODE_INTEGRATION.md) · [OpenCode](OPENCODE_INTEGRATION.md) | Host-specific wiring |

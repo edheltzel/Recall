@@ -75,7 +75,7 @@ Remote marketplace publication and update policy remain separate distribution wo
 
 Maintainer-only. Not the install path.
 
-Canonical skills live in `agent-skills/`. Regenerate Codex adapters with `bun run build:codex-plugin` (`scripts/build-codex-plugin.ts`). Do not hand-edit `plugins/recall/skills/`. Skill names stay `recall-*`. Current Codex CLI has no `codex plugin validate`.
+Canonical skills live in `agent-skills/`. Regenerate Codex adapters with `bun run build:codex-plugin` (`scripts/build-codex-plugin.ts`). Do not hand-edit `plugins/recall/skills/`. Skill names use `do-recall-*`. Current Codex CLI has no `codex plugin validate`.
 
 ```bash
 bun test tests/plugins/codex-plugin.test.ts
