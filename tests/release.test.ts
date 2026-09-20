@@ -142,6 +142,15 @@ describe('release commands', () => {
     expect(existsSync(env.RELEASE_RECORD)).toBe(false);
   });
 
+  test('only publishes the selected tag when push.followTags is enabled', () => {
+    git('config', 'push.followTags', 'true');
+    git('tag', '-a', 'v1.2.3-preview', '-m', 'Keep this local');
+    const result = release();
+    expect(result.code, result.output).toBe(0);
+    expect(git('--git-dir', remote, 'tag', '--list')).toBe('v1.2.4');
+    expect(git('tag', '--list')).toBe('v1.2.3-preview\nv1.2.4');
+  });
+
   test('rejected main push cannot publish a tag alone', () => {
     const head = git('rev-parse', 'HEAD');
     writeFileSync(join(remote, 'hooks', 'update'), '#!/bin/sh\ntest "$1" != refs/heads/main\n', { mode: 0o755 });

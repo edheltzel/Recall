@@ -160,7 +160,7 @@ function release(args: string[]): void {
     }
   }
   run('git', ['tag', '-a', tag, '-m', tag]);
-  run('git', ['push', '--atomic', origin, 'HEAD:refs/heads/main', `refs/tags/${tag}`]);
+  run('git', ['push', '--atomic', '--no-follow-tags', origin, 'HEAD:refs/heads/main', `refs/tags/${tag}`]);
   const url = run('gh', ['release', 'create', tag, '--repo', repository, '--verify-tag',
     '--title', tag, '--notes-file', '-', '--latest'], `${notes}\n`);
   console.log(`Released ${tag}: ${url}`);

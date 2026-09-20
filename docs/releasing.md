@@ -84,8 +84,9 @@ The command:
 5. Checks the version guard, then runs lint, the test suite, and the build.
 6. Commits only the release files as `chore(release): vX.Y.Z`, verifies their committed
    versions, and creates annotated tag `vX.Y.Z`.
-7. Pushes `main` and that tag atomically to `origin`. A rejected branch update cannot
-   leave a tag published alone.
+7. Pushes `main` and that tag atomically to `origin`, with automatic tag following
+   disabled. A rejected branch update cannot leave a tag published alone, and other
+   local annotated tags stay private even when `push.followTags` is enabled.
 8. Creates the GitHub release with `--verify-tag`, the changelog notes as its body,
    and `--latest`.
 
