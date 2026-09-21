@@ -80,7 +80,9 @@ Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKI
 
 - Use GitButler (`but`) for all version-control operations; load the `but` skill before using it. Do not run raw `git` commands or bypass GitButler's workspace state.
 - Use `gh` for GitHub issues, pull requests, reviews, and Actions. Use `but` for the underlying branches, commits, and pushes.
-
+- Create every GitHub PR as **`Atlas-Key`**. Before publishing, verify the authenticated API login is `Atlas-Key`; use account-scoped credentials for this repository rather than changing another project's active account. If that identity is unavailable, stop instead of creating the PR as another user.
+- The required reviewer is defined in [`.github/CODEOWNERS`](.github/CODEOWNERS). Request that reviewer on every PR, including automated publishing and drafts; after creation, verify author and reviewer through `gh`. Existing PR authors cannot be changed; do not close/recreate a PR without explicit permission.
+- Maintainer release exception: `npm run release:{major,minor,patch}` runs the documented one-command release from clean, synchronized `main` after GitButler teardown. It owns the version commit, annotated tag, atomic push, and GitHub release. Do not use it to publish feature work around the normal PR gate. See [`docs/releasing.md`](docs/releasing.md).
 ### Issue tracker
 
 Issues and PRDs are tracked in GitHub Issues for `edheltzel/Recall`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
@@ -141,7 +143,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Edit lifecycle scripts**: `install.sh`, `update.sh`, and `uninstall.sh` share `lib/install-lib.sh` — put shared bash functions there, not duplicated across scripts. Validate each with `bash -n`.
 - **Add an Agent Skill**: Create `agent-skills/<name>/SKILL.md` — the install/update/uninstall scripts pick it up automatically (canonical copy under `$RECALL_SHARED_SKILLS_DIR`, per-file symlinks into `~/.claude/skills` and `~/.omp/agent/skills`; Pi discovers it through the root native package manifest). Also add `<name>` to `RECALL_SKILL_NAMES` in `uninstall.sh` so legacy/uninstall cleanup removes it, and regenerate the native plugin bundles with `bun run build:codex-plugin` and `bun run build:claude-plugin` (their tests fail on drift).
 - **Update the Claude guide**: Edit `FOR_CLAUDE.md` (installer copies it to `~/.claude/Recall_GUIDE.md`). Keep `FOR_OPENCODE.md` and `FOR_PI.md` in sync if lifecycle commands change.
-- **Cut a release**: See `docs/releasing.md` for the tag → GitHub release flow.
+- **Cut a release**: See [`docs/releasing.md`](docs/releasing.md).
 
 ## Agent Context Files
 
