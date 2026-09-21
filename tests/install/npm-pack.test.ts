@@ -118,6 +118,9 @@ describe('npm package: shims resolve bundled scripts under a packaged layout', (
     if (!tgz) throw new Error('npm pack produced no .tgz');
     execFileSync('tar', ['-xzf', join(stage, tgz), '-C', stage]);
     pkgRoot = join(stage, 'package'); // npm tarballs root every entry under package/
+    // Mimic a package-manager install and keep Bun from auto-installing over
+    // the network when the extracted CLI imports its runtime dependencies.
+    symlinkSync(join(REPO, 'node_modules'), join(pkgRoot, 'node_modules'), 'dir');
 
     const binDir = join(stage, 'bin');
     mkdirSync(binDir, { recursive: true });
