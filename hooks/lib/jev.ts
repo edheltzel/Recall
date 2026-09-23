@@ -1,16 +1,11 @@
+// Self-contained batch scorer for hooks. Never import from src/.
+
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const MODEL = 'jev-latest';
-const QUESTION_ID = 'disposition';
 
 export const JEV_KEY_ENV = 'JEV_RECALL_KEY';
 
 export type JevDisposition = 'keep' | 'demote' | 'drop';
-
-export interface JevCandidate {
-  text: string;
-  kind?: string;
-  project?: string;
-}
 
 export interface JevDecision {
   choice: JevDisposition;
@@ -25,12 +20,6 @@ const MEANINGS = [
   'demote: store it at reduced importance because it is real but weak, partial, or soon stale.',
   'drop: do not store it because it has no future recall value.',
 ];
-
-const INSTRUCTIONS = [
-  'Should this candidate memory item be kept, demoted, or dropped when Recall ingests it?',
-  ...MEANINGS,
-  'Judge `text`, and use `kind` and `project` when those fields are present.',
-].join(' ');
 
 const CRITERIA = {
   keep: {
@@ -47,13 +36,10 @@ const CRITERIA = {
   },
 };
 
-export interface ScoreCandidateOptions {
+export interface ScoreCandidatesOptions {
   fetch?: typeof fetch;
   apiKey?: string;
   env?: NodeJS.ProcessEnv;
-}
-
-export interface ScoreCandidatesOptions extends ScoreCandidateOptions {
   timeoutMs?: number;
 }
 
@@ -73,22 +59,6 @@ export type JevBatchResult =
 // The stop hook must not wait on a hung socket.
 const BATCH_TIMEOUT_MS = 15_000;
 const CANDIDATE_ID = /^[dlb]\d+$/;
-
-function requiredKey(env: NodeJS.ProcessEnv): string {
-  const key = env[JEV_KEY_ENV];
-  if (typeof key !== 'string' || key.trim() === '') {
-    throw new Error(`${JEV_KEY_ENV} is not set`);
-  }
-  return key;
-}
-
-function stateFor(candidate: JevCandidate): Record<string, string> {
-  const state: Record<string, string> = {};
-  if (candidate.kind) state.kind = candidate.kind;
-  state.text = candidate.text;
-  if (candidate.project) state.project = candidate.project;
-  return state;
-}
 
 function isDisposition(value: unknown): value is JevDisposition {
   return DISPOSITIONS.some(name => name === value);
@@ -131,39 +101,6 @@ function decisionFromAnswer(answer: unknown): JevDecision {
     probabilities: readProbabilities(record.probabilities),
     confidence: record.confidence,
   };
-}
-
-export async function scoreCandidate(
-  candidate: JevCandidate,
-  options: ScoreCandidateOptions = {},
-): Promise<JevDecision> {
-  const apiKey = options.apiKey ?? requiredKey(options.env ?? process.env);
-  const call = options.fetch ?? fetch;
-  const response = await call(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      state: stateFor(candidate),
-      model: MODEL,
-      questions: {
-        [QUESTION_ID]: {
-          type: 'choice',
-          instructions: INSTRUCTIONS,
-          criteria: CRITERIA,
-        },
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Jev request failed: HTTP ${response.status}`);
-  }
-
-  const body = await response.json() as { answers?: Record<string, unknown> };
-  return decisionFromAnswer(body.answers?.[QUESTION_ID]);
 }
 
 function presentKey(value: string): string | undefined {

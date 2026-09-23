@@ -5,6 +5,13 @@
 
 import { getDb } from '../db/connection.js';
 import { addBreadcrumb, addDecision, addLearning, createLoaEntry } from './memory.js';
+import {
+  scoreCandidates,
+  type JevBatchCandidate,
+  type JevBatchResult,
+  type JevDecision,
+} from '../providers/jev.js';
+import { scrub } from './write-safety.js';
 
 export interface StructuredExtractionContext {
   sessionId: string;
@@ -25,17 +32,21 @@ export interface StructuredExtractionResult {
   breadcrumbs: number;
   errors: number;
   loa: number;
+  /** Disposition counts for scored rows. `skipped` is a missing or blank key. A request error leaves every counter at 0. */
+  jev: { kept: number; demoted: number; dropped: number; skipped: number };
   failures: Record<string, string>;
 }
 
 interface DecisionItem {
   decision: string;
   confidence: 'high' | 'medium' | 'low';
+  importance?: number;
 }
 
 interface LearningItem {
   problem: string;
   solution: string;
+  importance?: number;
 }
 
 interface ErrorPatternItem {
@@ -168,7 +179,113 @@ function writeLoa(ctx: StructuredExtractionContext): number {
   });
 }
 
-export function writeStructuredExtraction(ctx: StructuredExtractionContext): StructuredExtractionResult {
+function scrubText(value: string): string {
+  return scrub(value).text;
+}
+
+function jevCounts(
+  candidates: readonly { id: string }[],
+  scored: JevBatchResult,
+): StructuredExtractionResult['jev'] {
+  if (scored.status === 'skipped') {
+    return { kept: 0, demoted: 0, dropped: 0, skipped: candidates.length };
+  }
+  if (scored.status !== 'scored') {
+    return { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
+  }
+  const counts = { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
+  for (const candidate of candidates) {
+    // Missing choice counts as keep, matching applyChoices.
+    const choice = scored.decisions[candidate.id]?.choice ?? 'keep';
+    if (choice === 'drop') counts.dropped += 1;
+    else if (choice === 'demote') counts.demoted += 1;
+    else counts.kept += 1;
+  }
+  return counts;
+}
+
+function applyChoices<T extends { importance?: number }>(
+  items: readonly T[],
+  prefix: 'd' | 'l' | 'b',
+  decisions: Record<string, JevDecision>,
+): T[] {
+  const kept: T[] = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item === undefined) continue;
+    const choice = decisions[`${prefix}${index}`]?.choice ?? 'keep';
+    if (choice === 'drop') continue;
+    kept.push(choice === 'demote' ? { ...item, importance: 3 } : item);
+  }
+  return kept;
+}
+
+async function gateStructuredRows(
+  decisions: DecisionItem[],
+  learnings: LearningItem[],
+  breadcrumbs: string[],
+  project: string,
+  failures: Record<string, string>,
+): Promise<{
+  decisions: DecisionItem[];
+  learnings: LearningItem[];
+  breadcrumbs: { content: string; importance?: number }[];
+  jev: StructuredExtractionResult['jev'];
+}> {
+  const scrubbedProject = scrubText(project);
+  const projectField = scrubbedProject ? { project: scrubbedProject } : {};
+  const preparedDecisions = decisions.map(item => ({ ...item, decision: scrubText(item.decision) }));
+  const preparedLearnings: LearningItem[] = learnings.map(item => ({
+    problem: scrubText(item.problem),
+    solution: scrubText(item.solution),
+  }));
+  const preparedBreadcrumbs: { content: string; importance?: number }[] = breadcrumbs.map(content => ({
+    content: scrubText(content),
+  }));
+  const candidates: JevBatchCandidate[] = [
+    ...preparedDecisions.map((item, index) => ({
+      id: `d${index}`,
+      kind: 'decision' as const,
+      text: `${item.decision} (confidence: ${item.confidence})`,
+      confidence: item.confidence,
+      ...projectField,
+    })),
+    ...preparedLearnings.map((item, index) => ({
+      id: `l${index}`,
+      kind: 'learning' as const,
+      text: item.solution ? `${item.problem}: ${item.solution}` : item.problem,
+      ...projectField,
+    })),
+    ...preparedBreadcrumbs.map((item, index) => ({
+      id: `b${index}`,
+      kind: 'breadcrumb' as const,
+      text: item.content,
+      ...projectField,
+    })),
+  ];
+
+  const scored = await scoreCandidates(candidates);
+  const jev = jevCounts(candidates, scored);
+  if (scored.status === 'error') failures.jev = scored.error;
+  if (scored.status !== 'scored') {
+    return {
+      decisions: preparedDecisions,
+      learnings: preparedLearnings,
+      breadcrumbs: preparedBreadcrumbs,
+      jev,
+    };
+  }
+  return {
+    decisions: applyChoices(preparedDecisions, 'd', scored.decisions),
+    learnings: applyChoices(preparedLearnings, 'l', scored.decisions),
+    breadcrumbs: applyChoices(preparedBreadcrumbs, 'b', scored.decisions),
+    jev,
+  };
+}
+
+export async function writeStructuredExtraction(
+  ctx: StructuredExtractionContext,
+): Promise<StructuredExtractionResult> {
   const result: StructuredExtractionResult = {
     sessions: 0,
     decisions: 0,
@@ -176,8 +293,19 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
     breadcrumbs: 0,
     errors: 0,
     loa: 0,
+    jev: { kept: 0, demoted: 0, dropped: 0, skipped: 0 },
     failures: {},
   };
+
+  const gated = await gateStructuredRows(
+    parseDecisionItems(ctx.extracted),
+    parseLearningItems(ctx.extracted),
+    parseBreadcrumbItems(ctx.extracted),
+    ctx.project,
+    result.failures,
+  );
+  result.jev = gated.jev;
+  const project = scrubText(ctx.project);
 
   try {
     writeExtractionSession(ctx);
@@ -187,15 +315,16 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
   }
 
   try {
-    for (const item of parseDecisionItems(ctx.extracted)) {
+    for (const item of gated.decisions) {
       addDecision({
         session_id: ctx.sessionId,
         category: 'auto-extracted',
-        project: ctx.project,
+        project,
         decision: item.decision,
         status: 'active',
         confidence: item.confidence,
         provenance: 'extracted',
+        ...(item.importance === undefined ? {} : { importance: item.importance }),
       });
       result.decisions++;
     }
@@ -204,16 +333,17 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
   }
 
   try {
-    for (const item of parseLearningItems(ctx.extracted)) {
+    for (const item of gated.learnings) {
       addLearning({
         session_id: ctx.sessionId,
         category: 'auto-extracted',
-        project: ctx.project,
+        project,
         problem: item.problem,
         solution: item.solution,
         tags: ctx.sessionLabel,
         confidence: 'medium',
         provenance: 'extracted',
+        ...(item.importance === undefined ? {} : { importance: item.importance }),
       });
       result.learnings++;
     }
@@ -222,13 +352,13 @@ export function writeStructuredExtraction(ctx: StructuredExtractionContext): Str
   }
 
   try {
-    for (const content of parseBreadcrumbItems(ctx.extracted)) {
+    for (const item of gated.breadcrumbs) {
       addBreadcrumb({
         session_id: ctx.sessionId,
         category: 'extracted-idea',
-        project: ctx.project,
-        content,
-        importance: 5,
+        project,
+        content: item.content,
+        importance: item.importance ?? 5,
         provenance: 'extracted',
       });
       result.breadcrumbs++;

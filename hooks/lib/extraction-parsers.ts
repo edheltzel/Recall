@@ -17,6 +17,8 @@ import {
   writeLoaEntryFromExtraction,
   type WriteOptions,
 } from './sqlite-writers';
+import { scoreCandidates, type JevBatchCandidate, type JevBatchResult, type JevDecision } from './jev';
+import { scrub } from './write-safety';
 
 /** This seam is replayed on retry: every plain-INSERT writer skips rows it already wrote. */
 const RETRY_SAFE: WriteOptions = { skipDuplicates: true };
@@ -40,6 +42,8 @@ export interface DualWriteResult {
   breadcrumbs: number;
   errors: number;
   loa: number;
+  /** Disposition counts for scored rows. `skipped` is a missing or blank key. A request error leaves every counter at 0. */
+  jev: { kept: number; demoted: number; dropped: number; skipped: number };
   failures: Record<string, string>;
 }
 
@@ -139,20 +143,136 @@ export function parseErrorPatternItems(extracted: string): ExtractionErrorInput[
   return out;
 }
 
+function scrubText(value: string): string {
+  return scrub(value).text;
+}
+
+function scrubOptional(value: string | null | undefined): string | null | undefined {
+  return typeof value === 'string' ? scrubText(value) : value;
+}
+
+function projectField(project: string | null | undefined): { project?: string } {
+  return project ? { project } : {};
+}
+
+function memoryCandidates(
+  decisions: readonly DecisionInput[],
+  learnings: readonly LearningInput[],
+  breadcrumbs: readonly BreadcrumbInput[],
+): JevBatchCandidate[] {
+  const candidates: JevBatchCandidate[] = [];
+  decisions.forEach((item, index) => {
+    const confidence = item.confidence ?? 'medium';
+    candidates.push({
+      id: `d${index}`,
+      kind: 'decision',
+      text: `${item.decision} (confidence: ${confidence})`,
+      confidence,
+      ...projectField(item.project),
+    });
+  });
+  learnings.forEach((item, index) => {
+    const text = item.solution ? `${item.problem}: ${item.solution}` : item.problem;
+    candidates.push({
+      id: `l${index}`,
+      kind: 'learning',
+      text,
+      ...projectField(item.project),
+    });
+  });
+  breadcrumbs.forEach((item, index) => {
+    candidates.push({
+      id: `b${index}`,
+      kind: 'breadcrumb',
+      text: item.content,
+      ...projectField(item.project),
+    });
+  });
+  return candidates;
+}
+
+function jevCounts(
+  candidates: readonly { id: string }[],
+  scored: JevBatchResult,
+): DualWriteResult['jev'] {
+  if (scored.status === 'skipped') {
+    return { kept: 0, demoted: 0, dropped: 0, skipped: candidates.length };
+  }
+  if (scored.status !== 'scored') {
+    return { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
+  }
+  const counts = { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
+  for (const candidate of candidates) {
+    // Missing choice counts as keep, matching applyChoices.
+    const choice = scored.decisions[candidate.id]?.choice ?? 'keep';
+    if (choice === 'drop') counts.dropped += 1;
+    else if (choice === 'demote') counts.demoted += 1;
+    else counts.kept += 1;
+  }
+  return counts;
+}
+
+function applyChoices<T extends { importance?: number }>(
+  items: readonly T[],
+  prefix: 'd' | 'l' | 'b',
+  decisions: Record<string, JevDecision>,
+): T[] {
+  const kept: T[] = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item === undefined) continue;
+    const choice = decisions[`${prefix}${index}`]?.choice ?? 'keep';
+    if (choice === 'drop') continue;
+    kept.push(choice === 'demote' ? { ...item, importance: 3 } : item);
+  }
+  return kept;
+}
+
+function scrubMemoryRows(
+  decisions: readonly DecisionInput[],
+  learnings: readonly LearningInput[],
+  breadcrumbs: readonly BreadcrumbInput[],
+): { decisions: DecisionInput[]; learnings: LearningInput[]; breadcrumbs: BreadcrumbInput[] } {
+  return {
+    decisions: decisions.map((item) => ({
+      ...item,
+      decision: scrubText(item.decision),
+      project: scrubOptional(item.project),
+    })),
+    learnings: learnings.map((item) => ({
+      ...item,
+      problem: scrubText(item.problem),
+      solution: typeof item.solution === 'string' ? scrubText(item.solution) : item.solution,
+      project: scrubOptional(item.project),
+    })),
+    breadcrumbs: breadcrumbs.map((item) => ({
+      ...item,
+      content: scrubText(item.content),
+      project: scrubOptional(item.project),
+    })),
+  };
+}
+
 /**
  * Dual-write extracted content into SQLite. Every section is wrapped in its
- * own try/catch — a failure on one writer must not block the others, and the
+ * own try/catch. A failure on one writer must not block the others, and the
  * whole function must not throw.
+ *
+ * Decisions, learnings, and breadcrumbs are scored before those inserts when
+ * JEV_RECALL_KEY is set. Scoring finishes before any writer runs. A missing
+ * or blank key writes every parsed row and sets `jev.skipped` to that candidate
+ * count. A failed score writes every parsed row, sets `failures.jev`, and leaves
+ * the `jev` counters at 0. Sessions, extraction errors, and LoA are not scored.
  *
  * The plain-INSERT writers run with `skipDuplicates` because this seam is
  * replayed: the Stop hook marks a conversation extracted only after its markdown
  * archive writes, and a partial SQLite failure marks it failed + retryable. See
  * the RETRY IDEMPOTENCY note in sqlite-writers.ts.
  */
-export function dualWriteToSqlite(
+export async function dualWriteToSqlite(
   dbPath: string,
-  ctx: DualWriteContext
-): DualWriteResult {
+  ctx: DualWriteContext,
+): Promise<DualWriteResult> {
   const result: DualWriteResult = {
     sessions: 0,
     decisions: 0,
@@ -160,6 +280,7 @@ export function dualWriteToSqlite(
     breadcrumbs: 0,
     errors: 0,
     loa: 0,
+    jev: { kept: 0, demoted: 0, dropped: 0, skipped: 0 },
     failures: {},
   };
 
@@ -167,6 +288,23 @@ export function dualWriteToSqlite(
     result.failures._db = 'not writable or locked';
     return result;
   }
+
+  const prepared = scrubMemoryRows(
+    parseDecisionItems(ctx.extracted, ctx),
+    parseLearningItems(ctx.extracted, ctx),
+    parseBreadcrumbItems(ctx.extracted, ctx),
+  );
+  const candidates = memoryCandidates(prepared.decisions, prepared.learnings, prepared.breadcrumbs);
+  const scored = await scoreCandidates(candidates);
+  result.jev = jevCounts(candidates, scored);
+  const rows = scored.status === 'scored'
+    ? {
+        decisions: applyChoices(prepared.decisions, 'd', scored.decisions),
+        learnings: applyChoices(prepared.learnings, 'l', scored.decisions),
+        breadcrumbs: applyChoices(prepared.breadcrumbs, 'b', scored.decisions),
+      }
+    : prepared;
+  if (scored.status === 'error') result.failures.jev = scored.error;
 
   try {
     writeExtractionSession(dbPath, {
@@ -183,31 +321,19 @@ export function dualWriteToSqlite(
   }
 
   try {
-    result.decisions = writeDecisionsBatch(
-      dbPath,
-      parseDecisionItems(ctx.extracted, ctx),
-      RETRY_SAFE
-    );
+    result.decisions = writeDecisionsBatch(dbPath, rows.decisions, RETRY_SAFE);
   } catch (e: any) {
     result.failures.decisions = e?.message || String(e);
   }
 
   try {
-    result.learnings = writeLearningsBatch(
-      dbPath,
-      parseLearningItems(ctx.extracted, ctx),
-      RETRY_SAFE
-    );
+    result.learnings = writeLearningsBatch(dbPath, rows.learnings, RETRY_SAFE);
   } catch (e: any) {
     result.failures.learnings = e?.message || String(e);
   }
 
   try {
-    result.breadcrumbs = writeBreadcrumbsBatch(
-      dbPath,
-      parseBreadcrumbItems(ctx.extracted, ctx),
-      RETRY_SAFE
-    );
+    result.breadcrumbs = writeBreadcrumbsBatch(dbPath, rows.breadcrumbs, RETRY_SAFE);
   } catch (e: any) {
     result.failures.breadcrumbs = e?.message || String(e);
   }
