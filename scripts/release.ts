@@ -12,13 +12,17 @@ const manifests = [
 ];
 const releaseFiles = [...manifests, 'CHANGELOG.md'];
 
+function redactCredentials(value: string): string {
+  return value.replace(/(https?:\/\/)[^/\s@]+@/gi, '$1[REDACTED]@');
+}
+
 function run(command: string, args: string[], input?: string): string {
   const result = spawnSync(command, args, {
     encoding: 'utf8', input, timeout: 180_000, maxBuffer: 16 * 1024 * 1024,
   });
-  if (result.error) throw result.error;
+  if (result.error) throw new Error(redactCredentials(result.error.message));
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(' ')} failed:\n${result.stderr || result.stdout}`);
+    throw new Error(redactCredentials(`${command} ${args.join(' ')} failed:\n${result.stderr || result.stdout}`));
   }
   return result.stdout.trim();
 }
