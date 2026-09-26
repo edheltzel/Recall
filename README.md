@@ -24,7 +24,7 @@ Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.c
 
 All coding agents forget when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session, across every agent you use.
 
-Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. No phone-home. No vendor lock-in.
+Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. Retrieval does not phone home. Optional Jev is off unless `JEV_RECALL_KEY` is exported into the process that runs the hook or CLI. When it is exported, Jev sends scrubbed extracted candidates to TypeSafe. A key that sits only in `~/.env` does nothing until that process sources the file. No vendor lock-in.
 
 > Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/). [Codex CLI](https://github.com/openai/codex) has native MCP, skills, automatic capture, and session-start injection. [Grok Build CLI](docs/GROK_INTEGRATION.md) has automatic capture but no automatic injection. [omp](docs/OMP_INTEGRATION.md) has native main-session capture with skills and MCP kept separate. [JCode](docs/JCODE_INTEGRATION.md) remains MCP and skills only after a bounded live probe. See [Roadmap](#roadmap).
 
@@ -58,7 +58,7 @@ Install once, then forget about it. Recall runs silently in the background:
 
 Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
 
-- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server, no API keys for retrieval. Nothing leaves your machine — no telemetry, no phone-home. Optional Ollama for embeddings (also local).
+- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server. Keyword and hybrid retrieval need no API key and do not phone home. Optional Ollama for embeddings stays local. Optional Jev is the exception: with `JEV_RECALL_KEY` exported, scrubbed extracted candidates go to TypeSafe. Unset, Jev is off and those rows are written unchanged. Recall does not load `~/.env` by itself.
 - **Multi-agent native.** One memory layer across the agents you actually use. Claude Code, Pi, OpenCode, Codex, Grok, JCode, and omp share the same database through their supported MCP, skill, and lifecycle surfaces. Automatic capture and injection depend on each host's supported lifecycle surfaces; see the capability matrix below.
 - **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and **Library of Alexandria** entries (Automatic-capture LoA and Curated LoA) — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
 - **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
@@ -238,6 +238,39 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
 
 The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](assets/how-recall-works.excalidraw) — drop it onto [excalidraw.com](https://excalidraw.com) to edit.
 
+### Where Jev sits
+
+Jev scores structured extraction: one POST, one Choice per candidate. Native raw host-ingest does not call it. A missing key or a failed Jev request still writes the parsed rows.
+
+```mermaid
+flowchart TD
+  subgraph scored [Structured extraction]
+    claude["Claude Stop hook"] --> extract["RecallExtract"]
+    batch["OpenCode and Pi markdown drops"] --> batchExtract["RecallBatchExtract --reextract-md"]
+    batchExtract --> extract
+    import["conversation import"] --> structured["writeStructuredExtraction"]
+    extract --> parse["parse decisions, learnings, breadcrumbs"]
+    structured --> parse
+    parse --> key{"JEV_RECALL_KEY set?"}
+    key -->|no| write["write every parsed row"]
+    key -->|yes| jev["one POST, one Choice per candidate"]
+    jev -->|scored| gate{"keep / demote / drop"}
+    jev -->|timeout or bad response| write
+    gate -->|keep| write
+    gate -->|demote| low["write at importance 3"]
+    gate -->|drop| omit["omit that row"]
+  end
+  subgraph bypass [Native raw host-ingest]
+    omp["omp session_stop"] --> hook["recall host-hook"]
+    codex["Codex Stop"] --> hook
+    grok["Grok lifecycle hook"] --> hook
+    hook --> raw["write raw messages, skip Jev"]
+  end
+```
+
+Set the key in the process that runs the hook or CLI. Recall does not read `~/.env` on its own. Walk through that once in [Score one memory item with Jev](docs/score-a-memory-with-jev.md).
+
+
 ### Claude Code Session Lifecycle
 
 1. **Session starts** — A `SessionStart` hook injects two tiers of context: **L0 identity** (your global or project-local `identity.md`, always on) and **L1 top records** (top 12 by importance score, with 4 slots reserved for curated Library of Alexandria entries). L2/L3 stay on disk and are pulled on demand via MCP search.
@@ -370,6 +403,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
 | [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |
+| [Score one memory item with Jev](docs/score-a-memory-with-jev.md) | Export `JEV_RECALL_KEY` and prove one keep, demote, or drop score |
 | [Harness API](docs/api.md) | Thin `recall-memory/api` surface so a new harness can hook start/drop/capture/inject without forking core |
 | [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |
 | [Managing Recall](docs/lifecycle.md)       | Which command when: install, update, uninstall, custom DB, recovery       |

@@ -113,6 +113,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/session-start-context.ts"
   "$CLAUDE_DIR/hooks/lib/markdown-drop.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
+  "$CLAUDE_DIR/hooks/lib/jev.ts"
   "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
   "$CLAUDE_DIR/hooks/lib/session-progress.ts"
   "$CLAUDE_DIR/hooks/lib/threat-detect.ts"
