@@ -8,10 +8,10 @@ import { CREATE_TABLES } from '../src/db/schema';
 
 // v2→v3 migration SQL (inlined — formerly exported from schema.ts, now in migrations.ts)
 const MIGRATE_V2_TO_V3 = "ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'claude-code'";
-import { linearizeSession } from '../pi/RecallExtract';
+import { linearizeSession } from '../hosts/pi/RecallExtract';
 // Helpers live in opencode/lib/ because OpenCode calls every export of a
 // top-level plugin module as a plugin factory — see that file's header.
-import { exportSession, renderSessionExport, sessionIdFromEvent } from '../opencode/lib/session-export';
+import { exportSession, renderSessionExport, sessionIdFromEvent } from '../hosts/opencode/lib/session-export';
 
 // ─── OpenCode Runtime Contract Tests ───
 
@@ -25,7 +25,7 @@ describe('OpenCode plugin module contract', () => {
 
   for (const entry of pluginEntries) {
     test(`${entry}.ts exports only its plugin factory`, async () => {
-      const mod = await import(`../opencode/${entry}.ts`);
+      const mod = await import(`../hosts/opencode/${entry}.ts`);
       const exported = Object.keys(mod).filter(key => key !== 'default');
 
       expect(exported).toHaveLength(1);
@@ -34,8 +34,8 @@ describe('OpenCode plugin module contract', () => {
   }
 
   test('shared helpers are nested under opencode/lib so OpenCode does not glob them', () => {
-    expect(existsSync(join(import.meta.dir, '..', 'opencode', 'lib', 'session-export.ts'))).toBe(true);
-    expect(readdirSync(join(import.meta.dir, '..', 'opencode')).filter(f => f.endsWith('.ts')).sort())
+    expect(existsSync(join(import.meta.dir, '..', 'hosts', 'opencode', 'lib', 'session-export.ts'))).toBe(true);
+    expect(readdirSync(join(import.meta.dir, '..', 'hosts', 'opencode')).filter(f => f.endsWith('.ts')).sort())
       .toEqual(['RecallExtract.ts', 'RecallPreCompact.ts']);
   });
 });
@@ -309,7 +309,7 @@ describe('extraction tracker (dedup)', () => {
   // the data-loss bug this suite has to catch.
   async function loadPlugin(exports: Record<string, string>, onExport?: (id: string) => void) {
     process.env.RECALL_HOME = tempDir;
-    const mod = await import(`../opencode/RecallExtract.ts?tracker=${++cacheBuster}`);
+    const mod = await import(`../hosts/opencode/RecallExtract.ts?tracker=${++cacheBuster}`);
     return mod.RecallExtract({
       $: async (_s: TemplateStringsArray, ...values: unknown[]) => {
         const id = String(values[0]);
@@ -453,13 +453,13 @@ describe('compaction plugin logic', () => {
 
 describe('installer', () => {
   test('install.sh has no syntax errors', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     // bash -n does a syntax check without executing
     expect(() => execFileSync('bash', ['-n', installPath])).not.toThrow();
   });
 
   test('install.sh includes OpenCode config in backup list', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('OPENCODE_CONFIG_DIR');
@@ -467,7 +467,7 @@ describe('installer', () => {
   });
 
   test('install.sh detects both platforms', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('detect_platforms');
@@ -476,7 +476,7 @@ describe('installer', () => {
   });
 
   test('install.sh has JSONC-safe config parsing', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     // The dependency-free bundled helper parses comments/trailing commas and
@@ -666,7 +666,7 @@ describe('Installer: Pi Detection and MCP Config', () => {
 
 
   test('installer backup list includes Pi config files', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     // Pi-specific paths should appear in the install.sh
@@ -677,14 +677,14 @@ describe('Installer: Pi Detection and MCP Config', () => {
   });
 
   test('install.sh detects Pi platform', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('PI_DETECTED');
   });
 
   test('install.sh has Pi MCP configuration function', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('configure_pi_mcp');

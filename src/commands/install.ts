@@ -7,7 +7,7 @@
 // install`, `bun run build`, or `bun link`. We delegate to the canonical
 // install.sh in PACKAGED mode (RECALL_PACKAGED=1), which skips exactly those
 // bootstrap steps and runs only the canonical install. The git-checkout
-// `./install.sh` path is unchanged (RECALL_PACKAGED unset). See
+// `./packaging/install.sh` path is unchanged (RECALL_PACKAGED unset). See
 // src/lib/lifecycle.ts — same single-source delegation as update/uninstall.
 
 import { runLifecycleScript, type LifecycleDeps } from '../lib/lifecycle.js';

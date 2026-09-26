@@ -8,8 +8,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { existsSync } from 'fs';
 import { EMBEDDING_DIMENSIONS } from '../../src/lib/embeddings';
-import { runSuiteF, syntheticVector } from '../../benchmarks/suites/suite-f-search-latency';
-import { renderMarkdown } from '../../benchmarks/runner';
+import { runSuiteF, syntheticVector } from '../../docs/benchmarks/suites/suite-f-search-latency';
+import { renderMarkdown } from '../../docs/benchmarks/runner';
 import { closeDb } from '../../src/db/connection';
 import { isVecAvailable } from '../../src/db/vec';
 

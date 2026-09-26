@@ -117,8 +117,8 @@ describe('recall-memory/api harness seams', () => {
     const merged = mergeCursorHooksJson({ version: 1, hooks: {} });
     expect(merged.hooks.sessionStart).toEqual([{ command: CURSOR_SESSION_START_COMMAND }]);
     expect(existsSync(join(REPO, '.cursor-plugin'))).toBe(false);
-    expect(existsSync(join(REPO, 'plugins', 'recall-cursor'))).toBe(false);
-    const pluginDirs = existsSync(join(REPO, 'plugins')) ? readdirSync(join(REPO, 'plugins')) : [];
+    expect(existsSync(join(REPO, 'hosts', 'plugins', 'recall-cursor'))).toBe(false);
+    const pluginDirs = existsSync(join(REPO, 'hosts', 'plugins')) ? readdirSync(join(REPO, 'hosts', 'plugins')) : [];
     expect(pluginDirs.some(name => name.toLowerCase().includes('cursor'))).toBe(false);
     expect(typeof catalogCursorSessions).toBe('function');
   });

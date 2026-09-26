@@ -1,10 +1,10 @@
 // Benchmark runner — orchestrates suites and writes results.
 //
 // Usage from CLI: `recall benchmark run [suite]` (see src/commands/benchmark.ts).
-// Direct invocation: `bun run benchmarks/runner.ts [suite]`.
+// Direct invocation: `bun run docs/benchmarks/runner.ts [suite]`.
 //
-// Output: a JSONL file at benchmarks/results/<timestamp>-<suite>.jsonl plus a
-// rendered markdown report at benchmarks/results/<timestamp>-<suite>.md. The
+// Output: a JSONL file at docs/benchmarks/results/<timestamp>-<suite>.jsonl plus a
+// rendered markdown report at docs/benchmarks/results/<timestamp>-<suite>.md. The
 // JSONL is the source of truth (machine-readable, diffable). The markdown is
 // a human-friendly view of the same data.
 
@@ -162,7 +162,7 @@ export function renderMarkdown(result: RunResult): string {
   return lines.join('\n');
 }
 
-// Direct execution: `bun run benchmarks/runner.ts [suite] [project]`
+// Direct execution: `bun run docs/benchmarks/runner.ts [suite] [project]`
 const runsAsScript = process.argv[1]?.endsWith('runner.ts');
 if (runsAsScript) {
   const suiteArg = process.argv[2] as SuiteId | undefined;

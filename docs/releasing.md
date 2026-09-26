@@ -77,8 +77,8 @@ The command:
 2. Resolves the GitHub repository from `origin`'s push URL and checks existing local
    tags, remote tags, and GitHub releases. Existing release versions are never overwritten.
 3. Increments `package.json.version` and writes that version into both native plugin
-   manifests: `plugins/recall/.codex-plugin/plugin.json` and
-   `plugins/recall-claude/.claude-plugin/plugin.json`.
+   manifests: `hosts/plugins/recall/.codex-plugin/plugin.json` and
+   `hosts/plugins/recall-claude/.claude-plugin/plugin.json`.
 4. Moves nonempty `[Unreleased]` notes into a dated version heading, keeping an empty
    `[Unreleased]` heading for future work.
 5. Checks the version guard, then runs lint, the test suite, and the build.
@@ -126,7 +126,7 @@ Never move an existing release tag to a different commit.
 
 ## `update.sh` and the check commands
 
-`./update.sh --check` and `/do-recall-update` both query
+`./packaging/update.sh --check` and `/do-recall-update` both query
 `https://api.github.com/repos/edheltzel/Recall/releases/latest` for the
 current tag name. Make sure the release you create is marked as
 "Latest" (GitHub does this automatically for the newest non-draft,
@@ -156,7 +156,7 @@ release so the entry captures `### Added` / `### Changed` too.
 
 ## Never skip the CHANGELOG
 
-`./update.sh` and `/do-recall-update` read the GitHub release body for the
+`./packaging/update.sh` and `/do-recall-update` read the GitHub release body for the
 excerpt shown to users. If you push a tag without a release note, the
 update experience degrades to "new version available" with no detail —
 users won't know what they're updating to. Always release from the

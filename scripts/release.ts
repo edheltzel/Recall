@@ -7,8 +7,8 @@ import { assertVersionGuard, isStrictSemver, normalizeReleaseVersion } from '../
 
 const manifests = [
   'package.json',
-  'plugins/recall/.codex-plugin/plugin.json',
-  'plugins/recall-claude/.claude-plugin/plugin.json',
+  'hosts/plugins/recall/.codex-plugin/plugin.json',
+  'hosts/plugins/recall-claude/.claude-plugin/plugin.json',
 ];
 const releaseFiles = [...manifests, 'CHANGELOG.md'];
 

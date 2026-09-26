@@ -8,16 +8,16 @@
 # state and databases while retaining user-authored identity and distilled memory.
 #
 # Usage:
-#   ./uninstall.sh                  # preserve-everything default
-#   ./uninstall.sh --dry-run        # show what would change, touch nothing
-#   ./uninstall.sh --purge          # destroy runtime + DBs; preserve identity/distilled memory
-#   ./uninstall.sh --no-confirm     # non-interactive; prints what was removed
-#   ./uninstall.sh --skip-opencode  # leave OpenCode integration alone
-#   ./uninstall.sh --skip-pi        # leave Pi integration alone
-#   ./uninstall.sh --skip-grok      # leave Grok lifecycle capture alone
-#   ./uninstall.sh --skip-omp       # leave installer-owned omp skills alone
-#   ./uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
-#   ./uninstall.sh --help           # show this help
+#   ./packaging/uninstall.sh                  # preserve-everything default
+#   ./packaging/uninstall.sh --dry-run        # show what would change, touch nothing
+#   ./packaging/uninstall.sh --purge          # destroy runtime + DBs; preserve identity/distilled memory
+#   ./packaging/uninstall.sh --no-confirm     # non-interactive; prints what was removed
+#   ./packaging/uninstall.sh --skip-opencode  # leave OpenCode integration alone
+#   ./packaging/uninstall.sh --skip-pi        # leave Pi integration alone
+#   ./packaging/uninstall.sh --skip-grok      # leave Grok lifecycle capture alone
+#   ./packaging/uninstall.sh --skip-omp       # leave installer-owned omp skills alone
+#   ./packaging/uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
+#   ./packaging/uninstall.sh --help           # show this help
 #
 # Environment:
 #   RECALL_NO_GUM=1   Permanent gum opt-out (same as --no-gum)
@@ -28,8 +28,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=lib/install-lib.sh
-source "$SCRIPT_DIR/lib/install-lib.sh"
+# shellcheck source=../lib/install-lib.sh
+source "$SCRIPT_DIR/../lib/install-lib.sh"
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 
@@ -198,7 +198,7 @@ print_summary() {
     echo "  • User-authored identity.md and DISTILLED.md (materialized into ~/.claude/MEMORY/ when safe and included in the pre-purge snapshot)"
   fi
   echo "  • ~/.claude/MEMORY/ (non-Recall artifacts in this Claude-owned directory)"
-  echo "  • This source directory (remove with: rm -rf $SCRIPT_DIR)"
+  echo "  • This source directory (remove with: rm -rf $RECALL_REPO_DIR)"
   echo ""
 }
 
@@ -229,14 +229,7 @@ confirm_purge_or_exit() {
 # ── Removal steps ────────────────────────────────────────────────────────────
 
 remove_slash_commands() {
-  # Remove both Title-case (current) and legacy lowercase if present
-  local dir
-  for dir in "$CLAUDE_DIR/commands/Recall" "$CLAUDE_DIR/commands/recall"; do
-    if [[ -d "$dir" ]]; then
-      run rm -rf "$dir"
-      log_success "Removed $dir"
-    fi
-  done
+  recall_remove_legacy_slash_commands
 }
 
 remove_guide() {
@@ -261,52 +254,48 @@ remove_skills_from() {
   fi
 }
 
-# Filter Recall entries out of settings.json using a single bun -e pass.
-# Removes:
-#   - hooks[event] entries whose commands reference any RECALL_HOOK_NAMES
-#   - mcpServers["recall-memory"]
+# Filter Recall entries out of Claude config files.
+# Removes Recall hook commands and mcpServers["recall-memory"].
+# A file that is empty after that removal is deleted (#231).
 filter_claude_settings() {
-  local f="$CLAUDE_DIR/settings.json"
-  [[ ! -f "$f" ]] && return
-
-  if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  [dry-run] would filter Recall entries out of $f"
-    return
-  fi
-
-  SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" bun -e '
-    const fs = require("fs");
-    const file = process.env.SETTINGS_FILE;
-    const names = process.env.HOOK_NAMES_CSV.split(",");
-
-    let config = {};
-    try { config = JSON.parse(fs.readFileSync(file, "utf8")); } catch { process.exit(0); }
-
-    if (config.hooks && typeof config.hooks === "object") {
-      for (const event of Object.keys(config.hooks)) {
-        const list = config.hooks[event];
-        if (!Array.isArray(list)) continue;
-        const kept = list.filter(entry => {
-          const inner = (entry && entry.hooks) || [];
-          return !inner.some(h => h && h.command && names.some(n => h.command.includes(n)));
-        });
-        if (kept.length === 0) {
-          delete config.hooks[event];
-        } else {
-          config.hooks[event] = kept;
+  local f
+  for f in "$CLAUDE_DIR/settings.json" "$HOME/.claude.json"; do
+    [[ -f "$f" ]] || continue
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "  [dry-run] would filter Recall entries out of $f"
+      continue
+    fi
+    SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
+      JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
+      const fs = require("fs");
+      const { parseJsonc, writeJsonAtomic, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
+      const file = process.env.SETTINGS_FILE;
+      const names = process.env.HOOK_NAMES_CSV.split(",");
+      let config;
+      try { config = parseJsonc(fs.readFileSync(file, "utf8")); } catch { process.exit(0); }
+      if (!config || typeof config !== "object" || Array.isArray(config)) process.exit(0);
+      if (config.hooks && typeof config.hooks === "object") {
+        for (const event of Object.keys(config.hooks)) {
+          const list = config.hooks[event];
+          if (!Array.isArray(list)) continue;
+          const kept = list.filter(entry => {
+            const inner = (entry && entry.hooks) || [];
+            return !inner.some(h => h && h.command && names.some(n => h.command.includes(n)));
+          });
+          if (kept.length === 0) delete config.hooks[event];
+          else config.hooks[event] = kept;
         }
+        if (Object.keys(config.hooks).length === 0) delete config.hooks;
       }
-      if (Object.keys(config.hooks).length === 0) delete config.hooks;
-    }
-
-    if (config.mcpServers && config.mcpServers["recall-memory"]) {
-      delete config.mcpServers["recall-memory"];
-      if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
-    }
-
-    fs.writeFileSync(file, JSON.stringify(config, null, 2));
-  '
-  log_success "Filtered Recall entries from $f"
+      if (config.mcpServers && config.mcpServers["recall-memory"]) {
+        delete config.mcpServers["recall-memory"];
+        if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
+      }
+      if (isSemanticallyEmpty(config)) fs.unlinkSync(file);
+      else writeJsonAtomic(file, config);
+    '
+    log_success "Filtered Recall entries from $f"
+  done
 }
 
 # Some Claude Code installs register MCP servers via `claude mcp remove`
@@ -360,7 +349,7 @@ remove_hook_files() {
 # against the source as before, only remove if unmodified.
 remove_extract_prompt_if_unmodified() {
   local installed="$CLAUDE_DIR/MEMORY/extract_prompt.md"
-  local source_file="$SCRIPT_DIR/hooks/extract_prompt.md"
+  local source_file="$RECALL_REPO_DIR/hooks/extract_prompt.md"
 
   if [[ -L "$installed" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -809,7 +798,7 @@ main() {
       echo "  • Pre-purge database and user MEMORY snapshot at $BACKUP_BASE/pre_purge_$TIMESTAMP/"
       echo "  • ~/.claude/MEMORY/ (user files, including materialized Recall identity and distilled memory when safe)"
     fi
-    echo "  • Source directory at $SCRIPT_DIR (remove with: rm -rf $SCRIPT_DIR)"
+    echo "  • Source directory at $RECALL_REPO_DIR (remove with: rm -rf $RECALL_REPO_DIR)"
   fi
   echo ""
 }

@@ -75,7 +75,7 @@ If OpenCode is installed, Recall registers its MCP entry and native plugins.
 The integration requires the supported `opencode` CLI and Bun on `PATH`; the
 plugin uses `opencode export <session-id>` (JSON) and converts the result into a
 markdown drop for the shared batch extractor. Verify with `opencode --version`.
-Use `./install.sh --skip-opencode` when OpenCode should remain untouched.
+Use `./packaging/install.sh --skip-opencode` when OpenCode should remain untouched.
 
 ### Grok Build CLI (Optional)
 
@@ -129,14 +129,14 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not
 relocatable. `RECALL_DB_PATH` and `install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-**Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension (see [README Quick Start](../README.md#quick-start)). Use `./install.sh` / `recall install` for Grok, for Claude hooks, and for detected hosts that still need installer-owned files.
+**Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension (see [README Quick Start](../README.md#quick-start)). Use `./packaging/install.sh` / `recall install` for Grok, for Claude hooks, and for detected hosts that still need installer-owned files.
 
 Clone the repository to a permanent directory (not `/tmp`) when you need the installer script or a local marketplace root:
 
 ```bash
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
-./install.sh
+./packaging/install.sh
 ```
 
 > **Note:** Do not clone to a temporary directory. `bun link` creates symlinks back to the clone location — if the directory is removed (e.g. on reboot), `recall` commands will break.
@@ -258,7 +258,7 @@ crontab -e
 | `RECALL_VERBOSE` | `0` | Set to `1` to bypass output capture for `bun install` / `bun run build` (useful when debugging install failures). |
 | `NO_COLOR` | — | Standard; set to `1` to disable ANSI colors across all installer scripts. |
 
-Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`) if you need non-default values. The `RECALL_DB_PATH` variable is the most commonly changed — useful if you want to keep the database outside `~/.agents/Recall/`. You can also pass `--db-path /custom/path/recall.db` to `./install.sh` for non-interactive overrides.
+Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`) if you need non-default values. The `RECALL_DB_PATH` variable is the most commonly changed — useful if you want to keep the database outside `~/.agents/Recall/`. You can also pass `--db-path /custom/path/recall.db` to `./packaging/install.sh` for non-interactive overrides.
 
 ---
 
@@ -267,9 +267,9 @@ Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config
 The installer automatically creates a timestamped backup before making any changes. Backups are stored at `~/.claude/backups/recall/`.
 
 ```bash
-./install.sh list              # List available backups
-./install.sh restore           # Restore from most recent backup
-./install.sh restore 20260219  # Restore a specific backup by timestamp
+./packaging/install.sh list              # List available backups
+./packaging/install.sh restore           # Restore from most recent backup
+./packaging/install.sh restore 20260219  # Restore a specific backup by timestamp
 ```
 
 Manual database backup:
@@ -285,9 +285,9 @@ Recall ships an `uninstall.sh` that removes its integration surgically while pre
 
 ```bash
 cd /path/to/Recall
-./uninstall.sh --dry-run        # preview what will change, touch nothing
-./uninstall.sh                  # remove integration; preserve ~/.agents/Recall/ (DB + backups)
-./uninstall.sh --purge          # also destroy ~/.agents/Recall/ tree (confirmed)
+./packaging/uninstall.sh --dry-run        # preview what will change, touch nothing
+./packaging/uninstall.sh                  # remove integration; preserve ~/.agents/Recall/ (DB + backups)
+./packaging/uninstall.sh --purge          # also destroy ~/.agents/Recall/ tree (confirmed)
 ```
 
 ### What gets removed (default)

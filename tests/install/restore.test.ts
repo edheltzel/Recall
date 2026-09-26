@@ -20,7 +20,7 @@ import { spawnSync } from 'child_process';
 const REPO = join(import.meta.dir, '..', '..');
 
 /**
- * Installer rollback: `./install.sh restore [TIMESTAMP]`, documented in
+ * Installer rollback: `./packaging/install.sh restore [TIMESTAMP]`, documented in
  * docs/installation.md, had no coverage at all.
  *
  * `recall_do_restore` gates on `_confirm "Proceed with restore?" "N"`, and

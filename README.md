@@ -86,7 +86,7 @@ Then attach each coding agent with **that harness's native plugin or extension**
 | **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
 | **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
 | **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |
-| **Grok** | `recall install` / `./install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
+| **Grok** | `recall install` / `./packaging/install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
 | **Cursor** | Merge snippets under `templates/cursor/` | Marketplace plugin is locked off. |
 
 ```bash
@@ -111,7 +111,7 @@ npx --package=recall-memory recall install
 # Source checkout
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
-./install.sh
+./packaging/install.sh
 ```
 
 </details>
@@ -141,8 +141,8 @@ From inside Claude Code, `/do-recall-update` prints the current vs. latest
 release and the exact command to run. From a shell:
 
 ```bash
-./update.sh --check   # version check only
-./update.sh           # full update: pull, build, migrate, re-register hooks
+./packaging/update.sh --check   # version check only
+./packaging/update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
 Installed from npm? Use `recall update` (same flags) — or `bun install -g recall-memory@latest && recall install` to bump the binary.
@@ -150,9 +150,9 @@ Installed from npm? Use `recall update` (same flags) — or `bun install -g reca
 ### Uninstalling
 
 ```bash
-./uninstall.sh --dry-run   # preview, touch nothing
-./uninstall.sh             # surgical remove; preserves ~/.agents/Recall/ (DB + backups)
-./uninstall.sh --purge     # destroy runtime + DBs; preserve identity/distilled snapshots (confirmed)
+./packaging/uninstall.sh --dry-run   # preview, touch nothing
+./packaging/uninstall.sh             # surgical remove; preserves ~/.agents/Recall/ (DB + backups)
+./packaging/uninstall.sh --purge     # destroy runtime + DBs; preserve identity/distilled snapshots (confirmed)
 ```
 
 Installed from npm? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
@@ -285,7 +285,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ## Measured wake-up efficiency
 
-Suite B measures the byte cost of session-start memory injection. Latest tracked run ([2026-04-18, scope `atlas-recall`](benchmarks/results/2026-04-18T20-13-59-suite-B.md)):
+Suite B measures the byte cost of session-start memory injection. Latest tracked run ([2026-04-18, scope `atlas-recall`](docs/benchmarks/results/2026-04-18T20-13-59-suite-B.md)):
 
 | Variant                                      |     Chars | Tokens (est, 4 ch/tok) |
 | -------------------------------------------- | --------: | ---------------------: |
@@ -293,7 +293,7 @@ Suite B measures the byte cost of session-start memory injection. Latest tracked
 | v1 flat-blob RecallStart (simulated)       |     8,020 |                 ~2,005 |
 | CLAUDE.md static baseline                    |     8,760 |                 ~2,190 |
 
-v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `recall benchmark run B`. Methodology and caveats live in [`benchmarks/README.md`](benchmarks/README.md).
+v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static context; Recall is auto-extracted dynamic memory — the two are complementary, not competitors. Numbers scale with your own DB and L0 identity; reproduce with `recall benchmark run B`. Methodology and caveats live in [`docs/benchmarks/README.md`](docs/benchmarks/README.md).
 
 ## CLI at a Glance
 
@@ -331,11 +331,11 @@ If you're an AI agent reading this repository:
 
 | What you need                                                  | Where to find it                     |
 | -------------------------------------------------------------- | ------------------------------------ |
-| **Using Recall from Claude Code** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](FOR_CLAUDE.md)     |
+| **Using Recall from Claude Code** (MCP tools, CLI, core rules) | [`FOR_CLAUDE.md`](docs/hosts/FOR_CLAUDE.md)     |
 | **Installing the Claude Code plugin**                          | [`docs/CLAUDE_INTEGRATION.md`](docs/CLAUDE_INTEGRATION.md) |
-| **Using Recall from OpenCode**                                 | [`FOR_OPENCODE.md`](FOR_OPENCODE.md) |
+| **Using Recall from OpenCode**                                 | [`FOR_OPENCODE.md`](docs/hosts/FOR_OPENCODE.md) |
 | **Installing the Pi native package**                           | [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) |
-| **Using Recall from Pi**                                       | [`FOR_PI.md`](FOR_PI.md)             |
+| **Using Recall from Pi**                                       | [`FOR_PI.md`](docs/hosts/FOR_PI.md)             |
 | **Installing the Codex plugin**                                | [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) |
 | **Installing omp capture**                                     | [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md) |
 | **Using Recall from Grok**                                     | [`docs/GROK_INTEGRATION.md`](docs/GROK_INTEGRATION.md) |

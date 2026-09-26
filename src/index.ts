@@ -704,7 +704,7 @@ program
 // recall benchmark — Phase 2 benchmark harness
 const benchmarkCmd = program
   .command('benchmark')
-  .description('Run, list, or report Phase 2 benchmarks (see benchmarks/README.md)');
+  .description('Run, list, or report Phase 2 benchmarks (see docs/benchmarks/README.md)');
 
 benchmarkCmd
   .command('run [suite]')
