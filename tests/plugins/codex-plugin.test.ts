@@ -13,11 +13,11 @@ afterEach(() => {
 describe('Codex native plugin package', () => {
   test('manifest, MCP config, and marketplace use one lowercase plugin identity', () => {
     const manifest = JSON.parse(
-      readFileSync(join(repoRoot, 'plugins/recall/.codex-plugin/plugin.json'), 'utf-8')
+      readFileSync(join(repoRoot, 'hosts/plugins/recall/.codex-plugin/plugin.json'), 'utf-8')
     );
-    const mcp = JSON.parse(readFileSync(join(repoRoot, 'plugins/recall/.mcp.json'), 'utf-8'));
+    const mcp = JSON.parse(readFileSync(join(repoRoot, 'hosts/plugins/recall/.mcp.json'), 'utf-8'));
     const hooks = JSON.parse(
-      readFileSync(join(repoRoot, 'plugins/recall/hooks/hooks.json'), 'utf-8')
+      readFileSync(join(repoRoot, 'hosts/plugins/recall/hooks/hooks.json'), 'utf-8')
     );
     const marketplace = JSON.parse(
       readFileSync(join(repoRoot, '.agents/plugins/marketplace.json'), 'utf-8')
@@ -43,7 +43,7 @@ describe('Codex native plugin package', () => {
     expect(marketplace.name).toBe('recall-marketplace');
     expect(marketplace.plugins).toHaveLength(1);
     expect(marketplace.plugins[0].name).toBe('recall');
-    expect(marketplace.plugins[0].source.path).toBe('./plugins/recall');
+    expect(marketplace.plugins[0].source.path).toBe('./hosts/plugins/recall');
   });
 
   test('checked-in Codex skill adapters exactly match generated output', () => {
@@ -53,17 +53,17 @@ describe('Codex native plugin package', () => {
     for (const name of names) {
       const expected = readFileSync(join(tempDir, name, 'SKILL.md'), 'utf-8');
       const actual = readFileSync(
-        join(repoRoot, 'plugins/recall/skills', name, 'SKILL.md'),
+        join(repoRoot, 'hosts/plugins/recall/skills', name, 'SKILL.md'),
         'utf-8'
       );
       expect(actual).toBe(expected);
       expect(actual).toContain('equivalent behavior is not assumed across hosts');
     }
     expect(
-      readFileSync(join(repoRoot, 'plugins/recall/skills/do-recall-dump/agents/openai.yaml'), 'utf-8')
+      readFileSync(join(repoRoot, 'hosts/plugins/recall/skills/do-recall-dump/agents/openai.yaml'), 'utf-8')
     ).toContain('allow_implicit_invocation: false');
     expect(
-      readFileSync(join(repoRoot, 'plugins/recall/skills/do-recall-dump/SKILL.md'), 'utf-8')
+      readFileSync(join(repoRoot, 'hosts/plugins/recall/skills/do-recall-dump/SKILL.md'), 'utf-8')
     ).not.toContain('disable-model-invocation');
   });
 });

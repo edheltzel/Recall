@@ -19,7 +19,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const INSTALL_LIB = join(process.cwd(), 'lib', 'install-lib.sh');
-const INSTALL_SH = join(process.cwd(), 'install.sh');
+const INSTALL_SH = join(process.cwd(), 'packaging', 'install.sh');
 
 interface RunResult {
   stdout: string;
@@ -111,7 +111,7 @@ describe('install.sh completion sentinel (#27)', () => {
     const r = runDriver(['recall_mark_install_incomplete', 'recall_warn_if_install_incomplete']);
     expect(r.status).toBe(0); // warn-only: never aborts, never auto-repairs
     expect(r.stdout).toContain('did not finish');
-    expect(r.stdout).toContain('re-run ./install.sh');
+    expect(r.stdout).toContain('re-run ./packaging/install.sh');
     expect(existsSync(marker)).toBe(true); // left in place; not auto-cleared
   });
 
@@ -162,7 +162,7 @@ describe('install.sh completion sentinel (#27)', () => {
     const r = runDriver(['recall_mark_install_incomplete', 'recall_finalize_install false']);
     expect(r.status).not.toBe(0);             // no more "installed with warnings"
     expect(existsSync(marker)).toBe(true);    // marker left for the next run / doctor
-    expect(r.stderr).toContain('re-run ./install.sh'); // recovery via log_error → stderr
+    expect(r.stderr).toContain('re-run ./packaging/install.sh'); // recovery via log_error → stderr
   });
 
   // ── Skill command surface floor (#235) ──────────────────────────────────────

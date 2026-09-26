@@ -27,12 +27,12 @@ recall benchmark list
 Direct invocation also works:
 
 ```bash
-bun run benchmarks/runner.ts B atlas-recall
+bun run docs/benchmarks/runner.ts B atlas-recall
 ```
 
 ## Output
 
-Each run writes two files to `benchmarks/results/`:
+Each run writes two files to `docs/benchmarks/results/`:
 
 - `<timestamp>-<suite>.jsonl` — machine-readable result, one JSON object per line. **Source of truth.** Diffable across runs.
 - `<timestamp>-<suite>.md` — rendered markdown report for humans.
@@ -66,7 +66,7 @@ Suite C answers one question: **when the database is full of junk, does `search(
 - **Queries.** Four labeled categories: exact project/name lookup, paraphrased decision lookup, learning/problem lookup, and noisy ambiguous queries. Ambiguous queries carry explicit collision labels (name / project / topic) so failures can be attributed to entity ambiguity vs generic ranking noise.
 - **Metrics.** Precision@5, Recall@5, and MRR@5 per corpus size, plus breakdowns by query category, by ground-truth table (`r_at_5_table_*`), and by provenance (`r_at_5_prov_*`). No composite scores, per the methodology rules.
 - **Latency.** One unmeasured warmup pass per corpus size, then 5 measured repeats per query on a warm connection; p50/p95 are computed across all measured calls at that size. The report caveats state the protocol and whether the embedding service was available — Suite C exercises the FTS5 keyword path only.
-- **Baseline-first.** The first run records an honest baseline; there is no pass/fail threshold. Later regression gating can diff runs against the checked-in baseline JSONL in `benchmarks/results/`.
+- **Baseline-first.** The first run records an honest baseline; there is no pass/fail threshold. Later regression gating can diff runs against the checked-in baseline JSONL in `docs/benchmarks/results/`.
 - **Overrides.** `RECALL_BENCH_C_SIZES` (comma-separated) and `RECALL_BENCH_C_REPEATS` override the corpus ladder and repeat count — used by tests to keep CI fast; leave unset for comparable real runs. `RECALL_BENCH_C_DEDUP=1` runs `recall dedup --execute` (exact + stored-embedding semantic, non-destructive marking) over each corpus between seeding and measurement, so a run can be diffed against the no-dedup baseline (issue #78); default off, so the baseline path is unchanged. `RECALL_BENCH_C_EMBED_BACKFILL=1` (issue #99) additionally backfills embeddings for every dedup-eligible record before that dedup pass — via the real embedding service — so the semantic pass actually runs instead of skipping; it requires `RECALL_BENCH_C_DEDUP=1` and a reachable embedding service (it throws rather than fabricating vectors), and is default off so both the baseline and the #78 exact-only paths are unchanged.
 
 ## Suite F methodology — search latency
@@ -83,7 +83,7 @@ Suite F answers one question: **how does query latency grow as the DB grows, for
 
 ## Adding a new suite
 
-1. Create `benchmarks/suites/suite-<id>-<name>.ts` exporting `runSuite<id>(): Promise<SuiteResult>`.
-2. Add a case in `benchmarks/runner.ts:dispatchSuite`.
+1. Create `docs/benchmarks/suites/suite-<id>-<name>.ts` exporting `runSuite<id>(): Promise<SuiteResult>`.
+2. Add a case in `docs/benchmarks/runner.ts:dispatchSuite`.
 3. Add tests under `tests/benchmarks/`.
 4. Update this README.

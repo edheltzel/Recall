@@ -50,7 +50,7 @@ re-run `recall onboard --print` to preview length before writing.
 sudo apt-get install -y unzip
 ```
 
-Then re-run `./install.sh`.
+Then re-run `./packaging/install.sh`.
 
 ### "Fabric extraction failed"
 
@@ -83,9 +83,9 @@ spawn a fresh MCP server and it silently fails.
 
 Common causes:
 - `bun unlink`, `bun upgrade`, or `npm` clean-up removed the symlink
-- An older `./update.sh` (pre-0.7.21) didn't re-run `bun link` after
+- An older `./packaging/update.sh` (pre-0.7.21) didn't re-run `bun link` after
   rebuild, leaving the symlink stale after `bun install` pruning
-- `./update.sh` was run from a git worktree instead of the main
+- `./packaging/update.sh` was run from a git worktree instead of the main
   checkout, redirecting the global `recall` registry to the worktree
   — which then vanished when the worktree was removed
 
@@ -102,10 +102,10 @@ Or, from a shell:
 
 ```bash
 cd /path/to/Recall
-./update.sh --force --no-confirm
+./packaging/update.sh --force --no-confirm
 ```
 
-Starting in **0.7.21**, `./update.sh` runs `bun link` after every
+Starting in **0.7.21**, `./packaging/update.sh` runs `bun link` after every
 rebuild. Starting in **0.7.22**, it also *verifies* that the bin
 symlinks resolve to readable files after linking — so a silent
 `bun link` no-op now surfaces with a diagnostic instead of reporting
@@ -119,13 +119,13 @@ symlinks resolve to readable files after linking — so a silent
 4. Check bun accessible: `which bun` (hooks resolve bun dynamically — not hardcoded)
 5. Check claude CLI available: `which claude`
 
-Extraction hooks fire on the `Stop` event. If the hook isn't registered in `settings.json`, re-run `./install.sh`.
+Extraction hooks fire on the `Stop` event. If the hook isn't registered in `settings.json`, re-run `./packaging/install.sh`.
 
 ### "OpenCode sessions are not being captured"
 
 1. Verify the host and runtime: `opencode --version` and `bun --version`.
 2. Verify the host export contract: `opencode export <session-id>` should print JSON.
-3. Check the installed plugin, its helper, and the config: `ls ~/.config/opencode/plugins/RecallExtract.ts ~/.config/opencode/plugins/lib/session-export.ts` and inspect `opencode.json` for `mcp.recall-memory`. The plugin imports the helper, so an install that predates it fails to load and captures nothing. Re-run `./install.sh` (or `./update.sh`) to place both.
+3. Check the installed plugin, its helper, and the config: `ls ~/.config/opencode/plugins/RecallExtract.ts ~/.config/opencode/plugins/lib/session-export.ts` and inspect `opencode.json` for `mcp.recall-memory`. The plugin imports the helper, so an install that predates it fails to load and captures nothing. Re-run `./packaging/install.sh` (or `./packaging/update.sh`) to place both.
 4. Check the drop directory: `ls ~/.agents/Recall/MEMORY/opencode-sessions/`.
 5. Run the batch extractor manually with `bun run ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts --dry-run`.
 
@@ -200,7 +200,7 @@ post-rebuild and fails loudly if linking silently no-ops):
 
 ```bash
 cd /path/to/Recall
-./update.sh --force --no-confirm
+./packaging/update.sh --force --no-confirm
 ```
 
 See also: ["MCP worked yesterday but broke after I restarted Claude Code"](#mcp-worked-yesterday-but-broke-after-i-restarted-claude-code)

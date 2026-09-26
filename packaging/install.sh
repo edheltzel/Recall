@@ -4,9 +4,9 @@
 # Backs up existing files before ANY changes, supports restore
 #
 # Usage:
-#   ./install.sh          # Install with automatic backup
-#   ./install.sh restore  # Restore from most recent backup
-#   ./install.sh list     # List available backups
+#   ./packaging/install.sh          # Install with automatic backup
+#   ./packaging/install.sh restore  # Restore from most recent backup
+#   ./packaging/install.sh list     # List available backups
 #
 
 set -euo pipefail
@@ -15,8 +15,8 @@ set -euo pipefail
 # regardless of CWD.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=lib/install-lib.sh
-source "$SCRIPT_DIR/lib/install-lib.sh"
+# shellcheck source=../lib/install-lib.sh
+source "$SCRIPT_DIR/../lib/install-lib.sh"
 
 # Error trap — render structured failure panel with the failing step,
 # captured log tail, and the exact restore command. yellow-3.3 of the
@@ -45,7 +45,7 @@ cleanup() {
         "  $BACKUP_DIR"
         ""
         "To recover:"
-        "  ./install.sh restore"
+        "  ./packaging/install.sh restore"
         ""
       )
     fi
@@ -149,7 +149,7 @@ do_install() {
   # Bootstrap steps — vendoring deps, building dist/, and linking the global
   # bins. Packaged installs (RECALL_PACKAGED=1, set by `recall install`) already
   # have all three from the package manager, so they are skipped there. The
-  # git-checkout `./install.sh` path (RECALL_PACKAGED unset) runs them as before.
+  # git-checkout `./packaging/install.sh` path (RECALL_PACKAGED unset) runs them as before.
   if [[ "${RECALL_PACKAGED:-false}" != "true" ]]; then
     _step "Installing" "Bun dependencies"
     if ! _run_quiet "bun install" bun install; then
@@ -197,8 +197,8 @@ do_install() {
   recall_register_all_hooks
 
   _step "Guide" "Installing Recall guide"
-  if [[ -f "$RECALL_REPO_DIR/FOR_CLAUDE.md" ]]; then
-    recall_copy_canonical "$RECALL_REPO_DIR/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+  if [[ -f "$RECALL_REPO_DIR/docs/hosts/FOR_CLAUDE.md" ]]; then
+    recall_copy_canonical "$RECALL_REPO_DIR/docs/hosts/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     recall_link "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     log_success "Installed at $CLAUDE_DIR/Recall_GUIDE.md"
   fi
@@ -293,7 +293,7 @@ do_install() {
   log_success "Recall installed successfully — all systems operational."
   echo ""
   echo "Backup location: $BACKUP_DIR"
-  echo "To restore:      ./install.sh restore"
+  echo "To restore:      ./packaging/install.sh restore"
   echo ""
   echo "Platforms configured:"
   [[ "$CLAUDE_CODE_DETECTED" == "true" ]] && echo "  ✓ Claude Code (MCP + hooks + CLAUDE.md)"
@@ -345,14 +345,14 @@ help | --help | -h)
   echo "Recall Install Script"
   echo ""
   echo "Usage:"
-  echo "  ./install.sh                          Install Recall (creates backup first)"
-  echo "  ./install.sh --yes | -y               Install non-interactively (configure all detected agents)"
-  echo "  ./install.sh --no-gum                 Skip gum auto-install; use bash UX for this run"
-  echo "  ./install.sh --db-path PATH           Use a custom database path (skips the interactive prompt)"
-  echo "  ./install.sh restore                  Restore from most recent backup"
-  echo "  ./install.sh restore TIMESTAMP        Restore specific backup"
-  echo "  ./install.sh list                     List available backups"
-  echo "  ./install.sh help                     Show this help"
+  echo "  ./packaging/install.sh                          Install Recall (creates backup first)"
+  echo "  ./packaging/install.sh --yes | -y               Install non-interactively (configure all detected agents)"
+  echo "  ./packaging/install.sh --no-gum                 Skip gum auto-install; use bash UX for this run"
+  echo "  ./packaging/install.sh --db-path PATH           Use a custom database path (skips the interactive prompt)"
+  echo "  ./packaging/install.sh restore                  Restore from most recent backup"
+  echo "  ./packaging/install.sh restore TIMESTAMP        Restore specific backup"
+  echo "  ./packaging/install.sh list                     List available backups"
+  echo "  ./packaging/install.sh help                     Show this help"
   echo ""
   echo "Environment:"
   echo "  RECALL_DB_PATH                        Database path (primary)"
@@ -399,7 +399,7 @@ help | --help | -h)
         ;;
       *)
         echo "Error: unknown argument: $1" >&2
-        echo "Run ./install.sh --help for usage." >&2
+        echo "Run ./packaging/install.sh --help for usage." >&2
         exit 1
         ;;
     esac

@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-Recall ships its command surface as [Agent Skills](https://agentskills.io) — one canonical `SKILL.md` per skill under `agent-skills/`. Claude Code and omp receive per-file links in their skill homes; Pi discovers the canonicals directly through Recall's native package manifest. Codex receives generated native adapters in `plugins/recall/skills/`; Grok and JCode can load the same canonical skill bodies through their host setup. Byte-identical skill text is not treated as behavioral equivalence across hosts. In Claude Code, invoke skills as `/do-recall-<name>`; the model can also trigger most of them itself when the conversation calls for it.
+Recall ships its command surface as [Agent Skills](https://agentskills.io) — one canonical `SKILL.md` per skill under `agent-skills/`. Claude Code and omp receive per-file links in their skill homes; Pi discovers the canonicals directly through Recall's native package manifest. Codex receives generated native adapters in `hosts/plugins/recall/skills/`; Grok and JCode can load the same canonical skill bodies through their host setup. Byte-identical skill text is not treated as behavioral equivalence across hosts. In Claude Code, invoke skills as `/do-recall-<name>`; the model can also trigger most of them itself when the conversation calls for it.
 
 > **Migrating from `/Recall:*` slash commands?** The old namespaced slash commands were retired in favor of these skills (issue #228) — same bodies, one namespace across all hosts. `install.sh` / `update.sh` remove the stale `~/.claude/commands/Recall/` symlinks automatically. See [Upgrading](upgrading.md).
 
@@ -81,7 +81,7 @@ Check whether a newer Recall release is available on GitHub.
 
 **Usage:** `/do-recall-update`
 
-Check-only — prints the current version, the latest release tag, a short excerpt of the release notes, and the exact `cd <path> && ./update.sh` recipe. It never runs `update.sh` inline because rebuilding the `recall` binary mid-session can corrupt in-flight hook invocations. Exit the coding agent, run the recipe, and restart.
+Check-only — prints the current version, the latest release tag, a short excerpt of the release notes, and the exact `cd <path> && ./packaging/update.sh` recipe. It never runs `update.sh` inline because rebuilding the `recall` binary mid-session can corrupt in-flight hook invocations. Exit the coding agent, run the recipe, and restart.
 
 Rate limit: GitHub's anonymous API is 60 requests/hour per IP. On throttle, the skill falls back to pointing at <https://github.com/edheltzel/Recall/releases>.
 
@@ -97,4 +97,4 @@ Skill names use the canonical `do-recall-*` namespace. Claude and Codex load the
 
 The Codex plugin adapters are generated with `bun run build:codex-plugin` and packaged with the native plugin bundle documented in [Codex Integration](CODEX_INTEGRATION.md). Claude copies are generated with `bun run build:claude-plugin`; see [Claude Integration](CLAUDE_INTEGRATION.md).
 
-If installer-linked skills are missing after an update, re-run `./install.sh` to relink them. These links are omp's supported skill path; its native extension handles capture only. Claude, Codex, and Pi prefer their native attachments.
+If installer-linked skills are missing after an update, re-run `./packaging/install.sh` to relink them. These links are omp's supported skill path; its native extension handles capture only. Claude, Codex, and Pi prefer their native attachments.

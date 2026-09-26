@@ -6,7 +6,7 @@
 
 Claude lifecycle hooks are **not** in the plugin. Plugin hooks *merge* with `settings.json` rather than replacing them, so shipping `Stop` / `SessionStart` / `PreCompact` in the bundle would double-capture for anyone who also ran `recall install`. Auto-capture, tiered L0/L1 injection, and pre-compaction flushing stay installer-owned.
 
-The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plugin bundle is `plugins/recall-claude/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
+The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plugin bundle is `hosts/plugins/recall-claude/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
 
 ## Install (preferred)
 
@@ -32,7 +32,7 @@ The local repository path is required for the current checked-in marketplace. A 
 recall install
 ```
 
-With the plugin active, `recall install` / `./update.sh` keep the Claude hooks and skip duplicate skill symlinks and the user-scope `recall-memory` MCP entry. Running only the plugin gives skills and MCP, not automatic capture.
+With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks and skip duplicate skill symlinks and the user-scope `recall-memory` MCP entry. Running only the plugin gives skills and MCP, not automatic capture.
 
 ## What MCP covers
 
@@ -56,7 +56,7 @@ Claude collapses the two MCP entries only when they resolve to an identical comm
 `install.sh` and `update.sh` reconcile this, and both are idempotent — run either after installing the plugin:
 
 ```bash
-./update.sh
+./packaging/update.sh
 ```
 
 With the plugin active they:
@@ -83,7 +83,7 @@ Uninstalling is a separate, user-owned action — `uninstall.sh` does not remove
 
 ```bash
 claude plugin uninstall recall@recall-marketplace
-./install.sh   # restores the lifecycle-owned skills and MCP registration
+./packaging/install.sh   # restores the lifecycle-owned skills and MCP registration
 ```
 
 ## What the plugin does not cover
@@ -94,7 +94,7 @@ claude plugin uninstall recall@recall-marketplace
 
 Named explicitly rather than assumed away, because identical `SKILL.md` bytes do not imply identical behavior across hosts:
 
-| | Codex (`plugins/recall/`) | Claude (`plugins/recall-claude/`) |
+| | Codex (`hosts/plugins/recall/`) | Claude (`hosts/plugins/recall-claude/`) |
 | --- | --- | --- |
 | Manifest | `.codex-plugin/plugin.json` | `.claude-plugin/plugin.json` |
 | Marketplace | `.agents/plugins/marketplace.json` | `.claude-plugin/marketplace.json` |
@@ -123,10 +123,10 @@ None of these block the nine MCP operations or the skill surface.
 
 Maintainer-only. Not the install path.
 
-Canonical skills live in `agent-skills/`. Regenerate the Claude payload with `bun run build:claude-plugin` (`scripts/build-claude-plugin.ts`). Do not hand-edit `plugins/recall-claude/skills/`. Skill names use `do-recall-*`.
+Canonical skills live in `agent-skills/`. Regenerate the Claude payload with `bun run build:claude-plugin` (`scripts/build-claude-plugin.ts`). Do not hand-edit `hosts/plugins/recall-claude/skills/`. Skill names use `do-recall-*`.
 
 ```bash
-claude plugin validate plugins/recall-claude --strict
+claude plugin validate hosts/plugins/recall-claude --strict
 claude plugin validate . --strict
 bun test tests/plugins/claude-plugin.test.ts
 bun run test:e2e:claude-plugin

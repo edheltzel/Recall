@@ -29,16 +29,16 @@ export interface LifecycleDeps {
 }
 
 const SCRIPTS = {
-  install: 'install.sh',
-  update: 'update.sh',
-  uninstall: 'uninstall.sh',
+  install: 'packaging/install.sh',
+  update: 'packaging/update.sh',
+  uninstall: 'packaging/uninstall.sh',
 } as const;
 
 export type LifecycleCommand = keyof typeof SCRIPTS;
 
 /**
- * Resolve the Recall repo/package root — the directory that holds install.sh,
- * update.sh, uninstall.sh, and lib/install-lib.sh.
+ * Resolve the Recall repo/package root — the directory that holds packaging/install.sh,
+ * packaging/update.sh, packaging/uninstall.sh, and lib/install-lib.sh.
  *
  * Precedence:
  *   1. $RECALL_REPO_DIR — the same override lib/install-lib.sh honors. This is

@@ -23,9 +23,9 @@ import {
   mean,
   refKey,
   searchTableName,
-} from '../../benchmarks/suites/suite-c-internals';
-import { runSuiteC } from '../../benchmarks/suites/suite-c-precision-noise';
-import { renderMarkdown } from '../../benchmarks/runner';
+} from '../../docs/benchmarks/suites/suite-c-internals';
+import { runSuiteC } from '../../docs/benchmarks/suites/suite-c-precision-noise';
+import { renderMarkdown } from '../../docs/benchmarks/runner';
 import { initDb, closeDb } from '../../src/db/connection';
 
 const QUERY_CATEGORIES = ['exact_lookup', 'paraphrase', 'problem_lookup', 'ambiguous'] as const;

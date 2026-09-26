@@ -26,7 +26,7 @@ import { join } from 'path';
 
 const REPO = process.cwd();
 const INSTALL_LIB = join(REPO, 'lib', 'install-lib.sh');
-const UNINSTALL = join(REPO, 'uninstall.sh');
+const UNINSTALL = join(REPO, 'packaging', 'uninstall.sh');
 
 interface RunResult {
   stdout: string;
