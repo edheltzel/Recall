@@ -253,6 +253,7 @@ crontab -e
 | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
 | `Recall_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for the automatic Extractor |
 | `RECALL_FABRIC_MODEL` | `claude-haiku-4-5` | Fabric `-m` model for Curated LoA |
+| `JEV_RECALL_KEY` | _(unset)_ | Optional. Structured extraction scores decisions, learnings, and breadcrumbs when this is set in that process. Missing or blank skips scoring and still writes those rows. Native `recall host-hook` capture does not use it. Recall does not read `~/.env`. See [Score one memory item with Jev](score-a-memory-with-jev.md). |
 | `RECALL_BASE_DIR` | `~/.claude` | Base directory for document imports |
 | `RECALL_NO_GUM` | `0` | Set to `1` to skip the optional [`gum`](https://github.com/charmbracelet/gum) auto-install and use the bash UI for installer/update/uninstall. Same effect as the `--no-gum` flag, but persistent across all runs. |
 | `RECALL_VERBOSE` | `0` | Set to `1` to bypass output capture for `bun install` / `bun run build` (useful when debugging install failures). |
