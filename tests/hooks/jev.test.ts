@@ -4,10 +4,6 @@ import {
   scoreCandidates,
   type JevBatchCandidate,
 } from '../../hooks/lib/jev';
-import {
-  JEV_KEY_ENV as srcKeyEnv,
-  scoreCandidates as scoreCandidatesFromSrc,
-} from '../../src/providers/jev';
 
 const SECRET = 'jev-test-secret';
 
@@ -183,83 +179,5 @@ describe('hook scoreCandidates', () => {
       env: {},
     });
     expect(missing).toEqual({ status: 'error', error: 'Jev response missing an answer for l0' });
-  });
-
-  test('matches the src scorer request and result', async () => {
-    expect(JEV_KEY_ENV).toBe(srcKeyEnv);
-
-    const scenarios: Array<{
-      name: string;
-      list: readonly JevBatchCandidate[];
-      apiKey?: string;
-      env: NodeJS.ProcessEnv;
-      timeoutMs?: number;
-      respond: (init: RequestInit | undefined) => Response | Promise<Response>;
-    }> = [
-      {
-        name: 'scored',
-        list: candidates,
-        apiKey: SECRET,
-        env: {},
-        respond: () => choiceResponse(scoredAnswers),
-      },
-      {
-        name: 'skipped',
-        list: candidates,
-        env: {},
-        respond: () => new Response(SECRET, { status: 500 }),
-      },
-      {
-        name: 'http',
-        list: candidates,
-        apiKey: SECRET,
-        env: {},
-        respond: () => new Response(SECRET, { status: 500 }),
-      },
-      {
-        name: 'malformed',
-        list: [candidates[0]],
-        apiKey: SECRET,
-        env: {},
-        respond: () => new Response(SECRET, { status: 200 }),
-      },
-      {
-        name: 'timeout',
-        list: [candidates[2]],
-        apiKey: SECRET,
-        env: {},
-        timeoutMs: 30,
-        respond: (init) => new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => {
-            reject(Object.assign(new Error(`aborted ${SECRET}`), { name: 'AbortError' }));
-          }, { once: true });
-        }),
-      },
-    ];
-
-    for (const scenario of scenarios) {
-      const srcSeen = recordedFetch(scenario.respond);
-      const hookSeen = recordedFetch(scenario.respond);
-      const options = {
-        apiKey: scenario.apiKey,
-        env: scenario.env,
-        timeoutMs: scenario.timeoutMs,
-      };
-      const srcResult = await scoreCandidatesFromSrc(scenario.list, { ...options, fetch: srcSeen.fetch });
-      const hookResult = await scoreCandidates(scenario.list, { ...options, fetch: hookSeen.fetch });
-      expect(hookResult).toEqual(srcResult);
-      expect(hookSeen.calls.map(call => ({
-        url: call.url,
-        method: call.method,
-        body: call.body,
-        authorization: new Headers(call.headers).get('authorization'),
-      }))).toEqual(srcSeen.calls.map(call => ({
-        url: call.url,
-        method: call.method,
-        body: call.body,
-        authorization: new Headers(call.headers).get('authorization'),
-      })));
-      expect(JSON.stringify(hookResult)).not.toContain(SECRET);
-    }
   });
 });

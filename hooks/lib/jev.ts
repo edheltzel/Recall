@@ -1,11 +1,19 @@
-// Self-contained batch scorer for hooks. Never import from src/.
+// Canonical Jev scorer. Hooks consume this file; src/providers/jev.ts re-exports it.
+// Never import from src/.
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const MODEL = 'jev-latest';
+const QUESTION_ID = 'disposition';
 
 export const JEV_KEY_ENV = 'JEV_RECALL_KEY';
 
 export type JevDisposition = 'keep' | 'demote' | 'drop';
+
+export interface JevCandidate {
+  text: string;
+  kind?: string;
+  project?: string;
+}
 
 export interface JevDecision {
   choice: JevDisposition;
@@ -20,6 +28,12 @@ const MEANINGS = [
   'demote: store it at reduced importance because it is real but weak, partial, or soon stale.',
   'drop: do not store it because it has no future recall value.',
 ];
+
+const INSTRUCTIONS = [
+  'Should this candidate memory item be kept, demoted, or dropped when Recall ingests it?',
+  ...MEANINGS,
+  'Judge `text`, and use `kind` and `project` when those fields are present.',
+].join(' ');
 
 const CRITERIA = {
   keep: {
@@ -36,10 +50,13 @@ const CRITERIA = {
   },
 };
 
-export interface ScoreCandidatesOptions {
+export interface ScoreCandidateOptions {
   fetch?: typeof fetch;
   apiKey?: string;
   env?: NodeJS.ProcessEnv;
+}
+
+export interface ScoreCandidatesOptions extends ScoreCandidateOptions {
   timeoutMs?: number;
 }
 
@@ -101,6 +118,55 @@ function decisionFromAnswer(answer: unknown): JevDecision {
     probabilities: readProbabilities(record.probabilities),
     confidence: record.confidence,
   };
+}
+
+function requiredKey(env: NodeJS.ProcessEnv): string {
+  const key = env[JEV_KEY_ENV];
+  if (typeof key !== 'string' || key.trim() === '') {
+    throw new Error(`${JEV_KEY_ENV} is not set`);
+  }
+  return key;
+}
+
+function stateFor(candidate: JevCandidate): Record<string, string> {
+  const state: Record<string, string> = {};
+  if (candidate.kind) state.kind = candidate.kind;
+  state.text = candidate.text;
+  if (candidate.project) state.project = candidate.project;
+  return state;
+}
+
+export async function scoreCandidate(
+  candidate: JevCandidate,
+  options: ScoreCandidateOptions = {},
+): Promise<JevDecision> {
+  const apiKey = options.apiKey ?? requiredKey(options.env ?? process.env);
+  const call = options.fetch ?? fetch;
+  const response = await call(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      state: stateFor(candidate),
+      model: MODEL,
+      questions: {
+        [QUESTION_ID]: {
+          type: 'choice',
+          instructions: INSTRUCTIONS,
+          criteria: CRITERIA,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Jev request failed: HTTP ${response.status}`);
+  }
+
+  const body = await response.json() as { answers?: Record<string, unknown> };
+  return decisionFromAnswer(body.answers?.[QUESTION_ID]);
 }
 
 function presentKey(value: string): string | undefined {
@@ -287,4 +353,48 @@ export async function scoreCandidates(
   } finally {
     timeout.done();
   }
+}
+
+export interface JevCounts {
+  kept: number;
+  demoted: number;
+  dropped: number;
+  skipped: number;
+}
+
+export function jevCounts(
+  candidates: readonly { id: string }[],
+  scored: JevBatchResult,
+): JevCounts {
+  if (scored.status === 'skipped') {
+    return { kept: 0, demoted: 0, dropped: 0, skipped: candidates.length };
+  }
+  if (scored.status !== 'scored') {
+    return { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
+  }
+  const counts: JevCounts = { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
+  for (const candidate of candidates) {
+    // Missing choice counts as keep, matching applyChoices.
+    const choice = scored.decisions[candidate.id]?.choice ?? 'keep';
+    if (choice === 'drop') counts.dropped += 1;
+    else if (choice === 'demote') counts.demoted += 1;
+    else counts.kept += 1;
+  }
+  return counts;
+}
+
+export function applyChoices<T extends { importance?: number }>(
+  items: readonly T[],
+  prefix: 'd' | 'l' | 'b',
+  decisions: Record<string, JevDecision>,
+): T[] {
+  const kept: T[] = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item === undefined) continue;
+    const choice = decisions[`${prefix}${index}`]?.choice ?? 'keep';
+    if (choice === 'drop') continue;
+    kept.push(choice === 'demote' ? { ...item, importance: 3 } : item);
+  }
+  return kept;
 }

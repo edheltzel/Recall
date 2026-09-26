@@ -17,7 +17,7 @@ import {
   writeLoaEntryFromExtraction,
   type WriteOptions,
 } from './sqlite-writers';
-import { scoreCandidates, type JevBatchCandidate, type JevBatchResult, type JevDecision } from './jev';
+import { applyChoices, jevCounts, scoreCandidates, type JevBatchCandidate } from './jev';
 import { scrub } from './write-safety';
 
 /** This seam is replayed on retry: every plain-INSERT writer skips rows it already wrote. */
@@ -189,43 +189,6 @@ function memoryCandidates(
     });
   });
   return candidates;
-}
-
-function jevCounts(
-  candidates: readonly { id: string }[],
-  scored: JevBatchResult,
-): DualWriteResult['jev'] {
-  if (scored.status === 'skipped') {
-    return { kept: 0, demoted: 0, dropped: 0, skipped: candidates.length };
-  }
-  if (scored.status !== 'scored') {
-    return { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
-  }
-  const counts = { kept: 0, demoted: 0, dropped: 0, skipped: 0 };
-  for (const candidate of candidates) {
-    // Missing choice counts as keep, matching applyChoices.
-    const choice = scored.decisions[candidate.id]?.choice ?? 'keep';
-    if (choice === 'drop') counts.dropped += 1;
-    else if (choice === 'demote') counts.demoted += 1;
-    else counts.kept += 1;
-  }
-  return counts;
-}
-
-function applyChoices<T extends { importance?: number }>(
-  items: readonly T[],
-  prefix: 'd' | 'l' | 'b',
-  decisions: Record<string, JevDecision>,
-): T[] {
-  const kept: T[] = [];
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index];
-    if (item === undefined) continue;
-    const choice = decisions[`${prefix}${index}`]?.choice ?? 'keep';
-    if (choice === 'drop') continue;
-    kept.push(choice === 'demote' ? { ...item, importance: 3 } : item);
-  }
-  return kept;
 }
 
 function scrubMemoryRows(
