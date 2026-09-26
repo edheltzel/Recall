@@ -18,22 +18,20 @@
     "hooks/",
     "agent-skills/",
     "lib/",
-    "opencode/",
-    "omp/",
-    "pi/",
+    "hosts/opencode/",
+    "hosts/omp/",
+    "hosts/pi/",
     "templates/",
-    "install.sh",
-    "update.sh",
-    "uninstall.sh",
-    "FOR_CLAUDE.md",
-    "FOR_OPENCODE.md",
-    "FOR_PI.md",
+    "packaging/",
+    "docs/hosts/FOR_CLAUDE.md",
+    "docs/hosts/FOR_OPENCODE.md",
+    "docs/hosts/FOR_PI.md",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
-      "./pi/*.ts"
+      "./hosts/pi/*.ts"
     ],
     "skills": [
       "./agent-skills/*/SKILL.md"
@@ -41,7 +39,7 @@
   },
   "omp": {
     "extensions": [
-      "./omp/recall.ts"
+      "./hosts/omp/recall.ts"
     ]
   },
   "publishConfig": {

@@ -142,16 +142,16 @@ They are platform-agnostic — OpenCode, Claude Code, and Pi share them.
 
 | Script | Purpose |
 |---|---|
-| `./install.sh` | Install or reinstall. Idempotent. |
-| `./update.sh --check` | Check if a newer GitHub release exists. Check-only. |
-| `./update.sh` | Pull latest, rebuild, migrate DB, re-register hooks/plugins. Exit OpenCode first. |
-| `./uninstall.sh --dry-run` | Preview what would be removed. |
-| `./uninstall.sh` | Surgical remove; preserves `~/.agents/Recall/` (DB + backups + canonicals) by default. |
-| `./uninstall.sh --purge` | Also destroy `~/.agents/Recall/` and any legacy DB (double-confirmed). |
+| `./packaging/install.sh` | Install or reinstall. Idempotent. |
+| `./packaging/update.sh --check` | Check if a newer GitHub release exists. Check-only. |
+| `./packaging/update.sh` | Pull latest, rebuild, migrate DB, re-register hooks/plugins. Exit OpenCode first. |
+| `./packaging/uninstall.sh --dry-run` | Preview what would be removed. |
+| `./packaging/uninstall.sh` | Surgical remove; preserves `~/.agents/Recall/` (DB + backups + canonicals) by default. |
+| `./packaging/uninstall.sh --purge` | Also destroy `~/.agents/Recall/` and any legacy DB (double-confirmed). |
 
 If the user asks about updating or uninstalling, point them at these
 scripts rather than instructing per-platform manual steps. Never run
-`./update.sh` while the user is actively in an OpenCode session — the
+`./packaging/update.sh` while the user is actively in an OpenCode session — the
 `recall` binary lives in the same `bun link` process tree, and rebuilding
 mid-session can corrupt in-flight plugin invocations. Have them exit
 OpenCode first.

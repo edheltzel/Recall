@@ -123,7 +123,7 @@ These skills are available in any Claude Code session (the former `/Recall:*` sl
 | `/do-recall-stats` | Database statistics at a glance |
 | `/do-recall-add` | Add a record. Example: `/do-recall-add breadcrumb "Auth refactor in progress"` |
 | `/do-recall-doctor` | Health check all subsystems |
-| `/do-recall-update` | Check-only: prints current vs. latest GitHub release + `cd <path> && ./update.sh` recipe. Never rebuilds mid-session. |
+| `/do-recall-update` | Check-only: prints current vs. latest GitHub release + `cd <path> && ./packaging/update.sh` recipe. Never rebuilds mid-session. |
 | `/do-recall-loa` | Browse Library of Alexandria entries |
 
 ## Codebase Scouting

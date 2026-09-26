@@ -270,8 +270,8 @@ recall benchmark report                 # Show the latest report
 ```
 
 Suite B (token efficiency) compares the v2 wake-up bundle against v1 and the
-CLAUDE.md baseline. Results are written to `benchmarks/results/` as JSONL plus
-a human-readable `.md` alongside. See `benchmarks/README.md` for methodology.
+CLAUDE.md baseline. Results are written to `docs/benchmarks/results/` as JSONL plus
+a human-readable `.md` alongside. See `docs/benchmarks/README.md` for methodology.
 
 ## Export & Backup
 

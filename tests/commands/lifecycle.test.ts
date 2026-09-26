@@ -27,7 +27,8 @@ describe('lifecycle: recall install (packaged-mode delegation)', () => {
 
   test('forwards to install.sh with RECALL_PACKAGED=1 in the env', () => {
     root = mkdtempSync(join(tmpdir(), 'recall-install-'));
-    writeFileSync(join(root, 'install.sh'), '#!/bin/bash\nexit 0\n');
+    mkdirSync(join(root, 'packaging'), { recursive: true });
+    writeFileSync(join(root, 'packaging', 'install.sh'), '#!/bin/bash\nexit 0\n');
 
     let captured: { script: string; args: string[]; env?: NodeJS.ProcessEnv } | undefined;
     const code = runInstall(['--yes'], {
@@ -39,7 +40,7 @@ describe('lifecycle: recall install (packaged-mode delegation)', () => {
     });
 
     expect(code).toBe(0);
-    expect(captured?.script).toBe(join(root, 'install.sh'));
+    expect(captured?.script).toBe(join(root, 'packaging', 'install.sh'));
     expect(captured?.args).toEqual(['--yes']);
     // Packaged mode is the whole point: install.sh must skip bun install/build/link.
     expect(captured?.env?.RECALL_PACKAGED).toBe('1');
@@ -96,7 +97,8 @@ describe('lifecycle: runLifecycleScript delegation seam', () => {
 
   test('spawns the resolved script with forwarded args and returns its code', () => {
     root = mkdtempSync(join(tmpdir(), 'recall-lc-'));
-    writeFileSync(join(root, 'update.sh'), '#!/bin/bash\nexit 0\n');
+    mkdirSync(join(root, 'packaging'), { recursive: true });
+    writeFileSync(join(root, 'packaging', 'update.sh'), '#!/bin/bash\nexit 0\n');
 
     const calls: Array<{ script: string; args: string[] }> = [];
     const code = runLifecycleScript('update', ['--check', '--force'], {
@@ -109,7 +111,7 @@ describe('lifecycle: runLifecycleScript delegation seam', () => {
 
     expect(code).toBe(7);
     expect(calls).toHaveLength(1);
-    expect(calls[0].script).toBe(join(root, 'update.sh'));
+    expect(calls[0].script).toBe(join(root, 'packaging', 'update.sh'));
     expect(calls[0].args).toEqual(['--check', '--force']);
   });
 
@@ -129,8 +131,9 @@ describe('lifecycle: runLifecycleScript delegation seam', () => {
 
   test('runUpdate / runUninstall forward to the correct scripts', () => {
     root = mkdtempSync(join(tmpdir(), 'recall-lc-'));
-    writeFileSync(join(root, 'update.sh'), '#!/bin/bash\nexit 0\n');
-    writeFileSync(join(root, 'uninstall.sh'), '#!/bin/bash\nexit 0\n');
+    mkdirSync(join(root, 'packaging'), { recursive: true });
+    writeFileSync(join(root, 'packaging', 'update.sh'), '#!/bin/bash\nexit 0\n');
+    writeFileSync(join(root, 'packaging', 'uninstall.sh'), '#!/bin/bash\nexit 0\n');
 
     const seen: Array<{ script: string; args: string[] }> = [];
     const spawn = (script: string, args: string[]) => {
@@ -142,8 +145,8 @@ describe('lifecycle: runLifecycleScript delegation seam', () => {
     runUninstall(['--purge'], { repoRoot: root, spawn });
 
     expect(seen).toEqual([
-      { script: join(root, 'update.sh'), args: ['--dry-run'] },
-      { script: join(root, 'uninstall.sh'), args: ['--purge'] },
+      { script: join(root, 'packaging', 'update.sh'), args: ['--dry-run'] },
+      { script: join(root, 'packaging', 'uninstall.sh'), args: ['--purge'] },
     ]);
   });
 });

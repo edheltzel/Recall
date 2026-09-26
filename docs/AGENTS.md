@@ -14,11 +14,11 @@ User-facing published documentation: installation, CLI / MCP / agent-skill refer
 
 ## Local Contracts
 
-- `docs/` is EXCLUSIVELY user-facing published docs. NEVER store plans, specs, designs, handoffs, or scout artifacts here — those live under `.agents/atlas/` (see root `AGENTS.md`).
+- `docs/` is user-facing published docs, plus two moved trees: `hosts/` (agent guides) and `benchmarks/` (the wake-up harness). NEVER store plans, specs, designs, handoffs, or scout artifacts here — those live under `.agents/atlas/` (see root `AGENTS.md`).
 - ADRs are numbered and append-only: change a decision by adding a new `NNNN-*.md`; don't rewrite a past ADR's decision.
 - Keep docs in sync with behavior — a command, MCP, or lifecycle change must update the matching reference (`cli-reference`, `mcp-tools`, `agent-skills`, `api`, `installation`, `upgrading`).
-- Host integration guides stay aligned with their root counterparts (`FOR_OPENCODE.md`, `FOR_PI.md`). Codex's canonical guide is `CODEX_INTEGRATION.md` because the preferred Codex attach is the native plugin rather than the lifecycle installer. Grok's guide must distinguish installer-owned automatic capture from unsupported automatic injection. JCode's guide records the probe-bounded no-adapter result. `OMP_INTEGRATION.md` owns native extension setup and capture limits; skills and MCP remain separate.
-- `CLAUDE_INTEGRATION.md` covers preferred native plugin *install* (skills + MCP) and how it divides ownership with the lifecycle installer (installer: hooks). `FOR_CLAUDE.md` stays the agent-facing usage guide — keep the split, don't merge them.
+- Host integration guides stay aligned with `hosts/FOR_OPENCODE.md` and `hosts/FOR_PI.md`. Codex's canonical guide is `CODEX_INTEGRATION.md` because the preferred Codex attach is the native plugin rather than the lifecycle installer. Grok's guide must distinguish installer-owned automatic capture from unsupported automatic injection. JCode's guide records the probe-bounded no-adapter result. `OMP_INTEGRATION.md` owns native extension setup and capture limits; skills and MCP remain separate.
+- `CLAUDE_INTEGRATION.md` covers preferred native plugin *install* (skills + MCP) and how it divides ownership with the lifecycle installer (installer: hooks). `hosts/FOR_CLAUDE.md` stays the agent-facing usage guide — keep the split, don't merge them.
 
 ## Work Guidance
 
@@ -30,4 +30,4 @@ None automated — verify referenced commands run and links resolve.
 
 ## Child DOX Index
 
-No child docs — `adr/` and `agents/` are covered by the contracts above.
+- [`benchmarks/AGENTS.md`](benchmarks/AGENTS.md) — wake-up context-efficiency benchmark harness

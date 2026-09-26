@@ -18,11 +18,11 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { search, getLastSearchErrors } from '../../src/lib/memory.js';
-import { initDb, closeDb, getDb } from '../../src/db/connection.js';
-import { planDedup, applyDedupPlan, DEDUP_TABLES, DEFAULT_SEMANTIC_THRESHOLD } from '../../src/lib/dedup.js';
-import { checkEmbeddingService, embed, embeddingToBlob } from '../../src/lib/embeddings.js';
-import { embeddingTextFor } from '../../src/lib/repair.js';
+import { search, getLastSearchErrors } from '../../../src/lib/memory.js';
+import { initDb, closeDb, getDb } from '../../../src/db/connection.js';
+import { planDedup, applyDedupPlan, DEDUP_TABLES, DEFAULT_SEMANTIC_THRESHOLD } from '../../../src/lib/dedup.js';
+import { checkEmbeddingService, embed, embeddingToBlob } from '../../../src/lib/embeddings.js';
+import { embeddingTextFor } from '../../../src/lib/repair.js';
 import type { SuiteResult, MetricSample } from '../types.js';
 import {
   K,

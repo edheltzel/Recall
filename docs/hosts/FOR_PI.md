@@ -127,16 +127,16 @@ They are platform-agnostic — Pi, Claude Code, and OpenCode share them.
 
 | Script | Purpose |
 |---|---|
-| `./install.sh` | Install or reinstall. Idempotent. |
-| `./update.sh --check` | Check if a newer GitHub release exists. Check-only. |
-| `./update.sh` | Pull latest, rebuild, migrate DB, and refresh the Pi package plus MCP registration. Exit Pi first. |
-| `./uninstall.sh --dry-run` | Preview what would be removed. |
-| `./uninstall.sh` | Surgical remove; preserves `~/.agents/Recall/` (DB + backups + canonicals) by default. |
-| `./uninstall.sh --purge` | Also destroy `~/.agents/Recall/` and any legacy DB (double-confirmed). |
+| `./packaging/install.sh` | Install or reinstall. Idempotent. |
+| `./packaging/update.sh --check` | Check if a newer GitHub release exists. Check-only. |
+| `./packaging/update.sh` | Pull latest, rebuild, migrate DB, and refresh the Pi package plus MCP registration. Exit Pi first. |
+| `./packaging/uninstall.sh --dry-run` | Preview what would be removed. |
+| `./packaging/uninstall.sh` | Surgical remove; preserves `~/.agents/Recall/` (DB + backups + canonicals) by default. |
+| `./packaging/uninstall.sh --purge` | Also destroy `~/.agents/Recall/` and any legacy DB (double-confirmed). |
 
 If the user asks about updating or uninstalling, point them at these
 scripts rather than instructing per-platform manual steps. Never run
-`./update.sh` while the user is actively in a Pi session — the `recall`
+`./packaging/update.sh` while the user is actively in a Pi session — the `recall`
 binary lives in the same `bun link` process tree, and rebuilding
 mid-session can corrupt in-flight extension invocations. Have them
 exit Pi first.

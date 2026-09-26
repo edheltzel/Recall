@@ -49,9 +49,9 @@ describe('npm package: files whitelist', () => {
   const hasUnder = (prefix: string) => files.some(f => f.startsWith(prefix));
 
   test('bundles the 3 lifecycle scripts + shared install library (the #162 fix)', () => {
-    expect(has('install.sh')).toBe(true);
-    expect(has('update.sh')).toBe(true);
-    expect(has('uninstall.sh')).toBe(true);
+    expect(has('packaging/install.sh')).toBe(true);
+    expect(has('packaging/update.sh')).toBe(true);
+    expect(has('packaging/uninstall.sh')).toBe(true);
     expect(has('lib/install-lib.sh')).toBe(true);
   });
 
@@ -60,12 +60,12 @@ describe('npm package: files whitelist', () => {
     expect(hasUnder('hooks/lib/')).toBe(true); // hooks need their lib/ subtree
     expect(has('hooks/grok/RecallLifecycle.json')).toBe(true);
     expect(hasUnder('agent-skills/')).toBe(true);
-    expect(hasUnder('opencode/')).toBe(true);
-    expect(hasUnder('pi/')).toBe(true);
-    expect(has('omp/recall.ts')).toBe(true);
-    expect(has('FOR_CLAUDE.md')).toBe(true);
-    expect(has('FOR_OPENCODE.md')).toBe(true);
-    expect(has('FOR_PI.md')).toBe(true);
+    expect(hasUnder('hosts/opencode/')).toBe(true);
+    expect(hasUnder('hosts/pi/')).toBe(true);
+    expect(has('hosts/omp/recall.ts')).toBe(true);
+    expect(has('docs/hosts/FOR_CLAUDE.md')).toBe(true);
+    expect(has('docs/hosts/FOR_OPENCODE.md')).toBe(true);
+    expect(has('docs/hosts/FOR_PI.md')).toBe(true);
     expect(hasUnder('templates/cursor/')).toBe(true);
     expect(has('dist/api.js')).toBe(true);
     expect(has('dist/api.d.ts')).toBe(true);
@@ -89,8 +89,7 @@ describe('npm package: files whitelist', () => {
     for (const bad of [
       'tests/',
       'assets/',
-      'benchmarks/',
-      'docs/',
+      'docs/benchmarks/',
       'scripts/',
       '.agents/',
       '.claude/',
