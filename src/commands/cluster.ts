@@ -3,6 +3,10 @@
 import { getDb } from '../db/connection.js';
 import { blobToEmbedding, cosineSimilarity } from '../lib/embeddings.js';
 import { claudeCliTextGenerationProvider } from '../providers/claude-cli.js';
+import { resolveHarnessConfig } from '../lib/extractor-config.js';
+import { runHarnessStep, type ProvenCaller, type SpawnFn } from '../lib/harness-runner.js';
+import { scrub } from '../lib/write-safety.js';
+import type { NamedHarnessId } from '../lib/extractor-config.js';
 import type { TextGenerationProvider } from '../providers/text-generation.js';
 
 interface ClusterOptions {
@@ -117,6 +121,43 @@ STEPS:
   }
 }
 
+export function scrubProcedure(result: { title: string; trigger: string; steps: string }) {
+  return {
+    title: scrub(result.title).text,
+    trigger: scrub(result.trigger).text,
+    steps: scrub(result.steps).text,
+  };
+}
+
+export function clusterProvider(deps: {
+  fileText?: string | null;
+  spawn?: SpawnFn;
+  proven?: Partial<Record<NamedHarnessId, ProvenCaller>>;
+  isTTY?: boolean;
+} = {}): TextGenerationProvider | null {
+  const harness = resolveHarnessConfig({ fileText: deps.fileText });
+  if (!harness.cluster.ok) return null;
+  if (harness.cluster.absent) return claudeCliTextGenerationProvider;
+  const steps = [harness.cluster.value.primary, ...harness.cluster.value.fallback];
+  return {
+    id: 'cluster-harness',
+    generate(prompt: string) {
+      for (const step of steps) {
+        const result = runHarnessStep({
+          step,
+          stdin: prompt,
+          timeoutMs: 30000,
+          isTTY: deps.isTTY ?? false,
+          spawn: deps.spawn,
+          proven: deps.proven,
+        });
+        if (result.ok && 'text' in result && result.text) return result.text;
+      }
+      return null;
+    },
+  };
+}
+
 export function runCluster(options: ClusterOptions): void {
   const dryRun = !options.execute;
   const threshold = options.threshold || 0.85;
@@ -167,7 +208,8 @@ export function runCluster(options: ClusterOptions): void {
 
   for (const cluster of clusters) {
     console.log(`Synthesizing procedure from cluster of ${cluster.members.length}...`);
-    const result = synthesizeProcedure(cluster);
+    const provider = clusterProvider();
+    const result = provider ? synthesizeProcedure(cluster, provider) : null;
 
     if (!result) {
       console.log('  Synthesis failed, skipping.');
@@ -176,10 +218,11 @@ export function runCluster(options: ClusterOptions): void {
 
     const sourceIds = cluster.members.map(m => m.id).join(',');
 
+    const clean = scrubProcedure(result);
     insertStmt.run({
-      $title: result.title,
-      $trigger: result.trigger,
-      $steps: result.steps,
+      $title: clean.title,
+      $trigger: clean.trigger,
+      $steps: clean.steps,
       $sources: sourceIds,
       $project: cluster.project,
       $times: cluster.members.length,
