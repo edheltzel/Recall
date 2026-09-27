@@ -13,6 +13,7 @@ note in the 0.9.0 entry.
 ## [Unreleased]
 
 ### Added
+- **`recall jev` missing-key prompt**: a terminal prints `https://console.typesafe.ai/keys` and asks for a key for that run. The paste is not saved or printed. A non-interactive run prints the URL and exits 1. Ingest still skips scoring when the key is missing.
 
 - **Release commands**: `npm run release:major`, `release:minor`, and `release:patch` synchronize root/plugin versions and changelog, validate the release, atomically publish its commit and annotated tag, and create the matching GitHub release. `--dry-run` performs preflight without publishing.
 
