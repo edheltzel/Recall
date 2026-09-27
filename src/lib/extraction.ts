@@ -4,6 +4,7 @@ import type { Message } from '../types/index.js';
 import { extractWisdomWithFabric, MAX_FABRIC_INPUT_BYTES } from '../providers/fabric.js';
 import { ExtractorConfigError, requireCuratedExtractor, resolveExtractorConfig, resolveHarnessConfig } from './extractor-config.js';
 import { runHarnessStep, type SpawnFn } from './harness-runner.js';
+import { scrub } from './write-safety.js';
 
 export { MAX_FABRIC_INPUT_BYTES, ExtractorConfigError };
 
@@ -124,11 +125,11 @@ export function runFabricExtract(
         isTTY: false,
         spawn: deps.spawn,
       });
-      if (result.ok && 'text' in result && result.text) return result.text;
+      if (result.ok && 'text' in result && result.text) return scrub(result.text).text;
       if (!result.ok) lastError = result.error;
     }
     throw new ExtractorConfigError(lastError, 'curated');
   }
   const curated = requireCuratedExtractor((deps.resolve ?? resolveExtractorConfig)());
-  return (deps.extract ?? extractWisdomWithFabric)(content, curated.primary.model);
+  return scrub((deps.extract ?? extractWisdomWithFabric)(content, curated.primary.model)).text;
 }

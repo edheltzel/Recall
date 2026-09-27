@@ -206,9 +206,17 @@ export function runCluster(options: ClusterOptions): void {
 
   let created = 0;
 
+  const harness = resolveHarnessConfig();
+  if (!harness.cluster.ok) {
+    console.error(harness.cluster.error);
+    process.exitCode = 1;
+    return;
+  }
   for (const cluster of clusters) {
     console.log(`Synthesizing procedure from cluster of ${cluster.members.length}...`);
-    const provider = clusterProvider();
+    const provider = harness.cluster.absent
+      ? claudeCliTextGenerationProvider
+      : clusterProvider();
     const result = provider ? synthesizeProcedure(cluster, provider) : null;
 
     if (!result) {

@@ -154,6 +154,16 @@ describe('resolveHarnessConfig', () => {
     ]);
   });
 
+  test('an extractor-only file leaves every harness key absent', () => {
+    const fileText = JSON.stringify({
+      extractor: { automatic: { id: 'claude-cli', model: 'haiku' } },
+    });
+    const harness = resolveHarnessConfig({ fileText, env: {} });
+    expect(harness.query).toEqual({ ok: true, absent: true });
+    expect(harness.automatic).toEqual({ ok: true, absent: true });
+    expect(harness.curated).toEqual({ ok: true, absent: true });
+    expect(harness.cluster).toEqual({ ok: true, absent: true });
+  });
   test('query Pi and automatic Claude are different selections', () => {
     const harness = resolveHarnessConfig({
       fileText: JSON.stringify({
