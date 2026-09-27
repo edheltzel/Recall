@@ -75,6 +75,8 @@ export interface ExtractCoreResult {
  * ('extraction_failed') or the quality gate rejects the output
  * ('quality_failed'). A failed SQLite write is reported as 'persistence_failed'
  * with its failure details so callers cannot mark an empty extraction complete.
+ * `failures.jev` is a non-fatal score outage: the original rows were written,
+ * so the outcome stays 'extracted'.
  * On success the SQLite dual-write has already happened (with scrubbed text) and
  * `dualWrite` carries the per-table counts; `extracted`/`topics`/`summary` are
  * the RAW values for the caller's legacy markdown side-effects.
@@ -119,14 +121,15 @@ export async function runExtractCore(
     ...scrubbedTopics.flatMap((r) => detectThreats(r.text)),
   ];
 
-  const dualWrite = dualWriteToSqlite(dbPath, {
+  const dualWrite = await dualWriteToSqlite(dbPath, {
     ...ctx,
     extracted: scrubbedExtracted.text,
     summary: scrubbedSummary.text,
     topics: scrubbedTopics.map((r) => r.text),
   });
 
-  if (Object.keys(dualWrite.failures).length > 0) {
+  const persistenceFailed = Object.keys(dualWrite.failures).some((key) => key !== 'jev');
+  if (persistenceFailed) {
     return {
       outcome: 'persistence_failed',
       quality,

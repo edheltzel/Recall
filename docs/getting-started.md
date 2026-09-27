@@ -200,6 +200,7 @@ From inside Claude Code, the same workflows are the `/do-recall-*` skills. MCP t
 | Guide | When to open it |
 |-------|-----------------|
 | [Installation](installation.md) | Prerequisites, session extraction, uninstall, env vars |
+| [Score one memory item with Jev](score-a-memory-with-jev.md) | Export `JEV_RECALL_KEY` and prove one score |
 | [Managing Recall](lifecycle.md) | Install vs update vs uninstall, custom DB path, recovery |
 | [CLI Reference](cli-reference.md) | Every subcommand and flag |
 | [MCP Tools](mcp-tools.md) | Tool schemas for agents |

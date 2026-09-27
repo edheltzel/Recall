@@ -122,6 +122,16 @@ Stores a freeform observation or preference. The `-i` flag sets importance on a 
 
 ---
 
+### Jev score
+
+```bash
+recall jev "Use SQLite, not a second database"   # Score one candidate
+recall jev --kind decision -p recall "Use SQLite" # Optional kind and project
+printf '%s\n' "hi" | recall jev                   # Read the candidate from stdin
+```
+
+Prints one JSON object with `choice` (`keep`, `demote`, or `drop`), `probabilities`, and `confidence`. Does not open the database and does not write a row. If `JEV_RECALL_KEY` is missing or blank, it prints `JEV_RECALL_KEY is not set` and exits 1. Setup is in [Score one memory item with Jev](score-a-memory-with-jev.md).
+
 ## View
 
 ```bash
