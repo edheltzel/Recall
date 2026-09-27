@@ -96,9 +96,13 @@ function runClaude(claudePath: string, input: string, model: string): string | n
   }
 }
 
-async function extractDirect(messages: string, claudePath: string, model: string): Promise<string | null> {
+export function prepareAutomaticExtractionInput(messages: string): string {
   const truncated = messages.length > MAX_DIRECT_CHARS ? messages.slice(-MAX_DIRECT_CHARS) : messages;
-  const input = `${getExtractionPrompt()}\n\n---\n\nExtract the key information from this AI coding session transcript:\n\n${truncated}`;
+  return `${getExtractionPrompt()}\n\n---\n\nExtract the key information from this AI coding session transcript:\n\n${truncated}`;
+}
+
+async function extractDirect(messages: string, claudePath: string, model: string): Promise<string | null> {
+  const input = prepareAutomaticExtractionInput(messages);
   const text = runClaude(claudePath, input, model);
   if (text) {
     console.error(`[FabricExtract] Claude CLI extraction successful (model=${model}, ${text.length} chars)`);

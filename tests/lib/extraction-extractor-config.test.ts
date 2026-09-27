@@ -29,4 +29,26 @@ describe('curated Extractor wiring', () => {
       }),
     ).toThrow(ExtractorConfigError);
   });
+
+  test('a present named curated failure does not call Fabric', () => {
+    let extracted = false;
+    expect(() => runFabricExtract('transcript', {
+      resolveHarness: () => ({
+        query: { ok: true, absent: true },
+        automatic: { ok: true, absent: true },
+        curated: {
+          ok: true,
+          absent: false,
+          value: { primary: { kind: 'named', id: 'pi', model: 'luna' }, fallback: [] },
+        },
+        cluster: { ok: true, absent: true },
+      }),
+      extract: () => {
+        extracted = true;
+        return 'basic';
+      },
+      spawn: () => ({ ok: false, code: 'exit', message: 'failed' }),
+    })).toThrow(ExtractorConfigError);
+    expect(extracted).toBe(false);
+  });
 });

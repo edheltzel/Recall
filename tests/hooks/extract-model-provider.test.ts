@@ -71,4 +71,44 @@ describe('host-neutral extraction cascade', () => {
     }
     expect(logged.some(line => line.includes('automatic Extractor id "fabric" is not allowed'))).toBe(true);
   });
+
+  test('a named automatic step sends the prepared prompt and a failure tries the next step', async () => {
+    const inputs: string[] = [];
+    const long = '## ONE SENTENCE SUMMARY\nA prepared extraction that is long enough to pass the provider length check.\n\n## MAIN IDEAS\n- kept the prompt';
+    const result = await runExtractionCascade(
+      'raw transcript',
+      undefined,
+      () => ({
+        automatic: { ok: true, value: { primary: { id: 'claude-cli', model: 'haiku' }, fallback: [] } },
+        curated: { ok: true, value: { primary: { id: 'fabric', model: 'claude-haiku-4-5' } } },
+      }),
+      undefined,
+      () => ({
+        query: { ok: true, absent: true },
+        automatic: {
+          ok: true,
+          absent: false,
+          value: {
+            primary: { kind: 'named', id: 'pi', model: 'luna' },
+            fallback: [{ kind: 'named', id: 'claude', model: 'haiku' }],
+          },
+        },
+        curated: { ok: true, absent: true },
+        cluster: { ok: true, absent: true },
+      }),
+      (request) => {
+        inputs.push(request.stdin);
+        if (inputs.length === 1) return { ok: false, code: 'exit', message: 'failed' };
+        return { ok: true, stdout: long };
+      },
+      {
+        pi: () => ({ executable: 'pi', argv: ['--print'] }),
+        claude: () => ({ executable: 'claude', argv: ['-p'] }),
+      },
+    );
+    expect(inputs[0]).toContain('ONE SENTENCE SUMMARY');
+    expect(inputs[0]).toContain('raw transcript');
+    expect(inputs[0]).not.toBe('raw transcript');
+    expect(result).toBe(long);
+  });
 });

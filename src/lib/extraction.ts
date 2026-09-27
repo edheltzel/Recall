@@ -2,7 +2,8 @@
 
 import type { Message } from '../types/index.js';
 import { extractWisdomWithFabric, MAX_FABRIC_INPUT_BYTES } from '../providers/fabric.js';
-import { ExtractorConfigError, requireCuratedExtractor, resolveExtractorConfig } from './extractor-config.js';
+import { ExtractorConfigError, requireCuratedExtractor, resolveExtractorConfig, resolveHarnessConfig } from './extractor-config.js';
+import { runHarnessStep, type SpawnFn } from './harness-runner.js';
 
 export { MAX_FABRIC_INPUT_BYTES, ExtractorConfigError };
 
@@ -105,9 +106,29 @@ export function runFabricExtract(
   content: string,
   deps: {
     resolve?: typeof resolveExtractorConfig;
+    resolveHarness?: typeof resolveHarnessConfig;
     extract?: typeof extractWisdomWithFabric;
+    spawn?: SpawnFn;
   } = {},
 ): string {
+  const harness = (deps.resolveHarness ?? resolveHarnessConfig)();
+  if (!harness.curated.ok) throw new ExtractorConfigError(harness.curated.error, 'curated');
+  if (!harness.curated.absent) {
+    let lastError = 'curated harness failed';
+    for (const step of [harness.curated.value.primary, ...harness.curated.value.fallback]) {
+      const result = runHarnessStep({
+        step,
+        stdin: content,
+        timeoutMs: 600000,
+        maxBuffer: MAX_FABRIC_INPUT_BYTES,
+        isTTY: false,
+        spawn: deps.spawn,
+      });
+      if (result.ok && 'text' in result && result.text) return result.text;
+      if (!result.ok) lastError = result.error;
+    }
+    throw new ExtractorConfigError(lastError, 'curated');
+  }
   const curated = requireCuratedExtractor((deps.resolve ?? resolveExtractorConfig)());
   return (deps.extract ?? extractWisdomWithFabric)(content, curated.primary.model);
 }
