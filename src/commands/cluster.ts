@@ -229,7 +229,7 @@ export function runCluster(options: ClusterOptions): void {
       $confidence: cluster.members.length >= 3 ? 'high' : 'medium'
     });
 
-    console.log(`  Created: "${result.title}"`);
+    console.log(`  Created: "${clean.title}"`);
     created++;
   }
 

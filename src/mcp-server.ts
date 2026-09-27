@@ -612,6 +612,22 @@ server.tool(
 			if (harness.kind === 'error') {
 				return { content: [{ type: "text", text: harness.error }], isError: true };
 			}
+			if (harness.mode === 'semantic') {
+				return {
+					content: [{ type: "text", text: "Semantic-only query is not available on this tool." }],
+					isError: true,
+				};
+			}
+			if (harness.mode === 'keyword') {
+				const results = search(query, { project, limit });
+				logMemoryUsage("memory_hybrid_search", query, results.length, project);
+				if (results.length === 0) {
+					return { content: [{ type: "text", text: `No results found for: "${query}"` }] };
+				}
+				bumpAccess(results);
+				const formatted = results.map((r) => `[${r.table}#${r.id}] ${r.content.slice(0, 200)}`).join("\n");
+				return { content: [{ type: "text", text: `Found ${results.length} keyword results for "${query}":\n\n${formatted}` }] };
+			}
 			const { results, embeddingsAvailable, semanticBackend, readiness } = await hybridSearch(query, {
 				project,
 				limit,
@@ -1159,6 +1175,23 @@ server.tool(
 			}
 			if (harness.kind === 'error') {
 				return { content: [{ type: "text", text: harness.error }], isError: true };
+			}
+			if (harness.mode === 'semantic') {
+				return {
+					content: [{ type: "text", text: "Semantic-only query is not available on this tool." }],
+					isError: true,
+				};
+			}
+			if (harness.mode === 'keyword') {
+				const keywordHits = search(agent_task, { project, limit: 5 });
+				logMemoryUsage("context_for_agent", agent_task, keywordHits.length, project);
+				const lines = keywordHits.map((r) => `- [${r.table}#${r.id}] ${r.content.slice(0, 150)}`);
+				return {
+					content: [{
+						type: "text",
+						text: `## Agent Context (INCLUDE IN AGENT PROMPT)\n\n**Search Mode:** keyword\n\n${lines.join("\n") || "### No relevant memory found"}`,
+					}],
+				};
 			}
 			const { results: hybridResults, embeddingsAvailable, readiness } =
 				await hybridSearch(agent_task, { project, limit: 5 });

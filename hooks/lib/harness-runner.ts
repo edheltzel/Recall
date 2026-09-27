@@ -51,12 +51,13 @@ export interface RunHarnessInput {
 
 function defaultSpawn(request: SpawnRequest): SpawnOutcome {
   try {
-    const stdout = execFileSync(request.executable, request.argv, {
+    const options: { input: string; encoding: 'utf-8'; timeout: number; maxBuffer?: number } = {
       input: request.stdin,
       encoding: 'utf-8',
       timeout: request.timeoutMs,
-      maxBuffer: request.maxBuffer,
-    });
+    };
+    if (request.maxBuffer !== undefined) options.maxBuffer = request.maxBuffer;
+    const stdout = execFileSync(request.executable, request.argv, options);
     if (!stdout.trim()) return { ok: false, code: 'empty', message: 'empty stdout' };
     return { ok: true, stdout };
   } catch (error) {
