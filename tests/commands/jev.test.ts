@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { JEV_KEY_URL, runJev } from '../../src/commands/jev';
 import type { JevDecision } from '../../src/providers/jev';
 
@@ -8,8 +8,12 @@ const decision: JevDecision = {
   confidence: 1,
 };
 
+beforeEach(() => {
+  process.exitCode = 0;
+});
+
 afterEach(() => {
-  process.exitCode = undefined;
+  process.exitCode = 0;
 });
 
 describe('recall jev missing key', () => {
@@ -35,7 +39,7 @@ describe('recall jev missing key', () => {
     expect(err.join('\n')).not.toContain('secret-key');
     expect(out.join('\n')).not.toContain('secret-key');
     expect(scoredWith).toBe('secret-key');
-    expect(process.exitCode).toBeUndefined();
+    expect(process.exitCode).toBe(0);
   });
 
   test('a non-interactive run prints the URL and does not score', async () => {
