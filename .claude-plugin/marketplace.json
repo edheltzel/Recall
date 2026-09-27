@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "recall",
-      "source": "./plugins/recall-claude",
+      "source": "./hosts/plugins/recall-claude",
       "description": "Persistent SQLite memory and retrieval tools for Claude Code",
       "category": "productivity",
       "tags": ["memory", "sqlite", "mcp"]

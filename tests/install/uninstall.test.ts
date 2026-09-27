@@ -23,7 +23,7 @@ import { dirname, join } from 'path';
 import { legacyClaudeMemorySection, legacyPiMemorySection } from '../fixtures/legacy-memory-sections';
 
 const REPO = process.cwd();
-const UNINSTALL = join(REPO, 'uninstall.sh');
+const UNINSTALL = join(REPO, 'packaging', 'uninstall.sh');
 
 /**
  * Shadow the host's `pi` with a no-op and return the directory to prepend to
@@ -376,7 +376,7 @@ This content must be preserved across an uninstall.
       'lib',
       'identity-path.ts',
     ))).toBe(true);
-    expect(existsSync(join(claudeDir, 'commands', 'recall'))).toBe(false);
+    expect(existsSync(join(claudeDir, 'commands', 'recall', 'search.md'))).toBe(true);
     expect(existsSync(join(claudeDir, 'Recall_GUIDE.md'))).toBe(false);
     expect(existsSync(join(claudeDir, 'MEMORY', 'extract_prompt.md'))).toBe(false);
 

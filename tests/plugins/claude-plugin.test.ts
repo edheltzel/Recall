@@ -5,7 +5,7 @@ import { join } from 'path';
 import { generateClaudePluginSkills, repoRoot } from '../../scripts/build-claude-plugin';
 import { CLAUDE_PLUGIN_ID, claudePluginState } from '../../src/hosts/claude';
 
-const bundleRoot = join(repoRoot, 'plugins/recall-claude');
+const bundleRoot = join(repoRoot, 'hosts/plugins/recall-claude');
 
 let tempDir = '';
 
@@ -29,7 +29,7 @@ describe('Claude native plugin package', () => {
     expect(marketplace.owner.name).toBeTruthy();
     expect(marketplace.plugins).toHaveLength(1);
     expect(marketplace.plugins[0].name).toBe('recall');
-    expect(marketplace.plugins[0].source).toBe('./plugins/recall-claude');
+    expect(marketplace.plugins[0].source).toBe('./hosts/plugins/recall-claude');
     expect(`${marketplace.plugins[0].name}@${marketplace.name}`).toBe(CLAUDE_PLUGIN_ID);
   });
 

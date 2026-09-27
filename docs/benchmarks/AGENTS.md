@@ -1,6 +1,6 @@
 # benchmarks — wake-up context-efficiency harness
 
-> Child DOX. Root `AGENTS.md` carries repo-wide rules; this file owns local detail for `benchmarks/`.
+> Child DOX. Root `AGENTS.md` carries repo-wide rules; this file owns local detail for `docs/benchmarks/`.
 
 ## Purpose
 

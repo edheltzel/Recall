@@ -141,7 +141,7 @@ async function main(): Promise<void> {
 
   // ── Install the plugin with the live CLI ──────────────────────────────────
   console.log(`claude.version=${runClaude(['--version'], env).trim()}`);
-  runClaude(['plugin', 'validate', join(repoRoot, 'plugins', 'recall-claude'), '--strict'], env);
+  runClaude(['plugin', 'validate', join(repoRoot, 'hosts', 'plugins', 'recall-claude'), '--strict'], env);
   runClaude(['plugin', 'validate', repoRoot, '--strict'], env);
   runClaude(['plugin', 'marketplace', 'add', repoRoot], env);
   runClaude(['plugin', 'install', 'recall@recall-marketplace'], env);

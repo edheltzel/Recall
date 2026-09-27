@@ -97,4 +97,13 @@ describe('probeSymlink', () => {
     expect(result.status).toBe('WARN');
     expect(result.message.toLowerCase()).toContain('foreign');
   });
+
+  test('directory canonical → INFO and no repair (#237)', () => {
+    rmSync(canonical);
+    mkdirSync(canonical);
+    const { result, repair } = probe();
+    expect(result.status).toBe('INFO');
+    expect(result.message).toContain('not a file');
+    expect(repair).toBeUndefined();
+  });
 });

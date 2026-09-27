@@ -19,17 +19,17 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 | Fresh install — Cursor snippets | Merge `templates/cursor/`; no marketplace plugin |
 | Fresh install — npm installer (Grok / Claude hooks / detected hosts) | `bun install -g recall-memory` then `recall install` |
 | Fresh install — one-shot (Bun on PATH) | `npx --package=recall-memory recall install` |
-| Fresh install — source / dev checkout | `./install.sh` |
-| Re-install / repair a broken install | `recall install` (packaged) or `./install.sh` (source) — both idempotent |
-| Upgrade to the latest release — source checkout | `recall update` (or `./update.sh`) |
+| Fresh install — source / dev checkout | `./packaging/install.sh` |
+| Re-install / repair a broken install | `recall install` (packaged) or `./packaging/install.sh` (source) — both idempotent |
+| Upgrade to the latest release — source checkout | `recall update` (or `./packaging/update.sh`) |
 | Upgrade a packaged (npm) install | `bun install -g recall-memory@latest` then `recall install` |
 | Just check for a newer release | `recall update --check` — or `/do-recall-update` in Claude Code |
-| Uninstall, keep your memory database | `recall uninstall` (or `./uninstall.sh`) |
+| Uninstall, keep your memory database | `recall uninstall` (or `./packaging/uninstall.sh`) |
 | Uninstall **and** destroy the database + backups | `recall uninstall --purge` |
-| Install to / move the DB to a custom path | `./install.sh --db-path <path>` (new) · `recall migrate --to <path>` (existing) |
+| Install to / move the DB to a custom path | `./packaging/install.sh --db-path <path>` (new) · `recall migrate --to <path>` (existing) |
 | Repair drifted symlinks without reinstalling | `recall doctor --fix` |
 | See where everything resolves on disk | `recall path` |
-| Roll back a failed install or update | `./install.sh restore` — see [Recovery](#recovery) |
+| Roll back a failed install or update | `./packaging/install.sh restore` — see [Recovery](#recovery) |
 
 The `recall update` / `recall uninstall` / `recall install` subcommands simply forward to the corresponding bash script, so the flags and behavior are identical — use whichever entry point you have on hand.
 
@@ -44,7 +44,7 @@ Pick the on-ramp that matches how you got Recall:
 - **Binaries first:** `bun install -g recall-memory` puts `recall` / `recall-mcp` on PATH, then `recall init` creates the database. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
 - **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). omp skills remain installer-owned. Grok has no plugin path; run `recall install`.
 - **npx (one-shot installer):** `npx --package=recall-memory recall install` — installer-owned surfaces only, no global install. Bun must still be on PATH.
-- **Source / dev checkout:** `git clone … && cd Recall && ./install.sh`. This one **builds from your working tree** (`bun install` + `bun run build` + `bun link`). See the [Installation guide](installation.md) for prerequisites and the full step list.
+- **Source / dev checkout:** `git clone … && cd Recall && ./packaging/install.sh`. This one **builds from your working tree** (`bun install` + `bun run build` + `bun link`). See the [Installation guide](installation.md) for prerequisites and the full step list.
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
@@ -52,7 +52,7 @@ After any attach, **restart your agent** so it loads the plugin, extension, or s
 
 Both run the same canonical steps and are **idempotent** — re-running repairs symlinks and registrations, so there is no separate "re-install" command. They differ only in the bootstrap:
 
-- **`./install.sh`** (source checkout) builds from the working tree. Use it when developing, on a feature branch, or repairing a source install.
+- **`./packaging/install.sh`** (source checkout) builds from the working tree. Use it when developing, on a feature branch, or repairing a source install.
 - **`recall install`** (packaged) skips `bun install` / `bun run build` / `bun link` (`RECALL_PACKAGED=1`) because the npm package already shipped a prebuilt binary and its dependencies. Use it for npm / `npx` / `bun install -g` installs.
 
 ---
@@ -61,20 +61,20 @@ Both run the same canonical steps and are **idempotent** — re-running repairs 
 
 > **Exit Claude Code / OpenCode / Pi first.** Updating reloads hooks and the `recall-mcp` server; a running session can hold stale state. `update.sh` warns you before it proceeds.
 
-**Source / git checkout — `recall update`** (delegates to `./update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, force-re-registers the hooks, and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
+**Source / git checkout — `recall update`** (delegates to `./packaging/update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, force-re-registers the hooks, and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
 
 Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--force`, `--no-migrate`, `--no-confirm`. Check-only, without changing anything: `recall update --check`, or `/do-recall-update` from inside Claude Code (see [Agent Skills](agent-skills.md)).
 
 Two situations the original scripts didn't spell out:
 
-- **You're on a feature branch or have local commits.** `recall update` does `git pull --ff-only origin main` plus a GitHub-release version check, so it will refuse to fast-forward (or report "already current") rather than clobber your work. That's expected. To rebuild from your **working tree** instead, run `./install.sh`.
+- **You're on a feature branch or have local commits.** `recall update` does `git pull --ff-only origin main` plus a GitHub-release version check, so it will refuse to fast-forward (or report "already current") rather than clobber your work. That's expected. To rebuild from your **working tree** instead, run `./packaging/install.sh`.
 - **You installed from npm.** A packaged install has no git checkout, so `recall update` has nothing to pull. Bump the binary with `bun install -g recall-memory@latest`, then run `recall install` to refresh the canonical setup.
 
 ---
 
 ## Uninstall
 
-**`recall uninstall`** (delegates to `./uninstall.sh`) removes Recall's integration surgically and **preserves your memory database by default**. Exit your agent first.
+**`recall uninstall`** (delegates to `./packaging/uninstall.sh`) removes Recall's integration surgically and **preserves your memory database by default**. Exit your agent first.
 
 Run `recall uninstall --help` for the canonical forwarded flag list. The exact removal, preservation, purge, and per-host skip behavior is documented in [Installation → Uninstalling](installation.md#uninstalling).
 
@@ -82,7 +82,7 @@ Run `recall uninstall --help` for the canonical forwarded flag list. The exact r
 
 ## Custom database location
 
-- **At install time:** `./install.sh --db-path /path/to/recall.db`, or set `RECALL_DB_PATH` (see [Installation → Environment Variables](installation.md#environment-variables)).
+- **At install time:** `./packaging/install.sh --db-path /path/to/recall.db`, or set `RECALL_DB_PATH` (see [Installation → Environment Variables](installation.md#environment-variables)).
 - **Relocate an existing DB:** `recall migrate --to /new/path/recall.db` moves the database **and** rewrites the MCP config to point at it. Add `--dry-run` to preview. Details in the [CLI Reference → Admin](cli-reference.md#admin).
 - **Check the current location:** `recall path` prints the resolved DB path, install root, and per-platform symlink state.
 
@@ -90,7 +90,7 @@ Run `recall uninstall --help` for the canonical forwarded flag list. The exact r
 
 ## Recovery
 
-- **Restore a backup** (install/update write timestamped backups under `~/.agents/Recall/backups/`): `./install.sh list`, then `./install.sh restore [TIMESTAMP]`.
+- **Restore a backup** (install/update write timestamped backups under `~/.agents/Recall/backups/`): `./packaging/install.sh list`, then `./packaging/install.sh restore [TIMESTAMP]`.
 - **A failed update** writes `ROLLBACK.txt` into its backup directory with the exact revert commands. See [Upgrading → Rollback](upgrading.md#rollback). Note: **DB schema downgrades are not supported** — if a migration ran, restore the DB file from the backup rather than just reverting the repo.
 - **A `--purge` uninstall** writes a `pre_purge_<TS>/` snapshot containing the database and canonical user-authored MEMORY files before deleting runtime state; identity and distilled memory are also materialized into the Claude MEMORY directory when safe.
 - **Drifted symlinks** (e.g. after moving the checkout): `recall doctor` reports them and `recall doctor --fix` re-creates them, backing up any user-modified file at a symlink target first.

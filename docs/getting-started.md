@@ -27,16 +27,16 @@ Then attach each harness with its **native plugin or extension** when it has one
 | Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
 | Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
 | omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
-| Grok | `recall install` / `./install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
+| Grok | `recall install` / `./packaging/install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
 | Cursor | Merge `templates/cursor/` snippets. No marketplace plugin. |
 
-`recall install` (or `./install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+`recall install` (or `./packaging/install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
 ```bash
 # Source checkout (builds from the working tree, then the same installer-owned setup)
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
-./install.sh
+./packaging/install.sh
 ```
 
 Do not clone into `/tmp` — `bun link` points back at the checkout.
@@ -125,7 +125,7 @@ Then **open a new session in your agent**. What happens next depends on the host
 
 ## 5. How MCP and hooks get wired
 
-`recall install` (or `./install.sh`) wires **installer-owned** hosts: Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter/config. Claude, Codex, and Pi skills/MCP/extensions prefer the native plugin or package. You do not register MCP or hooks by hand unless you are on a host neither the plugin nor the installer owns.
+`recall install` (or `./packaging/install.sh`) wires **installer-owned** hosts: Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter/config. Claude, Codex, and Pi skills/MCP/extensions prefer the native plugin or package. You do not register MCP or hooks by hand unless you are on a host neither the plugin nor the installer owns.
 
 ### MCP (`recall-mcp`)
 

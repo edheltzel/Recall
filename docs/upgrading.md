@@ -34,7 +34,7 @@ From a shell:
 
 ```bash
 cd /path/to/Recall
-./update.sh --check
+./packaging/update.sh --check
 ```
 
 ## Using `update.sh` (recommended)
@@ -43,7 +43,7 @@ Exit Claude Code first, then:
 
 ```bash
 cd /path/to/Recall
-./update.sh
+./packaging/update.sh
 ```
 
 `update.sh` performs the full lifecycle:
@@ -103,7 +103,7 @@ commands to revert:
 ```
 git reset --hard <PRE_SHA>
 bun install && bun run build
-./install.sh restore <TIMESTAMP>
+./packaging/install.sh restore <TIMESTAMP>
 ```
 
 **DB schema downgrades are not supported.** If a migration applied to
@@ -125,7 +125,7 @@ bun link
 recall init
 ```
 
-Then re-run `./install.sh` to refresh hooks and agent skills — it's
+Then re-run `./packaging/install.sh` to refresh hooks and agent skills — it's
 idempotent.
 
 ## v0.7.22 Migration Notes
@@ -148,7 +148,7 @@ and resolve to readable files → falls back to `npm link` on failure.
 `install.sh` Step 4 and `update.sh` `step_link_global` both delegate
 to it. Catches the silent-no-op case where `bun link` exits 0 without
 refreshing the bin symlinks, which was the root cause of the "I ran
-`./update.sh` and then `recall` wasn't executable" class of issue.
+`./packaging/update.sh` and then `recall` wasn't executable" class of issue.
 
 ## v0.7.21 Migration Notes
 
@@ -167,7 +167,7 @@ alive: the current session works, but the next restart drops the
 inode and MCP breaks with no diagnostic.
 
 v0.7.21 runs `step_link_global` between build and migrate. No user
-action needed — next `./update.sh` run self-heals.
+action needed — next `./packaging/update.sh` run self-heals.
 
 ## v0.7.2 Migration Notes
 
@@ -194,7 +194,7 @@ anyone upgrading from a 0.6.x database that still had
 Adds an `importance INTEGER` (1-10) column to `messages`, `decisions`,
 `learnings`, and `loa_entries`. Non-destructive — existing rows receive
 the default value (5 for most tables, 8 for LoA with a floor of 5). Runs
-automatically on `recall init` or `./install.sh`.
+automatically on `recall init` or `./packaging/install.sh`.
 
 ### Recommended: run `recall onboard` post-upgrade
 
@@ -254,7 +254,7 @@ Migration 5→6 adds a `confidence` column (high/medium/low, DEFAULT 'medium') t
 
 ### New hooks/lib/ directory
 
-v0.6.0 introduces a `hooks/lib/` directory containing shared utilities imported by `RecallExtract.ts` and `RecallBatchExtract.ts`. If you update the hooks manually rather than via `./install.sh`, you must copy this directory:
+v0.6.0 introduces a `hooks/lib/` directory containing shared utilities imported by `RecallExtract.ts` and `RecallBatchExtract.ts`. If you update the hooks manually rather than via `./packaging/install.sh`, you must copy this directory:
 
 ```bash
 cp -r hooks/lib/ ~/.claude/hooks/lib/
@@ -278,7 +278,7 @@ Without `hooks/lib/`, the hook scripts will fail to resolve imports at runtime.
 
 ## Database Migrations
 
-Recall uses SQLite's `PRAGMA user_version` for schema version tracking. When you run `recall init` or `./install.sh`, the migration system:
+Recall uses SQLite's `PRAGMA user_version` for schema version tracking. When you run `recall init` or `./packaging/install.sh`, the migration system:
 
 1. Reads the current `PRAGMA user_version` from your database
 2. Compares it against the expected version in the codebase
@@ -289,7 +289,7 @@ Migrations are non-destructive — they add tables and indexes, never drop exist
 
 ```mermaid
 graph TD
-    A[git pull] --> B[./install.sh]
+    A[git pull] --> B[./packaging/install.sh]
     B --> C[bun install]
     C --> D[bun run build]
     D --> E[bun link]
@@ -315,9 +315,9 @@ The installer automatically backs up existing files before making any changes. B
 ### Managing Backups
 
 ```bash
-./install.sh list              # List available backups
-./install.sh restore           # Restore most recent backup
-./install.sh restore 20260219  # Restore specific backup
+./packaging/install.sh list              # List available backups
+./packaging/install.sh restore           # Restore most recent backup
+./packaging/install.sh restore 20260219  # Restore specific backup
 ```
 
 ### Manual Backup

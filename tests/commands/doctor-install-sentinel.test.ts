@@ -36,7 +36,7 @@ describe('probeInstallSentinel', () => {
     const r = probeInstallSentinel(marker);
     expect(r.status).toBe('WARN');
     expect(r.message).toContain('did not finish');
-    expect(r.message).toContain('re-run ./install.sh');
+    expect(r.message).toContain('re-run ./packaging/install.sh');
   });
 
   test('stale marker WARN surfaces the recorded marker detail', () => {

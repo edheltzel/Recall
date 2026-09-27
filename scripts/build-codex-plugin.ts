@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = join(repoRoot, 'agent-skills');
-const defaultOutputRoot = join(repoRoot, 'plugins', 'recall', 'skills');
+const defaultOutputRoot = join(repoRoot, 'hosts', 'plugins', 'recall', 'skills');
 
 export const routes: Record<string, string> = {
   'do-recall-add': 'Prefer the `memory_add` MCP tool. Use the CLI examples below only when the MCP server is unavailable.',

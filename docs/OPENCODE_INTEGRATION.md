@@ -61,7 +61,7 @@ The entire integration is **three thin adapter layers**:
   └────────────────────────┘     │  agents/recall-memory.md    │
                                  │                             │
                                  │ Context Injection:          │
-                                 │  plugins/recall-compaction  │
+                                 │  hosts/plugins/recall-compaction  │
                                  │  pushes to output.context[] │
                                  └─────────────────────────────┘
 ```

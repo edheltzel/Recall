@@ -8,7 +8,7 @@
       "name": "recall",
       "source": {
         "source": "local",
-        "path": "./plugins/recall"
+        "path": "./hosts/plugins/recall"
       },
       "policy": {
         "installation": "AVAILABLE",

@@ -14,7 +14,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const REPO = process.cwd();
-const UPDATE = join(REPO, 'update.sh');
+const UPDATE = join(REPO, 'packaging', 'update.sh');
 
 function run(args: string[], env: Record<string, string> = {}) {
   const r = spawnSync('bash', [UPDATE, ...args], {
@@ -320,7 +320,7 @@ describe('update.sh', () => {
         # Pull step_refresh_runtime out of update.sh and define it inline.
         # awk over sed: more robust to inline shell that might confuse sed's
         # range matcher.
-        eval "$(awk '/^step_refresh_runtime\\(\\)/{p=1} p; p && /^}$/{exit}' "${REPO}/update.sh")"
+        eval "$(awk '/^step_refresh_runtime\\(\\)/{p=1} p; p && /^}$/{exit}' "${REPO}/packaging/update.sh")"
 
         step_refresh_runtime
       `;

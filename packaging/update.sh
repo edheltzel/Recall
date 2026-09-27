@@ -7,14 +7,14 @@
 # of defect where one partial install could leave hooks missing).
 #
 # Usage:
-#   ./update.sh                # full update
-#   ./update.sh --check        # version check only, exit
-#   ./update.sh --dry-run      # show plan, touch nothing
-#   ./update.sh --force        # skip "already current" guard, still confirm
-#   ./update.sh --no-migrate   # skip recall init migration step
-#   ./update.sh --no-confirm   # non-interactive (same as install.sh --yes)
-#   ./update.sh --no-gum       # skip gum auto-install; use bash UX this run
-#   ./update.sh --help         # this message
+#   ./packaging/update.sh                # full update
+#   ./packaging/update.sh --check        # version check only, exit
+#   ./packaging/update.sh --dry-run      # show plan, touch nothing
+#   ./packaging/update.sh --force        # skip "already current" guard, still confirm
+#   ./packaging/update.sh --no-migrate   # skip recall init migration step
+#   ./packaging/update.sh --no-confirm   # non-interactive (same as install.sh --yes)
+#   ./packaging/update.sh --no-gum       # skip gum auto-install; use bash UX this run
+#   ./packaging/update.sh --help         # this message
 #
 # Environment:
 #   RECALL_NO_GUM=1   Permanent gum opt-out (same as --no-gum)
@@ -28,8 +28,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=lib/install-lib.sh
-source "$SCRIPT_DIR/lib/install-lib.sh"
+# shellcheck source=../lib/install-lib.sh
+source "$SCRIPT_DIR/../lib/install-lib.sh"
 
 REPO_OWNER="edheltzel"
 REPO_NAME="Recall"
@@ -129,16 +129,16 @@ Update failed: $reason
 
 To roll back this repository and restore the pre-update runtime files:
 
-  cd $SCRIPT_DIR
+  cd $RECALL_REPO_DIR
   git reset --hard $pre_sha
   bun install && bun run build
-  ./install.sh restore $TIMESTAMP
+  ./packaging/install.sh restore $TIMESTAMP
 
 Notes:
   - The database file (~/.agents/Recall/recall.db, or legacy ~/.claude/memory.db
     if not yet migrated) is NOT overwritten by restore — it survives.
   - DB schema downgrades are NOT supported. If migrations ran and applied
-    a newer schema, you cannot revert the DB via ./install.sh restore
+    a newer schema, you cannot revert the DB via ./packaging/install.sh restore
     alone; you must delete the DB file and re-init from a pre-update
     snapshot under $BACKUP_DIR.
   - If recall_auto_migrate ran, a pre-migration snapshot is preserved at
@@ -194,7 +194,7 @@ step_version_check() {
     echo "Release notes:"
     latest_release_notes | head -20 | sed 's/^/  /'
     echo ""
-    echo "To apply: cd $SCRIPT_DIR && ./update.sh"
+    echo "To apply: cd $RECALL_REPO_DIR && ./packaging/update.sh"
     exit 0
   fi
 
@@ -257,7 +257,7 @@ step_fetch_and_pull() {
 
   if ! git pull --ff-only origin main; then
     log_error "git pull --ff-only failed — you likely have local commits or a dirty tree."
-    log_error "Resolve manually, then re-run ./update.sh."
+    log_error "Resolve manually, then re-run ./packaging/update.sh."
     exit 1
   fi
 }

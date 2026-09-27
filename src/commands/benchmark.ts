@@ -1,8 +1,8 @@
 // recall benchmark — Phase 2 benchmarking CLI integration.
 //
-// Thin wrapper over benchmarks/runner.ts. We keep the actual implementation
+// Thin wrapper over docs/docs/benchmarks/runner.ts. We keep the actual implementation
 // outside src/ so the CLI binary stays small and benchmarks can be run
-// directly with `bun run benchmarks/runner.ts` without depending on the dist
+// directly with `bun run docs/docs/benchmarks/runner.ts` without depending on the dist
 // build.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
@@ -29,8 +29,8 @@ function findBenchmarksDir(): string | null {
   // src/, root is the project root. Walk up from cwd looking for the dir.
   let dir = process.cwd();
   for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'benchmarks', 'runner.ts');
-    if (existsSync(candidate)) return join(dir, 'benchmarks');
+    const candidate = join(dir, 'docs', 'benchmarks', 'runner.ts');
+    if (existsSync(candidate)) return join(dir, 'docs', 'benchmarks');
     const next = join(dir, '..');
     if (next === dir) break;
     dir = next;
@@ -41,7 +41,7 @@ function findBenchmarksDir(): string | null {
 export async function runBenchmark(options: RunBenchmarkOptions = {}): Promise<void> {
   const dir = findBenchmarksDir();
   if (!dir) {
-    console.error('Benchmark harness not found. The benchmarks/ directory must be present in the project root.');
+    console.error('Benchmark harness not found. The docs/benchmarks/ directory must be present in the project root.');
     process.exit(1);
   }
 

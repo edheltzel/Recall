@@ -48,7 +48,7 @@ A durable fix for GUI PATH / `recall start --format cursor` accuracy is **pendin
 ## Non-goals
 
 - No `HostDescriptor` layer and no adapter→plugin rename.
-- No Cursor marketplace plugin (`plugins/recall-cursor` does not exist).
+- No Cursor marketplace plugin (`hosts/plugins/recall-cursor` does not exist).
 - Cursor does not join `recall host-hook` / `host-ingest` / `LifecycleHost`.
 - No CLI extension loader in this slice — registrations are in-process.
 

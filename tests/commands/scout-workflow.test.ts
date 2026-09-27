@@ -25,10 +25,10 @@ const SCOUT = read('agent-skills/do-recall-scout/SKILL.md');
 
 // The four platform guides that must REFERENCE the canonical block, never copy it.
 const GUIDE_PATHS = [
-  'FOR_CLAUDE.md',
-  'FOR_PI.md',
-  'FOR_OPENCODE.md',
-  'opencode/recall-memory.md',
+  'docs/hosts/FOR_CLAUDE.md',
+  'docs/hosts/FOR_PI.md',
+  'docs/hosts/FOR_OPENCODE.md',
+  'hosts/opencode/recall-memory.md',
 ];
 
 // A distinctive sentence that lives only in the canonical workflow body.

@@ -12,7 +12,7 @@ import { VERSION } from '../version.js';
 import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
 import { getRecallHome } from '../lib/runtime-paths.js';
-
+import { parseJsonc } from '../../lib/jsonc-mcp.js';
 export interface DoctorOptions {
   fix?: boolean;
 }
@@ -547,7 +547,7 @@ export function probeSkillSurface(root: string): CheckResult {
     return {
       label,
       status: 'WARN',
-      message: 'No agent skill canonicals under shared/skills — the do-recall-* command surface is blank; re-run ./install.sh to converge',
+      message: 'No agent skill canonicals under shared/skills — the do-recall-* command surface is blank; re-run ./packaging/install.sh to converge',
     };
   }
   return { label, status: 'PASS', message: `${count} agent skill file(s) present` };
@@ -591,7 +591,7 @@ export function probeClaudePlugin(home: string, root: string): CheckResult {
     return {
       label,
       status: 'WARN',
-      message: `Plugin active${state.version ? ` (v${state.version})` : ''} alongside the legacy install — ${duplicates.join('; ')}. Run ./update.sh to reconcile`,
+      message: `Plugin active${state.version ? ` (v${state.version})` : ''} alongside the legacy install — ${duplicates.join('; ')}. Run ./packaging/update.sh to reconcile`,
     };
   }
   return {
@@ -643,11 +643,13 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
   const { label, target, canonical } = probe;
 
   if (!existsSync(canonical)) {
-    // The canonical file isn't present — this means the install root is
-    // incomplete or this hook isn't shipped on this platform. Treat as INFO
-    // (not a Recall-managed symlink to fix).
     return {
       result: { label, status: 'INFO', message: `Canonical not present at ${canonical}` },
+    };
+  }
+  if (!statSync(canonical).isFile()) {
+    return {
+      result: { label, status: 'INFO', message: `Canonical is not a file at ${canonical}` },
     };
   }
 
@@ -768,11 +770,7 @@ interface McpScan {
 // registration). Malformed/unreadable JSON is never fatal, but it is recorded
 // (not dropped) so the caller can distinguish it from a missing registration.
 function parseHostConfig(target: McpConfigTarget): Record<string, unknown> {
-  const raw = readFileSync(target.path, 'utf-8');
-  const json = target.format === 'jsonc'
-    ? raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
-    : raw;
-  return JSON.parse(json) as Record<string, unknown>;
+  return parseJsonc(readFileSync(target.path, 'utf-8')) as Record<string, unknown>;
 }
 
 function mcpEntryAt(config: Record<string, unknown>, target: McpConfigTarget): McpEntry | null {
@@ -926,7 +924,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
 // remove it only after the post-install self-check passes. A leftover marker
 // means a prior run was interrupted before it could verify (SIGKILL, closed
 // terminal, power loss) — the install may be partial. Warn-only: re-running
-// ./install.sh converges (it is idempotent). Exported + path-injected so it is
+// ./packaging/install.sh converges (it is idempotent). Exported + path-injected so it is
 // unit-testable without the real install root, mirroring probeSymlink/probeMcpEnv.
 export function probeInstallSentinel(markerPath: string): CheckResult {
   const label = 'Install completed (no interrupted run)';
@@ -939,7 +937,7 @@ export function probeInstallSentinel(markerPath: string): CheckResult {
   return {
     label,
     status: 'WARN',
-    message: `A previous install/update did not finish${suffix} — re-run ./install.sh to converge (idempotent), or 'recall doctor --fix' for symlinks only`,
+    message: `A previous install/update did not finish${suffix} — re-run ./packaging/install.sh to converge (idempotent), or 'recall doctor --fix' for symlinks only`,
   };
 }
 
@@ -976,12 +974,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // repairs and substitute the post-repair result for the report.
   const symlinkChecks = buildSymlinkProbes().map(probeSymlink);
   for (const sc of symlinkChecks) {
-    if (opts.fix && sc.repair && sc.result.status !== 'PASS' && sc.result.status !== 'INFO') {
-      const fixed = sc.repair();
-      results.push(fixed);
-    } else {
-      results.push(sc.result);
-    }
+    results.push(resolveProbeResult(sc, !!opts.fix));
   }
 
   // Skill command surface floor (#235): the per-file probes above go silent
@@ -1002,7 +995,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
 
   // Completion sentinel (#27): a leftover .install-incomplete marker means a
   // prior install/update was interrupted before its self-check ran. Warn-only —
-  // re-running ./install.sh converges; doctor does not auto-repair it.
+  // re-running ./packaging/install.sh converges; doctor does not auto-repair it.
   results.push(probeInstallSentinel(join(getRecallHome(), '.install-incomplete')));
 
   // Print all results

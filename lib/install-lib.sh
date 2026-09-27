@@ -30,9 +30,11 @@
 if [[ -z "${RECALL_REPO_DIR:-}" ]]; then
   RECALL_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
-
+_RECALL_JSONC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/jsonc-mcp.ts"
 : "${CLAUDE_DIR:=$HOME/.claude}"
-
+# $CLAUDE_DIR is always absolute. Recall does not write a project-local .claude
+# relative to cwd, so running the installer from $HOME cannot collide a project
+# config with the user config. No separate collision guard.
 # Recall install root — canonical home for hooks, commands, guides, the DB,
 # and backups. Claude/OpenCode homes receive per-file symlinks back here; Pi's
 # extensions + skills load through its native package manifest. This is the
@@ -770,7 +772,7 @@ recall_select_platforms() {
     && [[ "$GROK_DETECTED" == "false" ]] \
     && [[ "$OMP_DETECTED" == "false" ]]; then
     log_warn "All agents skipped — Recall will install core tools only."
-    log_info "Re-run ./install.sh later to configure agent integrations."
+    log_info "Re-run ./packaging/install.sh later to configure agent integrations."
   fi
 }
 
@@ -877,7 +879,7 @@ recall_create_backup() {
     echo "Date: $(date)"
     echo "Files backed up: $backed_up"
     echo ""
-    echo "To restore: ./install.sh restore $TIMESTAMP"
+    echo "To restore: ./packaging/install.sh restore $TIMESTAMP"
   } >"$BACKUP_DIR/manifest.txt"
 
   # Record the git SHA at backup time (used by update.sh for rollback recipes)
@@ -919,7 +921,7 @@ recall_list_backups() {
   done
 
   echo ""
-  echo "To restore: ./install.sh restore [TIMESTAMP]"
+  echo "To restore: ./packaging/install.sh restore [TIMESTAMP]"
   echo "           (omit timestamp to restore latest)"
 }
 
@@ -1044,7 +1046,7 @@ recall_do_restore() {
   echo ""
   log_info "If you had MCP changes, restart Claude Code to apply"
   echo ""
-  echo "To undo this restore: ./install.sh restore pre_restore_$TIMESTAMP"
+  echo "To undo this restore: ./packaging/install.sh restore pre_restore_$TIMESTAMP"
 }
 
 # ── Install root + symlink helpers ───────────────────────────────────────────
@@ -1247,11 +1249,16 @@ recall_remove_legacy_slash_commands() {
   fi
 
   # -ef (same device+inode), not a string compare: on case-insensitive macOS
-  # filesystems "commands/recall" IS "commands/Recall", so only remove the
-  # lowercase dir when it's genuinely a distinct directory.
+  # filesystems "commands/recall" IS "commands/Recall", so only clean the
+  # lowercase dir when it is a distinct directory. Same managed-link rule.
   if [[ -d "$legacy" ]] && ! [[ "$legacy" -ef "$dir" ]]; then
-    rm -rf "$legacy"
-    log_info "Removed legacy lowercase slash commands at $legacy"
+    local g
+    for g in "$legacy"/*.md; do
+      [[ -e "$g" || -L "$g" ]] || continue
+      recall_unlink_if_managed "$g"
+    done
+    rmdir "$legacy" 2>/dev/null || true
+    [[ -d "$legacy" ]] || log_info "Removed legacy lowercase slash commands at $legacy"
   fi
 
   # Command canonicals under $RECALL_CLAUDE_COMMANDS_DIR are no longer shipped.
@@ -1484,18 +1491,20 @@ _recall_unregister_legacy_claude_mcp() {
   for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
     [[ -f "$f" ]] || continue
     grep -q "recall-memory" "$f" || continue
-    if CFG_FILE="$f" DEFAULT_DB="$default_db" bun -e '
+    if CFG_FILE="$f" DEFAULT_DB="$default_db" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
       const fs = require("fs");
+      const { parseJsonc, writeJsonAtomic, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.CFG_FILE;
       let cfg;
-      try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { process.exit(1); }
+      try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(1); }
       const entry = cfg?.mcpServers?.["recall-memory"];
       if (!entry) process.exit(0);
       const pinned = entry.env?.RECALL_DB_PATH ?? entry.env?.MEM_DB_PATH;
       if (pinned && pinned !== process.env.DEFAULT_DB) process.exit(1);
       delete cfg.mcpServers["recall-memory"];
       if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
-      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+      if (isSemanticallyEmpty(cfg)) fs.unlinkSync(file);
+      else writeJsonAtomic(file, cfg);
     ' 2>/dev/null; then
       log_success "Removed duplicate recall-memory registration from $(basename "$f") — the plugin provides it"
     else
@@ -1690,7 +1699,7 @@ recall_verify_install() {
 recall_print_recovery() {
   local logger="${1:-log_info}"
   "$logger" "Recovery options:"
-  "$logger" "  Recommended: re-run ./install.sh — it heals canonicals AND symlinks (idempotent)."
+  "$logger" "  Recommended: re-run ./packaging/install.sh — it heals canonicals AND symlinks (idempotent)."
   "$logger" "  Alternative: run 'recall doctor --fix' — repairs symlinks only (no reinstall)."
 }
 
@@ -1906,14 +1915,16 @@ _recall_ensure_mcp_entry() {
     if ! grep -q "recall-memory" "$f"; then
       continue
     fi
-    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" bun -e '
+    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
+      JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
       const fs = require("fs");
+      const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
       const file = process.env.CFG_FILE;
       const dbPath = process.env.DB_PATH_ABS;
       const bunPath = process.env.BUN_PATH;
       const mcpPath = process.env.MCP_PATH;
       let cfg;
-      try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { process.exit(0); }
+      try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(0); }
       if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
       const entry = cfg.mcpServers["recall-memory"];
       entry.command = bunPath;
@@ -1921,8 +1932,8 @@ _recall_ensure_mcp_entry() {
       if (!entry.env || typeof entry.env !== "object" || Array.isArray(entry.env)) entry.env = {};
       entry.env.RECALL_DB_PATH = dbPath;
       delete entry.env.MEM_DB_PATH;
-      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
-    ' 2>/dev/null && log_success "Patched recall-memory command/env in $(basename "$f")"
+      writeJsonAtomic(file, cfg);
+    ' && log_success "Patched recall-memory command/env in $(basename "$f")"
   done
 }
 
@@ -1939,17 +1950,19 @@ _recall_write_mcp_settings() {
   fi
 
   SETTINGS_FILE="$settings_file" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
-    DB_PATH_ABS="$db_path_abs" node -e '
+    DB_PATH_ABS="$db_path_abs" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
     const fs = require("fs");
+    const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
     let config = {};
-    try { config = JSON.parse(fs.readFileSync(process.env.SETTINGS_FILE, "utf8")); } catch {}
+    try { config = parseJsonc(fs.readFileSync(process.env.SETTINGS_FILE, "utf8")); } catch {}
+    if (!config || typeof config !== "object" || Array.isArray(config)) config = {};
     config.mcpServers = config.mcpServers || {};
     config.mcpServers["recall-memory"] = {
       command: process.env.BUN_PATH,
       args: ["run", process.env.MCP_PATH],
       env: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
     };
-    fs.writeFileSync(process.env.SETTINGS_FILE, JSON.stringify(config, null, 2));
+    writeJsonAtomic(process.env.SETTINGS_FILE, config);
   '
   log_success "Added recall-memory to settings.json mcpServers"
 }
@@ -2059,6 +2072,7 @@ recall_register_hook() {
     COMMAND="$command" \
     TIMEOUT="$timeout" \
     MATCHER="$matcher" \
+    JSONC_LIB="$_RECALL_JSONC_LIB" \
     bun -e '
       const fs = require("fs");
       const settingsFile = process.env.SETTINGS_FILE;
@@ -2068,8 +2082,9 @@ recall_register_hook() {
       const timeout = process.env.TIMEOUT;
       const matcher = process.env.MATCHER || "";
 
+      const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
       let config = {};
-      try { config = JSON.parse(fs.readFileSync(settingsFile, "utf8")); } catch {}
+      try { config = parseJsonc(fs.readFileSync(settingsFile, "utf8")); } catch {}
       config.hooks = config.hooks || {};
       config.hooks[event] = config.hooks[event] || [];
 
@@ -2082,7 +2097,7 @@ recall_register_hook() {
       if (timeout) hookObj.timeout = Number(timeout);
       config.hooks[event].push({ matcher, hooks: [hookObj] });
 
-      fs.writeFileSync(settingsFile, JSON.stringify(config, null, 2));
+      writeJsonAtomic(settingsFile, config);
     '
 }
 
@@ -2156,11 +2171,12 @@ recall_rename_hooks_in_settings() {
   local settings_file="$CLAUDE_DIR/settings.json"
   [[ ! -f "$settings_file" ]] && return 0
 
-  SETTINGS_FILE="$settings_file" bun -e '
+  SETTINGS_FILE="$settings_file" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
     const fs = require("fs");
+    const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
     const file = process.env.SETTINGS_FILE;
     let cfg;
-    try { cfg = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return; }
+    try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { return; }
     if (!cfg.hooks || typeof cfg.hooks !== "object") return;
 
     // Map of old hook name → new hook name. Order matters in the substitution
@@ -2202,7 +2218,7 @@ recall_rename_hooks_in_settings() {
     }
 
     if (changed) {
-      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+      writeJsonAtomic(file, cfg);
       console.log("Migrated hook names in " + file);
     }
   ' 2>/dev/null
@@ -2476,7 +2492,7 @@ recall_configure_opencode_mcp() {
 
 recall_install_opencode_plugins() {
   local plugin_dir="$OPENCODE_CONFIG_DIR/plugins"
-  local src_dir="$RECALL_REPO_DIR/opencode"
+  local src_dir="$RECALL_REPO_DIR/hosts/opencode"
 
   recall_create_install_root
   mkdir -p "$plugin_dir"
@@ -2507,7 +2523,7 @@ recall_install_opencode_plugins() {
 
 recall_install_opencode_agent() {
   local agent_dir="$OPENCODE_CONFIG_DIR/agents"
-  local src_dir="$RECALL_REPO_DIR/opencode"
+  local src_dir="$RECALL_REPO_DIR/hosts/opencode"
 
   mkdir -p "$agent_dir"
 
@@ -2518,10 +2534,10 @@ recall_install_opencode_agent() {
 }
 
 recall_install_opencode_guide() {
-  if [[ -f "$RECALL_REPO_DIR/FOR_OPENCODE.md" ]]; then
+  if [[ -f "$RECALL_REPO_DIR/docs/hosts/FOR_OPENCODE.md" ]]; then
     recall_create_install_root
     mkdir -p "$OPENCODE_CONFIG_DIR"
-    recall_copy_canonical "$RECALL_REPO_DIR/FOR_OPENCODE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
+    recall_copy_canonical "$RECALL_REPO_DIR/docs/hosts/FOR_OPENCODE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
     recall_link "$OPENCODE_CONFIG_DIR/Recall_GUIDE.md" "$RECALL_OPENCODE_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide for OpenCode"
   fi
@@ -2678,8 +2694,8 @@ recall_install_pi_guide() {
   recall_create_install_root
   mkdir -p "$PI_CONFIG_DIR"
 
-  if [[ -f "$RECALL_REPO_DIR/FOR_PI.md" ]]; then
-    recall_copy_canonical "$RECALL_REPO_DIR/FOR_PI.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
+  if [[ -f "$RECALL_REPO_DIR/docs/hosts/FOR_PI.md" ]]; then
+    recall_copy_canonical "$RECALL_REPO_DIR/docs/hosts/FOR_PI.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
     recall_link "$PI_CONFIG_DIR/Recall_GUIDE.md" "$RECALL_PI_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide for Pi"
   fi
@@ -2733,8 +2749,8 @@ recall_copy_runtime_files() {
 
   # FOR_CLAUDE.md → Recall_GUIDE.md (canonical lives under $RECALL_CLAUDE_ROOT,
   # symlink at $CLAUDE_DIR/Recall_GUIDE.md).
-  if [[ -f "$RECALL_REPO_DIR/FOR_CLAUDE.md" ]]; then
-    recall_copy_canonical "$RECALL_REPO_DIR/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
+  if [[ -f "$RECALL_REPO_DIR/docs/hosts/FOR_CLAUDE.md" ]]; then
+    recall_copy_canonical "$RECALL_REPO_DIR/docs/hosts/FOR_CLAUDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     recall_link "$CLAUDE_DIR/Recall_GUIDE.md" "$RECALL_CLAUDE_ROOT/Recall_GUIDE.md"
     log_success "Installed Recall guide at $CLAUDE_DIR/Recall_GUIDE.md"
   fi

@@ -10,10 +10,10 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSy
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { Database } from 'bun:sqlite';
-import { runSuiteB } from '../../benchmarks/suites/suite-b-token-efficiency';
-import { runBenchmarks, renderMarkdown } from '../../benchmarks/runner';
-import { snapshotClaudeMd } from '../../benchmarks/baselines/claude-md';
-import { estimateTokens } from '../../benchmarks/types';
+import { runSuiteB } from '../../docs/benchmarks/suites/suite-b-token-efficiency';
+import { runBenchmarks, renderMarkdown } from '../../docs/benchmarks/runner';
+import { snapshotClaudeMd } from '../../docs/benchmarks/baselines/claude-md';
+import { estimateTokens } from '../../docs/benchmarks/types';
 
 let tempDir: string;
 let dbPath: string;
@@ -235,7 +235,7 @@ describe('Runner — runBenchmarks', () => {
     const parsed = JSON.parse(jsonl);
     expect(parsed.suites.length).toBeGreaterThan(0);
 
-    // Cleanup — the runner writes to the actual benchmarks/results dir
+    // Cleanup — the runner writes to the actual docs/benchmarks/results dir
     rmSync(out.jsonlPath!, { force: true });
     rmSync(out.markdownPath!, { force: true });
   });

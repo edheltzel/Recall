@@ -50,8 +50,8 @@ describe('shared drop-dir ingest', () => {
       expect(findMarkdownSessions(join(memory, 'acme-sessions'), 'acme')).toHaveLength(1);
       expect(parseMarkdownDrop(files[0].path)?.sessionId).toBe('ses_third');
 
-      const extract = readFileSync(join(REPO, 'opencode', 'RecallExtract.ts'), 'utf-8');
-      const precompact = readFileSync(join(REPO, 'pi', 'RecallPreCompact.ts'), 'utf-8');
+      const extract = readFileSync(join(REPO, 'hosts', 'opencode', 'RecallExtract.ts'), 'utf-8');
+      const precompact = readFileSync(join(REPO, 'hosts', 'pi', 'RecallPreCompact.ts'), 'utf-8');
       expect(extract).toContain('Host parser — not a template');
       expect(precompact).toContain('Host parser — not a template');
     } finally {

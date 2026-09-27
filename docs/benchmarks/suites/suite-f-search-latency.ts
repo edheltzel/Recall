@@ -40,18 +40,18 @@ import type { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { search, getLastSearchErrors, vectorRowContentProvenance } from '../../src/lib/memory.js';
-import { initDb, closeDb, getDb } from '../../src/db/connection.js';
+import { search, getLastSearchErrors, vectorRowContentProvenance } from '../../../src/lib/memory.js';
+import { initDb, closeDb, getDb } from '../../../src/db/connection.js';
 import {
   cosineSimilarity,
   blobToEmbedding,
   embeddingToBlob,
   reciprocalRankFusion,
   EMBEDDING_DIMENSIONS,
-} from '../../src/lib/embeddings.js';
-import { notMarkedDuplicateSql, DEDUP_TABLES } from '../../src/lib/dedup.js';
-import { isVecAvailable, reindexVec, knnSearch } from '../../src/db/vec.js';
-import type { Provenance } from '../../src/types/index.js';
+} from '../../../src/lib/embeddings.js';
+import { notMarkedDuplicateSql, DEDUP_TABLES } from '../../../src/lib/dedup.js';
+import { isVecAvailable, reindexVec, knnSearch } from '../../../src/db/vec.js';
+import type { Provenance } from '../../../src/types/index.js';
 import type { SuiteResult, MetricSample } from '../types.js';
 import {
   DEFAULT_SEED,

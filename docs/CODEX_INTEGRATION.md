@@ -4,7 +4,7 @@
 
 **Preferred install:** Codex's native plugin. It owns MCP, skills, and lifecycle hooks.
 
-The checked-in marketplace catalog is `.agents/plugins/marketplace.json`. The plugin bundle is `plugins/recall/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
+The checked-in marketplace catalog is `.agents/plugins/marketplace.json`. The plugin bundle is `hosts/plugins/recall/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
 
 The plugin owns three distinct surfaces:
 
@@ -75,7 +75,7 @@ Remote marketplace publication and update policy remain separate distribution wo
 
 Maintainer-only. Not the install path.
 
-Canonical skills live in `agent-skills/`. Regenerate Codex adapters with `bun run build:codex-plugin` (`scripts/build-codex-plugin.ts`). Do not hand-edit `plugins/recall/skills/`. Skill names use `do-recall-*`. Current Codex CLI has no `codex plugin validate`.
+Canonical skills live in `agent-skills/`. Regenerate Codex adapters with `bun run build:codex-plugin` (`scripts/build-codex-plugin.ts`). Do not hand-edit `hosts/plugins/recall/skills/`. Skill names use `do-recall-*`. Current Codex CLI has no `codex plugin validate`.
 
 ```bash
 bun test tests/plugins/codex-plugin.test.ts

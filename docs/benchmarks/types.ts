@@ -1,7 +1,7 @@
 // Shared result schema for the benchmark harness.
 //
 // Every suite returns a `SuiteResult`. The runner concatenates suite results
-// into a `RunResult`, writes it as JSONL to benchmarks/results/, and renders a
+// into a `RunResult`, writes it as JSONL to docs/benchmarks/results/, and renders a
 // markdown summary alongside.
 //
 // Design rule (lesson from MemPalace): suites NEVER return composite scores.

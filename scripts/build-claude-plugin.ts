@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = join(repoRoot, 'agent-skills');
-const defaultOutputRoot = join(repoRoot, 'plugins', 'recall-claude', 'skills');
+const defaultOutputRoot = join(repoRoot, 'hosts', 'plugins', 'recall-claude', 'skills');
 
 export function generateClaudePluginSkills(outputRoot: string = defaultOutputRoot): string[] {
   mkdirSync(outputRoot, { recursive: true });

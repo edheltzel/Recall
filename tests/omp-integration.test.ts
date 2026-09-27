@@ -4,7 +4,7 @@ import {
   MAX_OMP_STDIN_BYTES,
   runBoundedChild,
   type OmpExtensionContext,
-} from '../omp/recall';
+} from '../hosts/omp/recall';
 
 function uiCtx(
   notify: (message: string, type?: string) => void,

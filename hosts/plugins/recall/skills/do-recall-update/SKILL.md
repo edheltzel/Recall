@@ -28,7 +28,7 @@ lives in the same process tree via `bun link`).
    release notes, and the exact recipe to run the update manually:
 
    ```
-   cd <path-to-Recall> && ./update.sh
+   cd <path-to-Recall> && ./packaging/update.sh
    ```
 
 ## Why not auto-run?
@@ -36,7 +36,7 @@ lives in the same process tree via `bun link`).
 `update.sh` pulls, rebuilds, migrates the DB, and re-registers hooks.
 Rebuilding the `recall` binary mid-session can leave the running hook
 scripts in a half-updated state. The safe sequence is: exit the coding
-agent → `./update.sh` → restart it.
+agent → `./packaging/update.sh` → restart it.
 
 ## Rate-limit fallback
 
@@ -47,7 +47,7 @@ page: <https://github.com/edheltzel/Recall/releases>.
 ## Steps for you
 
 Run these steps to perform the check and produce the recipe. Prefer
-running the Recall-shipped helper (`./update.sh --check`) if the source
+running the Recall-shipped helper (`./packaging/update.sh --check`) if the source
 directory is locatable — it implements all of the logic below.
 
 1. **Locate the source directory.** Resolve the symlink target of the
@@ -63,10 +63,10 @@ directory is locatable — it implements all of the logic below.
    to it — it prints the exact recipe on its own:
 
    ```bash
-   cd "$RECALL_SRC" && ./update.sh --check
+   cd "$RECALL_SRC" && ./packaging/update.sh --check
    ```
 
-   Its output already includes the "cd ... && ./update.sh" line. Relay
+   Its output already includes the "cd ... && ./packaging/update.sh" line. Relay
    it to the user and stop.
 
 3. **Manual path** (if `update.sh` is not present on older installs):
@@ -90,9 +90,9 @@ directory is locatable — it implements all of the logic below.
      <first ~10 lines of body>
 
      To apply:
-       cd <RECALL_SRC> && ./update.sh
+       cd <RECALL_SRC> && ./packaging/update.sh
      ```
 
-4. **Do not** run `./update.sh` on the user's behalf. Stop at printing
+4. **Do not** run `./packaging/update.sh` on the user's behalf. Stop at printing
    the recipe. The user runs it themselves after exiting the coding
    agent.
