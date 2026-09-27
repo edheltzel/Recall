@@ -30,10 +30,11 @@ export interface ConversationImportOptions {
   dryRun?: boolean;
   verbose?: boolean;
   project?: string;
+  extractor?: (conversationText: string, session: ParsedConversationSession) => string | Promise<string>;
 }
 
 export interface ConversationImportDependencies {
-  extractor?: (conversationText: string, session: ParsedConversationSession) => string | Promise<string>;
+  extractor?: ConversationImportOptions['extractor'];
 }
 
 export interface ConversationImportResult {
@@ -509,7 +510,7 @@ async function runStructuredExtraction(
     fallback = true;
   }
 
-  const result = writeStructuredExtraction({
+  const result = await writeStructuredExtraction({
     sessionId: session.sessionId,
     sessionLabel: session.title,
     project: session.project,
@@ -530,7 +531,9 @@ export async function importConversations(
   dependencies: ConversationImportDependencies = {}
 ): Promise<ConversationImportResult> {
   const sessions = loadConversationSessions(inputPath, options);
-  const extractor = dependencies.extractor || ((conversationText: string) => runFabricExtract(conversationText));
+  const extractor = dependencies.extractor
+    || options.extractor
+    || ((conversationText: string) => runFabricExtract(conversationText));
   const result: ConversationImportResult = {
     sessionsFound: sessions.length,
     sessionsImported: 0,
@@ -583,7 +586,10 @@ export async function importConversations(
         result.structuredWrites.breadcrumbs += extraction.result.breadcrumbs;
         result.structuredWrites.errors += extraction.result.errors;
         result.structuredWrites.loa += extraction.result.loa;
+        // `failures.jev` stays on the structured write result. A score outage
+        // still wrote the original rows, so it is not a fatal import error.
         for (const [surface, message] of Object.entries(extraction.result.failures)) {
+          if (surface === 'jev') continue;
           result.errors.push(`${session.sessionId} extraction ${surface}: ${message}`);
         }
       }

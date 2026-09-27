@@ -68,16 +68,24 @@ async function main() {
   const dupe = acquireSemaphore(dbPath, convPath, process.pid + 1, 3);
   assertEq(dupe, false, 'duplicate semaphore acquire (same conv, diff pid) rejected');
 
-  const result = dualWriteToSqlite(dbPath, {
-    sessionId: 'e2e-session',
-    sessionLabel: 'e2e-test',
-    project: 'atlas-recall',
-    timestamp: '2026-05-17',
-    conversationPath: convPath,
-    topics: ['e2e', 'sqlite-native'],
-    summary: 'One sentence summary',
-    extracted: FIXTURE,
-  });
+  const priorJevKey = process.env.JEV_RECALL_KEY;
+  delete process.env.JEV_RECALL_KEY;
+  let result: Awaited<ReturnType<typeof dualWriteToSqlite>>;
+  try {
+    result = await dualWriteToSqlite(dbPath, {
+      sessionId: 'e2e-session',
+      sessionLabel: 'e2e-test',
+      project: 'atlas-recall',
+      timestamp: '2026-05-17',
+      conversationPath: convPath,
+      topics: ['e2e', 'sqlite-native'],
+      summary: 'One sentence summary',
+      extracted: FIXTURE,
+    });
+  } finally {
+    if (priorJevKey === undefined) delete process.env.JEV_RECALL_KEY;
+    else process.env.JEV_RECALL_KEY = priorJevKey;
+  }
   if (Object.keys(result.failures).length > 0) {
     fail(`dualWrite failures: ${JSON.stringify(result.failures)}`);
   }

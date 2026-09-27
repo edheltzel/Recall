@@ -11,6 +11,10 @@ import {
   parseSlackConversations,
 } from '../../src/lib/conversation-import';
 import { ExtractorConfigError } from '../../src/lib/extraction';
+import {
+  runImportConversations,
+  type ImportConversationsOptions,
+} from '../../src/commands/import-conversations';
 
 const EXTRACT_FIXTURE = `## ONE SENTENCE SUMMARY
 Imported conversations can become structured memory.
@@ -28,13 +32,21 @@ Imported conversations can become structured memory.
 
 let dbPath: string;
 let tempDir: string;
+let savedJevKey: string | undefined;
+let savedFetch: typeof fetch;
 
 beforeEach(() => {
+  savedJevKey = process.env.JEV_RECALL_KEY;
+  delete process.env.JEV_RECALL_KEY;
+  savedFetch = globalThis.fetch;
   dbPath = setupTestDb();
   tempDir = mkdtempSync(join(tmpdir(), 'recall-conv-import-'));
 });
 
 afterEach(() => {
+  globalThis.fetch = savedFetch;
+  if (savedJevKey === undefined) delete process.env.JEV_RECALL_KEY;
+  else process.env.JEV_RECALL_KEY = savedJevKey;
   teardownTestDb();
   rmSync(tempDir, { recursive: true, force: true });
 });
@@ -252,6 +264,115 @@ describe('importConversations', () => {
     const loaCount = (db.prepare('SELECT COUNT(*) c FROM loa_entries').get() as { c: number }).c;
     db.close();
     expect(loaCount).toBe(0);
+  });
+
+  test('a mocked Jev outage writes the original rows and is not a fatal import error', async () => {
+    const jevKey = 'jev-test-secret';
+    const priorExitCode = process.exitCode;
+    process.exitCode = 0;
+    process.env.JEV_RECALL_KEY = jevKey;
+    let jevCalls = 0;
+    globalThis.fetch = (async () => {
+      jevCalls += 1;
+      return new Response('down', { status: 500 });
+    }) as typeof fetch;
+
+    const file = join(tempDir, 'claude-jev-outage.json');
+    writeFileSync(file, JSON.stringify([
+      {
+        uuid: 'claude-jev-outage',
+        name: 'Claude export',
+        chat_messages: [
+          { sender: 'human', created_at: '2026-05-31T10:00:00Z', text: 'Please import this conversation.' },
+          { sender: 'assistant', created_at: '2026-05-31T10:00:01Z', text: 'I can normalize it first.' },
+        ],
+      },
+    ]));
+
+    try {
+      const result = await importConversations(
+        file,
+        { format: 'claude-ai' },
+        { extractor: async () => EXTRACT_FIXTURE },
+      );
+
+      // runImportConversations sets process.exitCode = 1 only when this list is non-empty.
+      expect(result.errors).toEqual([]);
+      expect(process.exitCode).toBe(0);
+      expect(jevCalls).toBe(1);
+      expect(result.sessionsImported).toBe(1);
+      expect(result.messagesImported).toBe(2);
+      expect(result.extractedSessions).toBe(1);
+      expect(result.structuredWrites).toMatchObject({
+        loa: 1,
+        decisions: 1,
+        learnings: 1,
+        breadcrumbs: 2,
+      });
+      expect(JSON.stringify(result)).not.toContain(jevKey);
+
+      const db = readDb();
+      const messages = db.prepare('SELECT provenance FROM messages ORDER BY timestamp').all() as { provenance: string }[];
+      const importance = [
+        ...db.prepare('SELECT importance FROM decisions').all(),
+        ...db.prepare('SELECT importance FROM learnings').all(),
+        ...db.prepare('SELECT importance FROM breadcrumbs').all(),
+      ] as { importance: number }[];
+      const decision = db.prepare('SELECT decision, provenance FROM decisions').get() as {
+        decision: string;
+        provenance: string;
+      };
+      db.close();
+
+      expect(messages.map(row => row.provenance)).toEqual(['verbatim', 'verbatim']);
+      expect(importance).toHaveLength(4);
+      expect(importance.every(row => row.importance === 5)).toBe(true);
+      expect(decision).toEqual({
+        decision: 'Use adapter normalization before persistence',
+        provenance: 'extracted',
+      });
+
+      const commandFile = join(tempDir, 'claude-jev-command.json');
+      writeFileSync(commandFile, JSON.stringify([
+        {
+          uuid: 'claude-jev-command',
+          name: 'Claude command export',
+          chat_messages: [
+            { sender: 'human', created_at: '2026-05-31T11:00:00Z', text: 'Import through the command.' },
+            { sender: 'assistant', created_at: '2026-05-31T11:00:01Z', text: 'The command should still succeed.' },
+          ],
+        },
+      ]));
+      const logged: string[] = [];
+      const loggedErrors: string[] = [];
+      const originalLog = console.log;
+      const originalError = console.error;
+      console.log = (...args: unknown[]) => { logged.push(args.map(String).join(' ')); };
+      console.error = (...args: unknown[]) => { loggedErrors.push(args.map(String).join(' ')); };
+      try {
+        await runImportConversations(commandFile, {
+          format: 'claude-ai',
+          extractor: async () => EXTRACT_FIXTURE,
+        } as ImportConversationsOptions);
+      } finally {
+        console.log = originalLog;
+        console.error = originalError;
+      }
+
+      expect(process.exitCode).toBe(0);
+      expect(jevCalls).toBe(2);
+      expect(loggedErrors.join('\n')).not.toContain('extraction jev');
+      expect(logged.join('\n')).toContain('Sessions imported: 1');
+
+      const afterCommand = readDb();
+      const imported = afterCommand.prepare('SELECT COUNT(*) AS c FROM sessions').get() as { c: number };
+      const decisions = afterCommand.prepare('SELECT COUNT(*) AS c FROM decisions').get() as { c: number };
+      afterCommand.close();
+      expect(imported.c).toBe(2);
+      expect(decisions.c).toBe(2);
+    } finally {
+      process.exitCode = priorExitCode ?? 0;
+    }
   });
 
   test('returns zero sessions for unrecognized JSON under auto without throwing', async () => {

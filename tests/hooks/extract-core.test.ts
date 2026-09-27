@@ -61,12 +61,23 @@ function deriveMeta(extracted: string): { topics: string[]; summary: string } {
 }
 
 let dbPath: string;
+let savedKey: string | undefined;
+let savedFetch: typeof fetch;
 
 beforeEach(() => {
+  savedKey = process.env.JEV_RECALL_KEY;
+  savedFetch = globalThis.fetch;
+  delete process.env.JEV_RECALL_KEY;
+  globalThis.fetch = (async () => {
+    throw new Error('unexpected Jev request');
+  }) as typeof fetch;
   dbPath = setupTestDb();
 });
 
 afterEach(() => {
+  globalThis.fetch = savedFetch;
+  if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
+  else process.env.JEV_RECALL_KEY = savedKey;
   teardownTestDb();
 });
 
@@ -109,6 +120,7 @@ describe('runExtractCore — dual-write parity', () => {
     // Wiring guard — break any writer (e.g. pass empty extracted) and these go RED.
     expect(result.dualWrite).toBeDefined();
     expect(result.dualWrite!.failures).toEqual({});
+    expect(result.dualWrite!.jev).toEqual({ kept: 0, demoted: 0, dropped: 0, skipped: 8 });
     expect(result.dualWrite!.sessions).toBe(1);
     expect(result.dualWrite!.decisions).toBe(3);
     expect(result.dualWrite!.learnings).toBe(2);
@@ -336,6 +348,124 @@ describe('runExtractCore — early-exit outcomes write nothing', () => {
     const db = openRead();
     expect((db.prepare('SELECT COUNT(*) c FROM extraction_sessions').get() as any).c).toBe(0);
     db.close();
+  });
+});
+
+describe('runExtractCore waits for the scored dual-write', () => {
+  test('scores before any insert and returns the written rows', async () => {
+    process.env.JEV_RECALL_KEY = 'jev-test-secret';
+    let rowsAtScore = -1;
+    const ids = ['d0', 'd1', 'd2', 'l0', 'l1', 'b0', 'b1', 'b2'];
+    const answers = Object.fromEntries(ids.map(id => [id, {
+      type: 'choice',
+      choice: id === 'd0' ? 'demote' : 'keep',
+      probabilities: {
+        keep: id === 'd0' ? 0.1 : 0.8,
+        demote: id === 'd0' ? 0.8 : 0.1,
+        drop: 0.1,
+      },
+      confidence: 0.7,
+    }]));
+    globalThis.fetch = (async () => {
+      const db = openRead();
+      const count = (table: string) =>
+        (db.prepare(`SELECT COUNT(*) c FROM ${table}`).get() as { c: number }).c;
+      rowsAtScore = count('extraction_sessions')
+        + count('decisions')
+        + count('learnings')
+        + count('breadcrumbs')
+        + count('extraction_errors')
+        + count('loa_entries');
+      db.close();
+      return new Response(JSON.stringify({ answers }), { status: 200 });
+    }) as typeof fetch;
+
+    const result = await runExtractCore(dbPath, 'raw transcript', BASE_CTX, {
+      extract: async () => CLEAN_FIXTURE,
+      deriveMeta,
+    });
+
+    expect(rowsAtScore).toBe(0);
+    expect(result.outcome).toBe('extracted');
+    expect(result.dualWrite?.decisions).toBe(3);
+    expect(result.dualWrite?.failures).toEqual({});
+    expect(result.dualWrite?.jev).toEqual({ kept: 7, demoted: 1, dropped: 0, skipped: 0 });
+    expect(JSON.stringify(result)).not.toContain('jev-test-secret');
+
+    const db = openRead();
+    const rows = db.prepare('SELECT decision, importance FROM decisions ORDER BY id').all() as {
+      decision: string;
+      importance: number;
+    }[];
+    db.close();
+    expect(rows[0]).toEqual({ decision: 'Use SQLite extraction_tracker', importance: 3 });
+    expect(rows.slice(1).map(row => row.importance)).toEqual([5, 5]);
+  });
+
+  test('a mocked Jev outage stays extracted and writes the original rows', async () => {
+    process.env.JEV_RECALL_KEY = 'jev-test-secret';
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response('down', { status: 500 });
+    }) as typeof fetch;
+
+    const result = await runExtractCore(dbPath, 'raw transcript', BASE_CTX, {
+      extract: async () => CLEAN_FIXTURE,
+      deriveMeta,
+    });
+
+    expect(calls).toBe(1);
+    expect(result.outcome).toBe('extracted');
+    expect(result.dualWrite?.failures.jev).toBe('Jev request failed: HTTP 500');
+    expect(result.dualWrite?.jev).toEqual({ kept: 0, demoted: 0, dropped: 0, skipped: 0 });
+    expect(result.dualWrite?.sessions).toBe(1);
+    expect(result.dualWrite?.decisions).toBe(3);
+    expect(result.dualWrite?.learnings).toBe(2);
+    expect(result.dualWrite?.breadcrumbs).toBe(3);
+    expect(result.dualWrite?.errors).toBe(2);
+    expect(result.dualWrite?.loa).toBe(1);
+    expect(JSON.stringify(result)).not.toContain('jev-test-secret');
+
+    const db = openRead();
+    const importance = [
+      ...db.prepare('SELECT importance FROM decisions').all(),
+      ...db.prepare('SELECT importance FROM learnings').all(),
+      ...db.prepare('SELECT importance FROM breadcrumbs').all(),
+    ] as { importance: number }[];
+    const counts = {
+      decisions: (db.prepare('SELECT COUNT(*) c FROM decisions').get() as { c: number }).c,
+      learnings: (db.prepare('SELECT COUNT(*) c FROM learnings').get() as { c: number }).c,
+      breadcrumbs: (db.prepare('SELECT COUNT(*) c FROM breadcrumbs').get() as { c: number }).c,
+    };
+    db.close();
+    expect(counts).toEqual({ decisions: 3, learnings: 2, breadcrumbs: 3 });
+    expect(importance).toHaveLength(8);
+    expect(importance.every((row) => row.importance === 5)).toBe(true);
+  });
+
+  test('a Jev outage does not hide a real writer failure', async () => {
+    process.env.JEV_RECALL_KEY = 'jev-test-secret';
+    globalThis.fetch = (async () => new Response('down', { status: 500 })) as typeof fetch;
+    const blocker = openRead();
+    blocker.exec(
+      `CREATE TRIGGER block_decisions BEFORE INSERT ON decisions
+       BEGIN SELECT RAISE(ABORT, 'decisions writer down'); END`,
+    );
+    blocker.close();
+
+    const result = await runExtractCore(dbPath, 'raw transcript', BASE_CTX, {
+      extract: async () => CLEAN_FIXTURE,
+      deriveMeta,
+    });
+
+    expect(result.outcome).toBe('persistence_failed');
+    expect(result.dualWrite?.failures.jev).toBe('Jev request failed: HTTP 500');
+    expect(result.dualWrite?.failures.decisions).toBeDefined();
+    expect(result.dualWrite?.jev).toEqual({ kept: 0, demoted: 0, dropped: 0, skipped: 0 });
+    expect(result.dualWrite?.decisions).toBe(0);
+    expect(result.dualWrite?.learnings).toBe(2);
+    expect(result.dualWrite?.breadcrumbs).toBe(3);
   });
 });
 

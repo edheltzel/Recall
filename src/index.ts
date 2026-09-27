@@ -30,6 +30,7 @@ import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runRebackfill, runReindex, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
+import { runJev } from './commands/jev.js';
 import { runProvenanceBackfill } from './commands/provenance.js';
 import { runBenchmark, listBenchmarks, reportLatestBenchmark } from './commands/benchmark.js';
 import { runOnboard } from './commands/onboard.js';
@@ -699,6 +700,16 @@ program
   .action((table, id) => {
     runUnpin(table, parseInt(id, 10));
     closeDb();
+  });
+
+// recall jev: one Choice over a candidate. Prints JSON. Does not open the database.
+program
+  .command('jev [text]')
+  .description('Score one candidate memory item with Jev (keep, demote, or drop) and print JSON')
+  .option('--kind <kind>', 'Candidate kind, when known')
+  .option('-p, --project <name>', 'Project name, when known')
+  .action(async (text: string | undefined, options: { kind?: string; project?: string }) => {
+    await runJev({ text, kind: options.kind, project: options.project });
   });
 
 // recall benchmark — Phase 2 benchmark harness
