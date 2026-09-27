@@ -262,6 +262,23 @@ Automatic-capture LoA may use `claude-cli` or `ollama`. Curated LoA may use `fab
 }
 ```
 
+### Harness steps
+
+Optional sibling keys in the same file: `query`, `extraction.automatic`, `extraction.curated`, and `cluster`. A missing key keeps today's path. These keys do not widen the Extractor allowlists above, and `RECALL_EXTRACTOR` does not select them.
+
+A named step is `{ "id": "pi" }` with no `argv`. Supported ids are `claude`, `pi`, `opencode`, `codex`, `grok`, `jcode`, `omp`, and `cursor`. A command step is a non-empty `argv` array, even when its label is one of those ids. Recall runs that argv with no shell. An empty argv fails that step. An unproven named call fails that step. It does not guess vendor flags.
+
+A blank `claude` model uses `haiku`. Other named ids need a model or that step fails. A query step sends the question alone. Extraction sends the prompt that path already builds. Cluster sends the synthesis prompt. A missing cluster key keeps the existing dated Claude call. A present list that fails does not call Claude afterward.
+
+The file must not contain an API key. Install never writes this file. Recall does not read `~/.env`.
+
+```json
+{
+  "query": { "primary": { "id": "pi" }, "fallback": [{ "runner": "local", "mode": "hybrid" }] },
+  "cluster": { "primary": { "argv": ["my-harness"] } }
+}
+```
+
 Terms: [CONTEXT.md](../CONTEXT.md). Extractor is the model backend that produces LoA, not a Host and not the ingest/filter/persist path.
 
 ## Technical Details
