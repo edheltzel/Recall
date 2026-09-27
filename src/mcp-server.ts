@@ -9,6 +9,7 @@ import { SESSION_SOURCES } from "./hosts/session-source.js";
 import { join } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VERSION } from "./version.js";
+import { resolveQueryHarness } from "./lib/query-harness.js";
 import { getRecallLogDir } from "./lib/runtime-paths.js";
 
 /**
@@ -604,6 +605,13 @@ server.tool(
 	},
 	async ({ query, project, limit }) => {
 		try {
+			const harness = resolveQueryHarness(query, { isTTY: false });
+			if (harness.kind === 'text') {
+				return { content: [{ type: "text", text: harness.text }] };
+			}
+			if (harness.kind === 'error') {
+				return { content: [{ type: "text", text: harness.error }], isError: true };
+			}
 			const { results, embeddingsAvailable, semanticBackend, readiness } = await hybridSearch(query, {
 				project,
 				limit,
@@ -1145,7 +1153,13 @@ server.tool(
 	},
 	async ({ agent_task, project }) => {
 		try {
-			// Use hybrid search for best context retrieval
+			const harness = resolveQueryHarness(agent_task, { isTTY: false });
+			if (harness.kind === 'text') {
+				return { content: [{ type: "text", text: harness.text }] };
+			}
+			if (harness.kind === 'error') {
+				return { content: [{ type: "text", text: harness.error }], isError: true };
+			}
 			const { results: hybridResults, embeddingsAvailable, readiness } =
 				await hybridSearch(agent_task, { project, limit: 5 });
 			const readinessMessage = lifecycleReadinessMessage(readiness);

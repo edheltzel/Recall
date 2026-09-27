@@ -29,6 +29,7 @@ import { runConsolidate } from './commands/consolidate.js';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_MIN_CLUSTER_SIZE } from './lib/consolidate.js';
 import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runRebackfill, runReindex, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
+import { resolveQueryHarness } from './lib/query-harness.js';
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
 import { runJev } from './commands/jev.js';
@@ -643,11 +644,11 @@ program
   .option('-l, --limit <n>', 'Max results', '10')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    await runHybridSearch(query, {
+    await runResolvedQuery(query, options, () => runHybridSearch(query, {
       table: options.table,
       limit: parseInt(options.limit, 10),
       showProvenance: options.showProvenance
-    });
+    }));
     closeDb();
   });
 
@@ -860,6 +861,41 @@ program
     closeDb();
   });
 
+async function runResolvedQuery(
+  query: string,
+  options: { project?: string; table?: string; biasType?: string; limit?: string; showProvenance?: boolean },
+  localHybrid: () => Promise<void>,
+): Promise<void> {
+  const answer = resolveQueryHarness(query, { isTTY: process.stdin.isTTY === true });
+  if (answer.kind === 'text') {
+    console.log(answer.text);
+    return;
+  }
+  if (answer.kind === 'error') {
+    console.error(answer.error);
+    process.exitCode = 1;
+    return;
+  }
+  if (answer.mode === 'keyword') {
+    runSearch(query, {
+      project: options.project,
+      table: options.table,
+      biasType: options.biasType,
+      limit: parseInt(options.limit ?? '10', 10),
+      showProvenance: options.showProvenance,
+    });
+    return;
+  }
+  if (answer.mode === 'semantic') {
+    await runSemanticSearch(query, {
+      table: options.table,
+      limit: parseInt(options.limit ?? '10', 10),
+      showProvenance: options.showProvenance,
+    });
+    return;
+  }
+  await localHybrid();
+}
 // Default command: recall <query> → hybrid search (Phase 3: best of both worlds)
 program
   .arguments('[query]')
@@ -873,7 +909,6 @@ program
   .action(async (query, options) => {
     if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start', 'capture'].includes(query)) {
       if (options.keyword) {
-        // FTS5 only
         runSearch(query, {
           project: options.project,
           table: options.table,
@@ -882,19 +917,17 @@ program
           showProvenance: options.showProvenance
         });
       } else if (options.vector) {
-        // Semantic only
         await runSemanticSearch(query, {
           table: options.table,
           limit: parseInt(options.limit, 10),
           showProvenance: options.showProvenance
         });
       } else {
-        // Default: hybrid (best results)
-        await runHybridSearch(query, {
+        await runResolvedQuery(query, options, () => runHybridSearch(query, {
           table: options.table,
           limit: parseInt(options.limit, 10),
           showProvenance: options.showProvenance
-        });
+        }));
       }
       closeDb();
     }

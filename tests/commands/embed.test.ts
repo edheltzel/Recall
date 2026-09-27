@@ -64,3 +64,58 @@ describe('runHybridSearch FTS-only fallback provenance display (issue #75, #67)'
     expect(unknownLine).toContain('provenance: unknown');
   });
 });
+
+import { resolveQueryHarness } from '../../src/lib/query-harness';
+import type { SpawnFn } from '../../src/lib/harness-runner';
+
+describe('resolveQueryHarness', () => {
+  const proven = {
+    pi: (model: string) => ({ executable: 'pi', argv: ['--model', model] }),
+  };
+
+  test('no query key stays local hybrid and does not spawn', () => {
+    let spawned = false;
+    const spawn: SpawnFn = () => {
+      spawned = true;
+      return { ok: true, stdout: 'nope' };
+    };
+    expect(resolveQueryHarness('question', { fileText: null, spawn })).toEqual({
+      kind: 'local',
+      mode: 'hybrid',
+    });
+    expect(spawned).toBe(false);
+  });
+
+  test('a named primary sends only the question', () => {
+    let stdin = '';
+    const spawn: SpawnFn = (request) => {
+      stdin = request.stdin;
+      return { ok: true, stdout: '  pi answer  ' };
+    };
+    const answer = resolveQueryHarness('what changed', {
+      fileText: JSON.stringify({ query: { primary: { id: 'pi', model: 'luna' } } }),
+      spawn,
+      proven,
+    });
+    expect(stdin).toBe('what changed');
+    expect(answer).toEqual({ kind: 'text', text: 'pi answer' });
+  });
+
+  test('primary failure falls through to an explicit local step', () => {
+    const spawn: SpawnFn = () => ({ ok: false, code: 'exit', message: 'failed' });
+    expect(resolveQueryHarness('question', {
+      fileText: JSON.stringify({
+        query: {
+          primary: { id: 'pi', model: 'luna' },
+          fallback: [{ runner: 'local', mode: 'hybrid' }],
+        },
+      }),
+      spawn,
+      proven,
+    })).toEqual({ kind: 'local', mode: 'hybrid' });
+  });
+
+  test('unparseable config fails closed', () => {
+    expect(resolveQueryHarness('question', { fileText: '{' }).kind).toBe('error');
+  });
+});
