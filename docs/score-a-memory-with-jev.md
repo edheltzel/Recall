@@ -31,9 +31,9 @@ You should see a path, for example `~/.bun/bin/recall`.
 
 If you see `command not found`, return to [Getting Started](getting-started.md) and finish the install before continuing.
 
-## Step 2: See the skipped path
+## Step 2: See the missing-key prompt
 
-Run this with the key removed for this one command, even if your shell already sourced `~/.env`:
+In a terminal, this does not exit:
 
 ```bash
 env -u JEV_RECALL_KEY recall jev "hi"
@@ -42,10 +42,20 @@ env -u JEV_RECALL_KEY recall jev "hi"
 You should see:
 
 ```text
-JEV_RECALL_KEY is not set
+JEV_RECALL_KEY is not set.
+Get a TypeSafe API key: https://console.typesafe.ai/keys
+Export it into this process. Recall does not read ~/.env.
 ```
 
-The command exits with status 1. No request was sent. This is the CLI check. Ingest is different: a missing key there still writes the parsed rows.
+It then asks you to paste a key for this run. The paste is not saved or printed. A blank line cancels and exits 1. No request is sent until a key is entered.
+
+A non-interactive run cannot prompt. This still exits 1 and sends no request:
+
+```bash
+env -u JEV_RECALL_KEY recall jev "hi" </dev/null
+```
+
+Ingest is different: a missing key there still writes the parsed rows and does not prompt.
 
 ## Step 3: Put the key in ~/.env
 
@@ -124,7 +134,7 @@ The Stop hook is a child of that process. It inherits `JEV_RECALL_KEY` from here
 
 In this tutorial, you:
 
-- Proved the CLI refuses to score when `JEV_RECALL_KEY` is missing.
+- Saw a terminal prompt for a missing key, including the TypeSafe key URL. A non-interactive run still refuses to score.
 - Stored the key in `~/.env` outside the repo, mode `600`.
 - Sourced that file into the process that runs `recall` and Claude Code.
 
