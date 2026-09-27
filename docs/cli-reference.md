@@ -130,7 +130,7 @@ recall jev --kind decision -p recall "Use SQLite" # Optional kind and project
 printf '%s\n' "hi" | recall jev                   # Read the candidate from stdin
 ```
 
-Prints one JSON object with `choice` (`keep`, `demote`, or `drop`), `probabilities`, and `confidence`. Does not open the database and does not write a row. If `JEV_RECALL_KEY` is missing or blank, it prints `JEV_RECALL_KEY is not set` and exits 1. Setup is in [Score one memory item with Jev](score-a-memory-with-jev.md).
+Prints one JSON object with `choice` (`keep`, `demote`, or `drop`), `probabilities`, and `confidence`. Does not open the database and does not write a row. If `JEV_RECALL_KEY` is missing or blank, a terminal prints [https://console.typesafe.ai/keys](https://console.typesafe.ai/keys) and prompts for a key for this run. The paste is not saved or printed. A non-interactive run prints that URL and exits 1. Ingest does not prompt. Setup is in [Score one memory item with Jev](score-a-memory-with-jev.md).
 
 ## View
 
