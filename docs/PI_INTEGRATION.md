@@ -57,7 +57,7 @@ pi install npm:pi-mcp-adapter
 recall install --yes
 ```
 
-`recall install --yes` (or `./install.sh --yes` from a checkout) performs these separate operations in order:
+`recall install --yes` (or `./packaging/install.sh --yes` from a checkout) performs these separate operations in order:
 
 1. Installs or preserves `pi-mcp-adapter` in Pi's configured home.
 2. Registers the Recall root as a native Pi package for the two extensions and nine skills.

@@ -43,9 +43,9 @@ afterEach(() => {
 
 describe('Grok lifecycle hook ownership', () => {
   test('install, update, and uninstall delegate to the shared lifecycle helpers', () => {
-    const install = readFileSync(join(repoRoot, 'install.sh'), 'utf-8');
-    const update = readFileSync(join(repoRoot, 'update.sh'), 'utf-8');
-    const uninstall = readFileSync(join(repoRoot, 'uninstall.sh'), 'utf-8');
+    const install = readFileSync(join(repoRoot, 'packaging', 'install.sh'), 'utf-8');
+    const update = readFileSync(join(repoRoot, 'packaging', 'update.sh'), 'utf-8');
+    const uninstall = readFileSync(join(repoRoot, 'packaging', 'uninstall.sh'), 'utf-8');
 
     expect(install).toContain('recall_install_grok_platform');
     expect(update).toContain('recall_install_grok_platform');

@@ -253,7 +253,7 @@ async function main(): Promise<void> {
   assert(runOpenCode(['export', sessionId], env).includes(marker), 'real OpenCode export did not contain the source marker');
 
   Object.assign(process.env, env);
-  const pluginModule = await import(join(repoRoot, 'opencode', 'RecallExtract.ts'));
+  const pluginModule = await import(join(repoRoot, 'hosts', 'opencode', 'RecallExtract.ts'));
   const plugin = await pluginModule.RecallExtract({
     $: async (_strings: TemplateStringsArray, ...values: unknown[]) => runOpenCode(['export', String(values[0])], env),
   } as never);
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
   const userHelper = join(pluginsDir, 'lib', 'user-owned.ts');
   writeFileSync(userHelper, 'export const UserOwned = 1\n');
 
-  const uninstall = spawnSync('bash', [join(repoRoot, 'uninstall.sh'), '--no-confirm', '--skip-pi', '--skip-omp'], {
+  const uninstall = spawnSync('bash', [join(repoRoot, 'packaging', 'uninstall.sh'), '--no-confirm', '--skip-pi', '--skip-omp'], {
     cwd: repoRoot,
     env: { ...env, CLAUDE_DIR: join(testHome, '.claude'), BACKUP_BASE: join(tempRoot, 'backups'), RECALL_SKIP_BUN_UNLINK: 'true' },
     encoding: 'utf-8',

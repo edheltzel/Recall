@@ -19,9 +19,9 @@ import {
   addBreadcrumb,
   addMessagesBatch,
   createLoaEntry,
-} from '../../src/lib/memory.js';
-import { getDb } from '../../src/db/connection.js';
-import type { Message, Provenance } from '../../src/types/index.js';
+} from '../../../src/lib/memory.js';
+import { getDb } from '../../../src/db/connection.js';
+import type { Message, Provenance } from '../../../src/types/index.js';
 
 /** Retrieval cutoff — all metrics are @5 (P@5, R@5, MRR@5). */
 export const K = 5;

@@ -4,7 +4,7 @@
 // Recall package ships lib/ but not node_modules/, so installer/uninstaller
 // config repair cannot require the repository's jsonc-parser installation.
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 
 type JsonObject = Record<string, unknown>;
 type Property = { key: string; keyStart: number; value: Node };
@@ -136,10 +136,33 @@ function parse(text: string): Node {
   return new JsoncParser(text).parse();
 }
 
+export function parseJsonc(text: string): unknown {
+  return parse(text).value;
+}
+
+export function writeJsonAtomic(file: string, value: unknown): void {
+  const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
+  const tmp = `${target}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+    renameSync(tmp, target);
+  } catch (error) {
+    try { unlinkSync(tmp); } catch { /* temp may not exist */ }
+    throw error;
+  }
+}
+
+export function isSemanticallyEmpty(value: unknown): boolean {
+  if (Array.isArray(value)) return value.every(isSemanticallyEmpty);
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).every(isSemanticallyEmpty);
+  }
+  return false;
+}
+
 function isObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
-
 function apply(text: string, start: number, end: number, replacement: string): string {
   return text.slice(0, start) + replacement + text.slice(end);
 }
@@ -220,17 +243,19 @@ function remove(file: string, parentKey: string): void {
   }
 }
 
-try {
-  const [, , action, file, parentKey, entryJson, preserveCsv] = process.argv;
-  if (action === 'merge') {
-    const entry = JSON.parse(entryJson) as JsonObject;
-    merge(file, parentKey, entry, (preserveCsv ?? '').split(',').filter(Boolean));
-  } else if (action === 'remove') {
-    remove(file, parentKey);
-  } else {
-    throw new Error('usage: jsonc-mcp.ts merge|remove ...');
+if (process.argv[1]?.endsWith('jsonc-mcp.ts') || process.argv[1]?.endsWith('jsonc-mcp.js')) {
+  try {
+    const [, , action, file, parentKey, entryJson, preserveCsv] = process.argv;
+    if (action === 'merge') {
+      const entry = JSON.parse(entryJson) as JsonObject;
+      merge(file, parentKey, entry, (preserveCsv ?? '').split(',').filter(Boolean));
+    } else if (action === 'remove') {
+      remove(file, parentKey);
+    } else {
+      throw new Error('usage: jsonc-mcp.ts merge|remove ...');
+    }
+  } catch (error) {
+    console.error(`recall: JSONC operation failed — ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
   }
-} catch (error) {
-  console.error(`recall: JSONC operation failed — ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
 }

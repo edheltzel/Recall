@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const repo = join(import.meta.dir, '..');
-const manifestPaths = ['package.json', 'plugins/recall/.codex-plugin/plugin.json', 'plugins/recall-claude/.claude-plugin/plugin.json'];
+const manifestPaths = ['package.json', 'hosts/plugins/recall/.codex-plugin/plugin.json', 'hosts/plugins/recall-claude/.claude-plugin/plugin.json'];
 let stage: string;
 let checkout: string;
 let remote: string;

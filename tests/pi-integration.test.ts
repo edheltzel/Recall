@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import registerRecallExtract, { linearizeSession } from '../pi/RecallExtract';
-import registerRecallInjection from '../pi/RecallPreCompact';
+import registerRecallExtract, { linearizeSession } from '../hosts/pi/RecallExtract';
+import registerRecallInjection from '../hosts/pi/RecallPreCompact';
 
 // ─── Tree JSONL Linearization ───
 
@@ -234,12 +234,12 @@ describe('RecallBatchExtract Pi session scanning', () => {
 
 describe('installer Pi integration', () => {
   test('install.sh has no syntax errors', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     expect(() => execFileSync('bash', ['-n', installPath])).not.toThrow();
   });
 
   test('install.sh includes Pi config in backup list', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('PI_CONFIG_DIR');
@@ -248,7 +248,7 @@ describe('installer Pi integration', () => {
   });
 
   test('install.sh detects Pi platform', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('PI_DETECTED');
@@ -256,7 +256,7 @@ describe('installer Pi integration', () => {
   });
 
   test('install.sh has pi-mcp-adapter installation', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('pi-mcp-adapter');
@@ -264,7 +264,7 @@ describe('installer Pi integration', () => {
   });
 
   test('install.sh has Pi MCP configuration', () => {
-    const installPath = join(__dirname, '..', 'install.sh');
+    const installPath = join(__dirname, '..', 'packaging', 'install.sh');
     const libPath = join(__dirname, '..', 'lib', 'install-lib.sh');
     const content = readFileSync(installPath, 'utf-8') + '\n' + readFileSync(libPath, 'utf-8');
     expect(content).toContain('configure_pi_mcp');
@@ -276,7 +276,7 @@ describe('installer Pi integration', () => {
     const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
     expect(packageJson.keywords).toContain('pi-package');
     expect(packageJson.pi).toEqual({
-      extensions: ['./pi/*.ts'],
+      extensions: ['./hosts/pi/*.ts'],
       skills: ['./agent-skills/*/SKILL.md'],
     });
     expect(packageJson.pi.mcp).toBeUndefined();

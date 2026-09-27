@@ -56,8 +56,8 @@ describe('Cursor inject wire', () => {
 
   test('no Cursor marketplace manifest', () => {
     expect(existsSync(join(REPO, '.cursor-plugin'))).toBe(false);
-    expect(existsSync(join(REPO, 'plugins', 'recall-cursor'))).toBe(false);
-    const pluginDirs = existsSync(join(REPO, 'plugins')) ? readdirSync(join(REPO, 'plugins')) : [];
+    expect(existsSync(join(REPO, 'hosts', 'plugins', 'recall-cursor'))).toBe(false);
+    const pluginDirs = existsSync(join(REPO, 'hosts', 'plugins')) ? readdirSync(join(REPO, 'hosts', 'plugins')) : [];
     expect(pluginDirs.some(name => name.toLowerCase().includes('cursor'))).toBe(false);
     const injectSource = readFileSync(join(REPO, 'src', 'hosts', 'cursor-inject.ts'), 'utf-8');
     expect(injectSource).not.toMatch(/\bmarketplace\b/);
