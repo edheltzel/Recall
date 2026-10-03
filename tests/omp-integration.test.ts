@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import recallOmpExtension, {
   captureOmpSessionStop,
   injectOmpSessionStart,
@@ -152,7 +153,7 @@ describe('omp native extension', () => {
     );
     expect(spawned).toHaveLength(1);
     expect(spawned[0]?.file).toBe('bun');
-    expect(spawned[0]?.args[0]).toMatch(/dist\/index\.js$/);
+    expect(spawned[0]?.args[0]).toBe(join(import.meta.dir, '..', 'dist', 'index.js'));
     expect(spawned[0]?.args[1]).toBe('start');
     expect(spawned[0]?.stdin).toBe('');
     expect(spawned[0]?.cwd).toBe('/work/Recall');

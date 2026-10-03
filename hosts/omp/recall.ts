@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const PACKAGE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLI_PATH = join(PACKAGE_ROOT, 'dist', 'index.js');
 const CHILD_TIMEOUT_MS = 30_000;
 
