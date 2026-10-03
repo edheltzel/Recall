@@ -5,6 +5,7 @@
  *   - `recall start` (public CLI)
  *   - Claude SessionStart (`hooks/RecallStart.ts` is a thin wrapper)
  *   - Codex SessionStart (`src/commands/host-hook.ts` renderContext)
+ *   - omp `session_start` (native extension calls `recall start`)
  *
  * Published char caps (≈ 4 chars/token). Tune from observation; do not
  * cargo-cult other products' token figures.

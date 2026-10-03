@@ -86,7 +86,7 @@ Pi's preferred attach is the native package: Pi discovers the root package's `pi
 
 Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
-omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. It sends active-branch snapshots from the awaited main-session `session_stop` event to the package-local CLI. The shared ingest path uses native IDs and source positions to reconcile branch visibility. See [omp Integration](OMP_INTEGRATION.md) for limits and separate skill/MCP ownership.
+omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. `session_start` calls package-local `recall start` (the shared L0/L1 assembler). It sends active-branch snapshots from the awaited main-session `session_stop` event to the package-local CLI. The shared ingest path uses native IDs and source positions to reconcile branch visibility. See [omp Integration](OMP_INTEGRATION.md) for limits and separate skill/MCP ownership.
 
 ## Extension surface
 

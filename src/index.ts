@@ -496,7 +496,8 @@ program
 
 // Internal lifecycle adapter entry point. Native host integrations own invocation.
 // Stays ingest-only for Codex/Grok/jcode/omp (Codex SessionStart injects via
-// the shared assembler, not a forked RecallStart). Cursor never joins.
+// the shared assembler, not a forked RecallStart; omp session_start calls
+// public `recall start`). Cursor never joins.
 program
   .command('host-hook <host>', { hidden: true })
   .action(async (host) => {

@@ -26,7 +26,7 @@ All coding agents forget when a session ends. Recall doesn't — it extracts, in
 
 Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. Retrieval does not phone home. Optional Jev is off unless `JEV_RECALL_KEY` is exported into the process that runs the hook or CLI. When it is exported, Jev sends scrubbed extracted candidates to TypeSafe. A key that sits only in `~/.env` does nothing until that process sources the file. No vendor lock-in.
 
-> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/). [Codex CLI](https://github.com/openai/codex) has native MCP, skills, automatic capture, and session-start injection. [Grok Build CLI](docs/GROK_INTEGRATION.md) has automatic capture but no automatic injection. [omp](docs/OMP_INTEGRATION.md) has native main-session capture with skills and MCP kept separate. [JCode](docs/JCODE_INTEGRATION.md) remains MCP and skills only after a bounded live probe. See [Roadmap](#roadmap).
+> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/). [Codex CLI](https://github.com/openai/codex) has native MCP, skills, automatic capture, and session-start injection. [Grok Build CLI](docs/GROK_INTEGRATION.md) has automatic capture but no automatic injection. [omp](docs/OMP_INTEGRATION.md) has native main-session capture and session-start injection, with skills and MCP kept separate. [JCode](docs/JCODE_INTEGRATION.md) remains MCP and skills only after a bounded live probe. See [Roadmap](#roadmap).
 
 ---
 
@@ -85,7 +85,7 @@ Then attach each coding agent with **that harness's native plugin or extension**
 | **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace` | Plugin owns the nine `do-recall-*` skills and `recall-memory` MCP. Claude hooks stay installer-owned (`recall install`) because plugin hooks *merge* with `settings.json` and would double-capture. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
 | **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
 | **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
-| **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |
+| **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_start` inject via `recall start` plus `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |
 | **Grok** | `recall install` / `./packaging/install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
 | **Cursor** | Merge snippets under `templates/cursor/` | Marketplace plugin is locked off. |
 
@@ -387,7 +387,7 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**OpenCode**](https://opencode.ai/) | ✅ | ⚠ Beta `session.idle` capture | ❌ Compaction injection not verified | Runtime verified against OpenCode 1.18.5 |
 | [**Codex CLI**](docs/CODEX_INTEGRATION.md) | ✅ | ✅ Supplied rollout hooks | ✅ Supported `additionalContext` | Native plugin; verified lifecycle contract |
 | [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
-| [**omp**](docs/OMP_INTEGRATION.md) | Skills via installer; MCP separate | Native main-session `session_stop` | Not installed | Verified with omp 18.2.0; unreleased |
+| [**omp**](docs/OMP_INTEGRATION.md) | Skills via installer; MCP separate | Native main-session `session_stop` | Native `session_start` → `recall start` | Verified with omp 18.2.0; unreleased |
 | [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
 | [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
@@ -415,7 +415,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [Codex Integration](docs/CODEX_INTEGRATION.md) | Preferred native plugin install: MCP, skills, automatic capture, session-start injection |
 | [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Preferred native plugin install; installer still owns Claude hooks |
 | [Pi Integration](docs/PI_INTEGRATION.md) | Preferred native package (`pi install`); MCP adapter/config remains separate |
-| [omp Integration](docs/OMP_INTEGRATION.md) | Native extension package: automatic turn-completion capture, separate skills/MCP |
+| [omp Integration](docs/OMP_INTEGRATION.md) | Native extension package: session-start inject, turn-completion capture, separate skills/MCP |
 | [Grok Integration](docs/GROK_INTEGRATION.md) | Installer-script only: automatic capture; no plugin path |
 | [JCode Integration](docs/JCODE_INTEGRATION.md) | Live-probe evidence and current MCP/skills-only boundary |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |

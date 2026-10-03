@@ -200,9 +200,10 @@ recall onboard --project                # Write project-local (./.atlas-recall/i
 recall onboard --out /path/identity.md  # Write to an explicit path
 ```
 
-`recall start` is the shared L0/L1 inject renderer. Claude SessionStart and Codex
-SessionStart call the same assembler (published caps: L0 1200 chars, L1 6000,
-total 8000). Empty DB + missing `identity.md` exits 0 with a short degrade line.
+`recall start` is the shared L0/L1 inject renderer. Claude SessionStart, Codex
+SessionStart, and omp `session_start` call the same assembler (published caps:
+L0 1200 chars, L1 6000, total 8000). Empty DB + missing `identity.md` exits 0
+with a short degrade line.
 Cursor inject uses `--format cursor` (`{ additional_context }`); Codex keeps
 `hookSpecificOutput.additionalContext`. The `templates/cursor/` sessionStart
 command stays unqualified `recall start --format cursor`. Cursor.app GUI PATH

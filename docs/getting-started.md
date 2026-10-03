@@ -26,7 +26,7 @@ Then attach each harness with its **native plugin or extension** when it has one
 | Claude Code | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace`. Hooks still need `recall install`. |
 | Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
 | Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
-| omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
+| omp | Pack and link the native inject+capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
 | Grok | `recall install` / `./packaging/install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
 | Cursor | Merge `templates/cursor/` snippets. No marketplace plugin. |
 
@@ -116,7 +116,7 @@ Then **open a new session in your agent**. What happens next depends on the host
 | Codex CLI | Yes — plugin `SessionStart` → `additionalContext` | Preferred: native plugin ([Codex Integration](CODEX_INTEGRATION.md)), then start a Codex session. |
 | Cursor | Beta — `sessionStart` `{ additional_context }` | Merge the snippets under `templates/cursor/`. The hook command is unqualified `recall start --format cursor`. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor, or a shell where `recall` resolves, is fine. Durable GUI PATH / `recall start --format cursor` accuracy is pending FM-321/327 — this table describes the as-built unqualified command, not that future fix. |
 | Pi | Beta — `before_agent_start` | Preferred: `pi install npm:recall-memory`. See [Pi Integration](PI_INTEGRATION.md). |
-| omp | No automatic injection | Pack and link the native extension for main-session `session_stop` capture, then restart omp. See [omp Integration](OMP_INTEGRATION.md). |
+| omp | Yes — native `session_start` → `recall start` | Pack and link the native extension, then restart omp. See [omp Integration](OMP_INTEGRATION.md). |
 | OpenCode | No verified compaction injection | MCP + skills + `session.idle` capture. See [OpenCode Integration](OPENCODE_INTEGRATION.md). |
 | Grok | No automatic injection | Capture is installer-owned; search via MCP. See [Grok Integration](GROK_INTEGRATION.md). |
 | JCode | No | MCP and skills only. See [JCode Integration](JCODE_INTEGRATION.md). |
@@ -139,7 +139,7 @@ Per-host registration:
 
 - **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer removes the duplicate user-scope entry.
 - **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
-- **omp** — no MCP registration. Native capture and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
+- **omp** — no MCP registration. Native session-start inject, capture, and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
 - **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.
 - **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `install.sh` does not duplicate it.
 - **Cursor** — snippets only. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`). No marketplace plugin.
@@ -163,7 +163,7 @@ Other hosts:
 - **Codex** — plugin hooks (`SessionStart`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`) write through `recall host-hook` internally. You do not invoke that command.
 - **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` → `recall host-hook grok`. Capture only; no session-start injection.
 - **OpenCode / Pi** — native plugins/extensions drop transcripts for the shared batch extractor (`RecallBatchExtract.ts`). Optional cron is printed at the end of install; nothing is auto-scheduled.
-- **omp** — the native extension captures the active main-session branch on awaited `session_stop`; see [omp Integration](OMP_INTEGRATION.md).
+- **omp** — the native extension injects `recall start` on `session_start` and captures the active main-session branch on awaited `session_stop`; see [omp Integration](OMP_INTEGRATION.md).
 - **Cursor** — merge `templates/cursor/hooks.json`. Command stays `recall start --format cursor`. Cursor is not a `recall host-hook` host.
 
 ### Agent skills (`do-recall-*`)
