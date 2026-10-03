@@ -7,6 +7,7 @@
  * markdown on stdout. Other hosts call the same assembler:
  *   - `recall start` (public CLI)
  *   - Codex SessionStart via `recall host-hook` renderContext
+ *   - omp `session_start` via package-local `recall start`
  *
  * TRIGGER: Claude Code SessionStart
  */

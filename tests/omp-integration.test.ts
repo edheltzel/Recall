@@ -1,8 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import {
+import recallOmpExtension, {
   captureOmpSessionStop,
+  CHILD_TIMEOUT_MS,
+  injectOmpSessionStart,
   MAX_OMP_STDIN_BYTES,
+  OMP_SESSION_START_CUSTOM_TYPE,
   runBoundedChild,
+  runBoundedChildCapture,
+  START_CHILD_TIMEOUT_MS,
+  type OmpExtensionAPI,
   type OmpExtensionContext,
 } from '../hosts/omp/recall';
 
@@ -181,5 +187,123 @@ describe('omp native extension', () => {
       },
     );
     expect(messages).toEqual(['Recall omp capture cancelled']);
+  });
+
+  test('session_start runs recall start and sendMessage with the markdown', async () => {
+    const sent: Array<{ content: string; customType?: string; display?: boolean }> = [];
+    const spawned: Array<{ file: string; args: readonly string[]; stdin: string; cwd?: string }> = [];
+    await injectOmpSessionStart(
+      {},
+      uiCtx(() => {}),
+      {
+        on() {},
+        sendMessage(message) {
+          sent.push(message);
+        },
+      },
+      async (file, args, stdin, _signal, cwd) => {
+        spawned.push({ file, args, stdin, cwd });
+        return { code: 0, stdout: '## Recall — Session Memory (tiered)\n**Project:** Recall\n' };
+      },
+    );
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.file).toBe('bun');
+    expect(spawned[0]?.args[0]).toMatch(/dist\/index\.js$/);
+    expect(spawned[0]?.args[0]).not.toContain('/hosts/dist/');
+    expect(spawned[0]?.args[1]).toBe('start');
+    expect(spawned[0]?.args).not.toContain('host-hook');
+    expect(spawned[0]?.stdin).toBe('');
+    expect(spawned[0]?.cwd).toBe('/work/Recall');
+    expect(sent).toEqual([{
+      customType: OMP_SESSION_START_CUSTOM_TYPE,
+      content: '## Recall — Session Memory (tiered)\n**Project:** Recall',
+      display: false,
+    }]);
+  });
+
+  test('session_start skips sendMessage when the custom type is already on the branch', async () => {
+    let spawned = false;
+    const sent: unknown[] = [];
+    await injectOmpSessionStart(
+      {},
+      uiCtx(() => {}, {
+        sessionManager: {
+          getSessionId: () => 'sess-1',
+          getBranch: () => [{ type: 'custom_message', customType: OMP_SESSION_START_CUSTOM_TYPE }],
+        },
+      }),
+      {
+        on() {},
+        sendMessage(message) {
+          sent.push(message);
+        },
+      },
+      async () => {
+        spawned = true;
+        return { code: 0, stdout: 'should not send' };
+      },
+    );
+    expect(spawned).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  test('session_start nonzero child warns and does not sendMessage', async () => {
+    const messages: string[] = [];
+    const sent: unknown[] = [];
+    await injectOmpSessionStart(
+      {},
+      uiCtx(message => messages.push(message)),
+      {
+        on() {},
+        sendMessage(message) {
+          sent.push(message);
+        },
+      },
+      async () => ({ code: 1, stdout: '## Recall — should not leak' }),
+    );
+    expect(messages).toEqual(['Recall omp inject failed']);
+    expect(sent).toEqual([]);
+  });
+
+  test('session_start child bound is shorter than capture', () => {
+    expect(START_CHILD_TIMEOUT_MS).toBe(3_000);
+    expect(CHILD_TIMEOUT_MS).toBe(30_000);
+    expect(START_CHILD_TIMEOUT_MS).toBeLessThan(CHILD_TIMEOUT_MS);
+  });
+
+  test('hanging recall start times out, warns, and does not sendMessage', async () => {
+    const messages: string[] = [];
+    const sent: unknown[] = [];
+    await injectOmpSessionStart(
+      {},
+      uiCtx(message => messages.push(message)),
+      {
+        on() {},
+        sendMessage(message) {
+          sent.push(message);
+        },
+      },
+      (_file, _args, stdin, signal, cwd) => runBoundedChildCapture(
+        process.execPath,
+        ['-e', 'await Bun.sleep(60_000)'],
+        stdin,
+        signal,
+        cwd,
+      ),
+      20,
+    );
+    expect(messages).toEqual(['Recall omp inject cancelled']);
+    expect(sent).toEqual([]);
+  });
+
+  test('the extension factory registers session_start and session_stop', () => {
+    const events: string[] = [];
+    const pi: OmpExtensionAPI = {
+      on(event) {
+        events.push(event);
+      },
+    };
+    recallOmpExtension(pi);
+    expect(events).toEqual(['session_start', 'session_stop']);
   });
 });

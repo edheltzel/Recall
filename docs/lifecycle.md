@@ -14,7 +14,7 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 |---|---|
 | Fresh install — Claude / Codex plugin | `bun install -g recall-memory` then `recall init`, then the host plugin command in [Claude](CLAUDE_INTEGRATION.md) / [Codex](CODEX_INTEGRATION.md) |
 | Fresh install — Pi native package | `bun install -g recall-memory` then `pi install npm:recall-memory`; MCP still needs the adapter ([Pi Integration](PI_INTEGRATION.md)) |
-| Fresh install — omp native capture | Build and link the clean packed checkout ([omp Integration](OMP_INTEGRATION.md)); skills remain installer-owned |
+| Fresh install — omp native inject and capture | Build and link the clean packed checkout ([omp Integration](OMP_INTEGRATION.md)); skills remain installer-owned |
 | Fresh install — Grok (no plugin path) | `bun install -g recall-memory` then `recall install` ([Grok Integration](GROK_INTEGRATION.md)) |
 | Fresh install — Cursor snippets | Merge `templates/cursor/`; no marketplace plugin |
 | Fresh install — npm installer (Grok / Claude hooks / detected hosts) | `bun install -g recall-memory` then `recall install` |

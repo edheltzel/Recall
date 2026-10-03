@@ -86,7 +86,7 @@ Pi's preferred attach is the native package: Pi discovers the root package's `pi
 
 Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
-omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. Awaited main-session `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
+omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. Awaited `session_start` calls package-local `recall start` (the shared L0/L1 assembler, 3s bound). Awaited main-session `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
 
 OpenCode stays on its markdown drop. Moving it to `recall capture` is the next adapter after this v1 door. See [OpenCode Integration](OPENCODE_INTEGRATION.md).
 

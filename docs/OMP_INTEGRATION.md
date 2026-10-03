@@ -2,11 +2,11 @@
 
 [Back to README](../README.md)
 
-Recall's native omp extension captures the active conversation into SQLite after each completed main-agent turn. It uses `package.json#omp.extensions`, not Pi compatibility loading or a second marketplace bundle.
+Recall's native omp extension injects the shared L0/L1 session-start bundle when a main session loads, then captures the active conversation into SQLite after each completed main-agent turn. It uses `package.json#omp.extensions`, not Pi compatibility loading or a second marketplace bundle.
 
 ## Install from this checkout
 
-Requires Bun, npm, and omp on `PATH`, plus an initialized Recall database. Capture was verified with omp 18.1.21; the strengthened E2E assertions were also verified with omp 18.2.0.
+Requires Bun, npm, and omp on `PATH`, plus an initialized Recall database. Capture was verified with omp 18.1.21; the strengthened E2E assertions were also verified with omp 18.2.0. Session-start injection uses the same packed-link check.
 
 Build a clean package before linking. Linking the repository root would also expose development-only configuration, such as its `.mcp.json`, to omp.
 
@@ -24,6 +24,10 @@ Restart omp after linking. `/reload-plugins` does not reload extension modules. 
 
 Once a release containing this integration is published, `omp plugin install recall-memory` installs the same package directly from npm. Use the packed checkout for the unreleased feature.
 
+## Session-start injection
+
+The awaited `session_start` event runs once when the session loads. omp waits for that handler before the session opens. The extension calls the package-local `dist/index.js start` command — the same L0/L1 renderer as Claude `RecallStart` and Codex SessionStart (`hooks/lib/session-start-context.ts`) — and bounds that child to 3 seconds so a hung start cannot consume omp's 30-second handler cap. Markdown stdout is sent into the session as a custom message (`recall-memory.session-start`, `display: false`) so omp converts it to a developer-role turn for the first model request. Repeated `session_start` on resume skips when that custom type is already on the branch. A failed, timed-out, or cancelled start warns without blocking the session.
+
 ## Capture contract
 
 - The awaited `session_stop` event runs after the main agent and its background work settle. omp does not emit it for task/subagent sessions.
@@ -38,7 +42,7 @@ Capture accepts at most 25 MiB of serialized branch data and bounds its child pr
 
 ## Skills and MCP remain separate
 
-`recall install` still links the nine canonical `do-recall-*` skills into `~/.omp/agent/skills/` when omp is detected. It does not activate this extension. The native package does not duplicate those skills, register MCP, or inject session-start memory. Existing manual MCP configuration remains untouched.
+`recall install` still links the nine canonical `do-recall-*` skills into `~/.omp/agent/skills/` when omp is detected. It does not activate this extension. The native package does not duplicate those skills or register MCP. Existing manual MCP configuration remains untouched.
 
 ## Verify and remove
 
@@ -48,7 +52,7 @@ bun run test:e2e:omp
 omp plugin uninstall recall-memory
 ```
 
-The runtime check packs the distributable, links it into a disposable omp home, and uses the packaged CLI for initialization, capture, and search. A deterministic localhost model drives real headless omp turns. The check compares exact ordered roles and text, preserves earlier message IDs and native keys across resume, and verifies search results. After uninstall, it requires a third model request and the expected assistant answer before checking that the complete captured snapshot remains unchanged.
+The runtime check packs the distributable, links it into a disposable omp home, and uses the packaged CLI for initialization, capture, and search. A deterministic localhost model drives real headless omp turns. The first model request must contain the shared session-start bundle. The check compares exact ordered roles and text, preserves earlier message IDs and native keys across resume, and verifies search results. After uninstall, it requires a third model request and the expected assistant answer before checking that the complete captured snapshot remains unchanged.
 
 During the script, before-and-after checks compare existence, size, modification time, and inode for the default production database, its WAL and SHM files, and the default omp plugin lockfile. These checks do not prove byte-identical preservation of all live state, cover nondefault production locations, or cover the preceding build. Test children receive disposable configuration and database paths, not live model credentials. Executables still resolve through inherited `PATH`; this is not a network or filesystem sandbox.
 

@@ -14,25 +14,30 @@ const home = join(scratch, 'home');
 const agent = join(home, '.omp', 'agent');
 const dbPath = join(scratch, 'recall.db');
 const recallHome = join(scratch, 'recall');
+const identityPath = join(recallHome, 'MEMORY', 'identity.md');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
 const protectedPaths = [productionDb, `${productionDb}-wal`, `${productionDb}-shm`, join(homedir(), '.omp', 'plugins', 'omp-plugins.lock.json')];
 const before = protectedPaths.map(path => metadata(path));
 assertSafeTestDb(dbPath, productionDb);
 console.log(`RECALL_DB_PATH=${dbPath}\nRECALL_HOME=${recallHome}`);
 mkdirSync(agent, { recursive: true });
+mkdirSync(join(recallHome, 'MEMORY'), { recursive: true });
+writeFileSync(identityPath, 'I am the cobalt orchard keeper.\n');
 const env = {
   PATH: process.env.PATH ?? '', HOME: home, TMPDIR: scratch,
   PI_CONFIG_DIR: join(home, '.omp'), PI_CODING_AGENT_DIR: agent,
   RECALL_DB_PATH: dbPath, RECALL_HOME: recallHome,
+  RECALL_IDENTITY_PATH: identityPath,
   TERM: 'dumb', NO_COLOR: '1', PI_NO_TITLE: '1',
 };
 
 let requests = 0;
+const requestBodies: unknown[] = [];
 const server = Bun.serve({
   hostname: '127.0.0.1', port: 0,
   async fetch(request) {
     if (new URL(request.url).pathname !== '/v1/chat/completions') return new Response('Not found', { status: 404 });
-    await request.json();
+    requestBodies.push(await request.json());
     requests++;
     const chunk = (delta: object, finish_reason: string | null) => `data: ${JSON.stringify({
       id: `smoke-${requests}`, object: 'chat.completion.chunk', created: 1,
@@ -108,6 +113,9 @@ try {
   const firstAnswer = await run([...flags, firstPrompt]);
   assert.match(firstAnswer, /Native capture answer 1\./, 'first assistant turn completed');
   assert.equal(requests, 1);
+  const firstRequest = JSON.stringify(requestBodies[0] ?? {});
+  assert.match(firstRequest, /I am the cobalt orchard keeper/, 'session_start injects recall start L0 into the first model request');
+  assert.match(firstRequest, /Recall — Session Memory/, 'session_start injects the shared L0/L1 bundle');
   const firstMessages = capturedMessages();
   const firstText = firstMessages.map(message => message.content).join('\n');
   assert(firstMessages.length >= 1, 'first capture wrote ambient text');
@@ -135,7 +143,11 @@ try {
   assert.match(uncapturedAnswer, /Native capture answer 3\./, 'post-uninstall assistant turn completed');
   assert.equal(requests, 3, 'post-uninstall turn reached the model');
   assert.deepEqual(capturedMessages(), resumedMessages, 'completed post-uninstall turn leaves captured history unchanged');
-  console.log('PASS native plugin link, session_stop capture, resume deduplication, and uninstall.');
+  console.log('PASS native plugin link, session_start inject, session_stop capture, resume deduplication, and uninstall.');
+  console.log(`omp.session_start_returned=${JSON.stringify({
+    identity: 'I am the cobalt orchard keeper.',
+    requestHasIdentity: /I am the cobalt orchard keeper/.test(firstRequest),
+  })}`);
 } finally {
   server.stop(true);
   for (const [index, path] of protectedPaths.entries()) assertMetadataUnchanged(path, before[index]!);

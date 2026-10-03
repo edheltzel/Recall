@@ -522,8 +522,8 @@ program
   });
 
 // Deprecated for ambient capture. Kept hidden. Codex SessionStart injection
-// still calls `host-hook codex`. Do not point new ambient adapters here.
-// Cursor never joins.
+// still calls `host-hook codex`. omp session_start calls public `recall start`.
+// Do not point new ambient adapters here. Cursor never joins.
 program
   .command('host-hook <host>', { hidden: true })
   .action(async (host) => {
