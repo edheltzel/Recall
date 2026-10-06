@@ -16,6 +16,7 @@ import { runImportConversations } from './commands/import-conversations.js';
 import { runLoa, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
 import { runDump } from './commands/dump.js';
 import { runHostHook } from './commands/host-hook.js';
+import { runCapture } from './commands/capture.js';
 import { runStart } from './commands/start.js';
 import { runImportLegacy } from './commands/import-legacy.js';
 import { runScrubArchive } from './commands/scrub-archive.js';
@@ -494,6 +495,31 @@ program
     closeDb();
   });
 
+// recall capture — public ambient ingress (contract 1). Hidden host-hook stays
+// host-private; adapters submit raw text here and core ranks/stores.
+program
+  .command('capture')
+  .description('Capture ambient turn/session text into Recall (flags or identical stdin JSON)')
+  .option('--contract <n>', 'Capture contract version (default: 1)')
+  .option('--harness <id>', 'Harness id (lowercase [a-z][a-z0-9-]{0,63})')
+  .option('--event <event>', 'Capture event: turn_end or session_end')
+  .option('--session-id <id>', 'Native session id')
+  .option('--cwd <path>', 'Working directory')
+  .option('--project <name>', 'Project name')
+  .option('--text <string>', 'Raw text to capture')
+  .option('--text-file <path>', 'Read raw text from a file')
+  .action(async (options) => {
+    try {
+      await runCapture(options);
+    } catch (error) {
+      process.stderr.write(
+        `Recall capture failed: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+      process.exitCode = 1;
+    }
+    closeDb();
+  });
+
 // Internal lifecycle adapter entry point. Native host integrations own invocation.
 // Stays ingest-only for Codex/Grok/jcode/omp (Codex SessionStart injects via
 // the shared assembler, not a forked RecallStart). Cursor never joins.
@@ -845,7 +871,7 @@ program
   .option('-v, --vector', 'Use vector search only (semantic)')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start', 'capture'].includes(query)) {
       if (options.keyword) {
         // FTS5 only
         runSearch(query, {

@@ -32,7 +32,8 @@ export interface HostTranscriptMessage {
 }
 
 export interface HostTranscript {
-  source: LifecycleHost;
+  /** Lifecycle host or public capture harness id. */
+  source: string;
   sessionId: string;
   messages: HostTranscriptMessage[];
   cwd?: string;
@@ -92,13 +93,13 @@ export interface HostIngestCheckpoint {
 }
 
 export interface HostIngestCheckpointExpectation {
-  source: LifecycleHost;
+  source: string;
   sessionId: string;
   checkpoint?: HostIngestCheckpoint;
 }
 
 export class HostIngestCheckpointConflictError extends Error {
-  constructor(source: LifecycleHost, sessionId: string) {
+  constructor(source: string, sessionId: string) {
     super(`Lifecycle checkpoint advanced for ${source} session ${sessionId}`);
     this.name = 'HostIngestCheckpointConflictError';
   }
@@ -131,7 +132,7 @@ interface PreparedInputStage {
 
 interface StagedInputRow {
   ordinal: number;
-  source: LifecycleHost;
+  source: string;
   session_id: string;
   incremental: number | null;
   reconcile_complete: number | null;
@@ -1176,7 +1177,7 @@ function assertExpectedCheckpoint(
 }
 
 export function getHostIngestCheckpoint(
-  source: LifecycleHost,
+  source: string,
   sessionId: string
 ): HostIngestCheckpoint | undefined {
   assertSessionId(sessionId);
