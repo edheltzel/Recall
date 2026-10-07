@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -17,8 +18,8 @@ import {
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
-import { probeSymlink } from '../../src/commands/doctor';
+import { dirname, join } from 'path';
+import { buildSymlinkProbes, probeSymlink } from '../../src/commands/doctor';
 
 let tempDir: string;
 let canonical: string;
@@ -42,6 +43,42 @@ function probe() {
 }
 
 describe('probeSymlink', () => {
+  test('an unreadable target is a failure, not a missing file', () => {
+    chmodSync(dirname(target), 0);
+    try {
+      const check = probe();
+      expect(check.result.status).toBe('FAIL');
+      expect(check.result.message).toContain('Cannot read');
+      expect(check.repair).toBeUndefined();
+    } finally {
+      chmodSync(dirname(target), 0o755);
+    }
+  });
+
+  test('dotfiles and subdirectories never become repair targets', () => {
+    const home = join(tempDir, 'home');
+    const root = join(tempDir, 'install');
+    const skills = join(root, 'shared', 'skills', 'do-recall-add');
+    mkdirSync(join(skills, 'scripts'), { recursive: true });
+    writeFileSync(join(skills, 'SKILL.md'), '# skill');
+    writeFileSync(join(skills, '.DS_Store'), 'junk');
+    mkdirSync(join(root, 'shared', 'skills', '.hidden'), { recursive: true });
+    writeFileSync(join(root, 'shared', 'skills', '.hidden', 'SKILL.md'), 'no');
+
+    const probes = buildSymlinkProbes(home, root);
+    const skillProbes = probes.filter(probe => probe.label.startsWith('agent skill:'));
+    expect(skillProbes.map(probe => probe.canonical)).toEqual([join(skills, 'SKILL.md')]);
+    for (const item of skillProbes) {
+      expect(item.canonical).not.toContain('.DS_Store');
+      expect(item.canonical).not.toContain(`${join('do-recall-add', 'scripts')}`);
+      expect(item.target).not.toContain('.DS_Store');
+      const check = probeSymlink(item);
+      expect(check.repair).toBeDefined();
+      expect(check.repair!().message).toContain('SKILL.md');
+    }
+  });
+
+
   test('target missing → WARN + repair creates symlink', () => {
     const { result, repair } = probe();
     expect(result.status).toBe('WARN');
