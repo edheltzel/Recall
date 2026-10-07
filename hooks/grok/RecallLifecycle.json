@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "recall host-hook grok",
+            "command": "bun \"${RECALL_DIR:-$(printf %s ~)/.agents/Recall}/grok/hooks/capture.ts\"",
             "timeout": 90
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "recall host-hook grok",
+            "command": "bun \"${RECALL_DIR:-$(printf %s ~)/.agents/Recall}/grok/hooks/capture.ts\"",
             "timeout": 90
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "recall host-hook grok",
+            "command": "bun \"${RECALL_DIR:-$(printf %s ~)/.agents/Recall}/grok/hooks/capture.ts\"",
             "timeout": 90
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "recall host-hook grok",
+            "command": "bun \"${RECALL_DIR:-$(printf %s ~)/.agents/Recall}/grok/hooks/capture.ts\"",
             "timeout": 90
           }
         ]

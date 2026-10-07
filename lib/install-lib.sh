@@ -2046,16 +2046,20 @@ _recall_copy_hook_files() {
 # Grok 1.0.4 headless mode discovers user-level hook files but does not
 # compose hooks from installed plugins. Install one Recall-owned global hook
 # file so headless and interactive sessions share the supported hook surface.
+# The companion adapter collects `grok export` text and calls `recall capture`.
 recall_install_grok_platform() {
   local source="$RECALL_REPO_DIR/hooks/grok/RecallLifecycle.json"
+  local script_source="$RECALL_REPO_DIR/hooks/grok/capture.ts"
   local canonical="$RECALL_GROK_HOOKS_DIR/RecallLifecycle.json"
+  local script_canonical="$RECALL_GROK_HOOKS_DIR/capture.ts"
   local target="$GROK_CONFIG_DIR/hooks/RecallLifecycle.json"
 
-  if [[ ! -f "$source" ]]; then
+  if [[ ! -f "$source" || ! -f "$script_source" ]]; then
     log_warn "Grok lifecycle hook not found at $source"
     return 1
   fi
   mkdir -p "$RECALL_GROK_HOOKS_DIR" "$GROK_CONFIG_DIR/hooks"
+  recall_copy_canonical "$script_source" "$script_canonical"
   recall_copy_canonical "$source" "$canonical"
   recall_link "$target" "$canonical"
   log_success "Installed Grok lifecycle capture hook"

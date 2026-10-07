@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
-
+import { GROK_CAPTURE_COMMAND, grokCaptureFromHook } from '../../hooks/grok/capture';
 const repoRoot = process.cwd();
 const installLib = join(repoRoot, 'lib', 'install-lib.sh');
 let tempRoot = '';
@@ -70,10 +70,13 @@ describe('Grok lifecycle hook ownership', () => {
       'Stop',
     ]);
     expect(config.hooks.SessionStart).toBeUndefined();
-    for (const groups of Object.values(config.hooks) as any[]) {
-      expect(groups[0].hooks[0].command).toBe('recall host-hook grok');
-      expect(groups[0].hooks[0].timeout).toBe(90);
+    for (const group of Object.values(config.hooks)) {
+      if (!Array.isArray(group)) continue;
+      const hook = group[0]?.hooks?.[0];
+      expect(hook?.command).toBe(GROK_CAPTURE_COMMAND);
+      expect(hook?.timeout).toBe(90);
     }
+    expect(existsSync(join(recallDir, 'grok', 'hooks', 'capture.ts'))).toBe(true);
 
     const second = helper('recall_install_grok_platform');
     expect(second.status).toBe(0);
@@ -99,5 +102,40 @@ describe('Grok lifecycle hook ownership', () => {
     writeFileSync(target, '{"foreign":true}\n');
     expect(helper('recall_uninstall_grok_platform').status).toBe(0);
     expect(readFileSync(target, 'utf-8')).toBe('{"foreign":true}\n');
+  });
+});
+
+describe('Grok capture adapter', () => {
+  test('Stop exports session text and maps SessionEnd to session_end', () => {
+    const stop = grokCaptureFromHook(
+      { hookEventName: 'Stop', sessionId: 'grok-1', workspaceRoot: '/work/Recall' },
+      () => '# export\n\nRemember the amber dock.\n',
+    );
+    expect(stop).toEqual({
+      event: 'turn_end',
+      text: '# export\n\nRemember the amber dock.\n',
+      sessionId: 'grok-1',
+      cwd: '/work/Recall',
+    });
+    const end = grokCaptureFromHook(
+      { hook_event_name: 'SessionEnd', session_id: 'grok-1' },
+      () => 'final text',
+    );
+    expect(end).toMatchObject({ event: 'session_end', text: 'final text' });
+  });
+
+  test('skips subagents, session start, and empty exports', () => {
+    expect(grokCaptureFromHook(
+      { hookEventName: 'Stop', sessionId: 'child', agent_id: 'child' },
+      () => 'should not export',
+    )).toEqual({ skipped: 'subagent' });
+    expect(grokCaptureFromHook(
+      { hookEventName: 'session_start', sessionId: 'grok-1' },
+      () => 'no injection',
+    )).toEqual({ skipped: 'unsupported-event' });
+    expect(grokCaptureFromHook(
+      { hookEventName: 'Stop', sessionId: 'grok-1' },
+      () => '   ',
+    )).toEqual({ skipped: 'empty-export' });
   });
 });

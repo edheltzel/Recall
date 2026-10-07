@@ -21,6 +21,7 @@ import {
   metadata,
   stringEnv,
 } from './lib/e2e-isolation';
+import { GROK_CAPTURE_COMMAND } from '../hooks/grok/capture';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
@@ -154,7 +155,7 @@ printf '%s' "$payload" | bun ${JSON.stringify(join(repoRoot, 'dist', 'index.js')
     hooks?: Array<{ event?: string; target?: string; source?: { type?: string; path?: string } }>;
   }>(runGrok(['inspect', '--json'], env), 'grok inspect');
   const installedHooks = inspect.hooks?.filter(hook =>
-    hook.target === 'recall host-hook grok'
+    hook.target === GROK_CAPTURE_COMMAND
       && hook.source?.type === 'user'
       && hook.source.path === join(testGrokHome, 'hooks')
   ) ?? [];
@@ -185,7 +186,7 @@ context_window = 16000
       hooks?: Array<{ target?: string; source?: { path?: string } }>;
     }>(runGrok(['inspect', '--json'], env), 'grok inspect before headless run');
     if (!effective.hooks?.some(hook =>
-      hook.target === 'recall host-hook grok' && hook.source?.path === join(testGrokHome, 'hooks')
+      hook.target === GROK_CAPTURE_COMMAND && hook.source?.path === join(testGrokHome, 'hooks')
     )) {
       throw new Error(`Recall Grok hook was absent in the run configuration: ${JSON.stringify(effective.hooks)}`);
     }
@@ -216,7 +217,7 @@ context_window = 16000
     .get() as { session_id: string; source: string } | undefined;
   if (!session) {
     db.close();
-    const direct = spawnSync(join(testBin, 'recall'), ['host-hook', 'grok'], {
+    const direct = spawnSync('bun', [join(testRecallHome, 'grok', 'hooks', 'capture.ts')], {
       cwd: workspace,
       env,
       encoding: 'utf-8',
@@ -263,7 +264,7 @@ context_window = 16000
   }
   console.log(`grok.automatic_rows=${firstCount}`);
 
-  const replay = spawnSync(join(testBin, 'recall'), ['host-hook', 'grok'], {
+  const replay = spawnSync('bun', [join(testRecallHome, 'grok', 'hooks', 'capture.ts')], {
     cwd: workspace,
     env,
     encoding: 'utf-8',
@@ -288,7 +289,7 @@ context_window = 16000
   );
   if (existsSync(installedHook)) throw new Error('Recall Grok hook file survived uninstall');
   if (afterRemoval.hooks?.some(hook =>
-    hook.target === 'recall host-hook grok' && hook.source?.path === join(testGrokHome, 'hooks')
+    hook.target === GROK_CAPTURE_COMMAND && hook.source?.path === join(testGrokHome, 'hooks')
   )) {
     throw new Error('Recall Grok hook registration survived uninstall');
   }
