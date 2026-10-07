@@ -21,7 +21,7 @@ If no identity exists, recommend `recall onboard` via Bash.
 
 ## Your MCP Tools
 
-These tools are available via the `recall-memory` MCP server. Recall enables the adapter's direct-tool mode by default, which registers each operation as `recall-memory_<tool>` (pi-mcp-adapter 2.32 keeps hyphens in the server name); an existing explicit `directTools` preference is preserved:
+These tools are available via the `recall-memory` MCP server. Recall enables direct tools by default, which registers each operation as `recall-memory_<tool>`. On Pi 1.0 that comes from `exposure: "direct"` in `mcp.json` (`pi-mcp-adapter` 5.x ignores a `directTools` key in that file); an existing explicit `directTools` or `exposure` preference is preserved:
 
 On the first Pi session after adding the server, `pi-mcp-adapter` populates its metadata cache in the background and keeps the operations available through its `mcp` proxy tool.
 After one Pi reload or restart, the nine direct names below are registered from that cache.
@@ -171,8 +171,8 @@ A Recall extension (`RecallPreCompact.ts` + `RecallExtract.ts`) runs inside Pi:
 
 1. `RecallPreCompact.ts` hooks into `before_agent_start` and injects relevant memory into the system prompt before each agent turn
 2. `RecallExtract.ts` hooks into `session_shutdown` and reads the supported path from `ctx.sessionManager.getSessionFile()`
-3. Pi sessions use tree-structured JSONL (each entry has `id` and `parentId`) rather than a linear format — the extension linearizes the active branch into flat markdown
-4. The markdown is dropped into `$RECALL_HOME/MEMORY/pi-sessions/` (default `~/.agents/Recall/MEMORY/pi-sessions/`)
+3. Shutdown also calls `recall capture` (harness `pi`, `session_end`). See [Capture adapter](../CAPTURE_ADAPTER.md).
+4. The markdown is still dropped into `$RECALL_HOME/MEMORY/pi-sessions/` (default `~/.agents/Recall/MEMORY/pi-sessions/`)
 5. A batch extraction cron job (`RecallBatchExtract`) processes these files into structured memory
 
 ## Database Location

@@ -2692,17 +2692,52 @@ recall_configure_pi_mcp() {
   # Build the owned entry shape via JSON.stringify (never shell-interpolated
   # into JS source). Always rewrite the env block so existing installs pick up
   # RECALL_DB_PATH even when the registration is already present.
+  #
+  # Pi 1.0 mcp.json is native MCP config. pi-mcp-adapter 5.x ignores directTools
+  # there and maps exposure: "direct" to direct tools (recall-memory_<tool>).
+  # directTools stays for older adapter configs that read this file themselves.
+  # An explicit exposure wins. A saved directTools value with no exposure is
+  # translated so the opt-out still applies on Pi 1.0.
   local entry_json
-  entry_json="$(MEM_MCP_PATH="$mem_mcp_path" DB_PATH_ABS="$db_path_abs" \
-    bun -e 'process.stdout.write(JSON.stringify({
-      command: process.env.MEM_MCP_PATH,
-      args: [],
-      lifecycle: "lazy",
-      directTools: true,
-      env: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
-    }))')"
+  if ! entry_json="$(MEM_MCP_PATH="$mem_mcp_path" DB_PATH_ABS="$db_path_abs" MCP_FILE="$config" JSONC_LIB="$_RECALL_JSONC_LIB" \
+    bun -e '
+import { existsSync, readFileSync } from "node:fs";
+const { parseJsonc } = await import(process.env.JSONC_LIB);
+function exposureFor(directTools) {
+  if (directTools === false) return "codemode";
+  if (directTools === "search") return "deferred";
+  if (Array.isArray(directTools)) return "codemode";
+  return "direct";
+}
+let previous = {};
+if (process.env.MCP_FILE && existsSync(process.env.MCP_FILE)) {
+  const text = readFileSync(process.env.MCP_FILE, "utf8");
+  if (text.trim()) {
+    const parsed = parseJsonc(text);
+    const servers = parsed && typeof parsed === "object" ? parsed.mcpServers : undefined;
+    const entry = servers && typeof servers === "object" && !Array.isArray(servers) ? servers["recall-memory"] : undefined;
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) previous = entry;
+  }
+}
+const hasExposure = Object.prototype.hasOwnProperty.call(previous, "exposure");
+const entry = {
+  command: process.env.MEM_MCP_PATH,
+  args: [],
+  lifecycle: "lazy",
+  directTools: true,
+  exposure: hasExposure ? previous.exposure : exposureFor(previous.directTools),
+  env: { RECALL_DB_PATH: process.env.DB_PATH_ABS },
+};
+if (!hasExposure && !Object.prototype.hasOwnProperty.call(previous, "toolExposure") && Array.isArray(previous.directTools)) {
+  entry.toolExposure = Object.fromEntries(previous.directTools.filter((name) => typeof name === "string").map((name) => [name, "direct"]));
+}
+process.stdout.write(JSON.stringify(entry));
+')"; then
+    log_error "Failed to read Pi mcp.json before registering recall-memory (left unchanged)"
+    return 1
+  fi
 
-  if _recall_jsonc_merge_mcp_entry "$config" "mcpServers" "$entry_json" "directTools"; then
+  if _recall_jsonc_merge_mcp_entry "$config" "mcpServers" "$entry_json" "directTools,exposure,toolExposure"; then
     log_success "Registered recall-memory in Pi mcp.json"
   else
     log_error "Failed to register recall-memory in Pi mcp.json (existing config is invalid or unsupported — left unchanged)"
