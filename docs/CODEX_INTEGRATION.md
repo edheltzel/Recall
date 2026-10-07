@@ -46,15 +46,13 @@ Codex CLI 0.147.0 provides supported plugin hooks, supplied transcript paths, co
 
 | Event | Recall behavior |
 | --- | --- |
-| `SessionStart` | Renders the shared tiered L0/L1 context and returns Codex `additionalContext` JSON. |
-| `Stop` | Reads only the supplied rollout path and immediately ingests new verbatim messages. |
-| `PreCompact` | Captures the supplied rollout before compaction. |
-| `PostCompact` | Reconciles the supplied rollout after compaction. |
-| `SessionEnd` | Captures the final rollout, closes the session, and creates one extracted summary. |
+| `SessionStart` | Hidden `recall host-hook codex`. Renders the shared L0/L1 assembler and returns Codex `additionalContext`. Not ambient capture. |
+| `Stop` | `hooks/capture.ts` reads the supplied rollout and calls `recall capture` with `turn_end`. |
+| `PreCompact` | Same adapter, `turn_end`, before compaction. |
+| `PostCompact` | Same adapter, `turn_end`, after compaction. |
+| `SessionEnd` | Same adapter, `session_end`. |
 
-The host-neutral ingest seam preserves the native Codex session ID and project attribution. It scrubs unattended content before storage as required by [#50](https://github.com/edheltzel/Recall/issues/50), records `source = 'codex'`, and persists message keys plus a rolling byte watermark. Ordinary `Stop` events read only an append-only suffix. Compaction and terminal events validate the complete prior prefix, while shrinkage resets to a full reconciliation.
-
-Capture writes directly to `recall.db`; it does not depend on the optional batch cron. Subagent rollouts are skipped by default. Set `RECALL_INCLUDE_SUBAGENTS=1` to opt in.
+Ambient events do not call `host-hook`. Guide: [Capture adapter](CAPTURE_ADAPTER.md). The adapter keeps the native session id, drops injected `AGENTS.md` / `<environment_context>` / `<user_instructions>` user turns, and skips subagent rollouts unless `RECALL_INCLUDE_SUBAGENTS=1`. Core scrubs and stores. Capture does not depend on the optional batch cron.
 
 Codex-injected instruction turns are not memory. Recall drops user turns that
 begin with the injected `AGENTS.md`, `<environment_context>`, or

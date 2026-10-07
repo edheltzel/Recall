@@ -240,7 +240,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ### Where Jev sits
 
-Jev scores structured extraction: one POST, one Choice per candidate. Native raw host-ingest does not call it. A missing key or a failed Jev request still writes the parsed rows.
+Jev scores structured extraction: one POST, one Choice per candidate. `recall capture` does not call it. A missing key or a failed Jev request still writes the parsed rows.
 
 ```mermaid
 flowchart TD
@@ -260,11 +260,11 @@ flowchart TD
     gate -->|demote| low["write at importance 3"]
     gate -->|drop| omit["omit that row"]
   end
-  subgraph bypass [Native raw host-ingest]
-    omp["omp session_stop"] --> hook["recall host-hook"]
-    codex["Codex Stop"] --> hook
-    grok["Grok lifecycle hook"] --> hook
-    hook --> raw["write raw messages, skip Jev"]
+  subgraph bypass [Native raw capture]
+    omp["omp session_stop"] --> door["recall capture"]
+    codex["Codex Stop"] --> door
+    grok["Grok lifecycle hook"] --> door
+    door --> raw["write raw text, skip Jev"]
   end
 ```
 
@@ -301,14 +301,14 @@ Set the key in the process that runs the hook or CLI. Recall does not read `~/.e
 
 ## What You Get
 
-- **Auto-captured session memory** — Claude Code extracts incrementally; Codex, Grok, and omp write supported transcript content directly to SQLite; Pi and OpenCode use their documented host adapters
+- **Auto-captured session memory** — Claude Stop shells `recall capture` and still extracts; Codex, Grok, omp, and Pi shutdown call the same door; OpenCode stays on its markdown drop; JCode calls it only when text is supplied
 - **MCP server (`recall-mcp`)** — `memory_search`, `memory_hybrid_search`, `memory_recall`, `memory_add`, `memory_dump`, `context_for_agent` exposed to your agent mid-session. `memory_search` supports `table` hard filters and `bias_type` soft boosts.
 - **Hybrid search** — FTS5 keyword search + optional Ollama embeddings, fused via Reciprocal Rank Fusion. Lose Ollama, lose nothing — keyword path keeps working. Type targeting (`table` / `bias_type`) is a keyword-path feature — see [Search Strategies](#search-strategies).
 - **Tiered RecallStart (v0.7.0+)** — resolved L0 identity + L1 top 12 records ranked by importance, with 4 reserved slots for curated Library of Alexandria entries. L2/L3 fetched on demand
 - **Importance scoring (1–10)** — every record carries an importance score that drives what surfaces in L1. Manage with `recall pin` / `recall unpin` / `recall importance backfill`
 - **PreCompact flush** — `RecallPreCompact.ts` writes in-flight messages to SQLite before Claude compacts its context window, so the squashed chunk is never lost
 - **Decision lifecycle** — `recall decision supersede/revert` tracks when a decision was replaced or rolled back; confidence scoring (high/medium/low) on every decision and learning
-- **Cross-host ingestion** — Codex, Grok, and omp write through one scrubbed, deduplicated SQLite ingest seam. OpenCode and Pi keep their existing drop-and-batch paths. One database remains searchable from every connected host
+- **Cross-host ingestion** — Claude, Codex, Grok, omp, Pi, and supplied-text JCode write ambient text through `recall capture`. OpenCode keeps its drop-and-batch path. One database remains searchable from every connected host
 - **Library of Alexandria** — Automatic-capture LoA from session extract (importance 6, excluded from reserved L1 LoA slots). Curated LoA from `recall loa` / dump via the `fabric` Extractor (`extract_wisdom`); default importance 8, reserved L1 slots. Optional per-path Extractor config: [architecture](docs/architecture.md#extractor-config)
 - **TELOS integration ([PAI](https://github.com/danielmiessler/Personal_AI_Infrastructure) users)** — `RecallTelosSync.ts` auto-imports your TELOS framework files (goals, mission, projects, strategies) from PAI's `USER/TELOS/` directory on every session start. Changes are detected by mtime; unchanged files are skipped. Manual import: `recall telos import --yes`
 - **Breadcrumbs, decisions, learnings** — three structured record types for non-session memory, addable from CLI (`recall add`), MCP (`memory_add`), or the `do-recall-add` agent skill
@@ -405,6 +405,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |
 | [Score one memory item with Jev](docs/score-a-memory-with-jev.md) | Export `JEV_RECALL_KEY` and prove one keep, demote, or drop score |
 | [Harness API](docs/api.md) | Thin `recall-memory/api` surface so a new harness can hook start/drop/capture/inject without forking core |
+| [Capture Adapter](docs/CAPTURE_ADAPTER.md) | Public `recall capture` door: raw ambient text in, no SDK |
 | [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |
 | [Managing Recall](docs/lifecycle.md)       | Which command when: install, update, uninstall, custom DB, recovery       |
 | [CLI Reference](docs/cli-reference.md)     | All commands and options                                                  |

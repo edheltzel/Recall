@@ -4,7 +4,7 @@
 
 Stable, thin library surface for humans and agents who need to plug a new harness into Recall **without forking core**.
 
-This is not a Cursor marketplace plugin, not a `HostDescriptor`, and not a new `recall host-hook` host. It re-exports the seams that already exist: CLI `recall start`, markdown drop-dir, Cursor catalog/inject, MCP, and skills.
+This is not a Cursor marketplace plugin, not a `HostDescriptor`, and not a new `recall host-hook` host. Ambient text uses public `recall capture` ([Capture adapter](CAPTURE_ADAPTER.md)). This library re-exports the other seams: CLI `recall start`, markdown drop-dir, Cursor catalog/inject, MCP, and skills.
 
 ## Install the package, then import the API
 
@@ -34,7 +34,7 @@ bun -e 'import { describeHarnessSeams } from "./src/api.ts"; console.log(JSON.st
 |------|-------------------|---------------|
 | **start** | `recall start` renders L0/L1 via `hooks/lib/session-start-context.ts`. `--format cursor` wraps `{ additional_context }`. | `registerStartFormat(id, wrap)` — in-process, for `runStart({ format: id })`. The public CLI still accepts only `markdown` \| `cursor`. |
 | **drop** | Write markdown into `MEMORY/<host>-sessions/`. Batch extract scans `*-sessions` generically. | None. The directory name **is** the extension point. `parseMarkdownDrop` / `markdownDropDirName` are the helpers. |
-| **capture** | Cursor: `catalogCursorSessions()` (catalog only, no SQLite insert). Dump: `discoverCurrentSession()`. Native lifecycle capture, including omp, uses hidden `recall host-hook`. | `registerSessionSource(adapter)` — in-process, consulted by `discoverCurrentSession()`. Cannot replace builtin `SESSION_SOURCES` ids. |
+| **capture** | Cursor: `catalogCursorSessions()` (catalog only, no SQLite insert). Dump: `discoverCurrentSession()`. Ambient harness text: `recall capture` ([Capture adapter](CAPTURE_ADAPTER.md)). Hidden `host-hook` is deprecated for ambient writes; Codex `SessionStart` still uses it for injection only. | `registerSessionSource(adapter)` — in-process, consulted by `discoverCurrentSession()`. Cannot replace builtin `SESSION_SOURCES` ids. |
 | **inject** | Cursor snippets under `templates/cursor/` call unqualified `recall start --format cursor`. Claude/Codex call the same assembler through their own hooks. | `mergeCursorHooksJson` is the Cursor hooks.json helper. Do not add a marketplace plugin. |
 
 MCP (`recall-mcp`, server name `recall-memory`) and Agent Skills (`agent-skills/`) are already cross-host. Point at [MCP Tools](mcp-tools.md) and [Agent Skills](agent-skills.md); do not fork those catalogs.
@@ -49,10 +49,10 @@ A durable fix for GUI PATH / `recall start --format cursor` accuracy is **pendin
 
 - No `HostDescriptor` layer and no adapter→plugin rename.
 - No Cursor marketplace plugin (`hosts/plugins/recall-cursor` does not exist).
-- Cursor does not join `recall host-hook` / `host-ingest` / `LifecycleHost`.
+- Cursor does not join `recall capture`, `recall host-hook`, `host-ingest`, or `LifecycleHost`. Catalog only.
 - No CLI extension loader in this slice — registrations are in-process.
 
-A new drop-dir host still does **not** copy `RecallExtract.ts` / `RecallPreCompact.ts`. A new lifecycle host (Codex-shaped) still goes through `commands/host-hook.ts` + `lib/host-ingest.ts`, which is a different, existing pipe — not this API.
+A new drop-dir host still does **not** copy `RecallExtract.ts` / `RecallPreCompact.ts`. A new ambient harness calls `recall capture`; it does not extend hidden `host-hook`. That command remains for Codex `SessionStart` injection.
 
 ## First-run and host attach
 
