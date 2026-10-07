@@ -36,5 +36,33 @@ describe('legacy slash-command cleanup', () => {
     expect(existsSync(join(dir, 'mine.md'))).toBe(true);
     expect(existsSync(join(dir, 'Recall.md'))).toBe(false);
     expect(existsSync(dir)).toBe(true);
+    expect(result.stdout).toContain('Left user file in place');
+  });
+
+  test('a relative link into the install root is still managed', () => {
+    root = mkdtempSync(join(tmpdir(), 'recall-slash-rel-'));
+    const claude = join(root, '.claude');
+    const recall = join(root, 'recall-home');
+    const dir = join(claude, 'commands', 'Recall');
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(recall, { recursive: true });
+    writeFileSync(join(recall, 'owned.md'), 'recall');
+    symlinkSync('../../../recall-home/owned.md', join(dir, 'Recall.md'));
+    const foreign = join(root, 'foreign.md');
+    writeFileSync(foreign, 'nope');
+    symlinkSync(foreign, join(dir, 'other.md'));
+
+    const result = spawnSync('bash', ['-c', `
+      set -euo pipefail
+      source "$REPO/lib/install-lib.sh" >/dev/null 2>&1
+      recall_remove_legacy_slash_commands
+    `], {
+      encoding: 'utf-8',
+      env: { ...process.env, REPO, HOME: root, CLAUDE_DIR: claude, RECALL_DIR: recall },
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(dir, 'Recall.md'))).toBe(false);
+    expect(existsSync(join(dir, 'other.md'))).toBe(true);
   });
 });
