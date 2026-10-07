@@ -9,6 +9,7 @@ import { SESSION_SOURCES } from "./hosts/session-source.js";
 import { join } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VERSION } from "./version.js";
+import { resolveQueryHarness, type QueryHarnessAnswer } from "./lib/query-harness.js";
 import { getRecallLogDir } from "./lib/runtime-paths.js";
 
 /**
@@ -593,10 +594,29 @@ server.tool(
 	},
 );
 
+async function semanticPreview(query: string, limit: number): Promise<{ error: string } | { lines: string[] }> {
+	try {
+		const status = await checkEmbeddingServiceCached();
+		if (!status.available) return { error: "Embeddings are unavailable." };
+		const embedded = await embedQueryCached(query);
+		const outcome = vectorSearch(getDb(), embedded.embedding, limit);
+		return {
+			lines: outcome.hits.map(hit => `[${hit.source_table}#${hit.source_id}] ${hit.content.slice(0, 150)}`),
+		};
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : "Semantic search failed." };
+	}
+}
+
+function harnessText(answer: Exclude<QueryHarnessAnswer, { kind: 'local' }>) {
+	if (answer.kind === 'text') return { content: [{ type: "text" as const, text: answer.text }] };
+	return { content: [{ type: "text" as const, text: answer.error }], isError: true as const };
+}
+
 // Tool: memory_hybrid_search - Semantic + keyword search with RRF fusion
 server.tool(
 	"memory_hybrid_search",
-	"Hybrid search combining keywords (FTS5) and semantics (embeddings) with Reciprocal Rank Fusion. Best for natural language queries. Falls back to keyword-only if embeddings unavailable.",
+	"Hybrid search, or the configured query harness when that key is present. A local win stays on the configured mode. Falls back to keyword-only if embeddings are unavailable and the mode is hybrid.",
 	{
 		query: z.string().describe("Natural language search query"),
 		project: z.string().optional().describe("Filter by project name"),
@@ -604,6 +624,25 @@ server.tool(
 	},
 	async ({ query, project, limit }) => {
 		try {
+			const harness = await resolveQueryHarness(query, { isTTY: false });
+			if (harness.kind !== 'local') return harnessText(harness);
+			if (harness.mode === 'semantic') {
+				const semantic = await semanticPreview(query, limit);
+				if ('error' in semantic) {
+					return { content: [{ type: "text", text: semantic.error }], isError: true };
+				}
+				return { content: [{ type: "text", text: semantic.lines.join("\n") || `No semantic results for: "${query}"` }] };
+			}
+			if (harness.mode === 'keyword') {
+				const results = search(query, { project, limit });
+				logMemoryUsage("memory_hybrid_search", query, results.length, project);
+				if (results.length === 0) {
+					return { content: [{ type: "text", text: `No results found for: "${query}"` }] };
+				}
+				bumpAccess(results);
+				const formatted = results.map((r) => `[${r.table}#${r.id}] ${r.content.slice(0, 200)}`).join("\n");
+				return { content: [{ type: "text", text: `Found ${results.length} keyword results for "${query}":\n\n${formatted}` }] };
+			}
 			const { results, embeddingsAvailable, semanticBackend, readiness } = await hybridSearch(query, {
 				project,
 				limit,
@@ -1133,7 +1172,7 @@ server.tool("memory_stats", "Get RECALL database statistics.", {}, async () => {
 // Uses HYBRID search (FTS5 + embeddings) for best context retrieval
 server.tool(
 	"context_for_agent",
-	"Prepare rich context before spawning any agent via Task tool. Uses hybrid search (keywords + semantics) to find relevant memory. Returns context to include in agent prompt.",
+	"Prepare context before spawning an agent. Uses the configured query harness when that key is present. A local win stays on that mode.",
 	{
 		agent_task: z
 			.string()
@@ -1145,7 +1184,31 @@ server.tool(
 	},
 	async ({ agent_task, project }) => {
 		try {
-			// Use hybrid search for best context retrieval
+			const harness = await resolveQueryHarness(agent_task, { isTTY: false });
+			if (harness.kind !== 'local') return harnessText(harness);
+			if (harness.mode === 'semantic') {
+				const semantic = await semanticPreview(agent_task, 5);
+				if ('error' in semantic) {
+					return { content: [{ type: "text", text: semantic.error }], isError: true };
+				}
+				return {
+					content: [{
+						type: "text",
+						text: `## Agent Context (INCLUDE IN AGENT PROMPT)\n\n**Search Mode:** semantic\n\n${semantic.lines.map(line => `- ${line}`).join("\n") || "### No relevant memory found"}`,
+					}],
+				};
+			}
+			if (harness.mode === 'keyword') {
+				const keywordHits = search(agent_task, { project, limit: 5 });
+				logMemoryUsage("context_for_agent", agent_task, keywordHits.length, project);
+				const lines = keywordHits.map((r) => `- [${r.table}#${r.id}] ${r.content.slice(0, 150)}`);
+				return {
+					content: [{
+						type: "text",
+						text: `## Agent Context (INCLUDE IN AGENT PROMPT)\n\n**Search Mode:** keyword\n\n${lines.join("\n") || "### No relevant memory found"}`,
+					}],
+				};
+			}
 			const { results: hybridResults, embeddingsAvailable, readiness } =
 				await hybridSearch(agent_task, { project, limit: 5 });
 			const readinessMessage = lifecycleReadinessMessage(readiness);

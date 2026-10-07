@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { defaultExtractorConfigPath, resolveExtractorConfig } from '../../hooks/lib/extractor-config';
+import { defaultExtractorConfigPath, resolveExtractorConfig, resolveHarnessConfig } from '../../hooks/lib/extractor-config';
 
 describe('resolveExtractorConfig', () => {
   test('missing file uses split defaults', () => {
@@ -136,5 +136,139 @@ describe('resolveExtractorConfig', () => {
         RECALL_HOME: '/decoy-recall-home',
       }),
     ).toBe(join('/real-home', '.agents', 'Recall', 'config.json'));
+  });
+});
+
+describe('resolveHarnessConfig', () => {
+  test('missing file leaves query and cluster absent and keeps extractor defaults', () => {
+    const harness = resolveHarnessConfig({ fileText: null, env: {} });
+    const extractor = resolveExtractorConfig({ fileText: null, env: {} });
+    expect(harness.query).toEqual({ ok: true, absent: true });
+    expect(harness.cluster).toEqual({ ok: true, absent: true });
+    expect(extractor.automatic.ok && extractor.automatic.value.primary).toEqual({
+      id: 'claude-cli',
+      model: 'haiku',
+    });
+    expect(extractor.automatic.ok && extractor.automatic.value.fallback).toEqual([
+      { id: 'ollama', model: 'qwen2.5:3b' },
+    ]);
+  });
+
+  test('an extractor-only file leaves every harness key absent', () => {
+    const fileText = JSON.stringify({
+      extractor: { automatic: { id: 'claude-cli', model: 'haiku' } },
+    });
+    const harness = resolveHarnessConfig({ fileText, env: {} });
+    expect(harness.query).toEqual({ ok: true, absent: true });
+    expect(harness.automatic).toEqual({ ok: true, absent: true });
+    expect(harness.curated).toEqual({ ok: true, absent: true });
+    expect(harness.cluster).toEqual({ ok: true, absent: true });
+  });
+
+  test('a secret-shaped harness id fails without echoing the value', () => {
+    const secret = 'sk-ant-abcdefghijklmnopqrst';
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({ query: { primary: { id: secret } } }),
+      env: {},
+    });
+    expect(harness.query.ok).toBe(false);
+    if (!harness.query.ok) expect(harness.query.error).not.toContain(secret);
+  });
+
+  test('query Pi and automatic Claude are different selections', () => {
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({
+        query: { primary: { id: 'pi' } },
+        extraction: { automatic: { primary: { id: 'claude' } } },
+      }),
+      env: {},
+    });
+    expect(harness.query).toEqual({
+      ok: true,
+      absent: false,
+      value: { primary: { kind: 'named', id: 'pi', model: '' }, fallback: [] },
+    });
+    expect(harness.automatic).toEqual({
+      ok: true,
+      absent: false,
+      value: { primary: { kind: 'named', id: 'claude', model: '' }, fallback: [] },
+    });
+  });
+
+  test('cluster Grok and automatic Claude are different selections', () => {
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({
+        cluster: { primary: { id: 'grok' } },
+        extraction: { automatic: { primary: { id: 'claude' } } },
+      }),
+      env: {},
+    });
+    expect(harness.cluster.ok && !harness.cluster.absent && harness.cluster.value.primary).toEqual({
+      kind: 'named',
+      id: 'grok',
+      model: '',
+    });
+    expect(harness.automatic.ok && !harness.automatic.absent && harness.automatic.value.primary).toEqual({
+      kind: 'named',
+      id: 'claude',
+      model: '',
+    });
+  });
+
+  test('a Pi label with argv stays a command', () => {
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({
+        query: { primary: { id: 'pi', argv: ['pi', '--print'] } },
+      }),
+      env: {},
+    });
+    expect(harness.query).toEqual({
+      ok: true,
+      absent: false,
+      value: {
+        primary: { kind: 'command', label: 'pi', argv: ['pi', '--print'], model: '' },
+        fallback: [],
+      },
+    });
+  });
+
+  test('empty argv fails that path closed', () => {
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({ query: { primary: { argv: [] } } }),
+      env: {},
+    });
+    expect(harness.query.ok).toBe(false);
+  });
+
+  test('unparseable JSON fails query closed', () => {
+    const harness = resolveHarnessConfig({ fileText: '{', env: {} });
+    expect(harness.query).toEqual({ ok: false, error: 'config.json is not valid JSON' });
+  });
+
+  test('a bad query object leaves the extractor path intact', () => {
+    const fileText = JSON.stringify({
+      query: { primary: { id: 'not-a-harness' } },
+      extractor: { automatic: { id: 'claude-cli', model: 'haiku' } },
+    });
+    const harness = resolveHarnessConfig({ fileText, env: {} });
+    const extractor = resolveExtractorConfig({ fileText, env: {} });
+    expect(harness.query.ok).toBe(false);
+    expect(extractor.automatic).toEqual({
+      ok: true,
+      value: {
+        primary: { id: 'claude-cli', model: 'haiku' },
+        fallback: [],
+      },
+    });
+  });
+
+  test('argv that matches scrub fails closed', () => {
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({
+        query: { primary: { argv: ['pi', 'sk-ant-abcdefghijklmnopqrst'] } },
+      }),
+      env: {},
+    });
+    expect(harness.query.ok).toBe(false);
   });
 });
