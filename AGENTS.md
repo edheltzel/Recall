@@ -80,6 +80,7 @@ Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKI
 ### Version control and GitHub
 
 - Use GitButler (`but`) for all version-control operations; load the `but` skill before using it. Do not run raw `git` commands or bypass GitButler's workspace state.
+- `no-mistakes` runs in this GitButler workspace: it uses `but` branches and commits, never `git worktree` or a plain-git isolation checkout.
 - Use `gh` for GitHub issues, pull requests, reviews, and Actions. Use `but` for the underlying branches, commits, and pushes.
 - Create every GitHub PR as **`Atlas-Key`**. Before publishing, verify the authenticated API login is `Atlas-Key`; use account-scoped credentials for this repository rather than changing another project's active account. If that identity is unavailable, stop instead of creating the PR as another user.
 - The required reviewer is defined in [`.github/CODEOWNERS`](.github/CODEOWNERS). Request that reviewer on every PR, including automated publishing and drafts; after creation, verify author and reviewer through `gh`. Existing PR authors cannot be changed; do not close/recreate a PR without explicit permission.
