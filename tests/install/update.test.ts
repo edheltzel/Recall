@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -157,6 +157,10 @@ describe('update.sh', () => {
       expect(entry.env.RECALL_DB_PATH).toBe('/new/db');
       expect(entry.env.MEM_DB_PATH).toBeUndefined();
       expect(entry.env.MY_CUSTOM_VAR).toBe('keep-me');
+      const backups = join(tempRoot, '.agents', 'Recall', 'backups');
+      expect(existsSync(backups)).toBe(true);
+      const saved = readFileSync(join(backups, readdirSync(backups).find(name => name !== 'latest') ?? '', 'settings.json'), 'utf-8');
+      expect(saved).toContain('/old/path/mem-mcp');
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

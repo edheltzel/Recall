@@ -1208,21 +1208,31 @@ _recall_hash_file() {
   fi
 }
 
-# Remove a symlink only if it's Recall-managed (its target resolves to a path
-# under $RECALL_DIR). Regular files and foreign symlinks are left alone so we
-# never delete user-owned data on update / uninstall.
+# Remove a symlink only if it's Recall-managed (its resolved target lives
+# under $RECALL_DIR). Regular files and foreign symlinks are left alone.
+# readlink -f, not a string prefix: a relative link still points into the
+# install root. -ef covers a symlink install root and its real path.
 #
 # Args: TARGET_PATH
+recall_link_is_managed() {
+  local target="$1"
+  [[ -L "$target" ]] || return 1
+  local resolved root
+  resolved="$(readlink -f "$target" 2>/dev/null || true)"
+  if [[ -z "$resolved" ]]; then
+    resolved="$(readlink "$target")"
+    if [[ "$resolved" != /* ]]; then
+      resolved="$(cd "$(dirname "$target")" && pwd)/$resolved"
+    fi
+  fi
+  root="$(readlink -f "$RECALL_DIR" 2>/dev/null || echo "$RECALL_DIR")"
+  [[ "$resolved" == "$root"/* || "$resolved" == "$root" || ( -e "$resolved" && -e "$root" && "$resolved" -ef "$root" ) ]]
+}
+
 recall_unlink_if_managed() {
   local target="$1"
-  if [[ ! -L "$target" ]]; then
-    return 0
-  fi
-  local resolved
-  resolved="$(readlink "$target")"
-  if [[ "$resolved" == "$RECALL_DIR"/* ]]; then
-    rm -f "$target"
-  fi
+  recall_link_is_managed "$target" || return 0
+  rm -f "$target"
 }
 
 # ── Legacy slash-command cleanup ─────────────────────────────────────────────
@@ -1245,7 +1255,15 @@ recall_remove_legacy_slash_commands() {
       recall_unlink_if_managed "$f"
     done
     rmdir "$dir" 2>/dev/null || true
-    [[ -d "$dir" ]] || log_info "Removed legacy slash commands at $dir"
+    if [[ -d "$dir" ]]; then
+      local leftover
+      for leftover in "$dir"/*.md; do
+        [[ -e "$leftover" && ! -L "$leftover" ]] || continue
+        log_warn "Left user file in place: $leftover"
+      done
+    else
+      log_info "Removed legacy slash commands at $dir"
+    fi
   fi
 
   # -ef (same device+inode), not a string compare: on case-insensitive macOS
@@ -1353,8 +1371,7 @@ _recall_remove_managed_skill_dirs_from() {
   for name in "$@"; do
     dir="$skills_root/$name"
     if [[ -L "$dir" ]]; then
-      # directory-level link from a pre-#228 install shape
-      if [[ "$(readlink "$dir")" == "$RECALL_DIR"/* ]]; then
+      if recall_link_is_managed "$dir"; then
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
           echo "  [dry-run] would rm -f $dir"
         else
@@ -1367,17 +1384,14 @@ _recall_remove_managed_skill_dirs_from() {
     [[ -d "$dir" ]] || continue
     for f in "$dir"/*; do
       [[ -L "$f" ]] || continue
-      target="$(readlink "$f")"
-      case "$target" in
-        "$RECALL_DIR"/*)
-          if [[ "${DRY_RUN:-false}" == "true" ]]; then
-            echo "  [dry-run] would rm -f $f"
-          else
-            rm -f "$f"
-          fi
-          removed=$((removed + 1))
-          ;;
-      esac
+      if recall_link_is_managed "$f"; then
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+          echo "  [dry-run] would rm -f $f"
+        else
+          rm -f "$f"
+        fi
+        removed=$((removed + 1))
+      fi
     done
     if [[ "${DRY_RUN:-false}" != "true" ]]; then
       rmdir "$dir" 2>/dev/null || true
@@ -1915,6 +1929,8 @@ _recall_ensure_mcp_entry() {
     if ! grep -q "recall-memory" "$f"; then
       continue
     fi
+    mkdir -p "$BACKUP_DIR"
+    recall_backup_file "$f" "$BACKUP_DIR"
     CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
       JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
       const fs = require("fs");
