@@ -466,23 +466,32 @@ export interface SymlinkProbe {
 // install root's shared/skills dir. Shared by buildSymlinkProbes (to derive
 // per-file symlink probes) and probeSkillSurface (to floor the command surface,
 // #235) so both agree on what counts as a shipped skill file.
-function listSkillCanonicalFiles(root: string): { name: string; file: string }[] {
+export function listSkillCanonicalFiles(root: string): { name: string; file: string }[] {
   const skillsCanonicalDir = join(root, 'shared', 'skills');
   if (!existsSync(skillsCanonicalDir)) return [];
   let skillNames: string[] = [];
   try { skillNames = readdirSync(skillsCanonicalDir); } catch { return []; }
   const out: { name: string; file: string }[] = [];
   for (const name of skillNames) {
+    if (name.startsWith('.')) continue;
+    const dir = join(skillsCanonicalDir, name);
+    let dirStat;
+    try { dirStat = statSync(dir); } catch { continue; }
+    if (!dirStat.isDirectory()) continue;
     let files: string[] = [];
-    try { files = readdirSync(join(skillsCanonicalDir, name)); } catch { continue; }
-    for (const file of files) out.push({ name, file });
+    try { files = readdirSync(dir); } catch { continue; }
+    for (const file of files) {
+      if (file.startsWith('.')) continue;
+      let fileStat;
+      try { fileStat = statSync(join(dir, file)); } catch { continue; }
+      if (!fileStat.isFile()) continue;
+      out.push({ name, file });
+    }
   }
   return out;
 }
 
-function buildSymlinkProbes(): SymlinkProbe[] {
-  const home = homedir();
-  const root = getRecallHome();
+export function buildSymlinkProbes(home = homedir(), root = getRecallHome()): SymlinkProbe[] {
   const claude = claudePaths(home);
   const probes: SymlinkProbe[] = [];
 
@@ -656,8 +665,11 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
   let st;
   try {
     st = lstatSync(target);
-  } catch {
-    // Target missing — fixable.
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+    if (code === 'EACCES' || code === 'EPERM') {
+      return { result: { label, status: 'FAIL', message: `Cannot read target: ${target}` } };
+    }
     return {
       result: { label, status: 'WARN', message: `Target missing: ${target}` },
       repair: () => {
