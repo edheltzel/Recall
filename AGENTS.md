@@ -32,6 +32,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `hosts/opencode/` — OpenCode host integration
 - `hosts/pi/` — Pi package extensions for native lifecycle capture and memory injection
 - `hosts/omp/` — native omp package extension for main-session turn-completion capture; setup and limits in [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md)
+- `hosts/jcode/` — supplied-text capture helper only; no hook install and no private-file watcher. Limits in [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md)
 - `packaging/` — shipped `install.sh`, `update.sh`, and `uninstall.sh`
 - `scripts/` — dev / CI helper scripts (version check, e2e)
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`) plus tiny host-wire snippets under `templates/cursor/`
@@ -193,6 +194,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `do-recall-*` Agent Skill definitions
 - [`hosts/plugins/AGENTS.md`](hosts/plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 - [`hosts/opencode/AGENTS.md`](hosts/opencode/AGENTS.md) — OpenCode adapter plugins, their shared helpers, and the runtime contract they must satisfy
+- [`hosts/jcode/AGENTS.md`](hosts/jcode/AGENTS.md) — Jcode capture helper; supplied text only, no private history
 
 Owned at root (no child doc): `lib/install-lib.sh` and `lib/jsonc-mcp.ts`; `packaging/` lifecycle scripts; `scripts/` (dev/CI helpers + the per-host isolated e2e harnesses); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
 

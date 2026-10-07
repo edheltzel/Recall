@@ -21,6 +21,7 @@
     "hosts/opencode/",
     "hosts/omp/",
     "hosts/pi/",
+    "hosts/jcode/",
     "templates/",
     "packaging/",
     "docs/hosts/FOR_CLAUDE.md",
