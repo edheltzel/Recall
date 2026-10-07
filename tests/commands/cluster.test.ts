@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { claudeCliTextGenerationProvider } from '../../src/providers/claude-cli';
-import { clusterProvider, scrubProcedure } from '../../src/commands/cluster';
+import { clusterProvider, reportClusterMiss, scrubProcedure } from '../../src/commands/cluster';
 
 describe('cluster harness', () => {
   test('no cluster list keeps the dated Claude provider', () => {
@@ -18,6 +18,19 @@ describe('cluster harness', () => {
     });
     expect(provider?.id).toBe('cluster-harness');
     expect(provider?.generate('TITLE: prompt')).toBeNull();
+    const logged: string[] = [];
+    const original = console.error;
+    const previous = process.exitCode;
+    console.error = (...args: unknown[]) => { logged.push(args.map(String).join(' ')); };
+    try {
+      reportClusterMiss(provider);
+      expect(process.exitCode).toBe(1);
+      expect(logged.join('\n')).toContain('failed');
+      expect(logged.join('\n')).not.toContain('Synthesis failed');
+    } finally {
+      console.error = original;
+      process.exitCode = previous ?? 0;
+    }
   });
 
   test('a present cluster step sends the synthesis prompt', () => {

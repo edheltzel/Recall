@@ -329,13 +329,17 @@ function parseHarnessStep(
     }
     const model = modelOf(raw, pathLabel);
     if (!model.ok) return model;
+    if (scrub(model.value).redactions.length > 0) return { ok: false, error: `${pathLabel} model contains a secret` };
     const label = typeof raw.id === 'string' ? raw.id : '';
+    if (label && scrub(label).redactions.length > 0) return { ok: false, error: `${pathLabel} label contains a secret` };
     return { ok: true, value: { kind: 'command', label, argv, model: model.value } };
   }
   if (typeof raw.id !== 'string' || !raw.id) return { ok: false, error: `${pathLabel} is missing a harness id` };
-  if (!NAMED_HARNESS[raw.id]) return { ok: false, error: `${pathLabel} harness id "${raw.id}" is not supported` };
+  if (scrub(raw.id).redactions.length > 0) return { ok: false, error: `${pathLabel} harness id contains a secret` };
+  if (!NAMED_HARNESS[raw.id]) return { ok: false, error: `${pathLabel} harness id is not supported` };
   const model = modelOf(raw, pathLabel);
   if (!model.ok) return model;
+  if (scrub(model.value).redactions.length > 0) return { ok: false, error: `${pathLabel} model contains a secret` };
   return { ok: true, value: { kind: 'named', id: raw.id as NamedHarnessId, model: model.value } };
 }
 

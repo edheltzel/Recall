@@ -134,14 +134,17 @@ export function clusterProvider(deps: {
   spawn?: SpawnFn;
   proven?: Partial<Record<NamedHarnessId, ProvenCaller>>;
   isTTY?: boolean;
-} = {}): TextGenerationProvider | null {
+} = {}): (TextGenerationProvider & { lastError?: string }) | null {
   const harness = resolveHarnessConfig({ fileText: deps.fileText });
   if (!harness.cluster.ok) return null;
   if (harness.cluster.absent) return claudeCliTextGenerationProvider;
   const steps = [harness.cluster.value.primary, ...harness.cluster.value.fallback];
+  let lastError = '';
   return {
     id: 'cluster-harness',
+    get lastError() { return lastError; },
     generate(prompt: string) {
+      lastError = 'cluster harness failed';
       for (const step of steps) {
         const result = runHarnessStep({
           step,
@@ -151,11 +154,27 @@ export function clusterProvider(deps: {
           spawn: deps.spawn,
           proven: deps.proven,
         });
-        if (result.ok && 'text' in result && result.text) return result.text;
+        if (result.ok && 'text' in result && result.text) {
+          lastError = '';
+          return result.text;
+        }
+        if (!result.ok) lastError = result.error;
       }
       return null;
     },
   };
+}
+
+export function reportClusterMiss(provider: TextGenerationProvider | null): void {
+  const error = provider && 'lastError' in provider && typeof provider.lastError === 'string'
+    ? provider.lastError
+    : '';
+  if (!error) {
+    console.log('  Synthesis failed, skipping.');
+    return;
+  }
+  console.error(`  ${error}`);
+  process.exitCode = 1;
 }
 
 export function runCluster(options: ClusterOptions): void {
@@ -220,7 +239,7 @@ export function runCluster(options: ClusterOptions): void {
     const result = provider ? synthesizeProcedure(cluster, provider) : null;
 
     if (!result) {
-      console.log('  Synthesis failed, skipping.');
+      reportClusterMiss(provider);
       continue;
     }
 

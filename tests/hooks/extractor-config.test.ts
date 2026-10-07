@@ -164,6 +164,17 @@ describe('resolveHarnessConfig', () => {
     expect(harness.curated).toEqual({ ok: true, absent: true });
     expect(harness.cluster).toEqual({ ok: true, absent: true });
   });
+
+  test('a secret-shaped harness id fails without echoing the value', () => {
+    const secret = 'sk-ant-abcdefghijklmnopqrst';
+    const harness = resolveHarnessConfig({
+      fileText: JSON.stringify({ query: { primary: { id: secret } } }),
+      env: {},
+    });
+    expect(harness.query.ok).toBe(false);
+    if (!harness.query.ok) expect(harness.query.error).not.toContain(secret);
+  });
+
   test('query Pi and automatic Claude are different selections', () => {
     const harness = resolveHarnessConfig({
       fileText: JSON.stringify({
