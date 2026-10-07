@@ -14,7 +14,7 @@ import {
   type ResolvedExtractorConfig,
   type ResolvedHarnessConfig,
 } from './extractor-config';
-import { prepareAutomaticExtractionInput } from './hosts/claude/extraction-provider';
+import { prepareAutomaticExtractionInput } from './extraction-input';
 import { runHarnessStep, type ProvenCaller, type SpawnFn } from './harness-runner';
 import type { NamedHarnessId } from './extractor-config';
 import { nativeAutomaticFactories } from './hosts';
@@ -109,7 +109,7 @@ function harnessProvider(
   spawn?: SpawnFn,
   proven?: Partial<Record<NamedHarnessId, ProvenCaller>>,
 ): ExtractionProvider {
-  const id = step.kind === 'named' ? step.id : (step.label || 'command');
+  const id = step.kind === 'named' ? step.id : step.kind === 'command' ? (step.label || 'command') : 'local';
   return {
     id,
     extract(messages: string) {

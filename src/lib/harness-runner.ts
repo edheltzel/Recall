@@ -2,6 +2,7 @@
 export {
   RECALL_HARNESS_DEFAULTS,
   runHarnessStep,
+  runHarnessStepAsync,
 } from '../../hooks/lib/harness-runner.js';
 export type {
   ProvenCall,

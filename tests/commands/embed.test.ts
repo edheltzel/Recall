@@ -65,7 +65,7 @@ describe('runHybridSearch FTS-only fallback provenance display (issue #75, #67)'
   });
 });
 
-import { resolveQueryHarness } from '../../src/lib/query-harness';
+import { resolveQueryHarness, unqualifiedQueryRoute } from '../../src/lib/query-harness';
 import type { SpawnFn } from '../../src/lib/harness-runner';
 
 describe('resolveQueryHarness', () => {
@@ -73,26 +73,57 @@ describe('resolveQueryHarness', () => {
     pi: (model: string) => ({ executable: 'pi', argv: ['--model', model] }),
   };
 
-  test('no query key stays local hybrid and does not spawn', () => {
+  test('keyword and vector flags stay off the harness', () => {
+    expect(unqualifiedQueryRoute({ keyword: true })).toBe('keyword');
+    expect(unqualifiedQueryRoute({ vector: true })).toBe('semantic');
+    expect(unqualifiedQueryRoute({})).toBe('configured');
+  });
+
+  test('no query key stays local hybrid and does not spawn', async () => {
     let spawned = false;
     const spawn: SpawnFn = () => {
       spawned = true;
       return { ok: true, stdout: 'nope' };
     };
-    expect(resolveQueryHarness('question', { fileText: null, spawn })).toEqual({
+    expect(await resolveQueryHarness('question', { fileText: null, spawn })).toEqual({
       kind: 'local',
       mode: 'hybrid',
     });
     expect(spawned).toBe(false);
   });
 
-  test('a named primary sends only the question', () => {
+  test('an extractor-only file stays local hybrid and does not spawn', async () => {
+    let spawned = false;
+    const spawn: SpawnFn = () => {
+      spawned = true;
+      return { ok: true, stdout: 'nope' };
+    };
+    expect(await resolveQueryHarness('question', {
+      fileText: JSON.stringify({ extractor: { automatic: { id: 'claude-cli' } } }),
+      spawn,
+    })).toEqual({ kind: 'local', mode: 'hybrid' });
+    expect(spawned).toBe(false);
+  });
+  test('a configured claude query uses the production caller', async () => {
+    let argv: string[] = [];
+    const answer = await resolveQueryHarness('what changed', {
+      fileText: JSON.stringify({ query: { primary: { id: 'claude' } } }),
+      spawn: (request) => {
+        argv = request.argv;
+        return { ok: true, stdout: 'from claude' };
+      },
+    });
+    expect(argv).toEqual(['-p', '--model', 'haiku', '--output-format', 'text', '--setting-sources', '']);
+    expect(answer).toEqual({ kind: 'text', text: 'from claude' });
+  });
+
+  test('a named primary sends only the question', async () => {
     let stdin = '';
     const spawn: SpawnFn = (request) => {
       stdin = request.stdin;
       return { ok: true, stdout: '  pi answer  ' };
     };
-    const answer = resolveQueryHarness('what changed', {
+    const answer = await resolveQueryHarness('what changed', {
       fileText: JSON.stringify({ query: { primary: { id: 'pi', model: 'luna' } } }),
       spawn,
       proven,
@@ -101,9 +132,9 @@ describe('resolveQueryHarness', () => {
     expect(answer).toEqual({ kind: 'text', text: 'pi answer' });
   });
 
-  test('primary failure falls through to an explicit local step', () => {
+  test('primary failure falls through to an explicit local step', async () => {
     const spawn: SpawnFn = () => ({ ok: false, code: 'exit', message: 'failed' });
-    expect(resolveQueryHarness('question', {
+    expect(await resolveQueryHarness('question', {
       fileText: JSON.stringify({
         query: {
           primary: { id: 'pi', model: 'luna' },
@@ -115,7 +146,7 @@ describe('resolveQueryHarness', () => {
     })).toEqual({ kind: 'local', mode: 'hybrid' });
   });
 
-  test('unparseable config fails closed', () => {
-    expect(resolveQueryHarness('question', { fileText: '{' }).kind).toBe('error');
+  test('unparseable config fails closed', async () => {
+    expect((await resolveQueryHarness('question', { fileText: '{' })).kind).toBe('error');
   });
 });

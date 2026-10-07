@@ -33,7 +33,7 @@ Lead with global search — leave `table` unset so a phrasing mismatch still fin
 
 ### memory_hybrid_search
 
-Combines keyword (FTS5) and semantic (embedding) search. Best for natural language queries.
+Combines keyword and semantic search unless a query harness is configured. A local win stays on that mode. `memory_search` stays keyword-only.
 
 ```
 memory_hybrid_search({ query: "how did we handle rate limiting" })
@@ -191,7 +191,7 @@ When you need information about past work or project context, follow this priori
 When a session ends, the `RecallExtract` hook writes Automatic-capture LoA:
 
 1. Reads the conversation JSONL file
-2. Runs the Automatic-capture Extractor (default `claude-cli`, then `ollama`)
+2. Runs the Automatic-capture Extractor (default `claude-cli`, then `ollama`, unless `extraction.automatic` is set)
 3. Parses the response into structured sections (summary, ideas, decisions, errors, insights)
 4. Appends to `~/.claude/MEMORY/DISTILLED.md` and updates `HOT_RECALL.md`
 5. Updates `SESSION_INDEX.json` for searchable lookup

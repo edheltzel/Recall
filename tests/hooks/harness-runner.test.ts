@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { HarnessStep, NamedHarnessId } from '../../hooks/lib/extractor-config';
-import { runHarnessStep, type SpawnFn } from '../../hooks/lib/harness-runner';
+import { runHarnessStep, runHarnessStepAsync, type SpawnFn } from '../../hooks/lib/harness-runner';
 
 const proven = {
   pi: (model: string) => ({ executable: 'pi', argv: ['--model', model] }),
@@ -157,5 +157,69 @@ describe('runHarnessStep', () => {
       },
     });
     expect(argv).toEqual(['a b', 'c;d']);
+  });
+
+  test('an async command step writes stdin to the child', async () => {
+    const result = await runHarnessStepAsync({
+      step: { kind: 'command', label: 'cat', argv: ['/bin/cat'], model: '' },
+      stdin: 'question only\n',
+      timeoutMs: 5000,
+      isTTY: false,
+    });
+    expect(result).toEqual({ ok: true, text: 'question only' });
+  });
+
+  test('a named claude step uses the print contract without an injected caller', () => {
+    let argv: string[] = [];
+    let cleared = false;
+    const result = runHarnessStep({
+      step: { kind: 'named', id: 'claude', model: '' },
+      stdin: 'question',
+      timeoutMs: 30000,
+      isTTY: false,
+      spawn: (request) => {
+        argv = request.argv;
+        cleared = request.env?.CLAUDECODE === '';
+        return { ok: true, stdout: 'answer' };
+      },
+    });
+    expect(result).toEqual({ ok: true, text: 'answer' });
+    expect(argv).toEqual(['-p', '--model', 'haiku', '--output-format', 'text', '--setting-sources', '']);
+    expect(cleared).toBe(true);
+  });
+
+  test('a named codex step reads stdin through exec without an injected caller', () => {
+    let argv: string[] = [];
+    const result = runHarnessStep({
+      step: { kind: 'named', id: 'codex', model: 'gpt-5' },
+      stdin: 'question',
+      timeoutMs: 30000,
+      isTTY: false,
+      spawn: (request) => {
+        argv = request.argv;
+        return { ok: true, stdout: 'answer' };
+      },
+    });
+    expect(result).toEqual({ ok: true, text: 'answer' });
+    expect(argv).toEqual(['exec', '-m', 'gpt-5', '-']);
+  });
+
+  test('a named pi step sends the question on stdin without an injected caller', () => {
+    let stdin = '';
+    let argv: string[] = [];
+    const result = runHarnessStep({
+      step: { kind: 'named', id: 'pi', model: 'sonnet' },
+      stdin: 'what changed',
+      timeoutMs: 30000,
+      isTTY: false,
+      spawn: (request) => {
+        stdin = request.stdin;
+        argv = request.argv;
+        return { ok: true, stdout: 'pi answer' };
+      },
+    });
+    expect(result).toEqual({ ok: true, text: 'pi answer' });
+    expect(stdin).toBe('what changed');
+    expect(argv).toEqual(['--print', '--model', 'sonnet']);
   });
 });

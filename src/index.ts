@@ -29,7 +29,7 @@ import { runConsolidate } from './commands/consolidate.js';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_MIN_CLUSTER_SIZE } from './lib/consolidate.js';
 import { runCluster } from './commands/cluster.js';
 import { runEmbedBackfill, runRebackfill, runReindex, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
-import { resolveQueryHarness } from './lib/query-harness.js';
+import { resolveQueryHarness, unqualifiedQueryRoute } from './lib/query-harness.js';
 import { runDoctor } from './commands/doctor.js';
 import { runImportanceBackfill, runPin, runUnpin } from './commands/importance.js';
 import { runJev } from './commands/jev.js';
@@ -866,7 +866,7 @@ async function runResolvedQuery(
   options: { project?: string; table?: string; biasType?: string; limit?: string; showProvenance?: boolean },
   localHybrid: () => Promise<void>,
 ): Promise<void> {
-  const answer = resolveQueryHarness(query, { isTTY: process.stdin.isTTY === true });
+  const answer = await resolveQueryHarness(query, { isTTY: process.stdin.isTTY === true });
   if (answer.kind === 'text') {
     console.log(answer.text);
     return;
@@ -908,7 +908,8 @@ program
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
     if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start', 'capture'].includes(query)) {
-      if (options.keyword) {
+      const route = unqualifiedQueryRoute(options);
+      if (route === 'keyword') {
         runSearch(query, {
           project: options.project,
           table: options.table,
@@ -916,7 +917,7 @@ program
           limit: parseInt(options.limit, 10),
           showProvenance: options.showProvenance
         });
-      } else if (options.vector) {
+      } else if (route === 'semantic') {
         await runSemanticSearch(query, {
           table: options.table,
           limit: parseInt(options.limit, 10),

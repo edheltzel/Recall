@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { ExtractorConfigError, runFabricExtract } from '../../src/lib/extraction';
 
+const absentHarness = () => ({
+  query: { ok: true as const, absent: true as const },
+  automatic: { ok: true as const, absent: true as const },
+  curated: { ok: true as const, absent: true as const },
+  cluster: { ok: true as const, absent: true as const },
+});
+
 describe('curated Extractor wiring', () => {
   test('runFabricExtract uses the resolved fabric model', () => {
     const calls: string[] = [];
@@ -13,6 +20,7 @@ describe('curated Extractor wiring', () => {
         calls.push(`${model}:${content}`);
         return `wisdom:${model}`;
       },
+      resolveHarness: absentHarness,
     });
     expect(text).toBe('wisdom:env-fabric');
     expect(calls).toEqual(['env-fabric:transcript']);
@@ -26,6 +34,7 @@ describe('curated Extractor wiring', () => {
           curated: { ok: false, error: 'curated Extractor id "ollama" is not allowed' },
         }),
         extract: () => 'should-not-run',
+        resolveHarness: absentHarness,
       }),
     ).toThrow(ExtractorConfigError);
   });

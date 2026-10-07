@@ -6,7 +6,7 @@ import {
   type NamedHarnessId,
 } from './extractor-config.js';
 import {
-  runHarnessStep,
+  runHarnessStepAsync,
   type ProvenCaller,
   type SpawnFn,
 } from './harness-runner.js';
@@ -27,10 +27,16 @@ export interface QueryHarnessOptions {
   proven?: Partial<Record<NamedHarnessId, ProvenCaller>>;
 }
 
-export function resolveQueryHarness(
+export function unqualifiedQueryRoute(flags: { keyword?: boolean; vector?: boolean }): 'keyword' | 'semantic' | 'configured' {
+  if (flags.keyword) return 'keyword';
+  if (flags.vector) return 'semantic';
+  return 'configured';
+}
+
+export async function resolveQueryHarness(
   question: string,
   options: QueryHarnessOptions = {},
-): QueryHarnessAnswer {
+): Promise<QueryHarnessAnswer> {
   const resolved = resolveHarnessConfig({
     fileText: options.fileText,
     env: options.env,
@@ -41,15 +47,15 @@ export function resolveQueryHarness(
   return walkQuery(question, query.value, options);
 }
 
-function walkQuery(
+async function walkQuery(
   question: string,
   list: HarnessList,
   options: QueryHarnessOptions,
-): QueryHarnessAnswer {
+): Promise<QueryHarnessAnswer> {
   let lastError = 'query harness failed';
   for (const step of [list.primary, ...list.fallback]) {
     if (step.kind === 'local') return { kind: 'local', mode: step.mode };
-    const result = runHarnessStep({
+    const result = await runHarnessStepAsync({
       step,
       stdin: question,
       timeoutMs: QUERY_TIMEOUT_MS,
