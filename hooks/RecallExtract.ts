@@ -33,6 +33,7 @@ import { spawn } from 'child_process';
 import { shouldSkipExtraction } from './lib/extraction-quality';
 import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extract-model';
 import { encodeProjectDir } from './lib/hosts/claude/path-encoding';
+import { claudeHookPayload, runRecallCapture } from './lib/hosts/claude/ambient-capture';
 import {
   wasAlreadyExtracted as trackerWasAlreadyExtracted,
   markAsExtracted as trackerMarkAsExtracted,
@@ -122,6 +123,8 @@ interface HookInput {
   session_id?: string;
   transcript_path?: string;
   cwd?: string;
+  hook_event_name?: string;
+  hookEventName?: string;
 }
 
 /**
@@ -986,6 +989,23 @@ async function main() {
     }
 
     const cwd = hookInput.cwd || process.cwd();
+
+    // Ambient door. Independent of LoA extraction dedup below: a session the
+    // extractor skips still needs its latest turn stored through recall capture.
+    try {
+      const supplied = hookInput.transcript_path;
+      const capturePath = supplied && existsSync(supplied) ? supplied : findCurrentConversation(cwd);
+      if (capturePath) {
+        const payload = claudeHookPayload(capturePath, {
+          sessionId: hookInput.session_id,
+          cwd,
+          hookEvent: hookInput.hook_event_name ?? hookInput.hookEventName,
+        });
+        if (payload && !runRecallCapture(payload)) logExtract(`CAPTURE_FAILED: ${capturePath}`);
+      }
+    } catch (error) {
+      logExtract(`CAPTURE_FAILED: ${error}`);
+    }
 
     // Find conversation file
     const conversationPath = findCurrentConversation(cwd);
