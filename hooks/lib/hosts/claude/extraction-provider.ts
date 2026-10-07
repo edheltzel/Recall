@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, appendFileSync } from 'fs';
+import { existsSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import type { ExtractionProvider } from '../../extraction-provider';
+import { prepareAutomaticExtractionInput } from '../../extraction-input';
 
 const DEFAULT_CLAUDE_CLI_MODEL = 'haiku';
 const MAX_DIRECT_CHARS = 120000;
@@ -41,35 +42,7 @@ export function findClaudeCli(): string | null {
   }
 }
 
-function getExtractionPrompt(): string {
-  try {
-    const patternPath = join(getMemoryDir(), 'extract_prompt.md');
-    if (existsSync(patternPath)) return readFileSync(patternPath, 'utf-8').trim();
-  } catch {
-    // Fall through to the self-contained prompt.
-  }
-  return `You are an expert at extracting meaningful, factual information from AI coding session transcripts.
-Extract ONLY what actually happened. Follow this format EXACTLY:
 
-## ONE SENTENCE SUMMARY
-[Single factual sentence]
-
-## MAIN IDEAS
-- [Concrete thing 1]
-- [Concrete thing 2]
-
-## DECISIONS MADE
-- [Decision]: [reason]
-
-## THINGS TO REJECT / AVOID
-- [Thing to avoid]: [why]
-
-## ERRORS FIXED
-- [Error]: [fix]
-
-## SESSION CONTEXT
-[One sentence about impact on infrastructure]`;
-}
 
 function runClaude(claudePath: string, input: string, model: string): string | null {
   try {
@@ -96,9 +69,10 @@ function runClaude(claudePath: string, input: string, model: string): string | n
   }
 }
 
+export { prepareAutomaticExtractionInput };
+
 async function extractDirect(messages: string, claudePath: string, model: string): Promise<string | null> {
-  const truncated = messages.length > MAX_DIRECT_CHARS ? messages.slice(-MAX_DIRECT_CHARS) : messages;
-  const input = `${getExtractionPrompt()}\n\n---\n\nExtract the key information from this AI coding session transcript:\n\n${truncated}`;
+  const input = prepareAutomaticExtractionInput(messages);
   const text = runClaude(claudePath, input, model);
   if (text) {
     console.error(`[FabricExtract] Claude CLI extraction successful (model=${model}, ${text.length} chars)`);

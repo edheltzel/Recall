@@ -221,12 +221,12 @@ When a session ends, the `Stop` hook triggers `RecallExtract.ts`, which:
 
 1. Reads the session's JSONL conversation file from `~/.claude/projects/`
 2. Extracts the text content (skipping tool results and thinking blocks)
-3. Runs the Automatic-capture Extractor (default `claude-cli`, then `ollama`)
+3. Runs the Automatic-capture Extractor (default `claude-cli`, then `ollama`, unless `extraction.automatic` is set)
 4. Applies a quality gate — rejects extractions missing required sections
 5. Appends results to six memory files in `~/.claude/MEMORY/` (full archive, hot recall, session index, decisions, rejections, error patterns)
 6. Tracks extraction state per-file to prevent duplicates and enable 24-hour retries
 
-If `claude-cli` is unavailable, the hook falls back to a local Ollama model. Set `Recall_OLLAMA_MODEL` to change which model is used (default: `qwen2.5:3b`). Optional per-path Extractor config (IDs and models): [architecture](architecture.md#extractor-config). `OLLAMA_URL` is the shared Ollama endpoint (embeddings and automatic `ollama` Extractor).
+If `claude-cli` is unavailable, the hook falls back to a local Ollama model. Set `Recall_OLLAMA_MODEL` to change which model is used (default: `qwen2.5:3b`). A present `extraction.automatic` list replaces that cascade. A missing key keeps it. See [architecture](architecture.md#harness-steps). `OLLAMA_URL` is the shared Ollama endpoint (embeddings and automatic `ollama` Extractor).
 
 The hook self-spawns in the background so the session exits immediately — extraction is non-blocking.
 

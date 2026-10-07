@@ -24,7 +24,7 @@ recall semantic "query"                 # Semantic search (explicit)
 recall hybrid "query"                   # Hybrid search (explicit)
 ```
 
-The default search mode is hybrid: it runs FTS5 keyword matching and vector similarity in parallel, then merges results by relevance score. Use `-k` when you want exact phrase or operator matching without semantic expansion. Use `-v` when you want conceptually related results even if the exact words differ.
+The default search mode is hybrid: it runs FTS5 keyword matching and vector similarity in parallel, then merges results by relevance score. Use `-k` when you want exact phrase or operator matching without semantic expansion. Use `-v` when you want conceptually related results even if the exact words differ. `-k`, `-v`, and `recall search` stay local even when `~/.agents/Recall/config.json` names a query harness. `recall hybrid` and an unqualified `recall "query"` use that harness when the `query` key is present. A missing key stays hybrid. See [architecture](architecture.md#harness-steps).
 
 For keyword search, `-t/--table` and `--bias-type` solve different problems:
 

@@ -7,6 +7,7 @@ export {
   requireAutomaticExtractor,
   requireCuratedExtractor,
   resolveExtractorConfig,
+  resolveHarnessConfig,
 } from '../../hooks/lib/extractor-config.js';
 export type {
   AutomaticExtractorConfig,
@@ -17,4 +18,10 @@ export type {
   PathResult,
   ResolveExtractorConfigOptions,
   ResolvedExtractorConfig,
+  HarnessList,
+  HarnessListResult,
+  HarnessStep,
+  LocalQueryMode,
+  NamedHarnessId,
+  ResolvedHarnessConfig,
 } from '../../hooks/lib/extractor-config.js';

@@ -3,6 +3,10 @@
 import { getDb } from '../db/connection.js';
 import { blobToEmbedding, cosineSimilarity } from '../lib/embeddings.js';
 import { claudeCliTextGenerationProvider } from '../providers/claude-cli.js';
+import { resolveHarnessConfig } from '../lib/extractor-config.js';
+import { runHarnessStep, type ProvenCaller, type SpawnFn } from '../lib/harness-runner.js';
+import { scrub } from '../lib/write-safety.js';
+import type { NamedHarnessId } from '../lib/extractor-config.js';
 import type { TextGenerationProvider } from '../providers/text-generation.js';
 
 interface ClusterOptions {
@@ -117,6 +121,62 @@ STEPS:
   }
 }
 
+export function scrubProcedure(result: { title: string; trigger: string; steps: string }) {
+  return {
+    title: scrub(result.title).text,
+    trigger: scrub(result.trigger).text,
+    steps: scrub(result.steps).text,
+  };
+}
+
+export function clusterProvider(deps: {
+  fileText?: string | null;
+  spawn?: SpawnFn;
+  proven?: Partial<Record<NamedHarnessId, ProvenCaller>>;
+  isTTY?: boolean;
+} = {}): (TextGenerationProvider & { lastError?: string }) | null {
+  const harness = resolveHarnessConfig({ fileText: deps.fileText });
+  if (!harness.cluster.ok) return null;
+  if (harness.cluster.absent) return claudeCliTextGenerationProvider;
+  const steps = [harness.cluster.value.primary, ...harness.cluster.value.fallback];
+  let lastError = '';
+  return {
+    id: 'cluster-harness',
+    get lastError() { return lastError; },
+    generate(prompt: string) {
+      lastError = 'cluster harness failed';
+      for (const step of steps) {
+        const result = runHarnessStep({
+          step,
+          stdin: prompt,
+          timeoutMs: 30000,
+          isTTY: deps.isTTY ?? false,
+          spawn: deps.spawn,
+          proven: deps.proven,
+        });
+        if (result.ok && 'text' in result && result.text) {
+          lastError = '';
+          return result.text;
+        }
+        if (!result.ok) lastError = result.error;
+      }
+      return null;
+    },
+  };
+}
+
+export function reportClusterMiss(provider: TextGenerationProvider | null): void {
+  const error = provider && 'lastError' in provider && typeof provider.lastError === 'string'
+    ? provider.lastError
+    : '';
+  if (!error) {
+    console.log('  Synthesis failed, skipping.');
+    return;
+  }
+  console.error(`  ${error}`);
+  process.exitCode = 1;
+}
+
 export function runCluster(options: ClusterOptions): void {
   const dryRun = !options.execute;
   const threshold = options.threshold || 0.85;
@@ -165,28 +225,38 @@ export function runCluster(options: ClusterOptions): void {
 
   let created = 0;
 
+  const harness = resolveHarnessConfig();
+  if (!harness.cluster.ok) {
+    console.error(harness.cluster.error);
+    process.exitCode = 1;
+    return;
+  }
   for (const cluster of clusters) {
     console.log(`Synthesizing procedure from cluster of ${cluster.members.length}...`);
-    const result = synthesizeProcedure(cluster);
+    const provider = harness.cluster.absent
+      ? claudeCliTextGenerationProvider
+      : clusterProvider();
+    const result = provider ? synthesizeProcedure(cluster, provider) : null;
 
     if (!result) {
-      console.log('  Synthesis failed, skipping.');
+      reportClusterMiss(provider);
       continue;
     }
 
     const sourceIds = cluster.members.map(m => m.id).join(',');
 
+    const clean = scrubProcedure(result);
     insertStmt.run({
-      $title: result.title,
-      $trigger: result.trigger,
-      $steps: result.steps,
+      $title: clean.title,
+      $trigger: clean.trigger,
+      $steps: clean.steps,
       $sources: sourceIds,
       $project: cluster.project,
       $times: cluster.members.length,
       $confidence: cluster.members.length >= 3 ? 'high' : 'medium'
     });
 
-    console.log(`  Created: "${result.title}"`);
+    console.log(`  Created: "${clean.title}"`);
     created++;
   }
 

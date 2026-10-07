@@ -8,9 +8,15 @@ import { execSync } from 'child_process';
 import type { ExtractionProvider } from './extraction-provider';
 import {
   resolveExtractorConfig,
+  resolveHarnessConfig,
   type AutomaticExtractorConfig,
+  type HarnessStep,
   type ResolvedExtractorConfig,
+  type ResolvedHarnessConfig,
 } from './extractor-config';
+import { prepareAutomaticExtractionInput } from './extraction-input';
+import { runHarnessStep, type ProvenCaller, type SpawnFn } from './harness-runner';
+import type { NamedHarnessId } from './extractor-config';
 import { nativeAutomaticFactories } from './hosts';
 
 const OLLAMA_EXTRACT_PROMPT = `You are an expert at extracting meaningful information from conversations. Extract in this exact format:
@@ -98,10 +104,44 @@ export function automaticProvidersFromConfig(
   });
 }
 
+function harnessProvider(
+  step: HarnessStep,
+  spawn?: SpawnFn,
+  proven?: Partial<Record<NamedHarnessId, ProvenCaller>>,
+): ExtractionProvider {
+  const id = step.kind === 'named' ? step.id : step.kind === 'command' ? (step.label || 'command') : 'local';
+  return {
+    id,
+    extract(messages: string) {
+      const result = runHarnessStep({
+        step,
+        stdin: prepareAutomaticExtractionInput(messages),
+        timeoutMs: 300000,
+        maxBuffer: 10 * 1024 * 1024,
+        isTTY: false,
+        spawn,
+        proven,
+      });
+      if (!result.ok || !('text' in result) || result.text.length <= 50) return null;
+      return result.text;
+    },
+  };
+}
+
 function providersFromResolved(
   resolved: ResolvedExtractorConfig,
   factories: AutomaticProviderFactories = defaultAutomaticFactories,
+  harness: ResolvedHarnessConfig = resolveHarnessConfig(),
+  spawn?: SpawnFn,
+  proven?: Partial<Record<NamedHarnessId, ProvenCaller>>,
 ): ExtractionProvider[] | null {
+  if (!harness.automatic.ok) {
+    console.error(`[FabricExtract] Automatic harness config failed: ${harness.automatic.error}`);
+    return null;
+  }
+  if (!harness.automatic.absent) {
+    return [harness.automatic.value.primary, ...harness.automatic.value.fallback].map(step => harnessProvider(step, spawn, proven));
+  }
   if (!resolved.automatic.ok) {
     console.error(`[FabricExtract] Automatic Extractor config failed: ${resolved.automatic.error}`);
     return null;
@@ -109,15 +149,17 @@ function providersFromResolved(
   return automaticProvidersFromConfig(resolved.automatic.value, factories);
 }
 
-
 /** Run providers in order and return the first usable extraction. */
 export async function runExtractionCascade(
   messages: string,
   providers?: readonly ExtractionProvider[],
   resolve: typeof resolveExtractorConfig = resolveExtractorConfig,
   factories: AutomaticProviderFactories = defaultAutomaticFactories,
+  resolveHarness: typeof resolveHarnessConfig = resolveHarnessConfig,
+  spawn?: SpawnFn,
+  proven?: Partial<Record<NamedHarnessId, ProvenCaller>>,
 ): Promise<string | null> {
-  const list = providers ?? providersFromResolved(resolve(), factories);
+  const list = providers ?? providersFromResolved(resolve(), factories, resolveHarness(), spawn, proven);
   if (!list) return null;
   for (const provider of list) {
     console.error(`[FabricExtract] Trying ${provider.id} extraction...`);

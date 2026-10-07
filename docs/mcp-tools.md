@@ -38,7 +38,7 @@ memory_search({ query: "kubernetes auth", project: "my-app", bias_type: "decisio
 
 ## memory_hybrid_search
 
-Combined keyword + semantic search using Reciprocal Rank Fusion. Best for natural language queries. Falls back to keyword-only search if embeddings are unavailable.
+Combined keyword + semantic search, unless `~/.agents/Recall/config.json` has a `query` key. A named or command win returns that text. A local win stays on the configured mode. `memory_search` stays keyword-only. See [architecture](architecture.md#harness-steps).
 
 **Parameters**
 
@@ -77,7 +77,7 @@ memory_recall({ limit: 5, project: "my-app" })
 
 ## context_for_agent
 
-Call this before spawning any agent via the Task tool. Uses hybrid search to find relevant memory context for the planned task, so the agent starts with relevant background.
+Call this before spawning any agent via the Task tool. Uses the configured query harness when that key is present, otherwise hybrid search.
 
 **Parameters**
 
