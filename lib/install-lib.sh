@@ -32,9 +32,8 @@ if [[ -z "${RECALL_REPO_DIR:-}" ]]; then
 fi
 _RECALL_JSONC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/jsonc-mcp.ts"
 : "${CLAUDE_DIR:=$HOME/.claude}"
-# $CLAUDE_DIR is always absolute. Recall does not write a project-local .claude
-# relative to cwd, so running the installer from $HOME cannot collide a project
-# config with the user config. No separate collision guard.
+# Host config paths are absolute home paths; lifecycle installs never write a
+# project-local .claude, so running from $HOME cannot alias a project config.
 # Recall install root — canonical home for hooks, commands, guides, the DB,
 # and backups. Claude/OpenCode homes receive per-file symlinks back here; Pi's
 # extensions + skills load through its native package manifest. This is the
@@ -1026,9 +1025,9 @@ recall_do_restore() {
 
   log_info "Validating restored files..."
   if [[ -f "$CLAUDE_DIR/.mcp.json" ]]; then
-    if MCP_FILE="$CLAUDE_DIR/.mcp.json" bun -e \
-      'JSON.parse(require("fs").readFileSync(process.env.MCP_FILE))' 2>/dev/null; then
-      log_success "Validated: .mcp.json is valid JSON"
+    if MCP_FILE="$CLAUDE_DIR/.mcp.json" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e \
+      'const { parseJsonc } = await import(process.env.JSONC_LIB); parseJsonc(require("fs").readFileSync(process.env.MCP_FILE, "utf8"))' 2>/dev/null; then
+      log_success "Validated: .mcp.json is valid JSONC"
     else
       log_error "Restored .mcp.json is NOT valid JSON!"
       log_warn "You may need to manually fix $CLAUDE_DIR/.mcp.json"
@@ -1235,6 +1234,15 @@ recall_unlink_if_managed() {
   rm -f "$target"
 }
 
+
+_recall_warn_leftover_files() {
+  local dir="$1" leftover
+  for leftover in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+    [[ -e "$leftover" || -L "$leftover" ]] || continue
+    [[ -L "$leftover" ]] && continue
+    log_warn "Left user file in place: $leftover"
+  done
+}
 # ── Legacy slash-command cleanup ─────────────────────────────────────────────
 #
 # All Recall slash commands (`/Recall:*`) migrated to Agent Skills
@@ -1256,11 +1264,7 @@ recall_remove_legacy_slash_commands() {
     done
     rmdir "$dir" 2>/dev/null || true
     if [[ -d "$dir" ]]; then
-      local leftover
-      for leftover in "$dir"/*.md; do
-        [[ -e "$leftover" && ! -L "$leftover" ]] || continue
-        log_warn "Left user file in place: $leftover"
-      done
+      _recall_warn_leftover_files "$dir"
     else
       log_info "Removed legacy slash commands at $dir"
     fi
@@ -1277,6 +1281,7 @@ recall_remove_legacy_slash_commands() {
     done
     rmdir "$legacy" 2>/dev/null || true
     [[ -d "$legacy" ]] || log_info "Removed legacy lowercase slash commands at $legacy"
+    [[ -d "$legacy" ]] && _recall_warn_leftover_files "$legacy"
   fi
 
   # Command canonicals under $RECALL_CLAUDE_COMMANDS_DIR are no longer shipped.
@@ -1395,6 +1400,7 @@ _recall_remove_managed_skill_dirs_from() {
     done
     if [[ "${DRY_RUN:-false}" != "true" ]]; then
       rmdir "$dir" 2>/dev/null || true
+      [[ -d "$dir" ]] && _recall_warn_leftover_files "$dir"
     fi
   done
   _RECALL_REMOVED_SKILL_LINKS=$removed
@@ -1451,10 +1457,11 @@ recall_claude_plugin_active() {
   local installed="$CLAUDE_DIR/plugins/installed_plugins.json"
   [[ -f "$installed" ]] || return 1
   command -v bun &>/dev/null || return 1
-  INSTALLED_FILE="$installed" SETTINGS_FILE="$CLAUDE_DIR/settings.json" \
+  INSTALLED_FILE="$installed" SETTINGS_FILE="$CLAUDE_DIR/settings.json" JSONC_LIB="$_RECALL_JSONC_LIB" \
     PLUGIN_ID="$RECALL_CLAUDE_PLUGIN_ID" bun -e '
     const fs = require("fs");
-    const read = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf-8")); } catch { return null; } };
+    const { parseJsonc } = await import(process.env.JSONC_LIB);
+    const read = (p) => { try { return parseJsonc(fs.readFileSync(p, "utf-8")); } catch { return null; } };
     const entry = read(process.env.INSTALLED_FILE)?.plugins?.[process.env.PLUGIN_ID];
     if (!Array.isArray(entry) || entry.length === 0) process.exit(1);
     const enabled = read(process.env.SETTINGS_FILE)?.enabledPlugins?.[process.env.PLUGIN_ID];
@@ -2472,9 +2479,26 @@ _recall_jsonc_merge_mcp_entry() {
 # input is a hard failure before any write so uninstall cannot claim success
 # after damaging or ignoring a user config.
 _recall_jsonc_remove_mcp_entry() {
-  bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" remove "$1" "$2"
-  return $?
-
+  local file="$1" parent="$2" status
+  if SETTINGS_FILE="$file" PARENT_KEY="$parent" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
+    const fs = require("fs");
+    const { parseJsonc } = await import(process.env.JSONC_LIB);
+    const cfg = parseJsonc(fs.readFileSync(process.env.SETTINGS_FILE, "utf8"));
+    const container = cfg?.[process.env.PARENT_KEY];
+    process.exit(container && Object.prototype.hasOwnProperty.call(container, "recall-memory") ? 0 : 2);
+  '; then
+    bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" remove "$file" "$parent" || return $?
+    SETTINGS_FILE="$file" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
+      const fs = require("fs");
+      const { parseJsonc, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
+      const path = process.env.SETTINGS_FILE;
+      if (isSemanticallyEmpty(parseJsonc(fs.readFileSync(path, "utf8")))) fs.unlinkSync(path);
+    '
+  else
+    status=$?
+    [[ "$status" -eq 2 ]] && return 0
+    return "$status"
+  fi
 }
 
 # ── OpenCode ─────────────────────────────────────────────────────────────────

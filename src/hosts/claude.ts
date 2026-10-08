@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
+import { parseJsonc } from '../../lib/jsonc-mcp.js';
 
 export interface ClaudePaths {
   root: string;
@@ -50,7 +51,7 @@ export interface ClaudePluginState {
 function readJson(path: string): Record<string, unknown> | null {
   if (!existsSync(path)) return null;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+    const parsed: unknown = parseJsonc(readFileSync(path, 'utf-8'));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null;
