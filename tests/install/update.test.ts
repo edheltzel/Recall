@@ -29,6 +29,31 @@ function run(args: string[], env: Record<string, string> = {}) {
   };
 }
 
+function refreshRuntimeDriver(tempRoot: string, claudeDir: string, setup = '') {
+  return [
+    'set -e',
+    `export HOME="${tempRoot}"`,
+    `export CLAUDE_DIR="${claudeDir}"`,
+    `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+    'source "$REPO/packaging/update.sh"',
+    'log_info() { :; }',
+    'log_success() { :; }',
+    'log_warn() { :; }',
+    'log_error() { :; }',
+    'recall_copy_runtime_files() { :; }',
+    'recall_configure_claude_md() { :; }',
+    'recall_detect_platforms() { :; }',
+    'recall_claude_plugin_active() { return 0; }',
+    'OPENCODE_DETECTED=false',
+    'PI_DETECTED=false',
+    'GROK_DETECTED=false',
+    'OMP_DETECTED=false',
+    'DRY_RUN=false',
+    setup,
+    'step_refresh_runtime',
+  ].join('\n');
+}
+
 describe('update.sh', () => {
   test('--check prints current + latest and exits 0 when current', () => {
     const r = run(['--check']);
@@ -166,16 +191,13 @@ describe('update.sh', () => {
     }
   });
 
-  test('Claude plugin reconciliation preserves a stored legacy custom DB pin', () => {
+  test('update refresh preserves and repairs a stored custom Claude MCP registration', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-custom-pin-'));
     try {
       const claudeDir = join(tempRoot, '.claude');
       const settingsFile = join(claudeDir, 'settings.json');
-      const stubBin = join(tempRoot, 'bin');
       const stored = '/stored/custom.db';
       mkdirSync(claudeDir, { recursive: true });
-      mkdirSync(stubBin, { recursive: true });
-      writeFileSync(join(stubBin, 'claude'), '#!/bin/sh\necho recall-memory\n', { mode: 0o755 });
       writeFileSync(settingsFile, JSON.stringify({
         mcpServers: {
           'recall-memory': {
@@ -186,16 +208,11 @@ describe('update.sh', () => {
         },
       }));
 
-      const driver = [
-        'set -e',
-        `export HOME="${tempRoot}"`,
-        `export CLAUDE_DIR="${claudeDir}"`,
-        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
-        `export PATH="${stubBin}:$PATH"`,
-        'source "$REPO/lib/install-lib.sh"',
-        'recall_claude_plugin_active() { return 0; }',
-        'recall_configure_mcp',
-      ].join('\n');
+      const driver = refreshRuntimeDriver(
+        tempRoot,
+        claudeDir,
+        'which() { if [[ "$1" == "recall-mcp" ]]; then echo "/new/path/recall-mcp"; else command -v "$1"; fi; }',
+      );
       const {
         RECALL_DB_PATH: _recallDbPath,
         MEM_DB_PATH: _memDbPath,
@@ -209,6 +226,8 @@ describe('update.sh', () => {
 
       expect(result.status).toBe(0);
       const entry = JSON.parse(readFileSync(settingsFile, 'utf-8')).mcpServers['recall-memory'];
+      expect(entry.command).not.toBe('bun');
+      expect(entry.args).toEqual(['run', '/new/path/recall-mcp']);
       expect(entry.env).toEqual({ RECALL_DB_PATH: stored });
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
@@ -427,7 +446,7 @@ describe('update.sh', () => {
     }
   });
 
-  test('Claude plugin reconciliation preserves an empty settings.json symlink', () => {
+  test('update refresh removes the default Claude MCP registration through a settings symlink', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-symlink-'));
     try {
       const claudeDir = join(tempRoot, '.claude');
@@ -441,20 +460,16 @@ describe('update.sh', () => {
       }));
       symlinkSync(realFile, settingsFile);
 
-      const driver = [
-        'set -e',
-        `export HOME="${tempRoot}"`,
-        `export CLAUDE_DIR="${claudeDir}"`,
-        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
-        'log_success() { :; }',
-        'log_warn() { :; }',
-        'source "$REPO/lib/install-lib.sh"',
-        '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
-      ].join('\n');
+      const driver = refreshRuntimeDriver(tempRoot, claudeDir);
+      const {
+        RECALL_DB_PATH: _recallDbPath,
+        MEM_DB_PATH: _memDbPath,
+        ...baseEnv
+      } = process.env;
       const r = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
         cwd: REPO,
-        env: { ...process.env, REPO },
+        env: { ...baseEnv, REPO },
       });
 
       expect(r.status).toBe(0);
@@ -781,6 +796,7 @@ describe('update.sh', () => {
         # Stub every install/configure function step_refresh_runtime might call.
         # Each prints CALL:<name> so test assertions can grep for invocations.
         recall_copy_runtime_files()      { echo "CALL:recall_copy_runtime_files"; }
+        recall_configure_mcp()           { echo "CALL:recall_configure_mcp"; }
         recall_configure_claude_md()      { echo "CALL:recall_configure_claude_md"; }
         recall_detect_platforms()        { echo "CALL:recall_detect_platforms"; }
         recall_install_opencode_agent()  { echo "CALL:recall_install_opencode_agent"; }
@@ -809,6 +825,7 @@ describe('update.sh', () => {
     test('Claude: always invokes shared bootstrap migration during refresh', () => {
       const r = runRefresh({ OPENCODE_DETECTED: 'false', PI_DETECTED: 'false' });
       expect(r.status).toBe(0);
+      expect(r.stdout).toContain('CALL:recall_configure_mcp');
       expect(r.stdout).toContain('CALL:recall_configure_claude_md');
     });
 

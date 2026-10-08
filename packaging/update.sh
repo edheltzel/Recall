@@ -341,6 +341,7 @@ step_refresh_runtime() {
   # symlink target before replacing it, so the .new-suffix drift dance the
   # legacy version did is no longer needed.
   recall_copy_runtime_files
+  recall_configure_mcp
   recall_configure_claude_md
 
   # recall_copy_runtime_files only refreshes the Claude guide + slash commands.
