@@ -154,17 +154,18 @@ On Claude Code, the installer copies canonical hooks to `~/.agents/Recall/shared
 |-------|------|----------------|
 | `SessionStart` | `RecallStart.ts` | Injects L0 identity + L1 top records (same assembler as `recall start`) |
 | `SessionStart` | `RecallTelosSync.ts` | PAI TELOS auto-import when that directory exists; otherwise exits immediately |
-| `Stop` | `RecallExtract.ts` | Extracts the session into SQLite in the background |
+| `Stop` | `RecallExtract.ts` | Extracts the session, and shells ambient text to `recall capture`. Without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts` |
 | `PreCompact` | `RecallPreCompact.ts` | Flushes in-flight messages before compaction |
 | `PostToolUse` / `UserPromptSubmit` | `RecallInSession.ts` | Mid-session loop and correction capture; both default OFF |
 
 Other hosts:
 
-- **Codex** — plugin hooks (`SessionStart`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`) write through `recall host-hook` internally. You do not invoke that command.
-- **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` → `recall host-hook grok`. Capture only; no session-start injection.
-- **OpenCode / Pi** — native plugins/extensions drop transcripts for the shared batch extractor (`RecallBatchExtract.ts`). Optional cron is printed at the end of install; nothing is auto-scheduled.
-- **omp** — the native extension captures the active main-session branch on awaited `session_stop`; see [omp Integration](OMP_INTEGRATION.md).
-- **Cursor** — merge `templates/cursor/hooks.json`. Command stays `recall start --format cursor`. Cursor is not a `recall host-hook` host.
+- **Codex** — `Stop`, `PreCompact`, `PostCompact`, and `SessionEnd` call `recall capture`. `SessionStart` stays hidden `recall host-hook codex` for L0/L1 injection only. See [Capture adapter](CAPTURE_ADAPTER.md).
+- **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` runs `grok/hooks/capture.ts`, which calls `recall capture`. Capture only; no session-start injection.
+- **OpenCode** — markdown drop for `RecallBatchExtract.ts`. Not on `recall capture` yet (next after v1). Optional cron is printed at install; nothing is auto-scheduled.
+- **Pi** — shutdown calls `recall capture` and still drops markdown under `MEMORY/pi-sessions/` for batch extract. See [Pi Integration](PI_INTEGRATION.md).
+- **omp** — awaited `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
+- **Cursor** — merge `templates/cursor/hooks.json`. Command stays `recall start --format cursor`. Cursor is a catalog, not a `recall capture` or `host-hook` host.
 
 ### Agent skills (`do-recall-*`)
 

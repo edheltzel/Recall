@@ -76,17 +76,19 @@ Recall-owned logs and mutable state resolve from `RECALL_HOME` (default `~/.agen
 
 Codex's preferred attach is the native plugin in `hosts/plugins/recall/`, discovered through `.agents/plugins/marketplace.json`. Its `.mcp.json` registers `recall-memory`, `scripts/build-codex-plugin.ts` generates host-adapted skills from the canonical sources, and plugin hooks provide supported transcript capture and session-start context. See [Codex Integration](CODEX_INTEGRATION.md).
 
-Grok lifecycle capture is installer-owned. A managed global hook runs `grok export <session-id>` and writes immediately through `src/lib/host-ingest.ts`; Grok has no verified automatic injection surface. See [Grok Integration](GROK_INTEGRATION.md).
+Grok lifecycle capture is installer-owned. A managed global hook runs `hooks/grok/capture.ts`, which exports the session and calls `recall capture`. Grok has no verified automatic injection surface. See [Grok Integration](GROK_INTEGRATION.md).
 
-The same ingest seam owns scrub, native session IDs, source/project attribution, persistent message keys, watermarks, and terminal finalization. JCode does not call it because the bounded live probe did not prove safe history ordering or additive configuration. See [JCode Integration](JCODE_INTEGRATION.md).
+Ambient text for Claude, Codex, Pi, Grok, omp, and supplied-text JCode enters through `recall capture` ([Capture adapter](CAPTURE_ADAPTER.md)). Core still scrubs and stores. JCode is not installed unattended: the live probe did not prove a public history watermark or additive hooks. See [JCode Integration](JCODE_INTEGRATION.md).
 
-Claude Code's preferred attach is the native plugin in `hosts/plugins/recall-claude/` (skills + MCP). The lifecycle installer continues to own hooks and reconciles legacy duplicate surfaces; see [Claude Integration](CLAUDE_INTEGRATION.md).
+Claude Code's preferred attach is the native plugin in `hosts/plugins/recall-claude/` (skills + MCP). The lifecycle installer continues to own hooks. Stop shells `recall capture`; without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts`. See [Claude Integration](CLAUDE_INTEGRATION.md).
 
-Pi's preferred attach is the native package: Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`.
+Pi's preferred attach is the native package: Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`. Shutdown calls `recall capture` and still writes `MEMORY/pi-sessions/` for batch extract.
 
 Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
 
-omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. It sends active-branch snapshots from the awaited main-session `session_stop` event to the package-local CLI. The shared ingest path uses native IDs and source positions to reconcile branch visibility. See [omp Integration](OMP_INTEGRATION.md) for limits and separate skill/MCP ownership.
+omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. Awaited main-session `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
+
+OpenCode stays on its markdown drop. Moving it to `recall capture` is the next adapter after this v1 door. See [OpenCode Integration](OPENCODE_INTEGRATION.md).
 
 ## Extension surface
 
@@ -94,7 +96,7 @@ A new harness plugs in through existing seams, not a new Cursor marketplace plug
 
 - **start** — `recall start` / `runStart` / `registerStartFormat` (in-process). Same L0/L1 assembler as Claude `RecallStart.ts`.
 - **drop** — `MEMORY/<host>-sessions/` markdown. No registry; the directory name is the extension point.
-- **capture** — Cursor `catalogCursorSessions` (catalog only). Dump `discoverCurrentSession` + `registerSessionSource`. Native lifecycle capture, including omp, uses hidden `recall host-hook`. Cursor never joins that pipe.
+- **capture** — Cursor `catalogCursorSessions` (catalog only). Dump `discoverCurrentSession` + `registerSessionSource`. Ambient harness text uses public `recall capture`. Hidden `host-hook` is deprecated for that write and remains only for Codex `SessionStart` injection. Cursor never joins either pipe.
 - **inject** — Cursor `templates/cursor/` + `mergeCursorHooksJson`. Command is unqualified `recall start --format cursor`. Durable Cursor.app GUI PATH accuracy is pending FM-321/327.
 
 MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.

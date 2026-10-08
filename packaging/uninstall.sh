@@ -121,6 +121,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/threat-detect.ts"
   "$CLAUDE_DIR/hooks/lib/write-safety.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/index.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/claude/ambient-capture.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/extraction-provider.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/lifecycle.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/path-encoding.ts"

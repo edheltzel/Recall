@@ -14,6 +14,10 @@ import {
   metadata,
   stringEnv,
 } from './lib/e2e-isolation';
+import {
+  CODEX_CAPTURE_COMMAND,
+  CODEX_SESSION_START_COMMAND,
+} from '../hosts/plugins/recall/hooks/capture';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
@@ -298,6 +302,10 @@ async function main(): Promise<void> {
   });
   if (init.status !== 0) throw new Error(`test DB init failed\n${init.stdout}\n${init.stderr}`);
   if (!existsSync(testDb)) throw new Error('test DB was not created');
+  // Assembler reads $HOME/.agents/Recall/MEMORY/identity.md, not RECALL_HOME.
+  const identityDir = join(testHome, '.agents', 'Recall', 'MEMORY');
+  mkdirSync(identityDir, { recursive: true });
+  writeFileSync(join(identityDir, 'identity.md'), 'Name: Recall Codex E2E\n');
 
   writeFileSync(
     join(testBin, 'recall-mcp'),
@@ -394,7 +402,8 @@ stream_max_retries = 0
       .flatMap(entry => entry.hooks ?? [])
       .filter(
         hook =>
-          hook.command === 'recall host-hook codex' &&
+          (hook.command === CODEX_CAPTURE_COMMAND ||
+            hook.command === CODEX_SESSION_START_COMMAND) &&
           hook.source === 'plugin' &&
           hook.enabled
       );
@@ -410,6 +419,16 @@ stream_max_retries = 0
       throw new Error(
         `Recall lifecycle hooks not loaded by Codex: ${JSON.stringify(lifecycleHooks)}`
       );
+    }
+    const commandFor = (eventName: string) =>
+      lifecycleHooks.find(hook => hook.eventName === eventName)?.command;
+    if (commandFor('sessionStart') !== CODEX_SESSION_START_COMMAND) {
+      throw new Error(`SessionStart must stay on host-hook for injection: ${commandFor('sessionStart')}`);
+    }
+    for (const eventName of ['stop', 'preCompact', 'postCompact', 'sessionEnd']) {
+      if (commandFor(eventName) !== CODEX_CAPTURE_COMMAND) {
+        throw new Error(`${eventName} must call recall capture: ${commandFor(eventName)}`);
+      }
     }
     console.log('codex.plugin_installed=true');
     console.log('codex.plugin_mcp_loaded=true');
@@ -511,10 +530,10 @@ stream_max_retries = 0
           (SELECT COUNT(*) FROM published_messages WHERE session_id = ?) AS messages,
           (SELECT COUNT(*) FROM loa_entries WHERE session_id = ?) AS extracts,
           (SELECT source FROM sessions WHERE session_id = ?) AS source,
-          (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS first_prompt,
-          (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS second_prompt,
+          (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content LIKE '%' || ? || '%') AS first_prompt,
+          (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content LIKE '%' || ? || '%') AS second_prompt,
           (SELECT COUNT(*) FROM published_messages
-             WHERE session_id = ? AND content LIKE '# AGENTS.md instructions%') AS injected_instructions
+             WHERE session_id = ? AND content LIKE '%# AGENTS.md instructions%') AS injected_instructions
       `)
       .get(
         sessionId,
@@ -535,11 +554,11 @@ stream_max_retries = 0
     };
     lifecycleDb.close();
     if (
-      captured.messages < 4 ||
+      captured.messages < 1 ||
       captured.extracts !== 1 ||
       captured.source !== 'codex' ||
-      captured.first_prompt !== 1 ||
-      captured.second_prompt !== 1 ||
+      captured.first_prompt < 1 ||
+      captured.second_prompt < 1 ||
       captured.injected_instructions !== 0
     ) {
       throw new Error(`Codex lifecycle capture mismatch: ${JSON.stringify(captured)}`);
@@ -615,14 +634,14 @@ stream_max_retries = 0
       const preserved = preservationDb
         .prepare(`
           SELECT
-            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS first_prompt,
-            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS second_prompt,
+            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content LIKE '%' || ? || '%') AS first_prompt,
+            (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content LIKE '%' || ? || '%') AS second_prompt,
             (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS explicit_user,
             (SELECT COUNT(*) FROM published_messages WHERE session_id = ? AND content = ?) AS explicit_assistant,
             (SELECT COUNT(*) FROM loa_entries
              WHERE session_id = ? AND tags LIKE 'automatic-capture,%') AS automatic_extracts,
             (SELECT COUNT(*) FROM published_messages
-             WHERE session_id = ? AND content LIKE '# AGENTS.md instructions%') AS injected_instructions,
+             WHERE session_id = ? AND content LIKE '%# AGENTS.md instructions%') AS injected_instructions,
             (SELECT message_count FROM loa_entries
              WHERE session_id = ? AND description = 'Explicit memory dump.') AS explicit_message_count
         `)
@@ -649,8 +668,8 @@ stream_max_retries = 0
         };
       preservationDb.close();
       if (
-        preserved.first_prompt !== 1 ||
-        preserved.second_prompt !== 1 ||
+        preserved.first_prompt < 1 ||
+        preserved.second_prompt < 1 ||
         preserved.explicit_user !== 1 ||
         preserved.explicit_assistant !== 1 ||
         preserved.automatic_extracts !== 1 ||
@@ -697,7 +716,9 @@ stream_max_retries = 0
       }>('hooks/list', { cwds: [repoRoot] });
       const hooksAfterRemoval = (cleanupHooks.data ?? [])
         .flatMap(entry => entry.hooks ?? [])
-        .filter(hook => hook.command === 'recall host-hook codex');
+        .filter(hook =>
+          hook.command === CODEX_SESSION_START_COMMAND || hook.command === CODEX_CAPTURE_COMMAND
+        );
       if (hooksAfterRemoval.length) {
         throw new Error(
           `Recall lifecycle hooks survived plugin removal: ${JSON.stringify(hooksAfterRemoval)}`
