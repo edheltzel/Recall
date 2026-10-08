@@ -712,6 +712,118 @@ describe('update.sh', () => {
     expect(r.stdout).toMatch(/would: migrate Recall-owned Claude\/Pi MEMORY bootstraps/);
   });
 
+  test('one update uses a freshly pulled lifecycle library to reconcile Claude MCP', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-reexec-'));
+    try {
+      const checkout = join(tempRoot, 'checkout');
+      const checkoutLib = join(checkout, 'lib');
+      const checkoutPackaging = join(checkout, 'packaging');
+      const stubBin = join(tempRoot, 'bin');
+      const home = join(tempRoot, 'home');
+      const claudeDir = join(home, '.claude');
+      const recallDir = join(home, '.agents', 'Recall');
+      const bunBin = join(home, '.bun', 'bin');
+      const targets = join(tempRoot, 'targets');
+      const settingsFile = join(claudeDir, 'settings.json');
+      const pullCount = join(tempRoot, 'pull-count');
+      const realLib = join(REPO, 'lib', 'install-lib.sh');
+
+      for (const dir of [checkoutLib, checkoutPackaging, stubBin, join(claudeDir, 'plugins'), bunBin, targets]) {
+        mkdirSync(dir, { recursive: true });
+      }
+      writeFileSync(join(checkoutPackaging, 'update.sh'), readFileSync(UPDATE, 'utf-8'), { mode: 0o755 });
+      writeFileSync(join(checkoutLib, 'jsonc-mcp.ts'), readFileSync(join(REPO, 'lib', 'jsonc-mcp.ts'), 'utf-8'));
+      writeFileSync(
+        join(checkoutLib, 'install-lib.sh'),
+        `source ${JSON.stringify(realLib)}\nrecall_configure_mcp() { :; }\n`,
+      );
+      writeFileSync(join(checkout, 'package.json'), JSON.stringify({ version: '9.9.9' }));
+      writeFileSync(
+        join(claudeDir, 'plugins', 'installed_plugins.json'),
+        JSON.stringify({ plugins: { 'recall@recall-marketplace': [{ version: '9.9.9' }] } }),
+      );
+      writeFileSync(settingsFile, JSON.stringify({
+        permissions: { allow: ['safe'] },
+        mcpServers: {
+          'recall-memory': {
+            command: 'bun',
+            args: ['run', '/old/recall-mcp'],
+            env: { RECALL_DB_PATH: join(recallDir, 'recall.db') },
+          },
+        },
+      }));
+
+      writeFileSync(join(targets, 'recall'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "recall 9.9.9"\nexit 0\n', { mode: 0o755 });
+      writeFileSync(join(targets, 'recall-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      symlinkSync(join(targets, 'recall'), join(bunBin, 'recall'));
+      symlinkSync(join(targets, 'recall-mcp'), join(bunBin, 'recall-mcp'));
+
+      writeFileSync(join(stubBin, 'git'), `#!/bin/bash
+set -e
+case "$1" in
+  fetch) exit 0 ;;
+  rev-parse) echo old-sha ;;
+  pull)
+    cp "$NEW_LIB" "$CHECKOUT/lib/install-lib.sh"
+    count=0
+    [[ -f "$PULL_COUNT" ]] && count="$(cat "$PULL_COUNT")"
+    printf '%s\n' "$((count + 1))" > "$PULL_COUNT"
+    ;;
+  diff) exit 1 ;;
+esac
+`, { mode: 0o755 });
+      writeFileSync(join(stubBin, 'bun'), `#!/bin/bash
+if [[ "$1" == "-e" ]]; then exec "$REAL_BUN" "$@"; fi
+exit 0
+`, { mode: 0o755 });
+      writeFileSync(join(stubBin, 'node'), '#!/bin/bash\nexec "$REAL_BUN" "$@"\n', { mode: 0o755 });
+      writeFileSync(join(stubBin, 'npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(join(stubBin, 'gh'), `#!/bin/sh
+case "$*" in
+  *tagName*) echo v9.9.9 ;;
+  *) echo notes ;;
+esac
+`, { mode: 0o755 });
+
+      const env = { ...process.env };
+      for (const name of [
+        'BACKUP_DIR',
+        'MEM_DB_PATH',
+        'RECALL_DB_PATH',
+        'RECALL_UPDATE_PRE_SHA',
+        'RECALL_UPDATE_REEXECUTED',
+        'TIMESTAMP',
+      ]) delete env[name];
+      Object.assign(env, {
+        BACKUP_BASE: join(recallDir, 'backups'),
+        CHECKOUT: checkout,
+        CLAUDE_DIR: claudeDir,
+        HOME: home,
+        NEW_LIB: realLib,
+        NO_COLOR: '1',
+        PATH: `${stubBin}:/usr/bin:/bin`,
+        PULL_COUNT: pullCount,
+        REAL_BUN: process.execPath,
+        RECALL_DIR: recallDir,
+        RECALL_REPO_DIR: REPO,
+      });
+
+      const result = spawnSync(
+        'bash',
+        [join(checkoutPackaging, 'update.sh'), '--force', '--no-confirm', '--no-migrate', '--no-gum'],
+        { cwd: checkout, encoding: 'utf-8', env, timeout: 10_000 },
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(pullCount, 'utf-8').trim()).toBe('1');
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf-8'));
+      expect(settings.permissions.allow).toEqual(['safe']);
+      expect(settings.mcpServers?.['recall-memory']).toBeUndefined();
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   // The /Recall:* slash commands migrated to Agent Skills (#228).
   // recall_copy_runtime_files must clean up what older releases installed —
   // Recall-managed symlinks at ~/.claude/commands/Recall/ plus the canonicals

@@ -42,6 +42,7 @@ DRY_RUN=false
 FORCE=false
 NO_MIGRATE=false
 NO_CONFIRM=false
+UPDATE_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -152,7 +153,7 @@ EOF
 }
 
 # Traps any failure and emits the rollback recipe before exiting.
-PRE_SHA=""
+PRE_SHA="${RECALL_UPDATE_PRE_SHA:-}"
 rollback_on_failure() {
   local code=$?
   if [[ $code -ne 0 ]] && [[ -n "$PRE_SHA" ]] && [[ "$DRY_RUN" != "true" ]]; then
@@ -259,6 +260,21 @@ step_fetch_and_pull() {
     log_error "git pull --ff-only failed — you likely have local commits or a dirty tree."
     log_error "Resolve manually, then re-run ./packaging/update.sh."
     exit 1
+  fi
+
+  local lifecycle_diff=0
+  git diff --quiet "$PRE_SHA" HEAD -- packaging/update.sh lib/install-lib.sh || lifecycle_diff=$?
+  if [[ $lifecycle_diff -gt 1 ]]; then
+    log_error "Could not determine whether lifecycle files changed after pull."
+    exit "$lifecycle_diff"
+  fi
+  if [[ $lifecycle_diff -eq 1 ]] && [[ "${RECALL_UPDATE_REEXECUTED:-0}" != "1" ]]; then
+    log_info "Lifecycle updater changed — continuing with the freshly pulled version..."
+    RECALL_UPDATE_REEXECUTED=1 \
+      RECALL_UPDATE_PRE_SHA="$PRE_SHA" \
+      TIMESTAMP="$TIMESTAMP" \
+      BACKUP_DIR="$BACKUP_DIR" \
+      exec bash "$SCRIPT_DIR/update.sh" "${UPDATE_ARGS[@]}"
   fi
 }
 
@@ -463,6 +479,16 @@ step_report() {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+run_post_pull_steps() {
+  step_install_and_build
+  step_link_global
+  step_migrate
+  step_refresh_runtime
+  step_reregister_hooks
+  step_verify
+  step_report
+}
+
 main() {
   trap rollback_on_failure ERR
 
@@ -481,6 +507,11 @@ main() {
   # install/update (warn-only; re-running converges) before we begin (#27).
   recall_warn_if_install_incomplete
 
+  if [[ "${RECALL_UPDATE_REEXECUTED:-0}" == "1" ]]; then
+    run_post_pull_steps
+    return
+  fi
+
   step_version_check
   [[ "$CHECK_ONLY" == "true" ]] && exit 0
 
@@ -488,13 +519,7 @@ main() {
   step_backup
   step_auto_migrate
   step_fetch_and_pull
-  step_install_and_build
-  step_link_global
-  step_migrate
-  step_refresh_runtime
-  step_reregister_hooks
-  step_verify
-  step_report
+  run_post_pull_steps
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
