@@ -142,7 +142,7 @@ They are platform-agnostic — OpenCode, Claude Code, and Pi share them.
 
 | Script | Purpose |
 |---|---|
-| `./packaging/install.sh` | Install or reinstall. Idempotent. |
+| `recall install` or `./packaging/install.sh` | Packaged user path, or source checkout. Idempotent. |
 | `./packaging/update.sh --check` | Check if a newer GitHub release exists. Check-only. |
 | `./packaging/update.sh` | Pull latest, rebuild, migrate DB, re-register hooks/plugins. Exit OpenCode first. |
 | `./packaging/uninstall.sh --dry-run` | Preview what would be removed. |
