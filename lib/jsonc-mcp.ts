@@ -4,7 +4,7 @@
 // Recall package ships lib/ but not node_modules/, so installer/uninstaller
 // config repair cannot require the repository's jsonc-parser installation.
 
-import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
 
 type JsonObject = Record<string, unknown>;
 type Property = { key: string; keyStart: number; value: Node };
@@ -143,8 +143,11 @@ export function parseJsonc(text: string): unknown {
 function writeTextAtomic(file: string, text: string): void {
   const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
+  const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined;
   try {
-    writeFileSync(tmp, text);
+    if (mode !== undefined && existsSync(tmp)) chmodSync(tmp, mode);
+    writeFileSync(tmp, text, mode === undefined ? undefined : { mode });
+    if (mode !== undefined) chmodSync(tmp, mode);
     renameSync(tmp, target);
   } catch (error) {
     try { unlinkSync(tmp); } catch { /* temp may not exist */ }
