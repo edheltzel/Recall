@@ -345,6 +345,42 @@ describe('update.sh', () => {
     }
   });
 
+  test('hook rename rejects invalid nested Claude settings without writing', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-settings-shape-invalid-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      const invalidConfigs = [
+        '{"hooks":[[{"hooks":[{"command":"bun run SessionExtract.ts"}]}]],"mcpServers":{}}',
+        '{"hooks":{"Stop":{}},"mcpServers":{}}',
+        '{"hooks":{"Stop":[{"hooks":[{"command":"bun run SessionExtract.ts"}]}]},"mcpServers":[]}',
+      ];
+
+      for (const original of invalidConfigs) {
+        writeFileSync(settingsFile, original);
+        const driver = [
+          'set -e',
+          `export HOME="${tempRoot}"`,
+          `export CLAUDE_DIR="${claudeDir}"`,
+          'log_error() { :; }',
+          'source "$REPO/lib/install-lib.sh"',
+          'recall_rename_hooks_in_settings',
+        ].join('\n');
+        const result = spawnSync('bash', ['-c', driver], {
+          encoding: 'utf-8',
+          cwd: REPO,
+          env: { ...process.env, REPO },
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+      }
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('Claude settings writers preserve unrelated valid configuration', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-settings-valid-'));
     try {

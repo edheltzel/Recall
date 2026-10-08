@@ -497,6 +497,25 @@ This content must be preserved across an uninstall.
     expect(result.stdout).not.toContain('Recall uninstalled successfully');
   });
 
+  test('invalid nested Claude settings remain unchanged and make uninstall incomplete', () => {
+    const invalidConfigs = [
+      '{"hooks":[],"mcpServers":{"recall-memory":{}}}',
+      '{"hooks":{"Stop":{}},"mcpServers":{"recall-memory":{}}}',
+      '{"hooks":{},"mcpServers":[]}',
+    ];
+
+    for (const original of invalidConfigs) {
+      writeFileSync(settingsFile, original);
+
+      const result = runUninstall(claudeDir, backupBase);
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+      expect(result.stdout).toContain('Uninstall Incomplete');
+      expect(result.stdout).not.toContain('Recall uninstalled successfully');
+    }
+  });
+
   test('CLAUDE.md: Recall-managed MEMORY section removed, other sections preserved', () => {
     runUninstall(claudeDir, backupBase);
     const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');

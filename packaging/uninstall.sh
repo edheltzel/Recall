@@ -272,15 +272,15 @@ filter_claude_settings() {
     fi
     if SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
       JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const { readJsoncObject, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
+      const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.SETTINGS_FILE;
       const names = process.env.HOOK_NAMES_CSV.split(",");
       const config = readJsoncObject(file, true);
+      validateClaudeConfigShape(config);
       let changed = false;
-      if (config.hooks && typeof config.hooks === "object") {
+      if (config.hooks) {
         for (const event of Object.keys(config.hooks)) {
           const list = config.hooks[event];
-          if (!Array.isArray(list)) continue;
           const kept = list.filter(entry => {
             const inner = (entry && entry.hooks) || [];
             return !inner.some(h => h && h.command && names.some(n => h.command.includes(n)));

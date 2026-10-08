@@ -24,7 +24,7 @@ import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
-import { parseJsonc, writeJsonAtomic } from '../../lib/jsonc-mcp.js';
+import { parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.js';
 
 export interface MigrateOptions {
   to: string;
@@ -80,6 +80,13 @@ function patchConfigEnv(target: McpConfigTarget, newDbPath: string, dryRun: bool
     return { changed: false, reason: `invalid JSONC: ${(e as Error).message}`, error: true };
   }
   if (!isRecord(parsed)) return { changed: false, reason: 'invalid JSONC root', error: true };
+  if (target.host === 'claude') {
+    try {
+      validateClaudeConfigShape(parsed);
+    } catch (e) {
+      return { changed: false, reason: `invalid Claude config: ${(e as Error).message}`, error: true };
+    }
+  }
 
   let node = parsed;
   for (let i = 0; i < target.envPath.length - 1; i++) {

@@ -159,6 +159,18 @@ export function readJsoncObject(file: string, emptyIfMissingOrBlank = false): Js
   return value;
 }
 
+export function validateClaudeConfigShape(config: JsonObject): void {
+  if (config.hooks !== undefined) {
+    if (!isObject(config.hooks)) throw new Error('hooks is not an object');
+    for (const [event, entries] of Object.entries(config.hooks)) {
+      if (!Array.isArray(entries)) throw new Error(`hooks.${event} is not an array`);
+    }
+  }
+  if (config.mcpServers !== undefined && !isObject(config.mcpServers)) {
+    throw new Error('mcpServers is not an object');
+  }
+}
+
 function writeTextAtomic(file: string, text: string): void {
   const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;

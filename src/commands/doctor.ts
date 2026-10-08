@@ -1,6 +1,6 @@
 // recall doctor — health check for all memory subsystems
 
-import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync, renameSync, realpathSync } from 'fs';
+import { existsSync, statSync, readFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -12,7 +12,7 @@ import { VERSION } from '../version.js';
 import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli, type ClaudePluginState } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
 import { getRecallHome } from '../lib/runtime-paths.js';
-import { parseJsonc } from '../../lib/jsonc-mcp.js';
+import { parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.js';
 export interface DoctorOptions {
   fix?: boolean;
 }
@@ -814,7 +814,9 @@ interface McpScan {
 // registration). Malformed/unreadable JSON is never fatal, but it is recorded
 // (not dropped) so the caller can distinguish it from a missing registration.
 function parseHostConfig(target: McpConfigTarget): Record<string, unknown> {
-  return parseJsonc(readFileSync(target.path, 'utf-8')) as Record<string, unknown>;
+  const config = parseJsonc(readFileSync(target.path, 'utf-8')) as Record<string, unknown>;
+  if (target.host === 'claude') validateClaudeConfigShape(config);
+  return config;
 }
 
 function mcpEntryAt(config: Record<string, unknown>, target: McpConfigTarget): McpEntry | null {
@@ -915,7 +917,6 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       for (const owner of stale) {
         // Per-file isolation: a write failure on one owner (EACCES, full disk,
         // read-only settings.json) must not abort the others or escape the loop.
-        let tmpPath: string | undefined;
         try {
           const cfg = parseHostConfig(owner.target);
           const entry = mcpEntryAt(cfg, owner.target);
@@ -925,23 +926,13 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
           const env = entry[envKey] as Record<string, unknown>;
           env.RECALL_DB_PATH = resolvedDbPath;
           delete env.MEM_DB_PATH;
-          // Resolve through any symlink so the write goes THROUGH the link rather
-          // than replacing it with a regular file (which would orphan the
-          // canonical target and break stow/chezmoi-style dotfiles). Safe here:
-          // the file was just read successfully.
-          const target = realpathSync(owner.target.path);
-          tmpPath = target + '.tmp';
           // Back up only once the write is confirmed to happen (after the re-read
           // + entry guard), so a vanished registration leaves no orphan backup.
           mkdirSync(backupDir, { recursive: true });
-          copyFileSync(target, join(backupDir, owner.target.path.replace(/[/\\]/g, '_')));
-          // Atomic write: stage to a temp sibling then rename over the resolved
-          // target, so an interrupt mid-write can't truncate the user's config.
-          writeFileSync(tmpPath, JSON.stringify(cfg, null, 2));
-          renameSync(tmpPath, target);
+          copyFileSync(owner.target.path, join(backupDir, owner.target.path.replace(/[/\\]/g, '_')));
+          writeJsonAtomic(owner.target.path, cfg);
           patched.push(owner.target.path);
         } catch (err) {
-          if (tmpPath) { try { if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort temp cleanup */ } }
           // Capture the cause so a real EACCES/disk-full is diagnosable.
           failed.push(`${owner.target.path} (${err instanceof Error ? err.message : String(err)})`);
         }

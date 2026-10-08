@@ -11,7 +11,7 @@
 // config, not the backup.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { probeMcpEnv, resolveProbeResult } from '../../src/commands/doctor';
@@ -192,6 +192,18 @@ describe('probeMcpEnv', () => {
     // Throws if the file is not intact, valid JSON.
     const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(cfg.mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
+  });
+
+  test('repair preserves the existing config mode', () => {
+    writeConfig({
+      mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } },
+    });
+    chmodSync(configPath, 0o600);
+
+    const fixed = probe().repair!();
+
+    expect(fixed.status).toBe('PASS');
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   // ── Fix 1 (issue #112): per-file error isolation ──

@@ -1537,10 +1537,11 @@ _recall_unregister_legacy_claude_mcp() {
     [[ -f "$f" ]] || continue
     grep -q "recall-memory" "$f" || continue
     if CFG_FILE="$f" DEFAULT_DB="$default_db" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const { readJsoncObject, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
+      const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.CFG_FILE;
       let cfg;
       try { cfg = readJsoncObject(file); } catch { process.exit(2); }
+      try { validateClaudeConfigShape(cfg); } catch { process.exit(2); }
       const entry = cfg?.mcpServers?.["recall-memory"];
       if (!entry) process.exit(0);
       const pinned = entry.env?.RECALL_DB_PATH ?? entry.env?.MEM_DB_PATH;
@@ -1994,12 +1995,13 @@ _recall_ensure_mcp_entry() {
       CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
         JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
         const { execFileSync } = require("child_process");
-        const { readJsoncObject, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+        const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
         const file = process.env.CFG_FILE;
         const dbPath = process.env.DB_PATH_ABS;
         const bunPath = process.env.BUN_PATH;
         const mcpPath = process.env.MCP_PATH;
         const cfg = readJsoncObject(file);
+        validateClaudeConfigShape(cfg);
         if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
         const entry = cfg.mcpServers["recall-memory"];
         entry.command = bunPath;
@@ -2028,11 +2030,9 @@ _recall_write_mcp_settings() {
 
   if SETTINGS_FILE="$settings_file" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
     DB_PATH_ABS="$db_path_abs" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-    const { readJsoncObject, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+    const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
     const config = readJsoncObject(process.env.SETTINGS_FILE, true);
-    if (config.mcpServers !== undefined && (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers))) {
-      throw new Error("mcpServers is not an object");
-    }
+    validateClaudeConfigShape(config);
     config.mcpServers ||= {};
     if (config.mcpServers["recall-memory"]) process.exit(0);
     config.mcpServers["recall-memory"] = {
@@ -2167,15 +2167,10 @@ recall_register_hook() {
       const timeout = process.env.TIMEOUT;
       const matcher = process.env.MATCHER || "";
 
-      const { readJsoncObject, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+      const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
       const config = readJsoncObject(settingsFile, true);
-      if (config.hooks !== undefined && (!config.hooks || typeof config.hooks !== "object" || Array.isArray(config.hooks))) {
-        throw new Error("hooks is not an object");
-      }
+      validateClaudeConfigShape(config);
       config.hooks ||= {};
-      if (config.hooks[event] !== undefined && !Array.isArray(config.hooks[event])) {
-        throw new Error(`hooks.${event} is not an array`);
-      }
       config.hooks[event] ||= [];
 
       const exists = config.hooks[event].some(e =>
@@ -2260,10 +2255,11 @@ recall_rename_hooks_in_settings() {
   [[ ! -f "$settings_file" ]] && return 0
 
   if SETTINGS_FILE="$settings_file" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-    const { readJsoncObject, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+    const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
     const file = process.env.SETTINGS_FILE;
     const cfg = readJsoncObject(file, true);
-    if (!cfg.hooks || typeof cfg.hooks !== "object") process.exit(0);
+    validateClaudeConfigShape(cfg);
+    if (!cfg.hooks) process.exit(0);
 
     // Map of old hook name → new hook name. Order matters in the substitution
     // loop: longest patterns first so we never rename a substring that
@@ -2280,7 +2276,6 @@ recall_rename_hooks_in_settings() {
     let changed = false;
     for (const event of Object.keys(cfg.hooks)) {
       const list = cfg.hooks[event];
-      if (!Array.isArray(list)) continue;
       for (const entry of list) {
         const inner = (entry && entry.hooks) || [];
         for (const h of inner) {
