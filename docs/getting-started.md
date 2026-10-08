@@ -76,7 +76,7 @@ recall stats                # record counts (zeros on a fresh install)
 recall doctor               # health check: database, MCP, hooks, embeddings
 ```
 
-`recall doctor` is the authoritative check. Run it first whenever something looks wrong. `recall doctor --fix` repairs missing or drifted install-layout symlinks only; it does not touch data.
+`recall doctor` is the authoritative check. Run it first whenever something looks wrong. `recall doctor --fix` repairs missing or drifted install-layout symlinks and stale Claude MCP database paths. It may rewrite Claude configuration, but it does not repair or mutate memory data.
 
 ---
 

@@ -28,7 +28,7 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 | Uninstall, keep your memory database | `recall uninstall` (or `./packaging/uninstall.sh`) |
 | Uninstall **and** destroy the database + backups | `recall uninstall --purge` |
 | Install to / move the DB to a custom path | `./packaging/install.sh --db-path <path>` (new) · `recall migrate --to <path>` (existing) |
-| Repair drifted symlinks without reinstalling | `recall doctor --fix` |
+| Repair install or Claude MCP configuration drift without reinstalling | `recall doctor --fix` |
 | See where everything resolves on disk | `recall path` |
 | Roll back a failed install or update | `./packaging/install.sh restore` — see [Recovery](#recovery) |
 
@@ -94,7 +94,7 @@ Run `recall uninstall --help` for the canonical forwarded flag list. The exact r
 - **Restore a backup** (install/update write timestamped backups under `~/.agents/Recall/backups/`): `./packaging/install.sh list`, then `./packaging/install.sh restore [TIMESTAMP]`.
 - **A failed update** writes `ROLLBACK.txt` into its backup directory with the exact revert commands. See [Upgrading → Rollback](upgrading.md#rollback). Note: **DB schema downgrades are not supported** — if a migration ran, restore the DB file from the backup rather than just reverting the repo.
 - **A `--purge` uninstall** writes a `pre_purge_<TS>/` snapshot containing the database and canonical user-authored MEMORY files before deleting runtime state; identity and distilled memory are also materialized into the Claude MEMORY directory when safe.
-- **Drifted symlinks** (e.g. after moving the checkout): `recall doctor` reports them and `recall doctor --fix` re-creates them, backing up any user-modified file at a symlink target first.
+- **Install or Claude MCP configuration drift**: `recall doctor` reports drifted symlinks and stale Recall database paths. `recall doctor --fix` repairs them, backing up any user-modified file at a symlink target first.
 
 ---
 

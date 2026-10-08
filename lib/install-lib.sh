@@ -1466,15 +1466,27 @@ recall_claude_plugin_active() {
     } catch {
       process.exit(2);
     }
-    const entry = installed.plugins?.[process.env.PLUGIN_ID];
-    if (!Array.isArray(entry) || entry.length === 0) process.exit(1);
+    const plugins = installed.plugins;
+    if (plugins !== undefined && (!plugins || typeof plugins !== "object" || Array.isArray(plugins))) {
+      process.exit(2);
+    }
+    const entries = plugins?.[process.env.PLUGIN_ID];
+    if (entries !== undefined && !Array.isArray(entries)) process.exit(2);
+    if (!entries || entries.length === 0) process.exit(1);
+    const record = entries[0];
+    if (!record || typeof record !== "object" || Array.isArray(record)) process.exit(2);
     let settings;
     try {
       settings = readJsoncObject(process.env.SETTINGS_FILE, true);
     } catch {
       process.exit(2);
     }
-    const enabled = settings.enabledPlugins?.[process.env.PLUGIN_ID];
+    const enabledPlugins = settings.enabledPlugins;
+    if (enabledPlugins !== undefined && (!enabledPlugins || typeof enabledPlugins !== "object" || Array.isArray(enabledPlugins))) {
+      process.exit(2);
+    }
+    const enabled = enabledPlugins?.[process.env.PLUGIN_ID];
+    if (enabled !== undefined && typeof enabled !== "boolean") process.exit(2);
     process.exit(enabled === false ? 1 : 0);
   ' 2>/dev/null
 }
@@ -1748,7 +1760,7 @@ recall_print_recovery() {
   local logger="${1:-log_info}"
   "$logger" "Recovery options:"
   "$logger" "  Recommended: re-run ./packaging/install.sh — it heals canonicals AND symlinks (idempotent)."
-  "$logger" "  Alternative: run 'recall doctor --fix' — repairs symlinks only (no reinstall)."
+  "$logger" "  Alternative: run 'recall doctor --fix' - repairs install and configuration drift (no reinstall)."
 }
 
 # Write the in-flight marker. Called once $RECALL_DIR exists, before the first

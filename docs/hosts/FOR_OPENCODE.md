@@ -121,7 +121,7 @@ recall stats                           # Database statistics
 recall loa list                        # Browse LoA entries
 recall onboard                         # Interactive L0 identity setup (run once per user)
 recall path                            # Show DB + install paths (diagnostics)
-recall doctor --fix                    # Repair drifted/missing Recall symlinks
+recall doctor --fix                    # Repair Recall symlinks and stale Claude MCP DB paths
 recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 

@@ -6,8 +6,8 @@
 // Orphan/invariant problems that cannot be repaired safely are report-only.
 //
 // Dry-run by default; --execute applies. Deliberately separate from
-// `recall doctor --fix`, which only repairs install-layout symlinks and
-// never runs data repair. Core logic lives in src/lib/repair.ts.
+// `recall doctor --fix`, which repairs install/configuration drift and never
+// runs data repair. Core logic lives in src/lib/repair.ts.
 
 import { getDb } from '../db/connection.js';
 import { checkEmbeddingService, embed } from '../lib/embeddings.js';

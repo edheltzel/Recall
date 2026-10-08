@@ -148,6 +148,45 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     expect(result.stdout).toContain('inactive');
   });
 
+  test('semantically invalid plugin state stops skill ownership changes', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    const pluginId = 'recall@recall-marketplace';
+    mkdirSync(pluginsDir, { recursive: true });
+
+    const cases = [
+      {
+        installed: { plugins: [] },
+        settings: {},
+      },
+      {
+        installed: { plugins: { [pluginId]: {} } },
+        settings: {},
+      },
+      {
+        installed: { plugins: { [pluginId]: [null] } },
+        settings: {},
+      },
+      {
+        installed: { plugins: { [pluginId]: [{ version: '1.0.0' }] } },
+        settings: { enabledPlugins: [] },
+      },
+      {
+        installed: { plugins: { [pluginId]: [{ version: '1.0.0' }] } },
+        settings: { enabledPlugins: { [pluginId]: 'false' } },
+      },
+    ];
+
+    for (const fixture of cases) {
+      writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify(fixture.installed));
+      writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify(fixture.settings));
+
+      const result = runDriver(['recall_install_claude_skills']);
+
+      expect(result.status).toBe(2);
+      expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(false);
+    }
+  });
+
   test('malformed plugin settings stop skill ownership changes', () => {
     const pluginsDir = join(claudeDir, 'plugins');
     mkdirSync(pluginsDir, { recursive: true });

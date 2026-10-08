@@ -417,9 +417,9 @@ Marked duplicates are hidden from all search paths by default; see
 
 ## Repair
 
-Explicit data/index maintenance — deliberately separate from
-`recall doctor --fix`, which only repairs install-layout symlinks and never
-touches data.
+Explicit data/index maintenance is deliberately separate from
+`recall doctor --fix`, which repairs install and configuration drift but never
+repairs memory data or indexes.
 
 ```bash
 recall repair                           # Dry-run report (default — writes nothing)
@@ -475,7 +475,7 @@ Safety model:
 ```bash
 recall init                             # Initialize the database (safe to re-run)
 recall doctor                           # Health check all subsystems
-recall doctor --fix                     # Re-create missing/drifted Recall symlinks
+recall doctor --fix                     # Repair install and Claude MCP configuration drift
 recall stats                            # Database statistics
 recall path                             # Print resolved paths (DB, install root, symlinks)
 recall path --json                      # Same, as JSON

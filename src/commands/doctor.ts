@@ -149,7 +149,7 @@ function checkStructuredData(): CheckResult {
 //
 // Read-only by design (issue #46): doctor only RECOMMENDS `recall repair`.
 // This check is exported as a plain CheckResult with no repair fn, so the
-// --fix loop (symlinks only) can never run data repair implicitly.
+// --fix loop (install/configuration drift only) can never run data repair implicitly.
 export function checkFtsIndexes(): CheckResult {
   const label = 'FTS5 search indexes in sync';
 
@@ -981,7 +981,7 @@ export function probeInstallSentinel(markerPath: string): CheckResult {
   return {
     label,
     status: 'WARN',
-    message: `A previous install/update did not finish${suffix} — re-run ./packaging/install.sh to converge (idempotent), or 'recall doctor --fix' for symlinks only`,
+    message: `A previous install/update did not finish${suffix} - re-run ./packaging/install.sh to converge (idempotent), or 'recall doctor --fix' for install/configuration drift`,
   };
 }
 
