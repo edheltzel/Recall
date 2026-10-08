@@ -1936,27 +1936,33 @@ _recall_ensure_mcp_entry() {
     if ! grep -q "recall-memory" "$f"; then
       continue
     fi
-    mkdir -p "$BACKUP_DIR"
-    recall_backup_file "$f" "$BACKUP_DIR"
-    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
-      JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const fs = require("fs");
-      const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
-      const file = process.env.CFG_FILE;
-      const dbPath = process.env.DB_PATH_ABS;
-      const bunPath = process.env.BUN_PATH;
-      const mcpPath = process.env.MCP_PATH;
-      let cfg;
-      try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(0); }
-      if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
-      const entry = cfg.mcpServers["recall-memory"];
-      entry.command = bunPath;
-      entry.args = ["run", mcpPath];
-      if (!entry.env || typeof entry.env !== "object" || Array.isArray(entry.env)) entry.env = {};
-      entry.env.RECALL_DB_PATH = dbPath;
-      delete entry.env.MEM_DB_PATH;
-      writeJsonAtomic(file, cfg);
-    ' && log_success "Patched recall-memory command/env in $(basename "$f")"
+    # Backup only after the registration is confirmed, then write through
+    # writeJsonAtomic (temp sibling + rename, realpath so a symlink stays a link).
+    (
+      export -f recall_backup_file
+      export BACKUP_DIR
+      CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
+        JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
+        const fs = require("fs");
+        const { execFileSync } = require("child_process");
+        const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+        const file = process.env.CFG_FILE;
+        const dbPath = process.env.DB_PATH_ABS;
+        const bunPath = process.env.BUN_PATH;
+        const mcpPath = process.env.MCP_PATH;
+        let cfg;
+        try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(0); }
+        if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
+        const entry = cfg.mcpServers["recall-memory"];
+        entry.command = bunPath;
+        entry.args = ["run", mcpPath];
+        if (!entry.env || typeof entry.env !== "object" || Array.isArray(entry.env)) entry.env = {};
+        entry.env.RECALL_DB_PATH = dbPath;
+        delete entry.env.MEM_DB_PATH;
+        execFileSync("bash", ["-c", "mkdir -p \"$BACKUP_DIR\" && recall_backup_file \"$CFG_FILE\" \"$BACKUP_DIR\""], { env: process.env });
+        writeJsonAtomic(file, cfg);
+      '
+    ) && log_success "Patched recall-memory command/env in $(basename "$f")"
   done
 }
 
