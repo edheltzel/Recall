@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -165,6 +165,76 @@ describe('update.sh', () => {
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+  test('symlinked settings.json is written through the link, with backup and no temp file', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-symlink-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const realDir = join(tempRoot, 'dotfiles');
+      const realFile = join(realDir, 'settings.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(realDir, { recursive: true });
+      writeFileSync(realFile, JSON.stringify({
+        mcpServers: { 'recall-memory': { command: 'bun', args: ['run', '/old/path/mem-mcp'], env: {} } },
+      }));
+      symlinkSync(realFile, settingsFile);
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        'log_success() { :; }',
+        'source "$REPO/lib/install-lib.sh"',
+        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO, RECALL_DB_PATH: '/new/db' },
+      });
+
+      expect(r.status).toBe(0);
+      expect(lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+      const after = JSON.parse(readFileSync(realFile, 'utf-8')) as {
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: string } } };
+      };
+      expect(after.mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe('/new/db');
+      expect(existsSync(`${realFile}.tmp`)).toBe(false);
+      expect(existsSync(`${settingsFile}.tmp`)).toBe(false);
+      const backups = join(tempRoot, '.agents', 'Recall', 'backups');
+      const stamp = readdirSync(backups).find(name => name !== 'latest') ?? '';
+      expect(readFileSync(join(backups, stamp, 'settings.json'), 'utf-8')).toContain('/old/path/mem-mcp');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('unparseable settings containing the name are not backed up', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-nobackup-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(join(claudeDir, 'settings.json'), '{ recall-memory not json');
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        'log_success() { :; }',
+        'source "$REPO/lib/install-lib.sh"',
+        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO, RECALL_DB_PATH: '/new/db' },
+      });
+      expect(r.status).toBe(0);
+      expect(existsSync(join(tempRoot, '.agents', 'Recall', 'backups'))).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
 
   test('--dry-run --force narrates but does not mutate', () => {
     // With --dry-run, no git/bun/recall commands should actually execute.
