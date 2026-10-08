@@ -171,9 +171,9 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
 | 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
-| 6. Register MCP | Registers the `recall-memory` MCP server in `~/.claude/settings.json` at user scope (available in all projects) |
+| 6. Configure MCP | With an active Claude plugin, removes a matching default-path user registration but preserves a custom-pinned one; without the plugin, registers `recall-memory` in `~/.claude/settings.json` at user scope |
 | 7. Setup hooks | Copies the installer-owned Claude hooks and shared hook libraries to their canonical runtime paths, links them into `~/.claude/hooks/`, and registers the current Claude lifecycle events through the shared hook installer |
-| 8. Copy guide | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md` and installs agent skills to `~/.claude/skills/do-recall-*/` (removing any legacy `~/.claude/commands/Recall/` symlinks) |
+| 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, otherwise the installer links them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
 | 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
 
@@ -190,11 +190,14 @@ flowchart LR
     C --> D[bun run build]
     D --> E[bun link]
     E --> F[recall init\nInit DB]
-    F --> G[Register MCP\nsettings.json]
-    G --> H[Register Hooks\nsettings.json]
-    H --> I[Copy Guide\nRecall_GUIDE.md]
-    I --> J[Configure Memory Pointer\nor defer to managed Recall rule]
-    J --> K[Done\nRestart Claude Code]
+    F --> G{Claude plugin active?}
+    G -->|Yes| H[Reconcile plugin MCP and skills]
+    G -->|No| I[Register MCP and link skills]
+    H --> J[Register installer-owned hooks]
+    I --> J
+    J --> K[Copy Guide\nRecall_GUIDE.md]
+    K --> L[Configure Memory Pointer\nor defer to managed Recall rule]
+    L --> M[Done\nRestart Claude Code]
 ```
 
 ---

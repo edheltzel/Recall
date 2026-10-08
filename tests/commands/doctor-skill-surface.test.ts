@@ -63,5 +63,40 @@ describe('probeClaudePlugin JSONC settings', () => {
     expect(result.message).toContain('also registered in settings.json');
   });
 
+  test('warns when plugin ownership cannot be read from settings', () => {
+    const home = join(root, 'home-unknown');
+    const claudeDir = join(home, '.claude');
+    const recallRoot = join(root, 'recall-unknown');
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(claudeDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ plugins: { [CLAUDE_PLUGIN_ID]: [{ version: '1.0.0' }] } }),
+    );
+    writeFileSync(join(claudeDir, 'settings.json'), '{"permissions":{},"permissions":{}}');
+
+    const result = probeClaudePlugin(home, recallRoot);
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('ownership is unknown');
+  });
+
+  test('warns when an active plugin has an unparseable legacy MCP config', () => {
+    const home = join(root, 'home-invalid-mcp');
+    const claudeDir = join(home, '.claude');
+    const recallRoot = join(root, 'recall-invalid-mcp');
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(claudeDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ plugins: { [CLAUDE_PLUGIN_ID]: [{ version: '1.0.0' }] } }),
+    );
+    writeFileSync(join(home, '.claude.json'), '{"mcpServers":{},"mcpServers":{}}');
+
+    const result = probeClaudePlugin(home, recallRoot);
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('.claude.json');
+    expect(result.message).toContain('sole MCP ownership is unknown');
+  });
+
 });
 });

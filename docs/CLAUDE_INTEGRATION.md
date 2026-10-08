@@ -77,7 +77,7 @@ claude mcp list                                  # confirm plugin:recall:recall-
 claude mcp remove recall-memory -s user          # then drop the duplicate
 ```
 
-`recall doctor` reports the state under **Claude native plugin**: `PASS` when the plugin is the sole owner, `WARN` listing the duplicates when a legacy copy is still present, `INFO` when the plugin is absent or disabled.
+`recall doctor` reports the state under **Claude native plugin**: `PASS` when the plugin is the sole owner, `WARN` when duplicates exist or plugin ownership cannot be parsed, and `INFO` when the plugin is absent or disabled. `doctor --fix` does not apply ownership-dependent skill or MCP repairs while ownership is unknown.
 
 Uninstalling is a separate, user-owned action — `uninstall.sh` does not remove the plugin:
 

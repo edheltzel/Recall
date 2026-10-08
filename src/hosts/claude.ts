@@ -42,9 +42,7 @@ export function claudePaths(home: string): ClaudePaths {
 export const CLAUDE_PLUGIN_ID = 'recall@recall-marketplace';
 
 export interface ClaudePluginState {
-  installed: boolean;
-  /** Installed and not disabled in settings — i.e. actually contributing skills and MCP. */
-  active: boolean;
+  status: 'absent' | 'active' | 'disabled' | 'unknown';
   version: string | null;
 }
 
@@ -61,23 +59,33 @@ function readJson(path: string): Record<string, unknown> | null | undefined {
 export function claudePluginState(home: string): ClaudePluginState {
   const paths = claudePaths(home);
   const installedPlugins = readJson(join(paths.root, 'plugins', 'installed_plugins.json'));
-  const entries = (installedPlugins?.plugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
-  const record = Array.isArray(entries) ? (entries[0] as Record<string, unknown> | undefined) : undefined;
-  if (!record) return { installed: false, active: false, version: null };
-
-  const settings = readJson(paths.settings);
-  if (settings === null) {
-    return {
-      installed: true,
-      active: false,
-      version: typeof record.version === 'string' ? record.version : null,
-    };
+  if (installedPlugins === null) return { status: 'unknown', version: null };
+  const plugins = installedPlugins?.plugins;
+  if (plugins !== undefined && (!plugins || typeof plugins !== 'object' || Array.isArray(plugins))) {
+    return { status: 'unknown', version: null };
   }
-  const enabledPlugins = settings?.enabledPlugins as Record<string, unknown> | undefined;
+  const entries = (plugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
+  if (entries !== undefined && !Array.isArray(entries)) return { status: 'unknown', version: null };
+  const first = entries?.[0];
+  if (first !== undefined && (!first || typeof first !== 'object' || Array.isArray(first))) {
+    return { status: 'unknown', version: null };
+  }
+  const record = first as Record<string, unknown> | undefined;
+  if (!record) return { status: 'absent', version: null };
+
+  const version = typeof record.version === 'string' ? record.version : null;
+  const settings = readJson(paths.settings);
+  if (settings === null) return { status: 'unknown', version };
+  const enabledPlugins = settings?.enabledPlugins;
+  if (enabledPlugins !== undefined
+    && (!enabledPlugins || typeof enabledPlugins !== 'object' || Array.isArray(enabledPlugins))) {
+    return { status: 'unknown', version };
+  }
+  const enabled = (enabledPlugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
+  if (enabled !== undefined && typeof enabled !== 'boolean') return { status: 'unknown', version };
   return {
-    installed: true,
-    active: enabledPlugins?.[CLAUDE_PLUGIN_ID] !== false,
-    version: typeof record.version === 'string' ? record.version : null,
+    status: enabled === false ? 'disabled' : 'active',
+    version,
   };
 }
 

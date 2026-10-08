@@ -20,6 +20,7 @@ import {
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { buildSymlinkProbes, probeSymlink } from '../../src/commands/doctor';
+import { CLAUDE_PLUGIN_ID } from '../../src/hosts/claude';
 
 let tempDir: string;
 let canonical: string;
@@ -76,6 +77,26 @@ describe('probeSymlink', () => {
       expect(check.repair).toBeDefined();
       expect(check.repair!().message).toContain('SKILL.md');
     }
+  });
+
+  test('unknown Claude plugin state creates no lifecycle skill repair targets', () => {
+    const home = join(tempDir, 'home');
+    const root = join(tempDir, 'install');
+    const claude = join(home, '.claude');
+    const skill = join(root, 'shared', 'skills', 'do-recall-add');
+    mkdirSync(join(claude, 'plugins'), { recursive: true });
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'SKILL.md'), '# skill');
+    writeFileSync(
+      join(claude, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ plugins: { [CLAUDE_PLUGIN_ID]: [{ version: '1.0.0' }] } }),
+    );
+    writeFileSync(join(claude, 'settings.json'), '{"permissions":{},"permissions":{}}');
+
+    const probes = buildSymlinkProbes(home, root);
+
+    expect(probes.some(item => item.label.startsWith('agent skill:'))).toBe(false);
+    expect(existsSync(join(claude, 'skills', 'do-recall-add', 'SKILL.md'))).toBe(false);
   });
 
 

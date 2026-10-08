@@ -9,7 +9,7 @@ import { getDb, getDbPath } from '../db/connection.js';
 import { checkAllFts } from '../lib/repair.js';
 import { getLifecycleSearchReadiness } from '../lib/lifecycle-search.js';
 import { VERSION } from '../version.js';
-import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli } from '../hosts/claude.js';
+import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli, type ClaudePluginState } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
 import { getRecallHome } from '../lib/runtime-paths.js';
 import { parseJsonc } from '../../lib/jsonc-mcp.js';
@@ -491,7 +491,11 @@ export function listSkillCanonicalFiles(root: string): { name: string; file: str
   return out;
 }
 
-export function buildSymlinkProbes(home = homedir(), root = getRecallHome()): SymlinkProbe[] {
+export function buildSymlinkProbes(
+  home = homedir(),
+  root = getRecallHome(),
+  pluginState: ClaudePluginState = claudePluginState(home),
+): SymlinkProbe[] {
   const claude = claudePaths(home);
   const probes: SymlinkProbe[] = [];
 
@@ -523,11 +527,9 @@ export function buildSymlinkProbes(home = homedir(), root = getRecallHome()): Sy
   // lets `recall doctor --fix` repair without reinstall. (The former slash
   // commands migrated to these skills — #228.)
   //
-  // Skipped once the native plugin is active: it ships the same nine skills from
-  // its own cache, and install/update deliberately remove the ~/.claude/skills
-  // symlinks so the surface isn't listed twice. Probing them then would report a
-  // converged install as broken.
-  if (!claudePluginState(home).active) {
+  // Added only when plugin state confirms lifecycle ownership. An active plugin
+  // supplies the same skills, while unreadable state cannot safely choose an owner.
+  if (pluginState.status === 'absent' || pluginState.status === 'disabled') {
     for (const { name, file } of listSkillCanonicalFiles(root)) {
       probes.push({
         label: `agent skill: ${name}/${file}`,
@@ -568,37 +570,64 @@ export function probeSkillSurface(root: string): CheckResult {
 // two recall-memory MCP servers exposing the same nine tools. install.sh/update.sh
 // reconcile that; this check reports the un-reconciled state and how to clear it.
 // Exported + path-injected for unit testing, mirroring probeSkillSurface.
-export function probeClaudePlugin(home: string, root: string): CheckResult {
+export function probeClaudePlugin(
+  home: string,
+  root: string,
+  state: ClaudePluginState = claudePluginState(home),
+): CheckResult {
   const label = 'Claude native plugin';
-  const state = claudePluginState(home);
-  if (!state.installed) {
+  if (state.status === 'unknown') {
+    return {
+      label,
+      status: 'WARN',
+      message: 'Plugin state is unreadable; ownership is unknown, so doctor skipped ownership-dependent skill and MCP repairs',
+    };
+  }
+  if (state.status === 'absent') {
     return { label, status: 'INFO', message: `Not installed — lifecycle install owns skills and MCP (${CLAUDE_PLUGIN_ID})` };
   }
-  if (!state.active) {
+  if (state.status === 'disabled') {
     return { label, status: 'INFO', message: 'Installed but disabled — lifecycle install owns skills and MCP' };
   }
 
   const skillsDir = claudePaths(home).skills;
   const leftoverSkills = [...new Set(listSkillCanonicalFiles(root).map(entry => entry.name))]
     .filter(name => existsSync(join(skillsDir, name)));
-  const leftoverMcp = claudeMcpConfigTargets(home)
-    .filter(target => {
-      if (!existsSync(target.path)) return false;
-      try {
-        const cfg: unknown = parseJsonc(readFileSync(target.path, 'utf-8'));
-        if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return false;
-        const servers = 'mcpServers' in cfg ? cfg.mcpServers : undefined;
-        return !!servers && typeof servers === 'object' && !Array.isArray(servers)
-          && 'recall-memory' in servers && !!servers['recall-memory'];
-      } catch {
-        return false;
+  const leftoverMcp: string[] = [];
+  const invalidMcp: string[] = [];
+  for (const target of claudeMcpConfigTargets(home)) {
+    if (!existsSync(target.path)) continue;
+    try {
+      const cfg: unknown = parseJsonc(readFileSync(target.path, 'utf-8'));
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+        invalidMcp.push(basename(target.path));
+        continue;
       }
-    })
-    .map(target => basename(target.path));
+      const servers = 'mcpServers' in cfg ? cfg.mcpServers : undefined;
+      if (servers !== undefined && (!servers || typeof servers !== 'object' || Array.isArray(servers))) {
+        invalidMcp.push(basename(target.path));
+        continue;
+      }
+      if (servers && typeof servers === 'object' && !Array.isArray(servers)
+        && Object.prototype.hasOwnProperty.call(servers, 'recall-memory')) {
+        leftoverMcp.push(basename(target.path));
+      }
+    } catch {
+      invalidMcp.push(basename(target.path));
+    }
+  }
 
   const duplicates: string[] = [];
   if (leftoverSkills.length) duplicates.push(`${leftoverSkills.length} skill(s) also in ~/.claude/skills`);
   if (leftoverMcp.length) duplicates.push(`recall-memory also registered in ${leftoverMcp.join(', ')}`);
+  if (invalidMcp.length) {
+    const knownDuplicates = duplicates.length ? ` Known duplicates: ${duplicates.join('; ')}.` : '';
+    return {
+      label,
+      status: 'WARN',
+      message: `Plugin active${state.version ? ` (v${state.version})` : ''}, but sole MCP ownership is unknown due to invalid config: ${invalidMcp.join(', ')}.${knownDuplicates}`,
+    };
+  }
   if (duplicates.length) {
     return {
       label,
@@ -987,7 +1016,10 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // Symlink health checks (new in Phase 3 of the install-layout refactor).
   // Each probe returns a result + optional repair fn; with --fix we apply
   // repairs and substitute the post-repair result for the report.
-  const symlinkChecks = buildSymlinkProbes().map(probeSymlink);
+  const home = homedir();
+  const root = getRecallHome();
+  const pluginState = claudePluginState(home);
+  const symlinkChecks = buildSymlinkProbes(home, root, pluginState).map(probeSymlink);
   for (const sc of symlinkChecks) {
     results.push(resolveProbeResult(sc, !!opts.fix));
   }
@@ -995,18 +1027,18 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // Skill command surface floor (#235): the per-file probes above go silent
   // when zero skill canonicals exist, so add an explicit WARN for a blanked
   // command surface — the sole command surface since #228.
-  results.push(probeSkillSurface(getRecallHome()));
-  results.push(probeClaudePlugin(homedir(), getRecallHome()));
+  results.push(probeSkillSurface(root));
+  results.push(probeClaudePlugin(home, root, pluginState));
 
   // MCP env health (issue #28): the recall-memory registration must carry
   // env.RECALL_DB_PATH matching the resolved DB path, or the MCP server can
   // diverge from the CLI after the next Claude restart. Same repair contract as
   // the symlink probes — with --fix we patch the owning config file(s).
   const mcpEnvCheck = probeMcpEnv({
-    targets: claudeMcpConfigTargets(homedir()),
+    targets: claudeMcpConfigTargets(home),
     resolvedDbPath: getDbPath(),
   });
-  results.push(resolveProbeResult(mcpEnvCheck, !!opts.fix));
+  results.push(resolveProbeResult(mcpEnvCheck, !!opts.fix && pluginState.status !== 'unknown'));
 
   // Completion sentinel (#27): a leftover .install-incomplete marker means a
   // prior install/update was interrupted before its self-check ran. Warn-only —
