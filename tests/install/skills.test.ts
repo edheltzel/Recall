@@ -131,6 +131,22 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     expect(existsSync(statsTarget)).toBe(true);
   });
 
+  test('plugin activation honors JSONC enabledPlugins settings', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      plugins: { 'recall@recall-marketplace': [{ version: '1.0.0' }] },
+    }));
+    writeFileSync(join(claudeDir, 'settings.json'), `{
+      // Hand-edited Claude settings.
+      "enabledPlugins": { "recall@recall-marketplace": false, },
+    }`);
+
+    const result = runDriver(['if recall_claude_plugin_active; then echo active; else echo inactive; fi']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('inactive');
+  });
+
   test('idempotent: running twice does not fail or duplicate', () => {
     const r1 = runDriver(['recall_install_claude_skills']);
     expect(r1.status).toBe(0);
@@ -325,6 +341,7 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
     expect(r.status).toBe(0);
     expect(() => lstatSync(planted.skillMd)).toThrow();
     expect(existsSync(join(planted.dir, 'notes.md'))).toBe(true);
+    expect(r.stdout).toContain('Left user file in place');
   });
 
   test('without --skip-omp, both eras are removed from the omp skills root', () => {

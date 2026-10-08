@@ -171,9 +171,9 @@ print_summary() {
   [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
   [[ "$SKIP_OMP" == "true" ]] && echo "Skipping: omp"
   echo ""
-  echo "Will REMOVE (integration symlinks; canonical runtime files stay unless --purge):"
-  echo "  • ~/.claude/commands/Recall/ (legacy, and lowercase ~/.claude/commands/recall/ if present)"
-  echo "  • ~/.claude/skills/do-recall-*/ (all 9 Recall-owned skills, plus legacy recall-* dirs)"
+  echo "Will REMOVE (Recall integration files; skill/command cleanup unlinks managed symlinks only and removes directories only when empty):"
+  echo "  • Legacy ~/.claude/commands/Recall/ and lowercase ~/.claude/commands/recall/"
+  echo "  • Recall-owned skills in Claude, Pi, and omp skills directories"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json and ~/.claude.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"
@@ -184,7 +184,7 @@ print_summary() {
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
   [[ "$SKIP_GROK" != "true" ]] && echo "  • Grok Recall lifecycle hook (~/.grok/hooks/RecallLifecycle.json)"
-  [[ "$SKIP_OMP" != "true" ]] && echo "  • omp agent skills (~/.omp/agent/skills/)"
+  [[ "$SKIP_OMP" != "true" ]] && echo "  • Recall-managed omp skill symlinks (user files are preserved; directories only when empty)"
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
   if [[ "$PURGE" == "true" ]]; then
@@ -540,20 +540,11 @@ remove_pi() {
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would remove recall-memory from $config"
     else
-      CONFIG_PATH="$config" bun -e '
-        const fs = require("fs");
-        const path = process.env.CONFIG_PATH;
-        let raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-        const cfg = JSON.parse(raw);
-        if (cfg.mcpServers && cfg.mcpServers["recall-memory"]) {
-          delete cfg.mcpServers["recall-memory"];
-          if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
-        }
-        fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
-      '
-      log_success "Removed recall-memory from $config"
+      if _recall_jsonc_remove_mcp_entry "$config" "mcpServers"; then
+        log_success "Removed recall-memory from $config"
+      else
+        log_warn "Could not remove recall-memory from $config (invalid or unsupported config — left unchanged)"
+      fi
     fi
   fi
 

@@ -585,8 +585,11 @@ export function probeClaudePlugin(home: string, root: string): CheckResult {
     .filter(target => {
       if (!existsSync(target.path)) return false;
       try {
-        const cfg: unknown = JSON.parse(readFileSync(target.path, 'utf-8'));
-        return !!(cfg as { mcpServers?: Record<string, unknown> })?.mcpServers?.['recall-memory'];
+        const cfg: unknown = parseJsonc(readFileSync(target.path, 'utf-8'));
+        if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return false;
+        const servers = 'mcpServers' in cfg ? cfg.mcpServers : undefined;
+        return !!servers && typeof servers === 'object' && !Array.isArray(servers)
+          && 'recall-memory' in servers && !!servers['recall-memory'];
       } catch {
         return false;
       }

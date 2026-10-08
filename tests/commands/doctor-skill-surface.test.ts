@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { probeSkillSurface } from '../../src/commands/doctor';
+import { probeClaudePlugin, probeSkillSurface } from '../../src/commands/doctor';
+import { CLAUDE_PLUGIN_ID } from '../../src/hosts/claude';
 
 let root: string;
 
@@ -39,4 +40,27 @@ describe('probeSkillSurface', () => {
     expect(r.status).toBe('PASS');
     expect(r.message).toContain('1 agent skill file');
   });
+
+describe('probeClaudePlugin JSONC settings', () => {
+  test('detects the legacy MCP entry in commented settings with trailing commas', () => {
+    const home = join(root, 'home');
+    const claudeDir = join(home, '.claude');
+    const recallRoot = join(root, 'recall');
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    mkdirSync(join(recallRoot, 'shared', 'skills', 'do-recall-add'), { recursive: true });
+    writeFileSync(
+      join(claudeDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ plugins: { [CLAUDE_PLUGIN_ID]: [{ version: '1.0.0' }] } }),
+    );
+    writeFileSync(join(recallRoot, 'shared', 'skills', 'do-recall-add', 'SKILL.md'), '# Add\n');
+    writeFileSync(join(claudeDir, 'settings.json'), `{
+  // Retain this user-edited JSONC config.
+  "mcpServers": { "recall-memory": { "command": "recall-mcp", }, },
+}`);
+
+    const result = probeClaudePlugin(home, recallRoot);
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('also registered in settings.json');
+  });
+});
 });
