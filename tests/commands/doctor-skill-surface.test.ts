@@ -98,5 +98,23 @@ describe('probeClaudePlugin JSONC settings', () => {
     expect(result.message).toContain('sole MCP ownership is unknown');
   });
 
+  test('warns when an active plugin has an invalid Recall MCP entry', () => {
+    const home = join(root, 'home-invalid-entry');
+    const claudeDir = join(home, '.claude');
+    const recallRoot = join(root, 'recall-invalid-entry');
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(claudeDir, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ plugins: { [CLAUDE_PLUGIN_ID]: [{ version: '1.0.0' }] } }),
+    );
+    writeFileSync(join(claudeDir, 'settings.json'), '{"mcpServers":{"recall-memory":[]}}');
+
+    const result = probeClaudePlugin(home, recallRoot);
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('settings.json');
+    expect(result.message).toContain('sole MCP ownership is unknown');
+  });
+
 });
 });

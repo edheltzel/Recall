@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { isSemanticallyEmpty, parseJsonc, writeJsonAtomic } from '../../lib/jsonc-mcp.ts';
+import { isSemanticallyEmpty, parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.ts';
 
 let dir: string;
 
@@ -23,6 +23,15 @@ describe('jsonc settings helpers', () => {
     expect(() => parseJsonc('{"mcpServers":{},"mcpServers":{}}')).toThrow('duplicate key "mcpServers"');
     expect(() => parseJsonc('{"mcpServers":{"recall-memory":{},"recall-memory":{}}}'))
       .toThrow('duplicate key "recall-memory"');
+  });
+
+  test('Claude config validation rejects invalid roots and Recall entries', () => {
+    expect(() => validateClaudeConfigShape([])).toThrow('root is not an object');
+    expect(() => validateClaudeConfigShape({ mcpServers: { 'recall-memory': [] } }))
+      .toThrow('mcpServers.recall-memory is not an object');
+    expect(() => validateClaudeConfigShape({ mcpServers: { 'recall-memory': null } }))
+      .toThrow('mcpServers.recall-memory is not an object');
+    expect(() => validateClaudeConfigShape({ mcpServers: { 'recall-memory': {} } })).not.toThrow();
   });
 
   test('writeJsonAtomic preserves mode for direct and symlinked targets', () => {

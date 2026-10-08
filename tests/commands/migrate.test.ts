@@ -165,6 +165,18 @@ describe('recall migrate', () => {
     expect(capturedErr.join('\n')).toContain('cannot patch');
   });
 
+  test('rejects an invalid Claude Recall entry before moving the database', () => {
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(join(tempDir, '.claude'), { recursive: true });
+    writeFileSync(settings, '{"mcpServers":{"recall-memory":[]}}');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(capturedErr.join('\n')).toContain('cannot patch');
+  });
+
   test('refuses to overwrite non-empty destination', () => {
     mkdirSync(join(tempDir, 'dest'), { recursive: true });
     writeFileSync(destDb, 'pre-existing');

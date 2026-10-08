@@ -181,6 +181,18 @@ describe('probeMcpEnv', () => {
     expect(repair).toBeUndefined();
   });
 
+  test('invalid root and Recall entry shapes are WARN and not repairable', () => {
+    for (const invalid of [[], { mcpServers: { 'recall-memory': [] } }]) {
+      writeConfig(invalid);
+
+      const { result, repair } = probe();
+
+      expect(result.status).toBe('WARN');
+      expect(result.message).toContain('unparseable');
+      expect(repair).toBeUndefined();
+    }
+  });
+
   // ── Fix 2 (issue #112): atomic write leaves valid JSON and no .tmp orphan ──
   test('successful repair leaves no .tmp orphan and writes valid JSON', () => {
     writeConfig({

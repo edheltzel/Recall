@@ -502,6 +502,7 @@ This content must be preserved across an uninstall.
       '{"hooks":[],"mcpServers":{"recall-memory":{}}}',
       '{"hooks":{"Stop":{}},"mcpServers":{"recall-memory":{}}}',
       '{"hooks":{},"mcpServers":[]}',
+      '{"hooks":{},"mcpServers":{"recall-memory":[]}}',
     ];
 
     for (const original of invalidConfigs) {

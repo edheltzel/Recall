@@ -599,17 +599,9 @@ export function probeClaudePlugin(
     if (!existsSync(target.path)) continue;
     try {
       const cfg: unknown = parseJsonc(readFileSync(target.path, 'utf-8'));
-      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
-        invalidMcp.push(basename(target.path));
-        continue;
-      }
-      const servers = 'mcpServers' in cfg ? cfg.mcpServers : undefined;
-      if (servers !== undefined && (!servers || typeof servers !== 'object' || Array.isArray(servers))) {
-        invalidMcp.push(basename(target.path));
-        continue;
-      }
-      if (servers && typeof servers === 'object' && !Array.isArray(servers)
-        && Object.prototype.hasOwnProperty.call(servers, 'recall-memory')) {
+      validateClaudeConfigShape(cfg);
+      const servers = cfg.mcpServers;
+      if (servers && Object.prototype.hasOwnProperty.call(servers, 'recall-memory')) {
         leftoverMcp.push(basename(target.path));
       }
     } catch {
@@ -814,9 +806,15 @@ interface McpScan {
 // registration). Malformed/unreadable JSON is never fatal, but it is recorded
 // (not dropped) so the caller can distinguish it from a missing registration.
 function parseHostConfig(target: McpConfigTarget): Record<string, unknown> {
-  const config = parseJsonc(readFileSync(target.path, 'utf-8')) as Record<string, unknown>;
-  if (target.host === 'claude') validateClaudeConfigShape(config);
-  return config;
+  const config = parseJsonc(readFileSync(target.path, 'utf-8'));
+  if (target.host === 'claude') {
+    validateClaudeConfigShape(config);
+    return config;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('root is not an object');
+  }
+  return config as Record<string, unknown>;
 }
 
 function mcpEntryAt(config: Record<string, unknown>, target: McpConfigTarget): McpEntry | null {
