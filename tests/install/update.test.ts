@@ -209,6 +209,44 @@ describe('update.sh', () => {
     }
   });
 
+  test('Claude plugin reconciliation preserves an empty settings.json symlink', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-symlink-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const realDir = join(tempRoot, 'dotfiles');
+      const realFile = join(realDir, 'settings.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(realDir, { recursive: true });
+      writeFileSync(realFile, JSON.stringify({
+        mcpServers: { 'recall-memory': { command: 'recall-mcp' } },
+      }));
+      symlinkSync(realFile, settingsFile);
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+        'log_success() { :; }',
+        'log_warn() { :; }',
+        'source "$REPO/lib/install-lib.sh"',
+        '_recall_unregister_legacy_claude_mcp',
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO },
+      });
+
+      expect(r.status).toBe(0);
+      expect(lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(readFileSync(realFile, 'utf-8'))).toEqual({});
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('unparseable settings containing the name are not backed up', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-nobackup-'));
     try {

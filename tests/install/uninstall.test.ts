@@ -20,6 +20,7 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
+import { parseJsonc } from '../../lib/jsonc-mcp.ts';
 import { legacyClaudeMemorySection, legacyPiMemorySection } from '../fixtures/legacy-memory-sections';
 
 const REPO = process.cwd();
@@ -442,6 +443,23 @@ This content must be preserved across an uninstall.
     expect(existsSync(settingsFile)).toBe(false);
   });
 
+  test('preserves a settings.json symlink when only Recall entries are removed', () => {
+    const realDir = join(tempRoot, 'dotfiles');
+    const realSettings = join(realDir, 'settings.json');
+    mkdirSync(realDir, { recursive: true });
+    rmSync(settingsFile);
+    writeFileSync(realSettings, JSON.stringify({
+      mcpServers: { 'recall-memory': { command: 'recall-mcp' } },
+    }));
+    symlinkSync(realSettings, settingsFile);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(realSettings, 'utf-8'))).toEqual({});
+  });
+
   test('CLAUDE.md: Recall-managed MEMORY section removed, other sections preserved', () => {
     runUninstall(claudeDir, backupBase);
     const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
@@ -683,6 +701,19 @@ Preserve this.
     expect(`${result.stdout}${result.stderr}`).not.toContain('left unchanged');
   });
 
+  test('OpenCode uninstall removes a sole trailing-comma JSONC registration', () => {
+    const opencodeConfigDir = join(tempRoot, 'opencode-sole');
+    mkdirSync(opencodeConfigDir, { recursive: true });
+    const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
+    writeFileSync(opencodeConfig, '{ "mcp": { "recall-memory": {}, }, }\n');
+
+    const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(opencodeConfig)).toBe(false);
+    expect(`${result.stdout}${result.stderr}`).not.toContain('left unchanged');
+  });
+
   test('Pi uninstall reads JSONC and preserves unrelated MCP registrations', () => {
     const piConfigDir = join(tempRoot, 'pi-jsonc');
     mkdirSync(piConfigDir, { recursive: true });
@@ -702,6 +733,26 @@ Preserve this.
     const after = readFileSync(piConfig, 'utf-8');
     expect(after).toContain('other-mcp');
     expect(after).not.toContain('recall-memory');
+  });
+
+  test('Pi uninstall preserves a config symlink after removing its sole JSONC registration', () => {
+    const piConfigDir = join(tempRoot, 'pi-symlink');
+    const realDir = join(tempRoot, 'pi-dotfiles');
+    mkdirSync(piConfigDir, { recursive: true });
+    mkdirSync(realDir, { recursive: true });
+    const realConfig = join(realDir, 'mcp.json');
+    const piConfig = join(piConfigDir, 'mcp.json');
+    writeFileSync(realConfig, '{ "mcpServers": { "recall-memory": {}, }, }\n');
+    symlinkSync(realConfig, piConfig);
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(piConfig).isSymbolicLink()).toBe(true);
+    const parsed = parseJsonc(readFileSync(realConfig, 'utf-8')) as {
+      mcpServers?: Record<string, unknown>;
+    };
+    expect(parsed.mcpServers?.['recall-memory']).toBeUndefined();
   });
 
   test('OpenCode uninstall rejects malformed config without writing', () => {

@@ -129,14 +129,14 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not
 relocatable. `RECALL_DB_PATH`, `recall install --db-path`, and `./packaging/install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-**User path:**
+Install the binaries and initialize the database once:
 
 ```bash
 bun install -g recall-memory
-recall install
+recall init
 ```
 
-`recall install` runs `packaging/install.sh` with `RECALL_PACKAGED=1`, so it skips clone, `bun install`, build, and link. **Preferred attach** for Claude Code, Codex, Pi, and omp is still the native plugin/extension (see [README Quick Start](../README.md#quick-start)). Use this path for Grok, Claude hooks, and detected hosts that still need installer-owned files.
+Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
 
 Source checkout (permanent directory, not `/tmp`; also the local marketplace root):
 

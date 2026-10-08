@@ -1514,7 +1514,7 @@ _recall_unregister_legacy_claude_mcp() {
     grep -q "recall-memory" "$f" || continue
     if CFG_FILE="$f" DEFAULT_DB="$default_db" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
       const fs = require("fs");
-      const { parseJsonc, writeJsonAtomic, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
+      const { parseJsonc, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.CFG_FILE;
       let cfg;
       try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(1); }
@@ -1524,8 +1524,7 @@ _recall_unregister_legacy_claude_mcp() {
       if (pinned && pinned !== process.env.DEFAULT_DB) process.exit(1);
       delete cfg.mcpServers["recall-memory"];
       if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
-      if (isSemanticallyEmpty(cfg)) fs.unlinkSync(file);
-      else writeJsonAtomic(file, cfg);
+      writeJsonAtomicOrRemoveEmpty(file, cfg);
     ' 2>/dev/null; then
       log_success "Removed duplicate recall-memory registration from $(basename "$f") — the plugin provides it"
     else
@@ -2485,26 +2484,7 @@ _recall_jsonc_merge_mcp_entry() {
 # input is a hard failure before any write so uninstall cannot claim success
 # after damaging or ignoring a user config.
 _recall_jsonc_remove_mcp_entry() {
-  local file="$1" parent="$2" status
-  if SETTINGS_FILE="$file" PARENT_KEY="$parent" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-    const fs = require("fs");
-    const { parseJsonc } = await import(process.env.JSONC_LIB);
-    const cfg = parseJsonc(fs.readFileSync(process.env.SETTINGS_FILE, "utf8"));
-    const container = cfg?.[process.env.PARENT_KEY];
-    process.exit(container && Object.prototype.hasOwnProperty.call(container, "recall-memory") ? 0 : 2);
-  '; then
-    bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" remove "$file" "$parent" || return $?
-    SETTINGS_FILE="$file" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const fs = require("fs");
-      const { parseJsonc, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
-      const path = process.env.SETTINGS_FILE;
-      if (isSemanticallyEmpty(parseJsonc(fs.readFileSync(path, "utf8")))) fs.unlinkSync(path);
-    '
-  else
-    status=$?
-    [[ "$status" -eq 2 ]] && return 0
-    return "$status"
-  fi
+  bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" remove "$1" "$2"
 }
 
 # ── OpenCode ─────────────────────────────────────────────────────────────────

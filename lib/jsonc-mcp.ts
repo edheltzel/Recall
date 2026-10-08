@@ -140,16 +140,20 @@ export function parseJsonc(text: string): unknown {
   return parse(text).value;
 }
 
-export function writeJsonAtomic(file: string, value: unknown): void {
+function writeTextAtomic(file: string, text: string): void {
   const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
   try {
-    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+    writeFileSync(tmp, text);
     renameSync(tmp, target);
   } catch (error) {
     try { unlinkSync(tmp); } catch { /* temp may not exist */ }
     throw error;
   }
+}
+
+export function writeJsonAtomic(file: string, value: unknown): void {
+  writeTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function isSemanticallyEmpty(value: unknown): boolean {
@@ -158,6 +162,18 @@ export function isSemanticallyEmpty(value: unknown): boolean {
     return Object.values(value as Record<string, unknown>).every(isSemanticallyEmpty);
   }
   return false;
+}
+
+function writeAtomicOrRemoveEmpty(file: string, value: unknown, text: string): void {
+  if (isSemanticallyEmpty(value) && !lstatSync(file).isSymbolicLink()) {
+    unlinkSync(file);
+    return;
+  }
+  writeTextAtomic(file, text);
+}
+
+export function writeJsonAtomicOrRemoveEmpty(file: string, value: unknown): void {
+  writeAtomicOrRemoveEmpty(file, value, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function isObject(value: unknown): value is JsonObject {
@@ -232,15 +248,17 @@ function remove(file: string, parentKey: string): void {
   const currentIndex = properties.findIndex(property => property.key === 'recall-memory');
   if (currentIndex < 0) return;
   const current = properties[currentIndex];
+  let updated: string;
   if (properties.length === 1) {
-    writeFileSync(file, apply(text, current.keyStart, current.value.end, ''));
-    return;
-  }
-  if (currentIndex < properties.length - 1) {
-    writeFileSync(file, apply(text, current.keyStart, properties[currentIndex + 1].keyStart, ''));
+    const end = parent.value.trailingComma ? parent.value.contentEnd ?? current.value.end : current.value.end;
+    updated = apply(text, current.keyStart, end, '');
+  } else if (currentIndex < properties.length - 1) {
+    updated = apply(text, current.keyStart, properties[currentIndex + 1].keyStart, '');
   } else {
-    writeFileSync(file, apply(text, properties[currentIndex - 1].value.end, current.value.end, ''));
+    updated = apply(text, properties[currentIndex - 1].value.end, current.value.end, '');
   }
+  const parsed = parse(updated);
+  writeAtomicOrRemoveEmpty(file, parsed.value, updated);
 }
 
 if (process.argv[1]?.endsWith('jsonc-mcp.ts') || process.argv[1]?.endsWith('jsonc-mcp.js')) {

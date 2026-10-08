@@ -272,7 +272,7 @@ filter_claude_settings() {
     SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
       JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
       const fs = require("fs");
-      const { parseJsonc, writeJsonAtomic, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
+      const { parseJsonc, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.SETTINGS_FILE;
       const names = process.env.HOOK_NAMES_CSV.split(",");
       let config;
@@ -295,8 +295,7 @@ filter_claude_settings() {
         delete config.mcpServers["recall-memory"];
         if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
       }
-      if (isSemanticallyEmpty(config)) fs.unlinkSync(file);
-      else writeJsonAtomic(file, config);
+      writeJsonAtomicOrRemoveEmpty(file, config);
     '
     log_success "Filtered Recall entries from $f"
   done
