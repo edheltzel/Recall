@@ -32,12 +32,7 @@ Then attach each harness with its **native plugin or extension** when it has one
 
 `recall install` (or `./packaging/install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
-```bash
-# Source checkout (builds from the working tree, then the same installer-owned setup)
-git clone https://github.com/edheltzel/Recall.git
-cd Recall
-./packaging/install.sh
-```
+For a source checkout, follow the [canonical source-checkout sequence](installation.md#source-checkout). It builds from the working tree after any native host attach that must precede installer-owned setup.
 
 Do not clone into `/tmp` — `bun link` points back at the checkout.
 

@@ -34,9 +34,53 @@ describe('jsonc settings helpers', () => {
     expect(statSync(real).mode & 0o777).toBe(0o600);
   });
 
+  test('parse and atomic rewrite preserve an own __proto__ key', () => {
+    dir = mkdtempSync(join(tmpdir(), 'recall-jsonc-'));
+    const config = join(dir, 'settings.json');
+    const parsed = parseJsonc(`{
+      "mcpServers": {
+        "__proto__": { "command": "keep", },
+        "recall-memory": { "env": {}, },
+      },
+    }`) as {
+      mcpServers: Record<string, unknown>;
+    };
+
+    writeJsonAtomic(config, parsed);
+
+    const written = JSON.parse(readFileSync(config, 'utf8')) as {
+      mcpServers: Record<string, unknown>;
+    };
+    expect(Object.prototype.hasOwnProperty.call(written.mcpServers, '__proto__')).toBe(true);
+    expect(written.mcpServers.__proto__).toEqual({ command: 'keep' });
+  });
+
   test('isSemanticallyEmpty is true only for empty containers', () => {
     expect(isSemanticallyEmpty({})).toBe(true);
     expect(isSemanticallyEmpty({ hooks: { Stop: [] } })).toBe(true);
     expect(isSemanticallyEmpty({ permissions: { allow: ['x'] } })).toBe(false);
+  });
+
+  test('remove preserves an unrelated __proto__ registration', () => {
+    dir = mkdtempSync(join(tmpdir(), 'recall-jsonc-'));
+    const config = join(dir, 'settings.json');
+    writeFileSync(config, '{"mcpServers":{"__proto__":{"command":"keep"},"recall-memory":{}}}\n');
+
+    const result = Bun.spawnSync([
+      'bun',
+      'run',
+      join(import.meta.dir, '..', '..', 'lib', 'jsonc-mcp.ts'),
+      'remove',
+      config,
+      'mcpServers',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(readFileSync(config, 'utf8')) as {
+      mcpServers: Record<string, unknown>;
+    };
+    expect(Object.prototype.hasOwnProperty.call(parsed.mcpServers, '__proto__')).toBe(true);
+    expect(parsed.mcpServers.__proto__).toEqual({ command: 'keep' });
+    expect(parsed.mcpServers['recall-memory']).toBeUndefined();
   });
 });

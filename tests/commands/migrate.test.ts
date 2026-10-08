@@ -13,7 +13,6 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { runMigrate } from '../../src/commands/migrate';
 import { closeDb } from '../../src/db/connection';
-import { parseJsonc } from '../../lib/jsonc-mcp';
 
 let tempDir: string;
 let srcDb: string;
@@ -93,7 +92,10 @@ describe('recall migrate', () => {
         path: join(tempDir, '.claude.json'),
         body: `{
           // Claude legacy settings.
-          "mcpServers": { "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+          "mcpServers": {
+            "__proto__": { "command": "keep", },
+            "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, },
+          },
         }`,
         readPath: ['mcpServers', 'recall-memory', 'env'],
       },
@@ -101,7 +103,10 @@ describe('recall migrate', () => {
         path: join(tempDir, '.claude', 'settings.json'),
         body: `{
           // Claude settings.
-          "mcpServers": { "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+          "mcpServers": {
+            "__proto__": { "command": "keep", },
+            "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, },
+          },
         }`,
         readPath: ['mcpServers', 'recall-memory', 'env'],
       },
@@ -109,7 +114,10 @@ describe('recall migrate', () => {
         path: join(tempDir, '.config', 'opencode', 'opencode.json'),
         body: `{
           // OpenCode settings.
-          "mcp": { "recall-memory": { "environment": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+          "mcp": {
+            "__proto__": { "command": "keep", },
+            "recall-memory": { "environment": { "RECALL_DB_PATH": "${srcDb}", }, },
+          },
         }`,
         readPath: ['mcp', 'recall-memory', 'environment'],
       },
@@ -117,7 +125,10 @@ describe('recall migrate', () => {
         path: join(tempDir, '.pi', 'agent', 'mcp.json'),
         body: `{
           // Pi settings.
-          "mcpServers": { "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+          "mcpServers": {
+            "__proto__": { "command": "keep", },
+            "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, },
+          },
         }`,
         readPath: ['mcpServers', 'recall-memory', 'env'],
       },
@@ -130,7 +141,11 @@ describe('recall migrate', () => {
     runMigrate({ to: destDb }, tempDir);
 
     for (const config of configs) {
-      let value: unknown = parseJsonc(readFileSync(config.path, 'utf-8'));
+      const parsed = JSON.parse(readFileSync(config.path, 'utf-8')) as Record<string, unknown>;
+      const registry = parsed[config.readPath[0]] as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(registry, '__proto__')).toBe(true);
+      expect(registry.__proto__).toEqual({ command: 'keep' });
+      let value: unknown = parsed;
       for (const segment of config.readPath) value = (value as Record<string, unknown>)[segment];
       expect((value as Record<string, unknown>).RECALL_DB_PATH).toBe(destDb);
     }

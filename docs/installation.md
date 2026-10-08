@@ -138,11 +138,25 @@ recall init
 
 Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
 
-Source checkout (permanent directory, not `/tmp`; also the local marketplace root):
+### Source checkout
+
+Clone into a permanent directory, not `/tmp`. This directory is also the local marketplace root:
 
 ```bash
 git clone https://github.com/edheltzel/Recall.git
 cd Recall
+```
+
+Claude Code users must attach the native plugin before installer-owned setup:
+
+```bash
+claude plugin marketplace add "$PWD"
+claude plugin install recall@recall-marketplace
+```
+
+Other hosts skip those two Claude-only commands. Then run the installer:
+
+```bash
 ./packaging/install.sh
 ```
 

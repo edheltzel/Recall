@@ -107,12 +107,9 @@ recall install
 
 # One-shot (Bun must be on PATH)
 npx --package=recall-memory recall install
-
-# Source checkout
-git clone https://github.com/edheltzel/Recall.git
-cd Recall
-./packaging/install.sh
 ```
+
+For a source checkout, follow the [canonical source-checkout sequence](docs/installation.md#source-checkout). It clones the local marketplace root, attaches the Claude plugin when applicable, and only then runs installer-owned setup.
 
 </details>
 

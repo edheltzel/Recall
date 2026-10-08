@@ -65,7 +65,7 @@ class JsoncParser {
   private object(): Node {
     const start = this.index++;
     const properties: Property[] = [];
-    const value: JsonObject = {};
+    const value: JsonObject = Object.create(null);
     let contentEnd = this.index;
     let trailingComma = false;
     this.skipSpaceAndComments();
