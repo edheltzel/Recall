@@ -62,7 +62,11 @@ function target(path: string): McpConfigTarget {
 }
 
 function probe() {
-  return probeMcpEnv({ targets: [target(configPath)], resolvedDbPath: RESOLVED });
+  return probeMcpEnv({
+    targets: [target(configPath)],
+    resolvedDbPath: RESOLVED,
+    runtimeDbPathOverride: RESOLVED,
+  });
 }
 
 // repair() backs files up under the real home (Bun's homedir() ignores $HOME),
@@ -130,6 +134,40 @@ describe('probeMcpEnv', () => {
     const env = readEntry().env as Record<string, unknown>;
     expect(env.RECALL_DB_PATH).toBe(RESOLVED);
     expect(env.MEM_DB_PATH).toBeUndefined();
+  });
+
+  test('stored custom path stays authoritative without a runtime override', () => {
+    const stored = '/stored/custom.db';
+    writeConfig({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: stored } } },
+    });
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath)],
+      resolvedDbPath: RESOLVED,
+    });
+
+    expect(result.status).toBe('PASS');
+    expect(repair).toBeUndefined();
+    expect((readEntry().env as Record<string, unknown>).RECALL_DB_PATH).toBe(stored);
+  });
+
+  test('empty primary path falls back to and migrates the stored legacy path', () => {
+    const stored = '/stored/legacy.db';
+    writeConfig({
+      mcpServers: {
+        'recall-memory': { env: { RECALL_DB_PATH: '', MEM_DB_PATH: stored } },
+      },
+    });
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath)],
+      resolvedDbPath: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(repair!().status).toBe('PASS');
+    expect(readEntry().env).toEqual({ RECALL_DB_PATH: stored });
   });
 
   test('repair preserves other entry keys and sibling mcpServers', () => {

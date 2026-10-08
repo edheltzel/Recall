@@ -12,7 +12,7 @@ import { VERSION } from '../version.js';
 import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli, type ClaudePluginState } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
 import { getRecallHome } from '../lib/runtime-paths.js';
-import { parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.js';
+import { configuredMcpDbPath, parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.js';
 export interface DoctorOptions {
   fix?: boolean;
 }
@@ -762,7 +762,7 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
 }
 
 // ─────────────────────────────────────────
-// Check: MCP registration carries env.RECALL_DB_PATH matching the resolved DB
+// Check: MCP registration carries a canonical env.RECALL_DB_PATH
 // ─────────────────────────────────────────
 //
 // Pre-Phase-1 installs registered recall-memory via `claude mcp add`, which
@@ -772,15 +772,10 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
 // restart (issue #28). This probe + repair is the in-place fix for installs
 // that predate `_recall_ensure_mcp_entry` in lib/install-lib.sh.
 //
-// Cross-language parallel (NOT a DRY violation — bash and TS can't share code):
-// the repair below mirrors `_recall_ensure_mcp_entry` in lib/install-lib.sh —
-// for each config file that owns the registration, ensure env is an object,
-// set env.RECALL_DB_PATH to the resolved path, and drop the legacy MEM_DB_PATH
-// key. Command/args rewrites stay owned by the installer; doctor only repairs
-// the env block, which is the surgical fix issue #28 calls for.
 export interface McpEnvProbe {
-  targets: McpConfigTarget[]; // native-host config owners, in resolution order
-  resolvedDbPath: string;  // getDbPath() — the value the env block should carry
+  targets: McpConfigTarget[];
+  resolvedDbPath: string;
+  runtimeDbPathOverride?: string;
 }
 
 interface McpEntry {
@@ -790,7 +785,9 @@ interface McpEntry {
 
 interface McpRegistration {
   target: McpConfigTarget;
-  envDbPath: string | undefined; // value of env.RECALL_DB_PATH, if present
+  primaryDbPath: string | undefined;
+  configuredDbPath: string | undefined;
+  hasLegacyDbPath: boolean;
 }
 
 interface McpScan {
@@ -842,10 +839,16 @@ function findMcpRegistrations(targets: McpConfigTarget[]): McpScan {
     if (!entry) continue;
     const envKey = target.envPath[target.envPath.length - 1];
     const env = entry[envKey];
-    const raw = env && typeof env === 'object' && !Array.isArray(env)
-      ? (env as Record<string, unknown>).RECALL_DB_PATH
+    const envRecord = env && typeof env === 'object' && !Array.isArray(env)
+      ? env as Record<string, unknown>
       : undefined;
-    owners.push({ target, envDbPath: typeof raw === 'string' ? raw : undefined });
+    const raw = envRecord?.RECALL_DB_PATH;
+    owners.push({
+      target,
+      primaryDbPath: typeof raw === 'string' && raw.length > 0 ? raw : undefined,
+      configuredDbPath: configuredMcpDbPath(envRecord),
+      hasLegacyDbPath: !!envRecord && Object.prototype.hasOwnProperty.call(envRecord, 'MEM_DB_PATH'),
+    });
   }
   return { owners, unparseable };
 }
@@ -854,7 +857,7 @@ function findMcpRegistrations(targets: McpConfigTarget[]): McpScan {
 // resolved DB path); the repair closure patches the owning config file(s).
 export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   const label = 'MCP env carries RECALL_DB_PATH';
-  const { targets, resolvedDbPath } = probe;
+  const { targets, resolvedDbPath, runtimeDbPathOverride } = probe;
 
   const { owners, unparseable } = findMcpRegistrations(targets);
 
@@ -884,28 +887,31 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
     };
   }
 
-  // Healthy: every owner already carries the resolved DB path.
-  const stale = owners.filter(o => o.envDbPath !== resolvedDbPath);
+  const selected = owners.map(owner => ({
+    ...owner,
+    desiredDbPath: runtimeDbPathOverride || owner.configuredDbPath || resolvedDbPath,
+  }));
+  const stale = selected.filter(owner =>
+    owner.primaryDbPath !== owner.desiredDbPath || owner.hasLegacyDbPath
+  );
   if (stale.length === 0) {
     return {
       result: {
         label,
         status: 'PASS',
-        message: `env.RECALL_DB_PATH matches resolved DB path in ${owners.length} config file(s)${unparseableNote}`,
+        message: `env.RECALL_DB_PATH is canonical in ${owners.length} config file(s)${unparseableNote}`,
       },
     };
   }
 
-  // At least one owner has a missing/empty env or a divergent value — the
-  // next-Claude-restart hazard from issue #28.
   const detail = stale
-    .map(o => `${o.target.path} (${o.envDbPath === undefined ? 'env.RECALL_DB_PATH missing' : `has ${o.envDbPath}`})`)
+    .map(o => `${o.target.path} (${o.primaryDbPath === undefined ? 'env.RECALL_DB_PATH missing' : `has ${o.primaryDbPath}`}; expected ${o.desiredDbPath})`)
     .join('; ');
   return {
     result: {
       label,
       status: 'WARN',
-      message: `env.RECALL_DB_PATH should be ${resolvedDbPath} but ${detail} — MCP server may diverge from CLI on next Claude restart${unparseableNote}`,
+      message: `${detail} — MCP server may diverge from CLI on next Claude restart${unparseableNote}`,
     },
     repair: () => {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
@@ -920,9 +926,10 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
           const entry = mcpEntryAt(cfg, owner.target);
           if (!entry) continue; // registration vanished between probe and repair — nothing to back up or patch
           const envKey = owner.target.envPath[owner.target.envPath.length - 1];
+          const desiredDbPath = runtimeDbPathOverride || configuredMcpDbPath(entry[envKey]) || resolvedDbPath;
           if (!entry[envKey] || typeof entry[envKey] !== 'object' || Array.isArray(entry[envKey])) entry[envKey] = {};
           const env = entry[envKey] as Record<string, unknown>;
-          env.RECALL_DB_PATH = resolvedDbPath;
+          env.RECALL_DB_PATH = desiredDbPath;
           delete env.MEM_DB_PATH;
           // Back up only once the write is confirmed to happen (after the re-read
           // + entry guard), so a vanished registration leaves no orphan backup.
@@ -944,7 +951,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
         const patchedNote = patched.length ? `patched ${patched.join(', ')}; ` : '';
         return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}${unparseableNote}` };
       }
-      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH=${resolvedDbPath} in ${patched.join(', ')}${unparseableNote}` };
+      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH in ${patched.join(', ')}${unparseableNote}` };
     },
   };
 }
@@ -1019,13 +1026,10 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   results.push(probeSkillSurface(root));
   results.push(probeClaudePlugin(home, root, pluginState));
 
-  // MCP env health (issue #28): the recall-memory registration must carry
-  // env.RECALL_DB_PATH matching the resolved DB path, or the MCP server can
-  // diverge from the CLI after the next Claude restart. Same repair contract as
-  // the symlink probes — with --fix we patch the owning config file(s).
   const mcpEnvCheck = probeMcpEnv({
     targets: claudeMcpConfigTargets(home),
     resolvedDbPath: getDbPath(),
+    runtimeDbPathOverride: process.env.RECALL_DB_PATH || process.env.MEM_DB_PATH || undefined,
   });
   results.push(resolveProbeResult(mcpEnvCheck, !!opts.fix && pluginState.status !== 'unknown'));
 

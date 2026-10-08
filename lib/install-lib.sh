@@ -1537,14 +1537,14 @@ _recall_unregister_legacy_claude_mcp() {
     [[ -f "$f" ]] || continue
     grep -q "recall-memory" "$f" || continue
     if CFG_FILE="$f" DEFAULT_DB="$default_db" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
+      const { configuredMcpDbPath, readJsoncObject, validateClaudeConfigShape, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.CFG_FILE;
       let cfg;
       try { cfg = readJsoncObject(file); } catch { process.exit(2); }
       try { validateClaudeConfigShape(cfg); } catch { process.exit(2); }
       const entry = cfg?.mcpServers?.["recall-memory"];
       if (!entry) process.exit(0);
-      const pinned = entry.env?.RECALL_DB_PATH ?? entry.env?.MEM_DB_PATH;
+      const pinned = configuredMcpDbPath(entry.env);
       if (pinned && pinned !== process.env.DEFAULT_DB) process.exit(3);
       delete cfg.mcpServers["recall-memory"];
       if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
@@ -1972,13 +1972,16 @@ recall_configure_mcp() {
 }
 
 # Ensure the recall-memory MCP registration points at recall-mcp and has
-# env.RECALL_DB_PATH set to the resolved canonical DB path. Patches both
+# env.RECALL_DB_PATH set to the selected DB path. Patches both
 # ~/.claude.json and ~/.claude/settings.json if either contains the registration.
 # Idempotent, and preserves user-authored env keys.
 _recall_ensure_mcp_entry() {
   local bun_path="$1"
   local mem_mcp_path="$2"
-  local db_path_abs
+  local db_path_abs db_path_explicit=false
+  if [[ -n "${RECALL_DB_PATH:-}" ]] || [[ -n "${MEM_DB_PATH:-}" ]]; then
+    db_path_explicit=true
+  fi
   db_path_abs="$(recall_resolve_db_path)"
 
   local f
@@ -1992,10 +1995,11 @@ _recall_ensure_mcp_entry() {
     if (
       export -f recall_backup_file
       export BACKUP_DIR
-      CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
+      CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" DB_PATH_EXPLICIT="$db_path_explicit" \
+        BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
         JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
         const { execFileSync } = require("child_process");
-        const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+        const { configuredMcpDbPath, readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
         const file = process.env.CFG_FILE;
         const dbPath = process.env.DB_PATH_ABS;
         const bunPath = process.env.BUN_PATH;
@@ -2004,10 +2008,13 @@ _recall_ensure_mcp_entry() {
         validateClaudeConfigShape(cfg);
         if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
         const entry = cfg.mcpServers["recall-memory"];
+        const selectedDbPath = process.env.DB_PATH_EXPLICIT === "true"
+          ? dbPath
+          : configuredMcpDbPath(entry.env) ?? dbPath;
         entry.command = bunPath;
         entry.args = ["run", mcpPath];
         if (!entry.env || typeof entry.env !== "object" || Array.isArray(entry.env)) entry.env = {};
-        entry.env.RECALL_DB_PATH = dbPath;
+        entry.env.RECALL_DB_PATH = selectedDbPath;
         delete entry.env.MEM_DB_PATH;
         execFileSync("bash", ["-c", "mkdir -p \"$BACKUP_DIR\" && recall_backup_file \"$CFG_FILE\" \"$BACKUP_DIR\""], { env: process.env });
         writeJsonAtomic(file, cfg);

@@ -402,13 +402,26 @@ This content must be preserved across an uninstall.
     expect(existsSync(join(backupBase, '20260101_000000'))).toBe(true);
   });
 
-  test('hook uninstall inventories cover every installed TypeScript file', () => {
-    const uninstall = readFileSync(UNINSTALL, 'utf-8');
-    for (const filename of installedHookFiles()) {
-      expect(uninstall).toContain(`"$CLAUDE_DIR/hooks/${filename}"`);
+  test('uninstall removes every shipped TypeScript hook', () => {
+    const hooks = installedHookFiles();
+    const helpers = hookLibFiles(join(REPO, 'hooks', 'lib'));
+    for (const filename of hooks) {
+      writeFileSync(join(claudeDir, 'hooks', filename), '// installed');
     }
-    for (const relative of hookLibFiles(join(REPO, 'hooks', 'lib'))) {
-      expect(uninstall).toContain(`"$CLAUDE_DIR/hooks/lib/${relative}"`);
+    for (const relative of helpers) {
+      const installed = join(claudeDir, 'hooks', 'lib', relative);
+      mkdirSync(dirname(installed), { recursive: true });
+      writeFileSync(installed, '// installed');
+    }
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    for (const filename of hooks) {
+      expect(existsSync(join(claudeDir, 'hooks', filename))).toBe(false);
+    }
+    for (const relative of helpers) {
+      expect(existsSync(join(claudeDir, 'hooks', 'lib', relative))).toBe(false);
     }
   });
 

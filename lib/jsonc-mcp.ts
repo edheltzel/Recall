@@ -176,6 +176,14 @@ export function validateClaudeConfigShape(config: unknown): asserts config is Js
   }
 }
 
+export function configuredMcpDbPath(env: unknown): string | undefined {
+  if (!isObject(env)) return undefined;
+  const primary = env.RECALL_DB_PATH;
+  if (typeof primary === 'string' && primary.length > 0) return primary;
+  const legacy = env.MEM_DB_PATH;
+  return typeof legacy === 'string' && legacy.length > 0 ? legacy : undefined;
+}
+
 function writeTextAtomic(file: string, text: string): void {
   const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;

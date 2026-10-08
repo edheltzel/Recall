@@ -165,6 +165,55 @@ describe('update.sh', () => {
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  test('Claude plugin reconciliation preserves a stored legacy custom DB pin', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-custom-pin-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const settingsFile = join(claudeDir, 'settings.json');
+      const stubBin = join(tempRoot, 'bin');
+      const stored = '/stored/custom.db';
+      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(stubBin, { recursive: true });
+      writeFileSync(join(stubBin, 'claude'), '#!/bin/sh\necho recall-memory\n', { mode: 0o755 });
+      writeFileSync(settingsFile, JSON.stringify({
+        mcpServers: {
+          'recall-memory': {
+            command: 'bun',
+            args: ['run', '/old/path/recall-mcp'],
+            env: { RECALL_DB_PATH: '', MEM_DB_PATH: stored },
+          },
+        },
+      }));
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+        `export PATH="${stubBin}:$PATH"`,
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_claude_plugin_active() { return 0; }',
+        'recall_configure_mcp',
+      ].join('\n');
+      const {
+        RECALL_DB_PATH: _recallDbPath,
+        MEM_DB_PATH: _memDbPath,
+        ...baseEnv
+      } = process.env;
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...baseEnv, REPO },
+      });
+
+      expect(result.status).toBe(0);
+      const entry = JSON.parse(readFileSync(settingsFile, 'utf-8')).mcpServers['recall-memory'];
+      expect(entry.env).toEqual({ RECALL_DB_PATH: stored });
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
   test('symlinked settings.json is written through the link, with backup and no temp file', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-symlink-'));
     try {
@@ -480,36 +529,6 @@ describe('update.sh', () => {
     expect(r.stdout).toMatch(/would: migrate Recall-owned Claude\/Pi MEMORY bootstraps/);
   });
 
-  // Regression: recall_copy_runtime_files only refreshes the Claude guide +
-  // slash commands. recall_install_pi_guide / recall_install_opencode_guide /
-  // recall_install_opencode_agent were called ONLY from install.sh, so existing
-  // OpenCode/Pi users never received guide/prompt updates on `update.sh`. The
-  // refresh path must call the shared installers (DRY — reused, not duplicated).
-  describe('refresh path propagates OpenCode/Pi guides and prompts', () => {
-    const src = readFileSync(UPDATE, 'utf-8');
-
-    test('reuses recall_detect_platforms to gate (no duplicated command -v)', () => {
-      expect(src).toContain('recall_detect_platforms');
-      // Must reuse the shared detector, not re-implement detection inline.
-      expect(src).not.toContain('command -v opencode');
-      expect(src).not.toContain('command -v pi');
-    });
-
-    test('routes OpenCode refresh through recall_install_opencode_platform helper', () => {
-      // The helper composes recall_configure_opencode_mcp + plugins + agent +
-      // guide (lib/install-lib.sh). install.sh and update.sh both call this
-      // single entry point so a new OpenCode surface added inside the helper
-      // applies to both scripts — the DRY mandate from CLAUDE.md.
-      expect(src).toContain('recall_install_opencode_platform');
-      expect(src).toMatch(/OPENCODE_DETECTED.*==.*true/);
-    });
-
-    test('routes Pi refresh through recall_install_pi_platform helper', () => {
-      expect(src).toContain('recall_install_pi_platform');
-      expect(src).toMatch(/PI_DETECTED.*==.*true/);
-    });
-  });
-
   // The /Recall:* slash commands migrated to Agent Skills (#228).
   // recall_copy_runtime_files must clean up what older releases installed —
   // Recall-managed symlinks at ~/.claude/commands/Recall/ plus the canonicals
@@ -583,7 +602,7 @@ describe('update.sh', () => {
     function runRefresh(env: { OPENCODE_DETECTED: string; PI_DETECTED: string; OMP_DETECTED?: string }) {
       const harness = `
         set -e
-        source "${REPO}/lib/install-lib.sh" >/dev/null 2>&1
+        source "${UPDATE}" >/dev/null 2>&1
 
         # Silence log helpers — only stub output should appear on stdout.
         log_info() { :; }
@@ -613,11 +632,6 @@ describe('update.sh', () => {
         PI_DETECTED=${env.PI_DETECTED}
         OMP_DETECTED=${env.OMP_DETECTED ?? 'false'}
         DRY_RUN=false
-
-        # Pull step_refresh_runtime out of update.sh and define it inline.
-        # awk over sed: more robust to inline shell that might confuse sed's
-        # range matcher.
-        eval "$(awk '/^step_refresh_runtime\\(\\)/{p=1} p; p && /^}$/{exit}' "${REPO}/packaging/update.sh")"
 
         step_refresh_runtime
       `;
