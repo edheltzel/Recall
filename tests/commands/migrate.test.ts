@@ -8,11 +8,12 @@
 // handles from other processes during these tests).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, statSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { runMigrate } from '../../src/commands/migrate';
 import { closeDb } from '../../src/db/connection';
+import { parseJsonc } from '../../lib/jsonc-mcp';
 
 let tempDir: string;
 let srcDb: string;
@@ -22,13 +23,25 @@ let originalErr: typeof console.error;
 let captured: string[] = [];
 let capturedErr: string[] = [];
 
+function withExitThrow(run: () => void): void {
+  const originalExit = process.exit;
+  process.exit = ((code?: number) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never;
+  try {
+    run();
+  } finally {
+    process.exit = originalExit;
+  }
+}
+
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'recall-migrate-test-'));
   srcDb = join(tempDir, 'src', 'recall.db');
   destDb = join(tempDir, 'dest', 'recall.db');
 
   // Seed source DB + sidecars.
-  require('fs').mkdirSync(join(tempDir, 'src'), { recursive: true });
+  mkdirSync(join(tempDir, 'src'), { recursive: true });
   writeFileSync(srcDb, 'fake-sqlite-bytes');
   writeFileSync(srcDb + '-wal', 'wal');
   writeFileSync(srcDb + '-shm', 'shm');
@@ -54,7 +67,7 @@ afterEach(() => {
 
 describe('recall migrate', () => {
   test('--dry-run prints a plan and changes nothing', () => {
-    runMigrate({ to: destDb, dryRun: true });
+    runMigrate({ to: destDb, dryRun: true }, tempDir);
     const out = captured.join('\n');
     expect(out).toContain('dry-run');
     expect(out).toContain(srcDb);
@@ -65,7 +78,7 @@ describe('recall migrate', () => {
   });
 
   test('moves DB + sidecars to destination', () => {
-    runMigrate({ to: destDb });
+    runMigrate({ to: destDb }, tempDir);
     expect(existsSync(srcDb)).toBe(false);
     expect(existsSync(destDb)).toBe(true);
     expect(existsSync(destDb + '-wal')).toBe(true);
@@ -74,32 +87,82 @@ describe('recall migrate', () => {
     expect(captured.join('\n')).toContain('Moved DB');
   });
 
-  test('refuses to overwrite non-empty destination', () => {
-    require('fs').mkdirSync(join(tempDir, 'dest'), { recursive: true });
-    writeFileSync(destDb, 'pre-existing');
-    let exited = false;
-    const origExit = process.exit;
-    // @ts-expect-error – test override
-    process.exit = (code?: number) => {
-      exited = true;
-      throw new Error(`exit:${code ?? 0}`);
-    };
-    try {
-      expect(() => runMigrate({ to: destDb })).toThrow(/exit:1/);
-      expect(exited).toBe(true);
-      // Source untouched.
-      expect(existsSync(srcDb)).toBe(true);
-      expect(statSync(destDb).size).toBeGreaterThan(0); // unchanged
-    } finally {
-      process.exit = origExit;
+  test('patches Claude, OpenCode, and Pi JSONC registrations', () => {
+    const configs = [
+      {
+        path: join(tempDir, '.claude.json'),
+        body: `{
+          // Claude legacy settings.
+          "mcpServers": { "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+        }`,
+        readPath: ['mcpServers', 'recall-memory', 'env'],
+      },
+      {
+        path: join(tempDir, '.claude', 'settings.json'),
+        body: `{
+          // Claude settings.
+          "mcpServers": { "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+        }`,
+        readPath: ['mcpServers', 'recall-memory', 'env'],
+      },
+      {
+        path: join(tempDir, '.config', 'opencode', 'opencode.json'),
+        body: `{
+          // OpenCode settings.
+          "mcp": { "recall-memory": { "environment": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+        }`,
+        readPath: ['mcp', 'recall-memory', 'environment'],
+      },
+      {
+        path: join(tempDir, '.pi', 'agent', 'mcp.json'),
+        body: `{
+          // Pi settings.
+          "mcpServers": { "recall-memory": { "env": { "RECALL_DB_PATH": "${srcDb}", }, }, },
+        }`,
+        readPath: ['mcpServers', 'recall-memory', 'env'],
+      },
+    ];
+    for (const config of configs) {
+      mkdirSync(dirname(config.path), { recursive: true });
+      writeFileSync(config.path, config.body);
     }
+
+    runMigrate({ to: destDb }, tempDir);
+
+    for (const config of configs) {
+      let value: unknown = parseJsonc(readFileSync(config.path, 'utf-8'));
+      for (const segment of config.readPath) value = (value as Record<string, unknown>)[segment];
+      expect((value as Record<string, unknown>).RECALL_DB_PATH).toBe(destDb);
+    }
+    expect(existsSync(srcDb)).toBe(false);
+    expect(existsSync(destDb)).toBe(true);
+  });
+
+  test('rejects malformed host config before moving the database', () => {
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(join(tempDir, '.claude'), { recursive: true });
+    writeFileSync(settings, '{ "mcpServers": { "recall-memory": { } }');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(capturedErr.join('\n')).toContain('cannot patch');
+  });
+
+  test('refuses to overwrite non-empty destination', () => {
+    mkdirSync(join(tempDir, 'dest'), { recursive: true });
+    writeFileSync(destDb, 'pre-existing');
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow(/exit:1/);
+    expect(existsSync(srcDb)).toBe(true);
+    expect(statSync(destDb).size).toBeGreaterThan(0);
   });
 
   test('source absent → graceful no-op', () => {
     rmSync(srcDb);
     rmSync(srcDb + '-wal');
     rmSync(srcDb + '-shm');
-    runMigrate({ to: destDb });
+    runMigrate({ to: destDb }, tempDir);
     expect(captured.join('\n')).toContain('does not exist');
     expect(existsSync(destDb)).toBe(false);
   });

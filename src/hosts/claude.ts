@@ -80,8 +80,8 @@ export function claudeMcpConfigTargets(home: string): McpConfigTarget[] {
   const paths = claudePaths(home);
   const envPath = ['mcpServers', 'recall-memory', 'env'];
   return [
-    { host: 'claude', path: paths.legacySettings, envPath, format: 'json' },
-    { host: 'claude', path: paths.settings, envPath, format: 'json' },
+    { host: 'claude', path: paths.legacySettings, envPath },
+    { host: 'claude', path: paths.settings, envPath },
   ];
 }
 

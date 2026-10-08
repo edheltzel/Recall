@@ -58,7 +58,6 @@ function target(path: string): McpConfigTarget {
     host: 'claude',
     path,
     envPath: ['mcpServers', 'recall-memory', 'env'],
-    format: 'json',
   };
 }
 

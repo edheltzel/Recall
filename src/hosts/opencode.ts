@@ -25,7 +25,6 @@ export const openCodeHost: NativeHostAdapter = {
       host: 'opencode',
       path: paths.settings,
       envPath: ['mcp', 'recall-memory', 'environment'],
-      format: 'jsonc',
     }];
   },
 };
