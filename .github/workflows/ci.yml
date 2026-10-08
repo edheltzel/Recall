@@ -112,6 +112,11 @@ jobs:
       - name: Verify sqlite-vec native load (Linux)
         run: bun test tests/db/sqlite-vec-load.test.ts tests/db/vec.test.ts tests/benchmarks/suite-f.test.ts tests/mcp-hybrid-vec-fallback.test.ts
 
+      # Lifecycle scripts are bash and ship on Linux too. macOS already runs
+      # the full suite; this step is the install-suite portability gate.
+      - name: Test install suite (Linux)
+        run: bun test tests/install
+
       # Ubuntu is a portability smoke target, not Recall's primary platform.
       # macOS runs the full test suite; Linux still builds to catch Bun/ESM and shell portability regressions.
       - name: Build
