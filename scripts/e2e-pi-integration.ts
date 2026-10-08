@@ -224,7 +224,7 @@ async function main(): Promise<void> {
 
   const mcpConfig = JSON.parse(readFileSync(join(testPiHome, 'mcp.json'), 'utf-8'));
   const recallServer = mcpConfig.mcpServers?.['recall-memory'];
-  if (recallServer?.env?.RECALL_DB_PATH !== testDb || recallServer?.directTools !== true) {
+  if (recallServer?.env?.RECALL_DB_PATH !== testDb || recallServer?.directTools !== true || recallServer?.exposure !== 'direct') {
     throw new Error(`unexpected Pi MCP registration: ${JSON.stringify(recallServer)}`);
   }
   console.log('pi.install_idempotent=true');
@@ -299,6 +299,11 @@ export default function (pi) {
   const captured = join(testRecallHome, 'MEMORY', 'pi-sessions', 'pi-session.md');
   if (!readFileSync(captured, 'utf-8').includes("Verify Recall's native Pi package")) {
     throw new Error('Pi session_shutdown lifecycle capture did not write the synthetic session');
+  }
+  // FTS5 treats ' as syntax, so the query stays a token from the captured sentence.
+  const search = run('recall', ['search', 'native Pi package', '-t', 'messages'], env);
+  if (!search.includes("Verify Recall's native Pi package")) {
+    throw new Error(`Pi session_shutdown did not store ambient text through recall capture\n${search}`);
   }
   console.log('pi.lifecycle_capture_verified=true');
 

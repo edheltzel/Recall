@@ -145,6 +145,62 @@ describe('recall capture public CLI', () => {
     expect(existsSync(dbPath)).toBe(false);
   });
 
+  test('built-in harness id omp is accepted', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-capture-omp-'));
+    roots.push(root);
+    const { env } = isolationEnv(root);
+    initIsolatedDb(env);
+    const result = runCli(
+      ['capture', '--contract', '1', '--harness', 'omp', '--event', 'turn_end', '--text', TOKEN],
+      env
+    );
+    expect(result.status).toBe(0);
+    const search = runCli(['search', TOKEN, '-t', 'messages'], env);
+    expect(search.status).toBe(0);
+    expect(search.stdout).toContain(TOKEN);
+  });
+
+  test('community harness id acme-agent is accepted', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-capture-acme-'));
+    roots.push(root);
+    const { env } = isolationEnv(root);
+    initIsolatedDb(env);
+    const result = runCli(
+      ['capture', '--contract', '1', '--harness', 'acme-agent', '--event', 'session_end', '--text', TOKEN],
+      env
+    );
+    expect(result.status).toBe(0);
+    const search = runCli(['search', TOKEN, '-t', 'messages'], env);
+    expect(search.status).toBe(0);
+    expect(search.stdout).toContain(TOKEN);
+  });
+
+  test('underscore harness id is rejected with no DB write', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-capture-bad-id-'));
+    roots.push(root);
+    const { env, dbPath } = isolationEnv(root);
+    const result = runCli(
+      ['capture', '--harness', 'bad_id', '--event', 'turn_end', '--text', TOKEN],
+      env
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/harness/i);
+    expect(existsSync(dbPath)).toBe(false);
+  });
+
+  test('empty harness id is rejected with no DB write', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-capture-empty-id-'));
+    roots.push(root);
+    const { env, dbPath } = isolationEnv(root);
+    const result = runCli(
+      ['capture', '--harness', '', '--event', 'turn_end', '--text', TOKEN],
+      env
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/harness/i);
+    expect(existsSync(dbPath)).toBe(false);
+  });
+
   test('empty text is rejected with no DB write', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-capture-empty-'));
     roots.push(root);

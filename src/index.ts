@@ -485,8 +485,8 @@ program
   });
 
 // recall start — shared L0/L1 inject renderer. Hosts call this instead of
-// forking RecallStart.ts. Hidden host-hook stays ingest-only (plus Codex
-// SessionStart, which uses the same assembler).
+// forking RecallStart.ts. Hidden host-hook is deprecated for ambient writes.
+// Codex SessionStart still uses it (same assembler).
 program
   .command('start')
   .description('Render L0/L1 session-start memory (markdown; --format cursor wraps { additional_context })')
@@ -496,8 +496,8 @@ program
     closeDb();
   });
 
-// recall capture — public ambient ingress (contract 1). Hidden host-hook stays
-// host-private; adapters submit raw text here and core ranks/stores.
+// recall capture — public ambient ingress (contract 1). Adapters submit raw
+// text here and core ranks/stores. Hidden host-hook is not this door.
 program
   .command('capture')
   .description('Capture ambient turn/session text into Recall (flags or identical stdin JSON)')
@@ -521,9 +521,9 @@ program
     closeDb();
   });
 
-// Internal lifecycle adapter entry point. Native host integrations own invocation.
-// Stays ingest-only for Codex/Grok/jcode/omp (Codex SessionStart injects via
-// the shared assembler, not a forked RecallStart). Cursor never joins.
+// Deprecated for ambient capture. Kept hidden. Codex SessionStart injection
+// still calls `host-hook codex`. Do not point new ambient adapters here.
+// Cursor never joins.
 program
   .command('host-hook <host>', { hidden: true })
   .action(async (host) => {

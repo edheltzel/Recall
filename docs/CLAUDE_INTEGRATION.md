@@ -88,7 +88,7 @@ claude plugin uninstall recall@recall-marketplace
 
 ## What the plugin does not cover
 
-**Lifecycle hooks are not in the bundle.** This is the one place where the plugin is deliberately not self-sufficient: a plugin-only user gets skills and MCP, not automatic capture.
+**Lifecycle hooks are not in the bundle.** This is the one place where the plugin is deliberately not self-sufficient: a plugin-only user gets skills and MCP, not automatic capture. Installer-owned `Stop` runs `RecallExtract.ts`, which shells ambient text to `recall capture`. Without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts` against `~/.claude/projects`. Guide: [Capture adapter](CAPTURE_ADAPTER.md).
 
 ## Differences from the Codex package
 

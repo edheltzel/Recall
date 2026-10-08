@@ -27,10 +27,9 @@ Once a release containing this integration is published, `omp plugin install rec
 ## Capture contract
 
 - The awaited `session_stop` event runs after the main agent and its background work settle. omp does not emit it for task/subagent sessions.
-- The extension reads `ctx.sessionManager.getBranch()` and sends the active branch to its package-local `dist/index.js host-hook omp` through stdin. No global `recall` executable is required.
-- Recall stores user and assistant text with native entry IDs, source `omp`, and project attribution. Tool calls/results, thinking, images, developer/system instructions, and custom/summary entries are excluded.
-- The existing lifecycle ingest path redacts secrets before persistence. Repeated capture is idempotent; distinct native entries containing identical text remain distinct messages. The next successful capture reconciles branch changes so abandoned messages stop appearing in current search results.
-- Each successful stop updates the session's automatic LoA summary at importance 6. This uses the existing local terminal summary, not a model-backed extraction or curated `fabric` call.
+- The extension reads `ctx.sessionManager.getBranch()` and sends ordered user/assistant text to its package-local `dist/index.js capture` (stdin JSON, contract 1, harness `omp`, event `turn_end`). No global `recall` executable is required. Door: [Capture adapter](CAPTURE_ADAPTER.md).
+- Tool calls/results, thinking, images, developer/system instructions, and custom/summary entries are excluded before that call.
+- Core scrubs secrets, tags the row `automatic-capture,omp`, and stores it at importance 6. This is not a model-backed extraction or a curated `fabric` call.
 - The database defaults to `~/.agents/Recall/recall.db`; `RECALL_DB_PATH` retains its existing override.
 
 This is turn-completion capture, not crash recovery. An interrupted turn before `session_stop` is not guaranteed captured. Shutdown and pre-compaction hooks are not installed. The complete active branch is retried on the next stop after a failure.

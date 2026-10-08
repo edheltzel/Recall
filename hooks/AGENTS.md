@@ -15,14 +15,15 @@ Standalone scripts that hosts run across a session lifecycle, plus cron jobs tha
 - `RecallBatchExtract.ts` — cron (batch-extract sessions missed during crashes)
 - `RecallTelosSync.ts` — cron (sync Telos goals/projects into memory)
 - `extract_prompt.md` — extraction prompt template (copied to `~/.claude/MEMORY/`)
-- `grok/RecallLifecycle.json` — installer-owned global Grok capture events; invokes the built `recall host-hook grok` command
+- `grok/RecallLifecycle.json` — installer-owned global Grok capture events. `grok/capture.ts` runs `grok export` and calls `recall capture`. No SessionStart injection.
 - `lib/` — shared host-neutral hook helpers; `lib/hosts/` owns native lifecycle payloads, paths, commands, authentication, and extraction providers
 
-TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. The Grok descriptor is copied to `~/.agents/Recall/grok/hooks/` and linked into `~/.grok/hooks/`.
+TypeScript hooks are installed as per-file symlinks into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. The Grok descriptor and `capture.ts` are copied to `~/.agents/Recall/grok/hooks/`; the descriptor is linked into `~/.grok/hooks/`.
 
 ## Local Contracts
 
 - Hooks are SELF-CONTAINED: never import from `src/`. Shared hook logic lives in `lib/` here.
+- Ambient capture shells out to `recall capture` (stdin JSON, contract 1). Claude Stop uses `lib/hosts/claude/ambient-capture.ts` and does not replace Automatic-capture LoA extraction. Operators without hooks run that file against `~/.claude/projects`. Pi keeps its MEMORY drop and also calls the same door from `hosts/pi/RecallExtract.ts`.
 - Generic hook helpers depend on `lib/events.ts`, `lib/extraction-provider.ts`, and the native-provider registry in `lib/hosts/`; native payloads, path encoding, commands, auth, and recursion guards stay in a host adapter.
 - Extractor config resolver is canonical in `lib/` (hooks consume it; `src/` re-exports). Automatic-capture LoA allowlist is `claude-cli` \| `ollama`. Do not parse `config.json` in a second schema.
 - Documented DRY exception: small utilities (e.g. bun-path resolution) are intentionally duplicated inside `RecallExtract.ts` / `RecallBatchExtract.ts` so they never reach into `src/`. Do not "DRY this up."

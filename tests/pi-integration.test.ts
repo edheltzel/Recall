@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
-import { execFileSync } from 'child_process';
+import { homedir, tmpdir } from 'os';
+import { execFileSync, spawnSync } from 'child_process';
 import registerRecallExtract, { linearizeSession } from '../hosts/pi/RecallExtract';
 import registerRecallInjection from '../hosts/pi/RecallPreCompact';
 
@@ -133,23 +133,99 @@ describe('Pi extension lifecycle contracts', () => {
   test('session_shutdown captures the path from sessionManager.getSessionFile()', () => {
     const sessionPath = join(tempDir, 'pi-session.jsonl');
     const entries = [
+      { type: 'session', id: 'pi-capture-640', cwd: '/work/Recall' },
       { id: '1', parentId: null, type: 'message', message: { role: 'user', content: `Plan the Recall Pi package. ${'x'.repeat(300)}` } },
       { id: '2', parentId: '1', type: 'message', message: { role: 'assistant', content: `Use Pi packages for extensions and skills only. ${'y'.repeat(300)}` } },
     ];
     writeFileSync(sessionPath, entries.map(entry => JSON.stringify(entry)).join('\n'));
+    const bin = join(tempDir, 'bin');
+    const argsPath = join(tempDir, 'recall-args');
+    const stdinPath = join(tempDir, 'recall-stdin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'recall'), `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argsPath)}\ncat > ${JSON.stringify(stdinPath)}\nexit 0\n`);
+    chmodSync(join(bin, 'recall'), 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${bin}:${previousPath ?? ''}`;
 
-    let shutdown: ((event: unknown, ctx: unknown) => void) | undefined;
-    registerRecallExtract({
-      on(event: string, handler: (event: unknown, ctx: unknown) => void) {
-        if (event === 'session_shutdown') shutdown = handler;
-      },
-    });
-    expect(shutdown).toBeDefined();
+    try {
+      let shutdown: ((event: unknown, ctx: unknown) => void) | undefined;
+      registerRecallExtract({
+        on(event: string, handler: (event: unknown, ctx: unknown) => void) {
+          if (event === 'session_shutdown') shutdown = handler;
+        },
+      });
+      expect(shutdown).toBeDefined();
 
-    shutdown?.({}, { sessionManager: { getSessionFile: () => sessionPath } });
+      shutdown?.({}, { sessionManager: { getSessionFile: () => sessionPath } });
 
-    const drop = join(process.env.RECALL_HOME!, 'MEMORY', 'pi-sessions', 'pi-session.md');
-    expect(readFileSync(drop, 'utf-8')).toContain('Recall Pi package');
+      const drop = join(process.env.RECALL_HOME!, 'MEMORY', 'pi-sessions', 'pi-session.md');
+      expect(readFileSync(drop, 'utf-8')).toContain('Recall Pi package');
+      expect(readFileSync(argsPath, 'utf-8')).toContain('capture');
+      const payload = JSON.parse(readFileSync(stdinPath, 'utf-8'));
+      expect(payload).toMatchObject({
+        contract: 1,
+        harness: 'pi',
+        event: 'session_end',
+        session_id: 'pi-capture-640',
+        cwd: '/work/Recall',
+        project: 'Recall',
+      });
+      expect(payload.text).toContain('Recall Pi package');
+
+      const dbRoot = join(tempDir, 'isolated');
+      mkdirSync(dbRoot);
+      const dbPath = join(dbRoot, 'recall.db');
+      expect(dbPath.startsWith(join(homedir(), '.agents', 'Recall'))).toBe(false);
+      const env = {
+        ...process.env,
+        HOME: dbRoot,
+        PATH: previousPath,
+        RECALL_DB_PATH: dbPath,
+        RECALL_HOME: join(dbRoot, 'home'),
+        RECALL_SKIP_LEGACY_DATA_MIGRATIONS: '1',
+      };
+      const cli = join(import.meta.dir, '..', 'src', 'index.ts');
+      expect(spawnSync('bun', [cli, 'init'], { env, encoding: 'utf-8' }).status).toBe(0);
+      const captured = spawnSync('bun', [cli, 'capture'], {
+        env,
+        encoding: 'utf-8',
+        input: readFileSync(stdinPath, 'utf-8'),
+      });
+      expect(captured.status).toBe(0);
+      const search = spawnSync('bun', [cli, 'search', 'Recall Pi package', '-t', 'messages'], {
+        env,
+        encoding: 'utf-8',
+      });
+      expect(search.status).toBe(0);
+      expect(search.stdout).toContain('Recall Pi package');
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  }, 30_000);
+
+  test('missing session file does not capture', () => {
+    const bin = join(tempDir, 'bin');
+    const argsPath = join(tempDir, 'recall-args');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'recall'), `#!/bin/sh\nprintf called > ${JSON.stringify(argsPath)}\nexit 0\n`);
+    chmodSync(join(bin, 'recall'), 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${bin}:${previousPath ?? ''}`;
+    try {
+      let shutdown: ((event: unknown, ctx: unknown) => void) | undefined;
+      registerRecallExtract({
+        on(event: string, handler: (event: unknown, ctx: unknown) => void) {
+          if (event === 'session_shutdown') shutdown = handler;
+        },
+      });
+      shutdown?.({}, { sessionManager: { getSessionFile: () => undefined } });
+      shutdown?.({}, { sessionManager: { getSessionFile: () => join(tempDir, 'missing.jsonl') } });
+      expect(existsSync(argsPath)).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   test('before_agent_start uses Pi exec and returns a chained system prompt', async () => {
@@ -429,6 +505,7 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
       args: [],
       lifecycle: 'lazy',
       directTools: true,
+      exposure: 'direct',
       env: { RECALL_DB_PATH: join(sandboxDir, 'fake-recall.db') },
     });
   });
@@ -528,6 +605,7 @@ describe('recall_configure_pi_mcp preserves user customizations', () => {
 
     const config = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
     expect(config.mcpServers['recall-memory'].directTools).toBe(false);
+    expect(config.mcpServers['recall-memory'].exposure).toBe('codemode');
     expect(config.mcpServers['recall-memory'].env.RECALL_DB_PATH).toContain('fake-recall.db');
   });
 });

@@ -1,3 +1,7 @@
+// Deprecated for ambient capture. Do not add harnesses here.
+// Codex SessionStart injection still enters through handleHostHook('codex').
+// Ambient text belongs on `recall capture` (src/commands/capture.ts).
+
 import {
   closeSync,
   existsSync,

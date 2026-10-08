@@ -51,6 +51,59 @@ describe('omp native extension', () => {
     expect(messages).toEqual(['Recall omp capture skipped: payload exceeds 25MiB']);
   });
 
+  test('session_stop sends ordered branch text through recall capture', async () => {
+    let args: readonly string[] = [];
+    let stdin = '';
+    await captureOmpSessionStop({}, uiCtx(() => {}, {
+      sessionManager: {
+        getSessionId: () => 'sess-order',
+        getBranch: () => [
+          { type: 'message', id: 'u1', message: { role: 'user', content: 'first leaf' } },
+          { type: 'tool', id: 't1' },
+          {
+            type: 'message',
+            id: 'a1',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'second leaf' }] },
+          },
+        ],
+      },
+    }), undefined, async (_file, childArgs, childStdin) => {
+      args = childArgs;
+      stdin = childStdin;
+      return 0;
+    });
+    expect(args[0]?.endsWith('/dist/index.js')).toBe(true);
+    expect(args[0]).not.toContain('/hosts/dist/');
+    expect(args[1]).toBe('capture');
+    expect(args).not.toContain('host-hook');
+    const payload = JSON.parse(stdin);
+    expect(payload).toMatchObject({
+      contract: 1,
+      harness: 'omp',
+      event: 'turn_end',
+      session_id: 'sess-order',
+      cwd: '/work/Recall',
+    });
+    expect(payload.text.indexOf('first leaf')).toBeLessThan(payload.text.indexOf('second leaf'));
+    expect(payload.text).not.toContain('t1');
+  });
+
+  test('malformed branch does not spawn', async () => {
+    const messages: string[] = [];
+    let spawned = false;
+    await captureOmpSessionStop({}, uiCtx(message => messages.push(message), {
+      sessionManager: {
+        getSessionId: () => 'sess-bad',
+        getBranch: () => [null],
+      },
+    }), undefined, async () => {
+      spawned = true;
+      return 0;
+    });
+    expect(spawned).toBe(false);
+    expect(messages).toEqual(['Recall omp capture failed']);
+  });
+
   test('headless failure writes stderr and logger, not notify', async () => {
     const logs: string[] = [];
     const ctx: OmpExtensionContext = {
@@ -58,7 +111,7 @@ describe('omp native extension', () => {
       hasUI: false,
       sessionManager: {
         getSessionId: () => 'sess-1',
-        getBranch: () => [],
+        getBranch: () => [{ type: 'message', id: 'a', message: { role: 'user', content: 'hi' } }],
       },
     };
     const stderrWrite = process.stderr.write.bind(process.stderr);

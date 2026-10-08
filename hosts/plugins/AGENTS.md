@@ -24,6 +24,7 @@ Both bundles declare plugin `name: "recall"` in their own host manifest; the dir
 - Codex adapters carry a routing preamble; the Claude bundle is byte-verbatim, because `agent-skills/` is already authored against Claude's frontmatter and rewriting it would change behavior for users migrating from the lifecycle install.
 - Copy skills into a bundle; never symlink. Claude drops symlinks that leave the plugin root on local-path installs, and `core.symlinks=false` checkouts degrade the payload silently.
 - The Codex bundle owns its lifecycle hooks because current Codex supplies transcript paths and additional-context output. The lifecycle installer must not duplicate them. The Claude bundle still ships no hooks because Claude merges plugin and `settings.json` hooks, which would double captures for lifecycle-installed users.
+- Codex ambient hooks (`Stop`, `PreCompact`, `PostCompact`, `SessionEnd`) run `hooks/capture.ts`, which sends supplied-transcript text to `recall capture`. `SessionStart` stays `recall host-hook codex` so L0/L1 injection keeps the existing assembler. Do not point injection at capture.
 - The Claude bundle coexists with the lifecycle installer, so `lib/install-lib.sh` must keep reconciling the duplicate skill symlinks and MCP registration. `RECALL_CLAUDE_PLUGIN_ID` there and `CLAUDE_PLUGIN_ID` in `src/hosts/claude.ts` are the same id — keep them in step.
 
 ## Work Guidance

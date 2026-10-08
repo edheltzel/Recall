@@ -89,9 +89,9 @@ The separately configured `recall-memory` server exposes all nine Recall operati
 - `memory_dump`
 - `decision_update`
 
-Recall enables the adapter's direct-tool mode by default. With the adapter's default `toolPrefix: "server"`, Pi registers those tools as `recall-memory_<tool>` — hyphens in the server name are preserved (`sanitizeServerPrefix` keeps `[A-Za-z0-9_-]`). An older hyphen-stripped `recall_memory_` prefix is not the current contract.
+Recall enables direct tools by default, registered as `recall-memory_<tool>` (adapter default `toolPrefix: "server"` keeps hyphens; a hyphen-stripped `recall_memory_` prefix is not the contract). Pi 1.0's `mcp.json` is native config: `pi-mcp-adapter` 5.x ignores `directTools` in that file and maps `exposure: "direct"` onto direct tools. The installer writes both (`exposure` for Pi 1.0, `directTools` for older adapter configs). Without the adapter, Pi's own names are `mcp__recall_memory__<tool>`.
 
-An existing explicit `directTools` preference is preserved during reinstall.
+An existing explicit `directTools` or `exposure` preference is preserved. A saved `directTools` value with no `exposure` is translated (`false` → `codemode`, `"search"` → `deferred`, a name list → `codemode` plus `toolExposure`) so Pi 1.0 still honors it.
 
 On the first Pi session after a new server is configured, the adapter exposes its `mcp` proxy while it builds the metadata cache.
 
@@ -109,7 +109,7 @@ Pi's native extension API provides real lifecycle events, so Recall does not nee
 
 `RecallExtract.ts` subscribes to `session_shutdown` and obtains the active JSONL path from `ctx.sessionManager.getSessionFile()`.
 
-It linearizes Pi's active tree branch and writes markdown under `$RECALL_HOME/MEMORY/pi-sessions/` for the existing batch extraction pipeline.
+It linearizes Pi's active tree branch, calls `recall capture` (harness `pi`, event `session_end`), and still writes markdown under `$RECALL_HOME/MEMORY/pi-sessions/` for the existing batch extraction pipeline. Guide: [Capture adapter](CAPTURE_ADAPTER.md).
 
 Pi also exposes compaction events, but Recall does not claim a separate pre-compaction flush.
 

@@ -4,5 +4,5 @@
   "compilerOptions": {
     "rootDir": "."
   },
-  "include": ["src/**/*", "hosts/omp/**/*"]
+  "include": ["src/**/*", "hosts/omp/**/*", "hosts/jcode/**/*"]
 }

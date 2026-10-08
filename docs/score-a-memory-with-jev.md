@@ -138,7 +138,7 @@ In this tutorial, you:
 - Stored the key in `~/.env` outside the repo, mode `600`.
 - Sourced that file into the process that runs `recall` and Claude Code.
 
-OpenCode and Pi markdown drops reach this same scorer through batch extract. Conversation import does too. Native raw capture does not: omp `session_stop`, Codex `Stop`, and the Grok lifecycle hook call `recall host-hook` and write messages without Jev.
+OpenCode markdown drops reach this same scorer through batch extract. Conversation import does too. Pi still drops markdown for that path, and also calls `recall capture` on shutdown. Ambient `recall capture` (omp `session_stop`, Codex `Stop`, Grok lifecycle, Claude Stop, Pi shutdown) writes the raw text without Jev. Guide: [Capture adapter](CAPTURE_ADAPTER.md).
 
 ## Next steps
 

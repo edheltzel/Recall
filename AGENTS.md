@@ -32,6 +32,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `hosts/opencode/` — OpenCode host integration
 - `hosts/pi/` — Pi package extensions for native lifecycle capture and memory injection
 - `hosts/omp/` — native omp package extension for main-session turn-completion capture; setup and limits in [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md)
+- `hosts/jcode/` — supplied-text capture helper only; no hook install and no private-file watcher. Limits in [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md)
 - `packaging/` — shipped `install.sh`, `update.sh`, and `uninstall.sh`
 - `scripts/` — dev / CI helper scripts (version check, e2e)
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`) plus tiny host-wire snippets under `templates/cursor/`
@@ -80,6 +81,7 @@ Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKI
 ### Version control and GitHub
 
 - Use GitButler (`but`) for all version-control operations; load the `but` skill before using it. Do not run raw `git` commands or bypass GitButler's workspace state.
+- `no-mistakes` runs in this GitButler workspace: it uses `but` branches and commits, never `git worktree` or a plain-git isolation checkout.
 - Use `gh` for GitHub issues, pull requests, reviews, and Actions. Use `but` for the underlying branches, commits, and pushes.
 - Create every GitHub PR as **`Atlas-Key`**. Before publishing, verify the authenticated API login is `Atlas-Key`; use account-scoped credentials for this repository rather than changing another project's active account. If that identity is unavailable, stop instead of creating the PR as another user.
 - The required reviewer is defined in [`.github/CODEOWNERS`](.github/CODEOWNERS). Request that reviewer on every PR, including automated publishing and drafts; after creation, verify author and reviewer through `gh`. Existing PR authors cannot be changed; do not close/recreate a PR without explicit permission.
@@ -128,7 +130,7 @@ Before adding code or content, search for an existing definition and extend it. 
 - **Uninstall preservation**: `--purge` snapshots canonical `identity.md` / `DISTILLED.md` with the databases and materializes them into Claude's MEMORY directory when that does not overwrite a foreign file. Installed root hooks and recursive `hooks/lib/` helpers must also appear in the matching `uninstall.sh` inventories; the uninstall test audits both.
 - **MCP registration**: User scope in `~/.claude/settings.json` (or `~/.claude.json` if managed by `claude mcp add`) under `mcpServers`. The `env.RECALL_DB_PATH` block is populated by the installer.
 - **Hook registration**: Claude events live in `~/.claude/settings.json`; Codex events live in `hosts/plugins/recall/hooks/hooks.json`; Grok capture uses the managed `~/.grok/hooks/RecallLifecycle.json` file.
-- **omp capture ownership**: the root `package.json#omp.extensions` loads `hosts/omp/recall.ts` through omp's native plugin manager. Only the awaited main-session `session_stop` event captures; native task/subagent sessions are excluded by omp. The installer still owns skills only. Keep native payload parsing under `src/hosts/` and persistence in the shared lifecycle ingest path; no duplicate database writer or Pi fallback.
+- **omp capture ownership**: the root `package.json#omp.extensions` loads `hosts/omp/recall.ts` through omp's native plugin manager. Only the awaited main-session `session_stop` event captures; native task/subagent sessions are excluded by omp. The installer still owns skills only. The extension sends ordered branch text to package-local `dist/index.js capture` and does not write SQLite. No duplicate database writer or Pi fallback.
 - **Hooks are self-contained**: `RecallExtract.ts`, `RecallStart.ts`, etc. are standalone scripts symlinked into `~/.claude/hooks/` from `~/.agents/Recall/shared/hooks/`. They don't import from `src/`. The shared resolver `hooks/lib/db-path.ts` centralizes DB-path resolution so the CLI and every hook agree.
 - **Input-scaled SQL bind lists**: any `IN (...)` or multi-row `VALUES` whose placeholder count grows with input MUST chunk through `src/lib/chunk.ts`'s `chunked()` (conservative 500, under SQLite's bind-variable limit) — never bind the whole list at once. Because hooks can't import `src/` (see above), a hook with an input-scaled list inlines a local equivalent. Partly enforced by `tests/lib/chunk-audit.test.ts`, which fails when a new input-scaled placeholder list appears in a file that doesn't already route some query through `chunked()` (and isn't allowlisted fixed-size). The guard is **file-granular**, not per-statement: a file that already calls `chunked()` anywhere is exempt wholesale, so a new un-chunked sibling `IN (...)` added to such a file (e.g. `memory.ts`, `dump.ts`, `aging.ts`, `dedup.ts` — the bulk-SQL files most likely to grow one) is NOT caught. Chunk those by hand and rely on review, not the guard, there.
 - **Shell-to-JS safety**: `install.sh` passes variables to `bun -e` via environment variables, never shell interpolation in JS strings.
@@ -192,6 +194,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`agent-skills/AGENTS.md`](agent-skills/AGENTS.md) — `do-recall-*` Agent Skill definitions
 - [`hosts/plugins/AGENTS.md`](hosts/plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 - [`hosts/opencode/AGENTS.md`](hosts/opencode/AGENTS.md) — OpenCode adapter plugins, their shared helpers, and the runtime contract they must satisfy
+- [`hosts/jcode/AGENTS.md`](hosts/jcode/AGENTS.md) — Jcode capture helper; supplied text only, no private history
 
 Owned at root (no child doc): `lib/install-lib.sh` and `lib/jsonc-mcp.ts`; `packaging/` lifecycle scripts; `scripts/` (dev/CI helpers + the per-host isolated e2e harnesses); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
 
