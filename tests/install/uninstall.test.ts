@@ -430,6 +430,18 @@ This content must be preserved across an uninstall.
     expect(s.mcpServers?.['other-server']).toBeDefined();
   });
 
+  test('deletes settings.json when it held only Recall entries', () => {
+    writeFileSync(settingsFile, `{
+      // Recall's sole settings entry.
+      "mcpServers": { "recall-memory": {}, },
+    }`);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(settingsFile)).toBe(false);
+  });
+
   test('CLAUDE.md: Recall-managed MEMORY section removed, other sections preserved', () => {
     runUninstall(claudeDir, backupBase);
     const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
@@ -671,6 +683,27 @@ Preserve this.
     expect(`${result.stdout}${result.stderr}`).not.toContain('left unchanged');
   });
 
+  test('Pi uninstall reads JSONC and preserves unrelated MCP registrations', () => {
+    const piConfigDir = join(tempRoot, 'pi-jsonc');
+    mkdirSync(piConfigDir, { recursive: true });
+    const piConfig = join(piConfigDir, 'mcp.json');
+    writeFileSync(piConfig, `{
+  // User-managed Pi settings.
+  "mcpServers": {
+    "recall-memory": { "command": "recall-mcp", },
+    "other": { "command": "other-mcp", },
+  },
+}
+`);
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).toBe(0);
+    const after = readFileSync(piConfig, 'utf-8');
+    expect(after).toContain('other-mcp');
+    expect(after).not.toContain('recall-memory');
+  });
+
   test('OpenCode uninstall rejects malformed config without writing', () => {
     const opencodeConfigDir = join(tempRoot, 'opencode-malformed');
     mkdirSync(opencodeConfigDir, { recursive: true });
@@ -709,7 +742,7 @@ Preserve this.
 
     expect(result.status).toBe(0);
     expect(readFileSync(opencodeConfig, 'utf-8')).toBe(malformed);
-    expect(JSON.parse(readFileSync(piConfig, 'utf-8')).mcpServers).toBeUndefined();
+    expect(existsSync(piConfig)).toBe(false);
     expect(existsSync(unlinkMarker)).toBe(true);
     expect(result.stdout).toContain('Uninstall Complete');
   });
