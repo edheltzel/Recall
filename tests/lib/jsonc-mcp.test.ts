@@ -19,6 +19,12 @@ describe('jsonc settings helpers', () => {
     expect(parsed.mcpServers['recall-memory'].command).toBe('bun');
   });
 
+  test('parseJsonc rejects duplicate keys at every object depth', () => {
+    expect(() => parseJsonc('{"mcpServers":{},"mcpServers":{}}')).toThrow('duplicate key "mcpServers"');
+    expect(() => parseJsonc('{"mcpServers":{"recall-memory":{},"recall-memory":{}}}'))
+      .toThrow('duplicate key "recall-memory"');
+  });
+
   test('writeJsonAtomic preserves mode for direct and symlinked targets', () => {
     dir = mkdtempSync(join(tmpdir(), 'recall-jsonc-'));
     const real = join(dir, 'real.json');
@@ -82,5 +88,29 @@ describe('jsonc settings helpers', () => {
     expect(Object.prototype.hasOwnProperty.call(parsed.mcpServers, '__proto__')).toBe(true);
     expect(parsed.mcpServers.__proto__).toEqual({ command: 'keep' });
     expect(parsed.mcpServers['recall-memory']).toBeUndefined();
+  });
+
+  test('merge and remove reject duplicate registrations without writing', () => {
+    dir = mkdtempSync(join(tmpdir(), 'recall-jsonc-'));
+    const original = `{
+      "mcpServers": {
+        "recall-memory": { "command": "first", },
+        "recall-memory": { "command": "second", },
+      },
+    }\n`;
+    const helper = join(import.meta.dir, '..', '..', 'lib', 'jsonc-mcp.ts');
+    const actions = [
+      ['merge', 'mcpServers', '{"command":"replacement"}', ''],
+      ['remove', 'mcpServers'],
+    ];
+
+    for (const [index, args] of actions.entries()) {
+      const config = join(dir, `settings-${index}.json`);
+      writeFileSync(config, original);
+      const result = Bun.spawnSync(['bun', 'run', helper, args[0], config, ...args.slice(1)]);
+      expect(result.exitCode).toBe(1);
+      expect(readFileSync(config, 'utf8')).toBe(original);
+      expect(result.stderr.toString()).toContain('duplicate key "recall-memory"');
+    }
   });
 });

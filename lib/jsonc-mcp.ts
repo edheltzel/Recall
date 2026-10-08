@@ -71,11 +71,15 @@ class JsoncParser {
     this.skipSpaceAndComments();
     while (this.text[this.index] !== '}') {
       const keyNode = this.string();
+      const key = keyNode.value as string;
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        throw new Error(`duplicate key ${JSON.stringify(key)} at ${keyNode.start}`);
+      }
       this.skipSpaceAndComments();
       if (this.text[this.index++] !== ':') throw new Error(`expected colon at ${this.index}`);
       const child = this.value();
-      properties.push({ key: keyNode.value as string, keyStart: keyNode.start, value: child });
-      value[keyNode.value as string] = child.value;
+      properties.push({ key, keyStart: keyNode.start, value: child });
+      value[key] = child.value;
       contentEnd = child.end;
       trailingComma = false;
       this.skipSpaceAndComments();
