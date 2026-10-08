@@ -19,7 +19,7 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 | Fresh install — Cursor snippets | Merge `templates/cursor/`; no marketplace plugin |
 | Fresh install — npm installer (Grok / Claude hooks / detected hosts) | `bun install -g recall-memory` then `recall install` |
 | Fresh install — one-shot (Bun on PATH) | `npx --package=recall-memory recall install` |
-| Fresh install — source / dev checkout | `./packaging/install.sh` |
+| Fresh install — source / dev checkout | Follow [Installation → Source checkout](installation.md#source-checkout) |
 | Re-install / repair a broken install | `recall install` (packaged) or `./packaging/install.sh` (source) — both idempotent |
 | Upgrade to the latest release — source checkout | `recall update` (or `./packaging/update.sh`) |
 | Upgrade a packaged (npm) install | `bun install -g recall-memory@latest` then `recall install` |
@@ -44,7 +44,7 @@ Pick the on-ramp that matches how you got Recall:
 - **Binaries first:** `bun install -g recall-memory` puts `recall` / `recall-mcp` on PATH, then `recall init` creates the database. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
 - **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). omp skills remain installer-owned. Grok has no plugin path; run `recall install`.
 - **npx (one-shot installer):** `npx --package=recall-memory recall install` — installer-owned surfaces only, no global install. Bun must still be on PATH.
-- **Source / dev checkout:** `git clone … && cd Recall && ./packaging/install.sh`. This one **builds from your working tree** (`bun install` + `bun run build` + `bun link`). See the [Installation guide](installation.md) for prerequisites and the full step list.
+- **Source / dev checkout:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup, then builds from your working tree (`bun install` + `bun run build` + `bun link`).
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
