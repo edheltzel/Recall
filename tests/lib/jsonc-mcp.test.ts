@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { isSemanticallyEmpty, parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.ts';
+import { isSemanticallyEmpty, parseJsonc, validateClaudeConfigShape, writeJsonAtomic, writeJsonAtomicOrRemoveEmpty } from '../../lib/jsonc-mcp.ts';
 
 let dir: string;
 
@@ -47,6 +47,24 @@ describe('jsonc settings helpers', () => {
     expect(readFileSync(real, 'utf8')).toContain('"ok": true');
     expect(readFileSync(link, 'utf8')).toContain('"ok": true');
     expect(statSync(real).mode & 0o777).toBe(0o600);
+  });
+
+  test('atomic writers fail closed on a dangling symlink', () => {
+    dir = mkdtempSync(join(tmpdir(), 'recall-jsonc-'));
+    const targetDir = join(dir, 'dotfiles');
+    const target = join(targetDir, 'settings.json');
+    const link = join(dir, 'settings.json');
+    mkdirSync(targetDir);
+    symlinkSync(target, link);
+
+    for (const write of [
+      () => writeJsonAtomic(link, { hooks: {} }),
+      () => writeJsonAtomicOrRemoveEmpty(link, {}),
+    ]) {
+      expect(write).toThrow('refusing to replace dangling symlink');
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(existsSync(target)).toBe(false);
+    }
   });
 
   test('parse and atomic rewrite preserve an own __proto__ key', () => {

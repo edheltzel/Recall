@@ -232,8 +232,21 @@ export function classifyClaudePluginState(
   return { status: enabled === false ? 'disabled' : 'active', version };
 }
 
+function lstatIfPresent(file: string) {
+  try {
+    return lstatSync(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 function writeTextAtomic(file: string, text: string): void {
-  const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
+  const entry = lstatIfPresent(file);
+  if (entry?.isSymbolicLink() && !existsSync(file)) {
+    throw new Error(`refusing to replace dangling symlink: ${file}`);
+  }
+  const target = entry?.isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
   const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined;
   try {
@@ -260,8 +273,9 @@ export function isSemanticallyEmpty(value: unknown): boolean {
 }
 
 function writeAtomicOrRemoveEmpty(file: string, value: unknown, text: string): void {
-  if (isSemanticallyEmpty(value) && !lstatSync(file).isSymbolicLink()) {
-    unlinkSync(file);
+  const entry = lstatIfPresent(file);
+  if (isSemanticallyEmpty(value) && !entry?.isSymbolicLink()) {
+    if (entry) unlinkSync(file);
     return;
   }
   writeTextAtomic(file, text);

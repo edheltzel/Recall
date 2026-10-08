@@ -136,7 +136,7 @@ describe('probeMcpEnv', () => {
     expect(env.MEM_DB_PATH).toBeUndefined();
   });
 
-  test('stored custom path stays authoritative without a runtime override', () => {
+  test('stored custom path warns when the runtime override is absent', () => {
     const stored = '/stored/custom.db';
     writeConfig({
       mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: stored } } },
@@ -147,7 +147,8 @@ describe('probeMcpEnv', () => {
       resolvedDbPath: RESOLVED,
     });
 
-    expect(result.status).toBe('PASS');
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('differs from current CLI path');
     expect(repair).toBeUndefined();
     expect((readEntry().env as Record<string, unknown>).RECALL_DB_PATH).toBe(stored);
   });
@@ -198,7 +199,7 @@ describe('probeMcpEnv', () => {
     }
   });
 
-  test('empty primary path falls back to and migrates the stored legacy path', () => {
+  test('stored legacy path warns without rewriting when the runtime override is absent', () => {
     const stored = '/stored/legacy.db';
     writeConfig({
       mcpServers: {
@@ -212,8 +213,9 @@ describe('probeMcpEnv', () => {
     });
 
     expect(result.status).toBe('WARN');
-    expect(repair!().status).toBe('PASS');
-    expect(readEntry().env).toEqual({ RECALL_DB_PATH: stored });
+    expect(result.message).toContain('differs from current CLI path');
+    expect(repair).toBeUndefined();
+    expect(readEntry().env).toEqual({ RECALL_DB_PATH: '', MEM_DB_PATH: stored });
   });
 
   test('repair preserves other entry keys and sibling mcpServers', () => {

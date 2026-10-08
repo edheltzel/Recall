@@ -908,7 +908,17 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
     };
   }
 
-  const desiredDbPath = selection.path;
+  if (!runtimeDbPathOverride && selection.path !== resolvedDbPath) {
+    return {
+      result: {
+        label,
+        status: 'WARN',
+        message: `stored MCP database path ${selection.path} differs from current CLI path ${resolvedDbPath}; export RECALL_DB_PATH=${selection.path} before launching Recall and Claude${unparseableNote}`,
+      },
+    };
+  }
+
+  const desiredDbPath = resolvedDbPath;
   const stale = owners.filter(owner =>
     owner.primaryDbPath !== desiredDbPath || owner.hasLegacyDbPath
   );

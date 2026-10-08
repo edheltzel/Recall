@@ -384,6 +384,49 @@ describe('update.sh', () => {
     }
   });
 
+  test('MCP and hook registration fail closed on a dangling settings symlink', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-settings-dangling-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const targetDir = join(tempRoot, 'dotfiles');
+      const target = join(targetDir, 'settings.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      mkdirSync(targetDir, { recursive: true });
+      symlinkSync(target, settingsFile);
+
+      const commands = [
+        ['recall_claude_plugin_active() { return 0; }', 'recall_configure_mcp'],
+        ['', 'recall_register_hook "Stop" "RecallExtract" "/bin/bun run RecallExtract.ts"'],
+      ];
+      for (const [setup, command] of commands) {
+        const driver = [
+          'set -e',
+          `export HOME="${tempRoot}"`,
+          `export CLAUDE_DIR="${claudeDir}"`,
+          `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+          'log_success() { :; }',
+          'log_warn() { :; }',
+          'log_error() { :; }',
+          'source "$REPO/lib/install-lib.sh"',
+          setup,
+          command,
+        ].join('\n');
+        const result = spawnSync('bash', ['-c', driver], {
+          encoding: 'utf-8',
+          cwd: REPO,
+          env: { ...process.env, REPO, RECALL_DB_PATH: '/custom/recall.db' },
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+        expect(existsSync(target)).toBe(false);
+      }
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('Claude plugin reconciliation preserves an empty settings.json symlink', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-symlink-'));
     try {
