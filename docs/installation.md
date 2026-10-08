@@ -12,7 +12,7 @@ This guide covers everything needed to install Recall: prerequisites, what the i
 
 ## Prerequisites
 
-Install these before running `install.sh`. Items marked **Optional** enhance Recall but are not required for core functionality.
+Install these before `bun install -g recall-memory` and `recall install`. Items marked **Optional** enhance Recall but are not required for core functionality.
 
 **Supported platforms:** macOS 13+ (Apple Silicon and Intel) and Linux (Ubuntu 22.04+, Debian 12+).
 
@@ -126,12 +126,19 @@ Set `OLLAMA_URL` if Ollama runs on a different host (default: `http://localhost:
 ## Install Recall
 
 Recall has one install root: `~/.agents/Recall`. The runtime tree is not
-relocatable. `RECALL_DB_PATH` and `install.sh --db-path` may place the SQLite
+relocatable. `RECALL_DB_PATH`, `recall install --db-path`, and `./packaging/install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-**Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension (see [README Quick Start](../README.md#quick-start)). Use `./packaging/install.sh` / `recall install` for Grok, for Claude hooks, and for detected hosts that still need installer-owned files.
+**User path:**
 
-Clone the repository to a permanent directory (not `/tmp`) when you need the installer script or a local marketplace root:
+```bash
+bun install -g recall-memory
+recall install
+```
+
+`recall install` runs `packaging/install.sh` with `RECALL_PACKAGED=1`, so it skips clone, `bun install`, build, and link. **Preferred attach** for Claude Code, Codex, Pi, and omp is still the native plugin/extension (see [README Quick Start](../README.md#quick-start)). Use this path for Grok, Claude hooks, and detected hosts that still need installer-owned files.
+
+Source checkout (permanent directory, not `/tmp`; also the local marketplace root):
 
 ```bash
 git clone https://github.com/edheltzel/Recall.git
@@ -164,7 +171,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
 ```mermaid
 flowchart LR
-    A[install.sh] --> B[Backup existing files]
+    A[packaging/install.sh] --> B[Backup existing files]
     B --> C[bun install]
     C --> D[bun run build]
     D --> E[bun link]

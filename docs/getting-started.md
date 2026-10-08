@@ -12,11 +12,11 @@ Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP
 
 Recall requires [Bun](https://bun.sh) (`bun:sqlite` and Bun-native hooks). Put Bun on `PATH` first.
 
-Install binaries and the database once:
+User path:
 
 ```bash
 bun install -g recall-memory
-recall init
+recall install
 ```
 
 Then attach each harness with its **native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Commands and ownership are in the README Quick Start table and the per-host guides: [Claude](CLAUDE_INTEGRATION.md), [Codex](CODEX_INTEGRATION.md), [Pi](PI_INTEGRATION.md), [omp](OMP_INTEGRATION.md).
@@ -141,7 +141,7 @@ Per-host registration:
 - **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
 - **omp** — no MCP registration. Native capture and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
 - **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.
-- **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `install.sh` does not duplicate it.
+- **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `packaging/install.sh` does not duplicate it.
 - **Cursor** — snippets only. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`). No marketplace plugin.
 
 Full tool reference: [MCP Tools](mcp-tools.md).
