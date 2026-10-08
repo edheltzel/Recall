@@ -152,6 +152,52 @@ describe('probeMcpEnv', () => {
     expect((readEntry().env as Record<string, unknown>).RECALL_DB_PATH).toBe(stored);
   });
 
+  test('conflicting stored paths warn without offering a repair', () => {
+    const siblingPath = join(tempDir, 'settings.json');
+    const first = {
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/one.db' } } },
+    };
+    const second = {
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/two.db' } } },
+    };
+    writeConfig(first);
+    writeFileSync(siblingPath, JSON.stringify(second, null, 2));
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath), target(siblingPath)],
+      resolvedDbPath: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('conflicting stored database paths');
+    expect(repair).toBeUndefined();
+    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual(first);
+    expect(JSON.parse(readFileSync(siblingPath, 'utf-8'))).toEqual(second);
+  });
+
+  test('runtime override converges conflicting stored paths', () => {
+    const siblingPath = join(tempDir, 'settings.json');
+    writeConfig({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/one.db' } } },
+    });
+    writeFileSync(siblingPath, JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/two.db' } } },
+    }, null, 2));
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath), target(siblingPath)],
+      resolvedDbPath: RESOLVED,
+      runtimeDbPathOverride: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(repair!().status).toBe('PASS');
+    for (const path of [configPath, siblingPath]) {
+      const config = JSON.parse(readFileSync(path, 'utf-8'));
+      expect(config.mcpServers['recall-memory'].env).toEqual({ RECALL_DB_PATH: RESOLVED });
+    }
+  });
+
   test('empty primary path falls back to and migrates the stored legacy path', () => {
     const stored = '/stored/legacy.db';
     writeConfig({

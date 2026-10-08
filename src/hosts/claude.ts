@@ -2,7 +2,11 @@ import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
-import { readJsoncObject } from '../../lib/jsonc-mcp.js';
+import {
+  classifyClaudePluginState,
+  readJsoncObject,
+  type ClaudePluginState as SharedClaudePluginState,
+} from '../../lib/jsonc-mcp.js';
 
 export interface ClaudePaths {
   root: string;
@@ -41,10 +45,7 @@ export function claudePaths(home: string): ClaudePaths {
  */
 export const CLAUDE_PLUGIN_ID = 'recall@recall-marketplace';
 
-export interface ClaudePluginState {
-  status: 'absent' | 'active' | 'disabled' | 'unknown';
-  version: string | null;
-}
+export type ClaudePluginState = SharedClaudePluginState;
 
 function readJson(path: string): Record<string, unknown> | null | undefined {
   if (!existsSync(path)) return undefined;
@@ -59,34 +60,8 @@ function readJson(path: string): Record<string, unknown> | null | undefined {
 export function claudePluginState(home: string): ClaudePluginState {
   const paths = claudePaths(home);
   const installedPlugins = readJson(join(paths.root, 'plugins', 'installed_plugins.json'));
-  if (installedPlugins === null) return { status: 'unknown', version: null };
-  const plugins = installedPlugins?.plugins;
-  if (plugins !== undefined && (!plugins || typeof plugins !== 'object' || Array.isArray(plugins))) {
-    return { status: 'unknown', version: null };
-  }
-  const entries = (plugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
-  if (entries !== undefined && !Array.isArray(entries)) return { status: 'unknown', version: null };
-  const first = entries?.[0];
-  if (first !== undefined && (!first || typeof first !== 'object' || Array.isArray(first))) {
-    return { status: 'unknown', version: null };
-  }
-  const record = first as Record<string, unknown> | undefined;
-  if (!record) return { status: 'absent', version: null };
-
-  const version = typeof record.version === 'string' ? record.version : null;
-  const settings = readJson(paths.settings);
-  if (settings === null) return { status: 'unknown', version };
-  const enabledPlugins = settings?.enabledPlugins;
-  if (enabledPlugins !== undefined
-    && (!enabledPlugins || typeof enabledPlugins !== 'object' || Array.isArray(enabledPlugins))) {
-    return { status: 'unknown', version };
-  }
-  const enabled = (enabledPlugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
-  if (enabled !== undefined && typeof enabled !== 'boolean') return { status: 'unknown', version };
-  return {
-    status: enabled === false ? 'disabled' : 'active',
-    version,
-  };
+  const settings = installedPlugins === undefined ? undefined : readJson(paths.settings);
+  return classifyClaudePluginState(installedPlugins, settings, CLAUDE_PLUGIN_ID);
 }
 
 export function claudeMcpConfigTargets(home: string): McpConfigTarget[] {

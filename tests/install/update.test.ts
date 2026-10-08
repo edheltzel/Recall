@@ -139,7 +139,7 @@ describe('update.sh', () => {
         `export CLAUDE_DIR="${claudeDir}"`,
         'log_success() { :; }',
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
       const r = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
@@ -214,6 +214,132 @@ describe('update.sh', () => {
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  test('active Claude plugin persists a fresh explicit custom DB path', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-fresh-custom-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const settingsFile = join(claudeDir, 'settings.json');
+      const customDb = '/fresh/custom.db';
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_claude_plugin_active() { return 0; }',
+        'recall_configure_mcp',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO, RECALL_DB_PATH: customDb },
+      });
+
+      expect(result.status).toBe(0);
+      const entry = JSON.parse(readFileSync(settingsFile, 'utf-8')).mcpServers['recall-memory'];
+      expect(entry.env).toEqual({ RECALL_DB_PATH: customDb });
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Claude MCP configuration reuses a legacy custom owner without adding settings', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-legacy-owner-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const legacyFile = join(tempRoot, '.claude.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      const stored = '/stored/custom.db';
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(legacyFile, JSON.stringify({
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: stored } } },
+      }));
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_claude_plugin_active() { return 1; }',
+        'command() { if [[ "$1" == "-v" && "$2" == "claude" ]]; then return 1; fi; builtin command "$@"; }',
+        'recall_configure_mcp',
+      ].join('\n');
+      const {
+        RECALL_DB_PATH: _recallDbPath,
+        MEM_DB_PATH: _memDbPath,
+        ...baseEnv
+      } = process.env;
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...baseEnv, REPO },
+      });
+
+      expect(result.status).toBe(0);
+      const entry = JSON.parse(readFileSync(legacyFile, 'utf-8')).mcpServers['recall-memory'];
+      expect(entry.env).toEqual({ RECALL_DB_PATH: stored });
+      expect(existsSync(settingsFile)).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('conflicting Claude MCP owners require an explicit path before convergence', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-conflict-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const legacyFile = join(tempRoot, '.claude.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      const legacyOriginal = JSON.stringify({
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/one.db' } } },
+      });
+      const settingsOriginal = JSON.stringify({
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/two.db' } } },
+      });
+      writeFileSync(legacyFile, legacyOriginal);
+      writeFileSync(settingsFile, settingsOriginal);
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_claude_plugin_active() { return 0; }',
+        'recall_configure_mcp',
+      ].join('\n');
+      const {
+        RECALL_DB_PATH: _recallDbPath,
+        MEM_DB_PATH: _memDbPath,
+        ...baseEnv
+      } = process.env;
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...baseEnv, REPO },
+      });
+
+      expect(result.status).toBe(3);
+      expect(readFileSync(legacyFile, 'utf-8')).toBe(legacyOriginal);
+      expect(readFileSync(settingsFile, 'utf-8')).toBe(settingsOriginal);
+
+      const selected = '/selected.db';
+      const converged = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...baseEnv, REPO, RECALL_DB_PATH: selected },
+      });
+      expect(converged.status).toBe(0);
+      for (const path of [legacyFile, settingsFile]) {
+        const entry = JSON.parse(readFileSync(path, 'utf-8')).mcpServers['recall-memory'];
+        expect(entry.env).toEqual({ RECALL_DB_PATH: selected });
+      }
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('symlinked settings.json is written through the link, with backup and no temp file', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-symlink-'));
     try {
@@ -234,7 +360,7 @@ describe('update.sh', () => {
         `export CLAUDE_DIR="${claudeDir}"`,
         'log_success() { :; }',
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
       const r = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
@@ -280,7 +406,7 @@ describe('update.sh', () => {
         'log_success() { :; }',
         'log_warn() { :; }',
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_unregister_legacy_claude_mcp',
+        '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
       const r = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
@@ -310,7 +436,7 @@ describe('update.sh', () => {
         `export CLAUDE_DIR="${claudeDir}"`,
         `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_unregister_legacy_claude_mcp',
+        '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
       const result = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
@@ -341,7 +467,7 @@ describe('update.sh', () => {
         `export CLAUDE_DIR="${claudeDir}"`,
         'log_success() { :; }',
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
       const r = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
@@ -364,7 +490,7 @@ describe('update.sh', () => {
       mkdirSync(claudeDir, { recursive: true });
       const original = '{"permissions":{"allow":["safe"]},"permissions":{"deny":["secret"]}}';
       const commands = [
-        '_recall_write_mcp_settings "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
         'recall_register_hook "Stop" "RecallExtract" "/bin/bun run RecallExtract.ts"',
         'recall_rename_hooks_in_settings',
       ];
@@ -438,8 +564,7 @@ describe('update.sh', () => {
       const original = '{"mcpServers":{"recall-memory":[]}}';
       mkdirSync(claudeDir, { recursive: true });
       const commands = [
-        '_recall_write_mcp_settings "/bin/bun" "/new/path/recall-mcp"',
-        '_recall_ensure_mcp_entry "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
         'recall_register_hook "Stop" "RecallExtract" "/bin/bun run RecallExtract.ts"',
         'recall_rename_hooks_in_settings',
       ];
@@ -483,7 +608,7 @@ describe('update.sh', () => {
         `export CLAUDE_DIR="${claudeDir}"`,
         'log_success() { :; }',
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_write_mcp_settings "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
         'recall_register_hook "Stop" "RecallExtract" "/bin/bun run RecallExtract.ts"',
         'recall_rename_hooks_in_settings',
       ].join('\n');

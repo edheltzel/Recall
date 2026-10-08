@@ -184,6 +184,54 @@ export function configuredMcpDbPath(env: unknown): string | undefined {
   return typeof legacy === 'string' && legacy.length > 0 ? legacy : undefined;
 }
 
+export type McpDbPathSelection =
+  | { status: 'selected'; path: string }
+  | { status: 'conflict'; paths: string[] };
+
+export function selectMcpDbPath(
+  configuredPaths: Array<string | undefined>,
+  defaultPath: string,
+  runtimeOverride?: string,
+): McpDbPathSelection {
+  if (runtimeOverride) return { status: 'selected', path: runtimeOverride };
+  const paths = [...new Set(configuredPaths.map(path => path ?? defaultPath))];
+  if (paths.length > 1) return { status: 'conflict', paths };
+  return { status: 'selected', path: paths[0] ?? defaultPath };
+}
+
+export interface ClaudePluginState {
+  status: 'absent' | 'active' | 'disabled' | 'unknown';
+  version: string | null;
+}
+
+export function classifyClaudePluginState(
+  installedPlugins: unknown | null | undefined,
+  settings: unknown | null | undefined,
+  pluginId: string,
+): ClaudePluginState {
+  if (installedPlugins === undefined) return { status: 'absent', version: null };
+  if (!isObject(installedPlugins)) return { status: 'unknown', version: null };
+  const plugins = installedPlugins.plugins;
+  if (plugins !== undefined && !isObject(plugins)) return { status: 'unknown', version: null };
+  const entries = isObject(plugins) ? plugins[pluginId] : undefined;
+  if (entries !== undefined && !Array.isArray(entries)) return { status: 'unknown', version: null };
+  const first = entries?.[0];
+  if (first !== undefined && !isObject(first)) return { status: 'unknown', version: null };
+  if (!isObject(first)) return { status: 'absent', version: null };
+
+  const version = typeof first.version === 'string' ? first.version : null;
+  if (settings === null || (settings !== undefined && !isObject(settings))) {
+    return { status: 'unknown', version };
+  }
+  const enabledPlugins = isObject(settings) ? settings.enabledPlugins : undefined;
+  if (enabledPlugins !== undefined && !isObject(enabledPlugins)) {
+    return { status: 'unknown', version };
+  }
+  const enabled = isObject(enabledPlugins) ? enabledPlugins[pluginId] : undefined;
+  if (enabled !== undefined && typeof enabled !== 'boolean') return { status: 'unknown', version };
+  return { status: enabled === false ? 'disabled' : 'active', version };
+}
+
 function writeTextAtomic(file: string, text: string): void {
   const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
