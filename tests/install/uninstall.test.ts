@@ -27,8 +27,7 @@ const REPO = process.cwd();
 const UNINSTALL = join(REPO, 'packaging', 'uninstall.sh');
 
 /**
- * Shadow the host's `pi` with a no-op and return the directory to prepend to
- * PATH.
+ * Shadow a host CLI with a no-op and return the directory to prepend to PATH.
  *
  * `remove_pi` runs `pi remove ... --no-approve` whenever `pi` is on PATH, so on
  * a developer machine that actually has Pi installed these tests inherit a real
@@ -38,9 +37,9 @@ const UNINSTALL = join(REPO, 'packaging', 'uninstall.sh');
  * stubbing it keeps the tests hermetic without losing coverage. Same reasoning
  * as the `bun unlink` stub used further down.
  */
-function stubPiOnPath(binDir: string): string {
+function stubCommandOnPath(binDir: string, command: string): string {
   mkdirSync(binDir, { recursive: true });
-  writeFileSync(join(binDir, 'pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(binDir, command), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   return binDir;
 }
 
@@ -55,6 +54,7 @@ function runUninstall(
   backupBase: string,
   extraArgs: string[] = [],
 ): RunResult {
+  const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
   const r = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', ...extraArgs],
@@ -66,6 +66,7 @@ function runUninstall(
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir, // ~ -> tmp (avoids touching real $HOME binaries)
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         // bun unlink / npm unlink -g operate on the host's global registry
         // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
         // the developer's live `recall` link.
@@ -81,6 +82,7 @@ function runUninstall(
 }
 
 function runPurge(claudeDir: string, backupBase: string): RunResult {
+  const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
@@ -93,6 +95,7 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir,
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -123,6 +126,9 @@ function runUninstallIncludingPi(
   backupBase: string,
   piConfigDir: string,
 ): RunResult {
+  const stubBin = join(dirname(claudeDir), 'stub-bin');
+  stubCommandOnPath(stubBin, 'claude');
+  stubCommandOnPath(stubBin, 'pi');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode'],
@@ -135,7 +141,7 @@ function runUninstallIncludingPi(
         BACKUP_BASE: backupBase,
         PI_CONFIG_DIR: piConfigDir,
         HOME: claudeDir,
-        PATH: `${stubPiOnPath(join(dirname(claudeDir), 'stub-bin'))}:${process.env.PATH ?? ''}`,
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -152,6 +158,7 @@ function runUninstallIncludingOpenCode(
   backupBase: string,
   opencodeConfigDir: string,
 ): RunResult {
+  const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-pi'],
@@ -164,6 +171,7 @@ function runUninstallIncludingOpenCode(
         BACKUP_BASE: backupBase,
         OPENCODE_CONFIG_DIR: opencodeConfigDir,
         HOME: claudeDir,
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -183,6 +191,7 @@ function runUninstallAll(
   unlinkMarker: string,
   fakeBin: string,
 ): RunResult {
+  stubCommandOnPath(fakeBin, 'claude');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-omp'],
@@ -429,6 +438,22 @@ This content must be preserved across an uninstall.
     // mcpServers: recall-memory removed, other-server kept
     expect(s.mcpServers?.['recall-memory']).toBeUndefined();
     expect(s.mcpServers?.['other-server']).toBeDefined();
+  });
+
+  test('uninstall leaves an unowned Claude JSONC file byte-for-byte unchanged', () => {
+    const legacySettings = join(claudeDir, '.claude.json');
+    const original = `{
+  // Unrelated user configuration.
+  "hooks": { "Stop": [], },
+}
+`;
+    writeFileSync(legacySettings, original);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(legacySettings)).toBe(true);
+    expect(readFileSync(legacySettings, 'utf-8')).toBe(original);
   });
 
   test('deletes settings.json when it held only Recall entries', () => {
@@ -814,7 +839,7 @@ Preserve this.
       `#!/bin/sh\nif [ "$1" = unlink ]; then touch "$RECALL_TEST_UNLINK"; exit 0; fi\nexec ${process.execPath} "$@"\n`,
       { mode: 0o755 },
     );
-    stubPiOnPath(fakeBin);
+    stubCommandOnPath(fakeBin, 'pi');
 
     const result = runUninstallAll(claudeDir, backupBase, opencodeConfigDir, piConfigDir, unlinkMarker, fakeBin);
 

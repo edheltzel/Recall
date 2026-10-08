@@ -12,7 +12,8 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 
 | Situation | Command |
 |---|---|
-| Fresh install — Claude / Codex plugin | `bun install -g recall-memory` then `recall init`, then the host plugin command in [Claude](CLAUDE_INTEGRATION.md) / [Codex](CODEX_INTEGRATION.md) |
+| Fresh install - Claude plugin + hooks | `bun install -g recall-memory` then `recall init`, install the [Claude plugin](CLAUDE_INTEGRATION.md), then run `recall install` |
+| Fresh install - Codex plugin | `bun install -g recall-memory` then `recall init`, then install the [Codex plugin](CODEX_INTEGRATION.md) |
 | Fresh install — Pi native package | `bun install -g recall-memory` then `pi install npm:recall-memory`; MCP still needs the adapter ([Pi Integration](PI_INTEGRATION.md)) |
 | Fresh install — omp native capture | Build and link the clean packed checkout ([omp Integration](OMP_INTEGRATION.md)); skills remain installer-owned |
 | Fresh install — Grok (no plugin path) | `bun install -g recall-memory` then `recall install` ([Grok Integration](GROK_INTEGRATION.md)) |
@@ -42,7 +43,7 @@ Recall installs runtime state under `~/.agents/Recall/`. **Preferred attach** fo
 Pick the on-ramp that matches how you got Recall:
 
 - **Binaries first:** `bun install -g recall-memory` puts `recall` / `recall-mcp` on PATH, then `recall init` creates the database. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
-- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). omp skills remain installer-owned. Grok has no plugin path; run `recall install`.
+- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). Claude Code must run `recall install` after its plugin attach because lifecycle hooks remain installer-owned. The Codex plugin already owns its lifecycle hooks. omp skills remain installer-owned. Grok has no plugin path; run `recall install`.
 - **npx (one-shot installer):** `npx --package=recall-memory recall install` — installer-owned surfaces only, no global install. Bun must still be on PATH.
 - **Source / dev checkout:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup, then builds from your working tree (`bun install` + `bun run build` + `bun link`).
 

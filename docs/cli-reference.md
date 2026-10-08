@@ -487,13 +487,15 @@ recall start                            # Render L0/L1 session-start memory (see
 
 `recall init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
 
-`recall doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created; user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced. `--fix` only ever repairs symlinks — data and index maintenance is the explicit job of [`recall repair`](#repair), which doctor recommends when an FTS index is out of sync.
+`recall doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created, stale `recall-memory` database paths are updated, and user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced. Data and index maintenance is the explicit job of [`recall repair`](#repair), which doctor recommends when an FTS index is out of sync.
+
+Claude configuration files accept JSONC, but when `recall install`, `recall update`, `recall uninstall`, or `recall doctor --fix` writes one back, it is serialized as strict JSON and loses comments and trailing commas. Config files without a relevant Recall entry are left untouched. `recall migrate` applies the same normalization to every detected host configuration it rewrites.
 
 `recall stats` reports row counts per table and total database size.
 
 `recall path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
 
-`recall migrate` moves the database to a new path and rewrites MCP/hook configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. It accepts JSONC comments and trailing commas, but a config whose `RECALL_DB_PATH` changes is rewritten as strict JSON and loses its comments. Refuses to overwrite a non-empty destination. Snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
+`recall migrate` moves the database to a new path and rewrites MCP/hook configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. Refuses to overwrite a non-empty destination. Snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
 
 ### Onboard
 

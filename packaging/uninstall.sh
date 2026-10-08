@@ -276,6 +276,7 @@ filter_claude_settings() {
       const file = process.env.SETTINGS_FILE;
       const names = process.env.HOOK_NAMES_CSV.split(",");
       const config = readJsoncObject(file, true);
+      let changed = false;
       if (config.hooks && typeof config.hooks === "object") {
         for (const event of Object.keys(config.hooks)) {
           const list = config.hooks[event];
@@ -284,16 +285,19 @@ filter_claude_settings() {
             const inner = (entry && entry.hooks) || [];
             return !inner.some(h => h && h.command && names.some(n => h.command.includes(n)));
           });
+          if (kept.length === list.length) continue;
+          changed = true;
           if (kept.length === 0) delete config.hooks[event];
           else config.hooks[event] = kept;
         }
         if (Object.keys(config.hooks).length === 0) delete config.hooks;
       }
-      if (config.mcpServers && config.mcpServers["recall-memory"]) {
+      if (config.mcpServers && Object.prototype.hasOwnProperty.call(config.mcpServers, "recall-memory")) {
+        changed = true;
         delete config.mcpServers["recall-memory"];
         if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
       }
-      writeJsonAtomicOrRemoveEmpty(file, config);
+      if (changed) writeJsonAtomicOrRemoveEmpty(file, config);
     '; then
       log_success "Filtered Recall entries from $f"
     else
