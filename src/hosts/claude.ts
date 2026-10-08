@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
-import { parseJsonc } from '../../lib/jsonc-mcp.js';
+import { readJsoncObject } from '../../lib/jsonc-mcp.js';
 
 export interface ClaudePaths {
   root: string;
@@ -48,13 +48,10 @@ export interface ClaudePluginState {
   version: string | null;
 }
 
-function readJson(path: string): Record<string, unknown> | null {
-  if (!existsSync(path)) return null;
+function readJson(path: string): Record<string, unknown> | null | undefined {
+  if (!existsSync(path)) return undefined;
   try {
-    const parsed: unknown = parseJsonc(readFileSync(path, 'utf-8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return readJsoncObject(path);
   } catch {
     return null;
   }
@@ -68,7 +65,15 @@ export function claudePluginState(home: string): ClaudePluginState {
   const record = Array.isArray(entries) ? (entries[0] as Record<string, unknown> | undefined) : undefined;
   if (!record) return { installed: false, active: false, version: null };
 
-  const enabledPlugins = readJson(paths.settings)?.enabledPlugins as Record<string, unknown> | undefined;
+  const settings = readJson(paths.settings);
+  if (settings === null) {
+    return {
+      installed: true,
+      active: false,
+      version: typeof record.version === 'string' ? record.version : null,
+    };
+  }
+  const enabledPlugins = settings?.enabledPlugins as Record<string, unknown> | undefined;
   return {
     installed: true,
     active: enabledPlugins?.[CLAUDE_PLUGIN_ID] !== false,

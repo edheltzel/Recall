@@ -16,6 +16,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readlinkSync,
   rmSync,
   symlinkSync,
@@ -145,6 +146,22 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     const result = runDriver(['if recall_claude_plugin_active; then echo active; else echo inactive; fi']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('inactive');
+  });
+
+  test('malformed plugin settings stop skill ownership changes', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      plugins: { 'recall@recall-marketplace': [{ version: '1.0.0' }] },
+    }));
+    const original = '{"permissions":{},"permissions":{}}';
+    writeFileSync(join(claudeDir, 'settings.json'), original);
+
+    const result = runDriver(['recall_install_claude_skills']);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(join(claudeDir, 'settings.json'), 'utf-8')).toBe(original);
+    expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(false);
   });
 
   test('idempotent: running twice does not fail or duplicate', () => {

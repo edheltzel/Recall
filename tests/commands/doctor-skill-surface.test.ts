@@ -62,5 +62,6 @@ describe('probeClaudePlugin JSONC settings', () => {
     expect(result.status).toBe('WARN');
     expect(result.message).toContain('also registered in settings.json');
   });
+
 });
 });

@@ -144,6 +144,21 @@ export function parseJsonc(text: string): unknown {
   return parse(text).value;
 }
 
+export function readJsoncObject(file: string, emptyIfMissingOrBlank = false): JsonObject {
+  if (!existsSync(file)) {
+    if (emptyIfMissingOrBlank) return Object.create(null) as JsonObject;
+    throw new Error(`file not found: ${file}`);
+  }
+  const text = readFileSync(file, 'utf8');
+  if (text.trim() === '') {
+    if (emptyIfMissingOrBlank) return Object.create(null) as JsonObject;
+    throw new Error(`empty JSONC file: ${file}`);
+  }
+  const value = parseJsonc(text);
+  if (!isObject(value)) throw new Error('root is not an object');
+  return value;
+}
+
 function writeTextAtomic(file: string, text: string): void {
   const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
@@ -245,7 +260,8 @@ function merge(file: string, parentKey: string, entry: JsonObject, preserveKeys:
 }
 
 function remove(file: string, parentKey: string): void {
-  const text = readFileSync(file, 'utf8');
+  const original = readFileSync(file, 'utf8');
+  const text = original.trim() === '' ? '{}' : original;
   const root = parse(text);
   if (!isObject(root.value)) throw new Error('root is not an object');
   const parent = root.properties?.find(property => property.key === parentKey);

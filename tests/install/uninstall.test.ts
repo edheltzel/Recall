@@ -460,6 +460,18 @@ This content must be preserved across an uninstall.
     expect(JSON.parse(readFileSync(realSettings, 'utf-8'))).toEqual({});
   });
 
+  test('invalid Claude settings remain unchanged and make uninstall incomplete', () => {
+    const original = '{"permissions":{},"permissions":{},"mcpServers":{"recall-memory":{}}}';
+    writeFileSync(settingsFile, original);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+    expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+
   test('CLAUDE.md: Recall-managed MEMORY section removed, other sections preserved', () => {
     runUninstall(claudeDir, backupBase);
     const content = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
@@ -755,20 +767,35 @@ Preserve this.
     expect(parsed.mcpServers?.['recall-memory']).toBeUndefined();
   });
 
-  test('OpenCode uninstall rejects malformed config without writing', () => {
+  test('OpenCode uninstall rejects duplicate-key config without writing', () => {
     const opencodeConfigDir = join(tempRoot, 'opencode-malformed');
     mkdirSync(opencodeConfigDir, { recursive: true });
     const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
-    const original = '{ "mcp": { "recall-memory": { } }';
+    const original = '{"mcp":{"recall-memory":{}} ,"mcp":{"other":{}}}';
     writeFileSync(opencodeConfig, original);
 
     const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
 
-    expect(result.status).toBe(0);
+    expect(result.status).not.toBe(0);
     expect(readFileSync(opencodeConfig, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
   });
 
-  test('malformed OpenCode JSONC does not abort the remaining uninstall', () => {
+  test('Pi uninstall rejects duplicate-key config without writing', () => {
+    const piConfigDir = join(tempRoot, 'pi-malformed');
+    mkdirSync(piConfigDir, { recursive: true });
+    const piConfig = join(piConfigDir, 'mcp.json');
+    const original = '{"mcpServers":{"recall-memory":{}} ,"mcpServers":{"other":{}}}';
+    writeFileSync(piConfig, original);
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(piConfig, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+  });
+
+  test('duplicate-key OpenCode JSONC does not abort the remaining uninstall', () => {
     const opencodeConfigDir = join(tempRoot, 'opencode-malformed-continuation');
     const piConfigDir = join(tempRoot, 'pi');
     const fakeBin = join(tempRoot, 'bin');
@@ -778,8 +805,8 @@ Preserve this.
     mkdirSync(fakeBin, { recursive: true });
 
     const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
-    const malformed = '{ "mcp": { "recall-memory": { } }';
-    writeFileSync(opencodeConfig, malformed);
+    const invalid = '{"mcp":{"recall-memory":{}} ,"mcp":{"other":{}}}';
+    writeFileSync(opencodeConfig, invalid);
     const piConfig = join(piConfigDir, 'mcp.json');
     writeFileSync(piConfig, JSON.stringify({ mcpServers: { 'recall-memory': { command: 'recall-mcp' } } }));
     writeFileSync(
@@ -791,10 +818,11 @@ Preserve this.
 
     const result = runUninstallAll(claudeDir, backupBase, opencodeConfigDir, piConfigDir, unlinkMarker, fakeBin);
 
-    expect(result.status).toBe(0);
-    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(malformed);
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(invalid);
     expect(existsSync(piConfig)).toBe(false);
     expect(existsSync(unlinkMarker)).toBe(true);
-    expect(result.stdout).toContain('Uninstall Complete');
+    expect(result.stdout).toContain('Uninstall Incomplete');
+    expect(result.stdout).not.toContain('Recall uninstalled successfully');
   });
 });

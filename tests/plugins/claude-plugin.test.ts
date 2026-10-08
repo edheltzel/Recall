@@ -84,5 +84,8 @@ describe('Claude native plugin package', () => {
       "enabledPlugins": { "${CLAUDE_PLUGIN_ID}": false, },
     }`);
     expect(claudePluginState(tempDir)).toEqual({ installed: true, active: false, version: '0.9.4' });
+
+    writeFileSync(join(claudeDir, 'settings.json'), '{"permissions":{},"permissions":{}}');
+    expect(claudePluginState(tempDir)).toEqual({ installed: true, active: false, version: '0.9.4' });
   });
 });

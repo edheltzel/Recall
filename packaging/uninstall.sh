@@ -263,21 +263,19 @@ remove_skills_from() {
 # A file that is empty after that removal is deleted (#231).
 filter_claude_settings() {
   local f
+  local config_failed=false
   for f in "$CLAUDE_DIR/settings.json" "$HOME/.claude.json"; do
     [[ -f "$f" ]] || continue
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would filter Recall entries out of $f"
       continue
     fi
-    SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
+    if SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
       JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const fs = require("fs");
-      const { parseJsonc, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
+      const { readJsoncObject, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.SETTINGS_FILE;
       const names = process.env.HOOK_NAMES_CSV.split(",");
-      let config;
-      try { config = parseJsonc(fs.readFileSync(file, "utf8")); } catch { process.exit(0); }
-      if (!config || typeof config !== "object" || Array.isArray(config)) process.exit(0);
+      const config = readJsoncObject(file, true);
       if (config.hooks && typeof config.hooks === "object") {
         for (const event of Object.keys(config.hooks)) {
           const list = config.hooks[event];
@@ -296,9 +294,14 @@ filter_claude_settings() {
         if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
       }
       writeJsonAtomicOrRemoveEmpty(file, config);
-    '
-    log_success "Filtered Recall entries from $f"
+    '; then
+      log_success "Filtered Recall entries from $f"
+    else
+      log_error "Failed to filter Recall entries from $f (existing config is invalid - left unchanged)"
+      config_failed=true
+    fi
   done
+  [[ "$config_failed" == "false" ]]
 }
 
 # Some Claude Code installs register MCP servers via `claude mcp remove`
@@ -440,7 +443,7 @@ remove_opencode() {
       if _recall_jsonc_remove_mcp_entry "$config" "mcp"; then
         log_success "Removed recall-memory from $config"
       else
-        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported — left unchanged)"
+        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported - left unchanged)"
         config_failed=true
       fi
     fi
@@ -523,6 +526,7 @@ remove_grok() {
 
 remove_pi() {
   local config="$PI_CONFIG_DIR/mcp.json"
+  local config_failed=false
 
   # Recall is a local Pi package for extensions + skills. The MCP adapter is a
   # separate shared Pi package and may serve other servers, so leave it alone.
@@ -542,7 +546,8 @@ remove_pi() {
       if _recall_jsonc_remove_mcp_entry "$config" "mcpServers"; then
         log_success "Removed recall-memory from $config"
       else
-        log_warn "Could not remove recall-memory from $config (invalid or unsupported config — left unchanged)"
+        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported - left unchanged)"
+        config_failed=true
       fi
     fi
   fi
@@ -580,6 +585,7 @@ remove_pi() {
 
   remove_memory_section "$agents_md" pi
   remove_skills_from "$PI_CONFIG_DIR/skills"
+  [[ "$config_failed" == "false" ]]
 }
 
 # ── omp removal ──────────────────────────────────────────────────────────────
@@ -708,6 +714,7 @@ do_purge() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
+  local lifecycle_failed=false
   print_summary
   confirm_or_exit
   confirm_purge_or_exit
@@ -727,7 +734,9 @@ main() {
 
   log_info "Removing Claude Code MCP registration..."
   unregister_claude_mcp_cli
-  filter_claude_settings
+  if ! filter_claude_settings; then
+    lifecycle_failed=true
+  fi
   echo ""
 
   log_info "Removing hook files..."
@@ -743,13 +752,17 @@ main() {
     log_info "Removing OpenCode integration..."
     if ! remove_opencode; then
       log_warn "OpenCode config was left unchanged; continuing uninstall"
+      lifecycle_failed=true
     fi
     echo ""
   fi
 
   if [[ "$SKIP_PI" != "true" ]]; then
     log_info "Removing Pi integration..."
-    remove_pi
+    if ! remove_pi; then
+      log_warn "Pi config was left unchanged; continuing uninstall"
+      lifecycle_failed=true
+    fi
     echo ""
   fi
 
@@ -773,6 +786,13 @@ main() {
     log_info "Purging install root + databases..."
     do_purge
     echo ""
+  fi
+
+  if [[ "$lifecycle_failed" == "true" ]]; then
+    _banner error "Uninstall Incomplete"
+    echo ""
+    log_error "Recall cleanup finished, but one or more invalid config files were left unchanged."
+    return 1
   fi
 
   _banner success "Uninstall Complete"
