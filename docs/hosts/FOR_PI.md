@@ -127,7 +127,7 @@ They are platform-agnostic — Pi, Claude Code, and OpenCode share them.
 
 | Script | Purpose |
 |---|---|
-| `./packaging/install.sh` | Install or reinstall. Idempotent. |
+| `recall install` or `./packaging/install.sh` | Packaged user path, or source checkout. Idempotent. |
 | `./packaging/update.sh --check` | Check if a newer GitHub release exists. Check-only. |
 | `./packaging/update.sh` | Pull latest, rebuild, migrate DB, and refresh the Pi package plus MCP registration. Exit Pi first. |
 | `./packaging/uninstall.sh --dry-run` | Preview what would be removed. |
