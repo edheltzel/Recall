@@ -8,7 +8,7 @@
 // handles from other processes during these tests).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { runMigrate } from '../../src/commands/migrate';
@@ -190,6 +190,7 @@ describe('recall migrate', () => {
     writeFileSync(legacy, legacyOriginal);
     writeFileSync(settings, settingsOriginal);
     mkdirSync(`${settings}.tmp`);
+    chmodSync(`${settings}.tmp`, 0o751);
 
     expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
 
@@ -201,6 +202,7 @@ describe('recall migrate', () => {
     expect(readFileSync(settings, 'utf-8')).toBe(settingsOriginal);
     expect(existsSync(`${legacy}.tmp`)).toBe(false);
     expect(statSync(`${settings}.tmp`).isDirectory()).toBe(true);
+    expect(statSync(`${settings}.tmp`).mode & 0o777).toBe(0o751);
     expect(capturedErr.join('\n')).toContain(`cannot stage ${settings}`);
   });
 

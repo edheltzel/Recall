@@ -264,6 +264,10 @@ function stageTextAtomic(file: string, text: string): StagedJsonWrite {
   }
   const target = entry?.isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
+  const tmpEntry = lstatIfPresent(tmp);
+  if (tmpEntry && !tmpEntry.isFile()) {
+    throw new Error(`refusing to replace non-file temporary path: ${tmp}`);
+  }
   const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined;
   let pending = true;
   const cleanup = () => {
@@ -272,7 +276,7 @@ function stageTextAtomic(file: string, text: string): StagedJsonWrite {
     try { unlinkSync(tmp); } catch { /* temp may not exist */ }
   };
   try {
-    if (mode !== undefined && existsSync(tmp)) chmodSync(tmp, mode);
+    if (mode !== undefined && tmpEntry) chmodSync(tmp, mode);
     writeFileSync(tmp, text, mode === undefined ? undefined : { mode });
     if (mode !== undefined) chmodSync(tmp, mode);
   } catch (error) {

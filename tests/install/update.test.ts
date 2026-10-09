@@ -398,7 +398,7 @@ describe('update.sh', () => {
       expect(readFileSync(join(backupDir, '.claude.json'), 'utf-8')).toBe(legacyOriginal);
       expect(readFileSync(join(backupDir, 'settings.json'), 'utf-8')).toBe(settingsOriginal);
       const output = `${result.stdout}${result.stderr}`;
-      expect(output).toMatch(/EISDIR|is a directory/i);
+      expect(output).toContain('refusing to replace non-file temporary path');
       expect(output).toContain('config may be partially updated');
       expect(output).toContain(`Restore the Claude config backups from ${backupDir}, then rerun the command`);
     } finally {
@@ -558,45 +558,75 @@ describe('update.sh', () => {
     }
   });
 
-  test('Claude plugin leaves invalid MCP environments unchanged', () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-env-invalid-'));
+  test('plugin-active install rejects an MCP env array without changing either config', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-install-env-invalid-'));
     try {
       const claudeDir = join(tempRoot, '.claude');
-      mkdirSync(claudeDir, { recursive: true });
-      const invalidEnvironments = [
-        [],
-        { RECALL_DB_PATH: 42 },
-        { MEM_DB_PATH: false },
-      ];
-      for (const settingsFile of [
-        join(tempRoot, '.claude.json'),
-        join(claudeDir, 'settings.json'),
-      ]) {
-        for (const env of invalidEnvironments) {
-          const original = JSON.stringify({
-            permissions: { allow: ['safe'] },
-            mcpServers: { 'recall-memory': { env } },
-          });
-          writeFileSync(settingsFile, original);
-          const driver = [
-            'set -e',
-            `export HOME="${tempRoot}"`,
-            `export CLAUDE_DIR="${claudeDir}"`,
-            `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
-            'source "$REPO/lib/install-lib.sh"',
-            '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
-          ].join('\n');
-          const result = spawnSync('bash', ['-c', driver], {
-            encoding: 'utf-8',
-            cwd: REPO,
-            env: { ...process.env, REPO },
-          });
+      const legacyFile = join(tempRoot, '.claude.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+      writeFileSync(
+        join(claudeDir, 'plugins', 'installed_plugins.json'),
+        JSON.stringify({ plugins: { 'recall@recall-marketplace': [{ version: '1.0.0' }] } }),
+      );
+      const legacyOriginal = JSON.stringify({
+        permissions: { allow: ['safe'] },
+        mcpServers: { 'recall-memory': { env: [] } },
+      });
+      const settingsOriginal = JSON.stringify({
+        permissions: { allow: ['safe'] },
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: join(tempRoot, 'custom.db') } } },
+      });
+      writeFileSync(legacyFile, legacyOriginal);
+      writeFileSync(settingsFile, settingsOriginal);
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+        'source "$REPO/lib/install-lib.sh"',
+        'recall_configure_mcp',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO },
+      });
 
-          expect(result.status).not.toBe(0);
-          expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
-          rmSync(settingsFile, { force: true });
-        }
-      }
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(legacyFile, 'utf-8')).toBe(legacyOriginal);
+      expect(readFileSync(settingsFile, 'utf-8')).toBe(settingsOriginal);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('plugin-active update rejects a non-string MCP path without changing either config', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-update-path-invalid-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const legacyFile = join(tempRoot, '.claude.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      mkdirSync(claudeDir, { recursive: true });
+      const legacyOriginal = JSON.stringify({
+        permissions: { allow: ['safe'] },
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: join(tempRoot, 'custom.db') } } },
+      });
+      const settingsOriginal = JSON.stringify({
+        permissions: { allow: ['safe'] },
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: 5 } } },
+      });
+      writeFileSync(legacyFile, legacyOriginal);
+      writeFileSync(settingsFile, settingsOriginal);
+      const result = spawnSync('bash', ['-c', refreshRuntimeDriver(tempRoot, claudeDir)], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO },
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(legacyFile, 'utf-8')).toBe(legacyOriginal);
+      expect(readFileSync(settingsFile, 'utf-8')).toBe(settingsOriginal);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
