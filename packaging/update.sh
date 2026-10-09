@@ -30,6 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=../lib/install-lib.sh
 source "$SCRIPT_DIR/../lib/install-lib.sh"
+cd "$RECALL_REPO_DIR"
 
 REPO_OWNER="edheltzel"
 REPO_NAME="Recall"
@@ -274,7 +275,7 @@ step_fetch_and_pull() {
       RECALL_UPDATE_PRE_SHA="$PRE_SHA" \
       TIMESTAMP="$TIMESTAMP" \
       BACKUP_DIR="$BACKUP_DIR" \
-      exec bash "$SCRIPT_DIR/update.sh" "${UPDATE_ARGS[@]}"
+      exec bash "$SCRIPT_DIR/update.sh" ${UPDATE_ARGS[@]+"${UPDATE_ARGS[@]}"}
   fi
 }
 

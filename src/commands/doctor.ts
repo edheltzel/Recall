@@ -17,6 +17,7 @@ import {
   parseJsonc,
   selectMcpDbPath,
   validateClaudeConfigShape,
+  validateClaudeMcpConfigShape,
   writeJsonAtomic,
 } from '../../lib/jsonc-mcp.js';
 export interface DoctorOptions {
@@ -798,20 +799,19 @@ interface McpRegistration {
 
 interface McpScan {
   owners: McpRegistration[];
-  // Config files that exist but failed to parse — doctor must never touch a
-  // file it can't read as JSON, so these are surfaced (WARN), not silently
-  // conflated with a genuinely-absent registration.
-  unparseable: string[];
+  // Existing config files that could not be fully validated. A readable MCP
+  // registration still participates even when an unrelated Claude field fails.
+  invalidConfigs: string[];
 }
 
 // Locate every config file that owns an mcpServers["recall-memory"] entry.
 // Mirrors lifecycle MCP reconciliation file selection (exists + contains the
-// registration). Malformed/unreadable JSON is never fatal, but it is recorded
-// (not dropped) so the caller can distinguish it from a missing registration.
+// registration). Invalid config is never fatal, but it is recorded so the
+// caller can distinguish it from a missing registration.
 function parseHostConfig(target: McpConfigTarget): Record<string, unknown> {
   const config = parseJsonc(readFileSync(target.path, 'utf-8'));
   if (target.host === 'claude') {
-    validateClaudeConfigShape(config);
+    validateClaudeMcpConfigShape(config);
     return config;
   }
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
@@ -831,15 +831,22 @@ function mcpEntryAt(config: Record<string, unknown>, target: McpConfigTarget): M
 
 function findMcpRegistrations(targets: McpConfigTarget[]): McpScan {
   const owners: McpRegistration[] = [];
-  const unparseable: string[] = [];
+  const invalidConfigs: string[] = [];
   for (const target of targets) {
     if (!existsSync(target.path)) continue;
     let cfg: Record<string, unknown>;
     try {
       cfg = parseHostConfig(target);
     } catch {
-      unparseable.push(target.path);
+      invalidConfigs.push(target.path);
       continue;
+    }
+    if (target.host === 'claude') {
+      try {
+        validateClaudeConfigShape(cfg);
+      } catch {
+        invalidConfigs.push(target.path);
+      }
     }
     const entry = mcpEntryAt(cfg, target);
     if (!entry) continue;
@@ -856,7 +863,7 @@ function findMcpRegistrations(targets: McpConfigTarget[]): McpScan {
       hasLegacyDbPath: !!envRecord && Object.prototype.hasOwnProperty.call(envRecord, 'MEM_DB_PATH'),
     });
   }
-  return { owners, unparseable };
+  return { owners, invalidConfigs };
 }
 
 // Exported for unit tests. Pure with respect to its args (config-file paths +
@@ -865,26 +872,26 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   const label = 'MCP env carries RECALL_DB_PATH';
   const { targets, resolvedDbPath, runtimeDbPathOverride } = probe;
 
-  const { owners, unparseable } = findMcpRegistrations(targets);
+  const { owners, invalidConfigs } = findMcpRegistrations(targets);
 
   // A config that exists but can't be parsed is never silently dropped: doctor
   // names it and leaves it untouched. When there are no valid owners this is the
   // whole result (WARN); when there are valid owners it rides along as a note so
   // the malformed sibling can't hide behind a PASS/WARN/FAIL on the others.
-  const unparseableNote = unparseable.length > 0
-    ? ` — could not parse ${unparseable.join(', ')} (left untouched)`
+  const invalidNote = invalidConfigs.length > 0
+    ? ` — invalid or unparseable config: ${invalidConfigs.join(', ')}`
     : '';
 
   // No config file owns the registration. Distinguish a genuinely-absent
   // registration (INFO — nothing to do) from a config that exists but is
   // unparseable (WARN — doctor refuses to touch a file it can't parse).
   if (owners.length === 0) {
-    if (unparseable.length > 0) {
+    if (invalidConfigs.length > 0) {
       return {
         result: {
           label,
           status: 'WARN',
-          message: `config present but unparseable — refusing to touch ${unparseable.join(', ')}`,
+          message: `config present but unparseable — refusing to touch ${invalidConfigs.join(', ')}`,
         },
       };
     }
@@ -903,7 +910,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       result: {
         label,
         status: 'WARN',
-        message: `conflicting stored database paths: ${selection.paths.join(', ')} — refusing to rewrite MCP registrations${unparseableNote}`,
+        message: `conflicting stored database paths: ${selection.paths.join(', ')} — refusing to rewrite MCP registrations${invalidNote}`,
       },
     };
   }
@@ -913,7 +920,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       result: {
         label,
         status: 'WARN',
-        message: `stored MCP database path ${selection.path} differs from current CLI path ${resolvedDbPath}; export RECALL_DB_PATH=${selection.path} before launching Recall and Claude${unparseableNote}`,
+        message: `stored MCP database path ${selection.path} differs from current CLI path ${resolvedDbPath}; export RECALL_DB_PATH=${selection.path} before launching Recall and Claude${invalidNote}`,
       },
     };
   }
@@ -926,8 +933,8 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
     return {
       result: {
         label,
-        status: 'PASS',
-        message: `env.RECALL_DB_PATH is canonical in ${owners.length} config file(s)${unparseableNote}`,
+        status: invalidConfigs.length > 0 ? 'WARN' : 'PASS',
+        message: `env.RECALL_DB_PATH is canonical in ${owners.length} config file(s)${invalidNote}`,
       },
     };
   }
@@ -939,7 +946,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
     result: {
       label,
       status: 'WARN',
-      message: `${detail} — MCP server may diverge from CLI on next Claude restart${unparseableNote}`,
+      message: `${detail} — MCP server may diverge from CLI on next Claude restart${invalidNote}`,
     },
     repair: () => {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
@@ -972,13 +979,13 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       // Every stale owner's registration vanished before we could patch it —
       // don't claim work that didn't happen.
       if (patched.length === 0 && failed.length === 0) {
-        return { label, status: 'PASS', message: `Nothing to patch — registration(s) vanished before repair${unparseableNote}` };
+        return { label, status: invalidConfigs.length > 0 ? 'WARN' : 'PASS', message: `Nothing to patch — registration(s) vanished before repair${invalidNote}` };
       }
       if (failed.length > 0) {
         const patchedNote = patched.length ? `patched ${patched.join(', ')}; ` : '';
-        return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}${unparseableNote}` };
+        return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}${invalidNote}` };
       }
-      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH in ${patched.join(', ')}${unparseableNote}` };
+      return { label, status: invalidConfigs.length > 0 ? 'WARN' : 'PASS', message: `Patched env.RECALL_DB_PATH in ${patched.join(', ')}${invalidNote}` };
     },
   };
 }

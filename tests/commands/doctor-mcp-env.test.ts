@@ -382,9 +382,35 @@ describe('probeMcpEnv', () => {
       { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } }, null, 2));
     writeFileSync(badPath, '{ not valid json ');
 
-    const { result } = probeMcpEnv({ targets: [target(validPath), target(badPath)], resolvedDbPath: RESOLVED });
+    const { result, repair } = probeMcpEnv({ targets: [target(validPath), target(badPath)], resolvedDbPath: RESOLVED });
     expect(result.status).toBe('WARN'); // stale valid owner
     expect(result.message).toContain(badPath); // malformed sibling surfaced, not dropped
+
+    writeFileSync(validPath, JSON.stringify({ mcpServers: {} }));
+    expect(repair!().status).toBe('WARN');
+  });
+
+  test('invalid Claude hooks do not hide a readable conflicting MCP path', () => {
+    const validPath = join(tempDir, 'valid.json');
+    const invalidSiblingPath = join(tempDir, 'invalid-sibling.json');
+    writeFileSync(validPath, JSON.stringify(
+      { mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/cli.db' } } } }));
+    writeFileSync(invalidSiblingPath, JSON.stringify({
+      hooks: [],
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/other.db' } } },
+    }));
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(validPath), target(invalidSiblingPath)],
+      resolvedDbPath: '/cli.db',
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('conflicting stored database paths');
+    expect(result.message).toContain('/cli.db');
+    expect(result.message).toContain('/other.db');
+    expect(result.message).toContain(invalidSiblingPath);
+    expect(repair).toBeUndefined();
   });
 
   // ── Fix 1 call site (issue #112): a throwing repair() degrades to FAIL and

@@ -469,7 +469,7 @@ This content must be preserved across an uninstall.
     expect(readFileSync(legacySettings, 'utf-8')).toBe(original);
   });
 
-  test('deletes settings.json when it held only Recall entries', () => {
+  test('preserves settings.json after removing its only Recall entry', () => {
     writeFileSync(settingsFile, `{
       // Recall's sole settings entry.
       "mcpServers": { "recall-memory": {}, },
@@ -478,7 +478,8 @@ This content must be preserved across an uninstall.
     const result = runUninstall(claudeDir, backupBase);
 
     expect(result.status).toBe(0);
-    expect(existsSync(settingsFile)).toBe(false);
+    expect(existsSync(settingsFile)).toBe(true);
+    expect(JSON.parse(readFileSync(settingsFile, 'utf-8'))).toEqual({});
   });
 
   test('preserves a settings.json symlink when only Recall entries are removed', () => {

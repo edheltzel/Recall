@@ -15,10 +15,12 @@ type Node = {
   properties?: Property[];
   contentEnd?: number;
   trailingComma?: boolean;
+  hasComments?: boolean;
 };
 
 class JsoncParser {
   private index = 0;
+  private hasComments = false;
 
   constructor(private readonly text: string) {}
 
@@ -27,6 +29,7 @@ class JsoncParser {
     const root = this.value();
     this.skipSpaceAndComments();
     if (this.index !== this.text.length) throw new Error('trailing content');
+    root.hasComments = this.hasComments;
     return root;
   }
 
@@ -121,11 +124,13 @@ class JsoncParser {
         continue;
       }
       if (this.text.startsWith('//', this.index)) {
+        this.hasComments = true;
         const end = this.text.indexOf('\n', this.index + 2);
         this.index = end < 0 ? this.text.length : end + 1;
         continue;
       }
       if (this.text.startsWith('/*', this.index)) {
+        this.hasComments = true;
         const end = this.text.indexOf('*/', this.index + 2);
         if (end < 0) throw new Error('unterminated comment');
         this.index = end + 2;
@@ -160,13 +165,17 @@ export function readJsoncObject(file: string, emptyIfMissingOrBlank = false): Js
 }
 
 export function validateClaudeConfigShape(config: unknown): asserts config is JsonObject {
-  if (!isObject(config)) throw new Error('root is not an object');
+  validateClaudeMcpConfigShape(config);
   if (config.hooks !== undefined) {
     if (!isObject(config.hooks)) throw new Error('hooks is not an object');
     for (const [event, entries] of Object.entries(config.hooks)) {
       if (!Array.isArray(entries)) throw new Error(`hooks.${event} is not an array`);
     }
   }
+}
+
+export function validateClaudeMcpConfigShape(config: unknown): asserts config is JsonObject {
+  if (!isObject(config)) throw new Error('root is not an object');
   if (config.mcpServers !== undefined) {
     if (!isObject(config.mcpServers)) throw new Error('mcpServers is not an object');
     const recallEntry = config.mcpServers['recall-memory'];
@@ -309,17 +318,19 @@ export function writeJsonAtomic(file: string, value: unknown): void {
   writeTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-export function isSemanticallyEmpty(value: unknown): boolean {
-  if (Array.isArray(value)) return value.every(isSemanticallyEmpty);
-  if (value !== null && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).every(isSemanticallyEmpty);
-  }
-  return false;
+function isOnlyEmptyMcpParent(root: Node): boolean {
+  if (root.hasComments || !isObject(root.value)) return false;
+  const properties = root.properties ?? [];
+  if (properties.length !== 1) return false;
+  const parent = properties[0];
+  return (parent.key === 'mcp' || parent.key === 'mcpServers')
+    && isObject(parent.value.value)
+    && (parent.value.properties?.length ?? 0) === 0;
 }
 
-function writeAtomicOrRemoveEmpty(file: string, value: unknown, text: string): void {
+function writeAtomicOrRemoveEmpty(file: string, root: Node, text: string): void {
   const entry = lstatIfPresent(file);
-  if (isSemanticallyEmpty(value) && !entry?.isSymbolicLink()) {
+  if (isOnlyEmptyMcpParent(root) && !entry?.isSymbolicLink()) {
     if (entry) unlinkSync(file);
     return;
   }
@@ -327,7 +338,8 @@ function writeAtomicOrRemoveEmpty(file: string, value: unknown, text: string): v
 }
 
 export function writeJsonAtomicOrRemoveEmpty(file: string, value: unknown): void {
-  writeAtomicOrRemoveEmpty(file, value, `${JSON.stringify(value, null, 2)}\n`);
+  const text = `${JSON.stringify(value, null, 2)}\n`;
+  writeAtomicOrRemoveEmpty(file, parse(text), text);
 }
 
 function isObject(value: unknown): value is JsonObject {
@@ -413,7 +425,7 @@ function remove(file: string, parentKey: string): void {
     updated = apply(text, properties[currentIndex - 1].value.end, current.value.end, '');
   }
   const parsed = parse(updated);
-  writeAtomicOrRemoveEmpty(file, parsed.value, updated);
+  writeAtomicOrRemoveEmpty(file, parsed, updated);
 }
 
 if (process.argv[1]?.endsWith('jsonc-mcp.ts') || process.argv[1]?.endsWith('jsonc-mcp.js')) {

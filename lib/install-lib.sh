@@ -1576,8 +1576,11 @@ _recall_reconcile_claude_mcp() {
     try {
       const files = [process.env.LEGACY_FILE, process.env.SETTINGS_FILE];
       const owners = files.map(ownedConfig).filter(Boolean);
+      const hadOwners = owners.length > 0;
+      const previousPaths = owners.map(owner => configuredMcpDbPath(owner.entry.env) ?? process.env.DEFAULT_DB);
+      const discardedCustomPaths = [...new Set(previousPaths.filter(path => path !== process.env.DEFAULT_DB))];
       const selection = selectMcpDbPath(
-        owners.map(owner => configuredMcpDbPath(owner.entry.env)),
+        previousPaths,
         process.env.DEFAULT_DB,
         process.env.EXPLICIT_DB || undefined,
       );
@@ -1589,8 +1592,25 @@ _recall_reconcile_claude_mcp() {
           if (Object.keys(owner.config.mcpServers).length === 0) delete owner.config.mcpServers;
         }
         persist(owners, true);
-        console.log("plugin");
+        if (!hadOwners) {
+          console.log("success:recall-memory MCP provided by the Claude plugin");
+        } else if (discardedCustomPaths.length > 0) {
+          console.log(`warn:Removed the user recall-memory registration and discarded custom RECALL_DB_PATH ${discardedCustomPaths.join(", ")} because inherited RECALL_DB_PATH selects the plugin default ${process.env.DEFAULT_DB}`);
+        } else {
+          console.log("success:Removed the default user recall-memory registration; recall-memory MCP is now provided by the Claude plugin");
+        }
       } else {
+        const registrationsNeedUpdate = owners.some(owner => {
+          const args = owner.entry.args;
+          const env = owner.entry.env;
+          return owner.entry.command !== process.env.BUN_PATH
+            || !Array.isArray(args)
+            || args.length !== 2
+            || args[0] !== "run"
+            || args[1] !== process.env.MCP_PATH
+            || configuredMcpDbPath(env) !== selection.path
+            || Object.prototype.hasOwnProperty.call(env ?? {}, "MEM_DB_PATH");
+        });
         if (owners.length === 0) {
           const config = readJsoncObject(process.env.SETTINGS_FILE, true);
           validateClaudeConfigShape(config);
@@ -1601,20 +1621,35 @@ _recall_reconcile_claude_mcp() {
         }
         for (const owner of owners) configure(owner, selection.path);
         persist(owners, false);
-        console.log(selection.path === process.env.DEFAULT_DB ? "default" : "custom");
+        if (process.env.MODE !== "plugin") {
+          console.log("success:Configured recall-memory MCP registration");
+        } else if (!hadOwners) {
+          console.log(`warn:Added a user recall-memory registration for custom RECALL_DB_PATH ${selection.path} because the Claude plugin cannot carry it`);
+        } else {
+          const replacedPaths = [...new Set(previousPaths.filter(path => path !== selection.path))];
+          if (replacedPaths.length > 0) {
+            const discarded = replacedPaths.filter(path => path !== process.env.DEFAULT_DB);
+            const prior = discarded.length > 0
+              ? `discarded custom RECALL_DB_PATH ${discarded.join(", ")}`
+              : `replaced the default database path ${process.env.DEFAULT_DB}`;
+            console.log(`warn:Replaced the user recall-memory registration: ${prior} in favor of inherited RECALL_DB_PATH ${selection.path}`);
+          } else if (registrationsNeedUpdate) {
+            console.log(`warn:Updated the user recall-memory registration while keeping custom RECALL_DB_PATH ${selection.path} because the Claude plugin cannot carry it`);
+          } else {
+            console.log(`warn:Kept the user recall-memory registration for custom RECALL_DB_PATH ${selection.path} because the Claude plugin cannot carry it`);
+          }
+        }
       }
     } catch (error) {
       console.error(error instanceof Error ? error.stack ?? error.message : String(error));
       process.exit(writeAttempted ? 4 : 2);
     }
   ')"; then
-    if [[ "$mode" == "plugin" && "$outcome" == "custom" ]]; then
-      log_warn "Kept a user recall-memory registration to persist the custom RECALL_DB_PATH the plugin cannot carry"
-    elif [[ "$mode" == "plugin" ]]; then
-      log_success "recall-memory MCP provided by the Claude plugin"
-    else
-      log_success "Configured recall-memory MCP registration"
-    fi
+    case "$outcome" in
+      warn:*) log_warn "${outcome#warn:}" ;;
+      success:*) log_success "${outcome#success:}" ;;
+      *) log_success "$outcome" ;;
+    esac
     return 0
   else
     status=$?

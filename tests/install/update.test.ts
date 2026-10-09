@@ -164,7 +164,7 @@ describe('update.sh', () => {
         `export CLAUDE_DIR="${claudeDir}"`,
         'log_success() { :; }',
         'source "$REPO/lib/install-lib.sh"',
-        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
+        '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
       const r = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
@@ -182,6 +182,9 @@ describe('update.sh', () => {
       expect(entry.env.RECALL_DB_PATH).toBe('/new/db');
       expect(entry.env.MEM_DB_PATH).toBeUndefined();
       expect(entry.env.MY_CUSTOM_VAR).toBe('keep-me');
+      expect(`${r.stdout}${r.stderr}`).toContain('Replaced the user recall-memory registration');
+      expect(`${r.stdout}${r.stderr}`).toContain('/old/db');
+      expect(`${r.stdout}${r.stderr}`).toContain('/new/db');
       const backups = join(tempRoot, '.agents', 'Recall', 'backups');
       expect(existsSync(backups)).toBe(true);
       const saved = readFileSync(join(backups, readdirSync(backups).find(name => name !== 'latest') ?? '', 'settings.json'), 'utf-8');
@@ -258,6 +261,8 @@ describe('update.sh', () => {
       expect(result.status).toBe(0);
       const entry = JSON.parse(readFileSync(settingsFile, 'utf-8')).mcpServers['recall-memory'];
       expect(entry.env).toEqual({ RECALL_DB_PATH: customDb });
+      expect(`${result.stdout}${result.stderr}`).toContain('Added a user recall-memory registration');
+      expect(`${result.stdout}${result.stderr}`).toContain(customDb);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -522,6 +527,42 @@ describe('update.sh', () => {
       expect(r.status).toBe(0);
       expect(lstatSync(settingsFile).isSymbolicLink()).toBe(true);
       expect(JSON.parse(readFileSync(realFile, 'utf-8'))).toEqual({});
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('active Claude plugin reports a removed custom pin selected back to default', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-removed-custom-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const recallDir = join(tempRoot, '.agents', 'Recall');
+      const settingsFile = join(claudeDir, 'settings.json');
+      const customDb = '/stored/custom.db';
+      const defaultDb = join(recallDir, 'recall.db');
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(settingsFile, JSON.stringify({
+        mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: customDb } } },
+      }));
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export RECALL_DIR="${recallDir}"`,
+        'source "$REPO/lib/install-lib.sh"',
+        '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO, RECALL_DB_PATH: defaultDb },
+      });
+
+      expect(result.status).toBe(0);
+      expect(JSON.parse(readFileSync(settingsFile, 'utf-8'))).toEqual({});
+      expect(`${result.stdout}${result.stderr}`).toContain('Removed the user recall-memory registration');
+      expect(`${result.stdout}${result.stderr}`).toContain(customDb);
+      expect(`${result.stdout}${result.stderr}`).toContain(defaultDb);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -833,7 +874,7 @@ describe('update.sh', () => {
     expect(r.stdout).toMatch(/would: migrate Recall-owned Claude\/Pi MEMORY bootstraps/);
   });
 
-  test('a bootstrap-capable updater reloads a changed lifecycle library', () => {
+  test('a no-argument updater from a subdirectory reloads changed lifecycle code', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-reexec-'));
     try {
       const checkout = join(tempRoot, 'checkout');
@@ -848,16 +889,30 @@ describe('update.sh', () => {
       const settingsFile = join(claudeDir, 'settings.json');
       const pullCount = join(tempRoot, 'pull-count');
       const realLib = join(REPO, 'lib', 'install-lib.sh');
+      const newLib = join(tempRoot, 'new-install-lib.sh');
+      const nested = join(checkout, 'nested');
 
-      for (const dir of [checkoutLib, checkoutPackaging, stubBin, join(claudeDir, 'plugins'), bunBin, targets]) {
+      for (const dir of [checkoutLib, checkoutPackaging, nested, stubBin, join(claudeDir, 'plugins'), bunBin, targets]) {
         mkdirSync(dir, { recursive: true });
       }
       writeFileSync(join(checkoutPackaging, 'update.sh'), readFileSync(UPDATE, 'utf-8'), { mode: 0o755 });
       writeFileSync(join(checkoutLib, 'jsonc-mcp.ts'), readFileSync(join(REPO, 'lib', 'jsonc-mcp.ts'), 'utf-8'));
       writeFileSync(
         join(checkoutLib, 'install-lib.sh'),
-        `source ${JSON.stringify(realLib)}\nrecall_configure_mcp() { :; }\n`,
+        `source ${JSON.stringify(realLib)}\n_confirm() { return 0; }\nrecall_configure_mcp() { :; }\n`,
       );
+      writeFileSync(newLib, [
+        `source ${JSON.stringify(realLib)}`,
+        '_confirm() { return 0; }',
+        'recall_copy_runtime_files() { :; }',
+        'recall_configure_claude_md() { :; }',
+        'recall_detect_platforms() { OPENCODE_DETECTED=false; PI_DETECTED=false; GROK_DETECTED=false; OMP_DETECTED=false; }',
+        'recall_rename_hooks_in_settings() { :; }',
+        'recall_register_all_hooks() { :; }',
+        'recall_unlink_if_managed() { :; }',
+        'recall_verify_install() { return 0; }',
+        'recall_provision_embedding_model() { :; }',
+      ].join('\n'));
       writeFileSync(join(checkout, 'package.json'), JSON.stringify({ version: '9.9.9' }));
       writeFileSync(
         join(claudeDir, 'plugins', 'installed_plugins.json'),
@@ -890,7 +945,7 @@ case "$1" in
     [[ -f "$PULL_COUNT" ]] && count="$(cat "$PULL_COUNT")"
     printf '%s\n' "$((count + 1))" > "$PULL_COUNT"
     ;;
-  diff) exit 1 ;;
+  diff) [[ "$PWD" == "$CHECKOUT" ]] && exit 1 || exit 0 ;;
 esac
 `, { mode: 0o755 });
       writeFileSync(join(stubBin, 'bun'), `#!/bin/bash
@@ -901,7 +956,7 @@ exit 0
       writeFileSync(join(stubBin, 'npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       writeFileSync(join(stubBin, 'gh'), `#!/bin/sh
 case "$*" in
-  *tagName*) echo v9.9.9 ;;
+  *tagName*) echo v10.0.0 ;;
   *) echo notes ;;
 esac
 `, { mode: 0o755 });
@@ -920,19 +975,20 @@ esac
         CHECKOUT: checkout,
         CLAUDE_DIR: claudeDir,
         HOME: home,
-        NEW_LIB: realLib,
+        NEW_LIB: newLib,
         NO_COLOR: '1',
         PATH: `${stubBin}:/usr/bin:/bin`,
         PULL_COUNT: pullCount,
         REAL_BUN: process.execPath,
         RECALL_DIR: recallDir,
-        RECALL_REPO_DIR: REPO,
+        RECALL_REPO_DIR: checkout,
+        RECALL_NO_GUM: '1',
       });
 
       const result = spawnSync(
         'bash',
-        [join(checkoutPackaging, 'update.sh'), '--force', '--no-confirm', '--no-migrate', '--no-gum'],
-        { cwd: checkout, encoding: 'utf-8', env, timeout: 10_000 },
+        [join(checkoutPackaging, 'update.sh')],
+        { cwd: nested, encoding: 'utf-8', env, timeout: 10_000 },
       );
 
       expect(result.status).toBe(0);
