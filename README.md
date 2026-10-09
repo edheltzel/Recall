@@ -82,7 +82,7 @@ Then attach each coding agent with **that harness's native plugin or extension**
 
 | Harness | Preferred install | Notes |
 | --- | --- | --- |
-| **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` | Plugin owns the nine `do-recall-*` skills and `recall-memory` MCP. Install the plugin before the lifecycle hooks so `recall install` removes duplicate user-scope surfaces. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
+| **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` | Plugin owns the nine `do-recall-*` skills and `recall-memory` MCP. Install the plugin before the lifecycle hooks so `recall install` can reconcile user-scope surfaces. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
 | **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `packaging/install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
 | **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
 | **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |

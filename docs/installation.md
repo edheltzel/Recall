@@ -166,7 +166,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
 | Step | What happens |
 |------|-------------|
-| 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `recall.db`) to `~/.claude/backups/recall/` |
+| 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `recall.db`) to `~/.agents/Recall/backups/` |
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
@@ -289,7 +289,7 @@ Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config
 
 ## Backup and Restore
 
-The installer automatically creates a timestamped backup before making any changes. Backups are stored at `~/.claude/backups/recall/`.
+The installer automatically creates a timestamped backup before making any changes. Backups are stored at `~/.agents/Recall/backups/`.
 
 ```bash
 ./packaging/install.sh list              # List available backups
@@ -317,8 +317,8 @@ cd /path/to/Recall
 
 ### What gets removed (default)
 
-- `~/.claude/commands/Recall/` (slash commands; legacy `~/.claude/commands/recall/` is also removed if present)
-- Recall-owned Agent Skills under `~/.claude/skills/do-recall-*/` and `~/.omp/agent/skills/do-recall-*/` (unless `--skip-omp` for omp)
+- Recall-managed slash-command symlinks under `~/.claude/commands/Recall/` and legacy `~/.claude/commands/recall/`; either directory is removed only when empty
+- Recall-managed Agent Skill symlinks under `~/.claude/skills/do-recall-*/` and `~/.omp/agent/skills/do-recall-*/` (unless `--skip-omp` for omp); real files and foreign links are preserved
 - `~/.claude/Recall_GUIDE.md`
 - Recall's hook entries in `~/.claude/settings.json` (Stop/SessionStart/PreCompact/PostToolUse/UserPromptSubmit) — other hooks are preserved
 - `mcpServers["recall-memory"]` in `settings.json` — other MCP servers preserved
@@ -330,12 +330,14 @@ cd /path/to/Recall
 - The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 
+If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, it does not rewrite that file, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
+
 Separately installed omp capture is removed with `omp plugin uninstall recall-memory`, followed by an omp restart. The lifecycle uninstaller does not manage that native plugin registration.
 
 ### What is preserved (default)
 
 - `~/.agents/Recall/recall.db` — your persistent memory database
-- `~/.claude/backups/recall/` — the backup tree written by install/update
+- `~/.agents/Recall/backups/` — the backup tree written by install/update
 - User-authored identity and distilled memory under `~/.agents/Recall/MEMORY/`, together with any managed Claude links or legacy files in `~/.claude/MEMORY/`
 - This source directory (remove with `rm -rf /path/to/Recall`)
 

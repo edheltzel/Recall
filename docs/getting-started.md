@@ -23,7 +23,7 @@ Then attach each harness with its **native plugin or extension** when it has one
 
 | Harness | Preferred attach |
 | --- | --- |
-| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` for hooks and duplicate cleanup. |
+| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` for hooks and user-scope reconciliation. |
 | Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
 | Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
 | omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
@@ -132,7 +132,7 @@ It exposes nine tools against the same SQLite file as the CLI:
 
 Per-host registration:
 
-- **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer removes the duplicate user-scope entry.
+- **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer reconciles that entry under the [Claude ownership rules](CLAUDE_INTEGRATION.md#migrating-an-existing-install).
 - **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
 - **omp** — no MCP registration. Native capture and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
 - **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.

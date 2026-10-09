@@ -32,7 +32,7 @@ The local repository path is required for the current checked-in marketplace. A 
 recall install
 ```
 
-With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks and skip duplicate skill symlinks and the user-scope `recall-memory` MCP entry. Running only the plugin gives skills and MCP, not automatic capture.
+With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks, skip duplicate skill symlinks, and reconcile the user-scope `recall-memory` MCP entry under the database-path rules below. Running only the plugin gives skills and MCP, not automatic capture.
 
 ## What MCP covers
 

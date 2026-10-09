@@ -7,7 +7,6 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.25.3",
         "commander": "^12.1.0",
-        "recall-memory": "/Users/ed/.no-mistakes/worktrees/fd32172f1538/01M4EG7M80BN7X24HBWTGY51SJ/.packaged-install-repro.bFwB5U/artifact/recall-memory-0.10.0.tgz",
         "sqlite-vec": "0.1.9",
         "zod": "^3.24.0",
       },
@@ -369,8 +368,6 @@
     "raw-body": ["raw-body@3.0.2", "", { "dependencies": { "bytes": "~3.1.2", "http-errors": "~2.0.1", "iconv-lite": "~0.7.0", "unpipe": "~1.0.0" } }, "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA=="],
 
     "readdirp": ["readdirp@4.1.2", "", {}, "sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg=="],
-
-    "recall-memory": ["recall-memory@/Users/ed/.no-mistakes/worktrees/fd32172f1538/01M4EG7M80BN7X24HBWTGY51SJ/.packaged-install-repro.bFwB5U/artifact/recall-memory-0.10.0.tgz", { "dependencies": { "@modelcontextprotocol/sdk": "^1.25.3", "commander": "^12.1.0", "sqlite-vec": "0.1.9", "zod": "^3.24.0" }, "bin": { "recall": "./dist/index.js", "recall-mcp": "./dist/mcp-server.js" } }, "sha512-530uYpCZwDo/cHHgkZt94XdCOdpK9L0awxKMdiY2r+8UJYuQBGFPevHLw/3pI8n7VunLYMe2fnQgrCDn1MixJQ=="],
 
     "require-from-string": ["require-from-string@2.0.2", "", {}, "sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw=="],
 
