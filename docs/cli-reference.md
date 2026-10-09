@@ -497,7 +497,7 @@ Recall's direct config editors reject malformed configuration, duplicate keys, a
 
 `recall path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
 
-`recall migrate` moves the database to a new path and rewrites MCP configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. Refuses to overwrite an existing destination or destination sidecar. Snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. If an existing target config is invalid or cannot be staged for an atomic write, migration stops before moving the database. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
+`recall migrate` moves the database to a new path and rewrites MCP configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. Refuses to overwrite a non-empty destination. Snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. If an existing target config is invalid or cannot be staged for an atomic write, migration stops before moving the database. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
 
 ### Onboard
 
