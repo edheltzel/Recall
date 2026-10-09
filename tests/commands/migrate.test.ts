@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 // Smoke tests for `recall migrate`. Exercises:
 //   - dry-run prints a plan without touching files
 //   - real run moves DB + sidecars to the destination
-//   - refusal to overwrite a non-empty destination
+//   - refusal to overwrite an existing destination
 //
 // We bypass the lsof open-handle check by closing our own DB connection
 // inside the test before invoking runMigrate (the resolver doesn't open
 // handles from other processes during these tests).
 
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync, lstatSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync, lstatSync, symlinkSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -46,6 +46,8 @@ function withExitThrow(run: () => void): void {
 
 beforeEach(() => {
   migrateTestHooks.failCommitPath = '';
+  migrateTestHooks.beforeMove = undefined;
+  migrateTestHooks.onCommitFailure = undefined;
   tempDir = mkdtempSync(join(tmpdir(), 'recall-migrate-test-'));
   srcDb = join(tempDir, 'src', 'recall.db');
   destDb = join(tempDir, 'dest', 'recall.db');
@@ -164,6 +166,22 @@ describe('recall migrate', () => {
     expect(existsSync(destDb)).toBe(true);
   });
 
+  test('patches a symlinked host config through its real target', () => {
+    const target = join(tempDir, 'managed', 'claude.json');
+    const config = join(tempDir, '.claude.json');
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    }));
+    symlinkSync(target, config);
+
+    runMigrate({ to: destDb }, tempDir);
+
+    expect(lstatSync(config).isSymbolicLink()).toBe(true);
+    const parsed = JSON.parse(readFileSync(target, 'utf-8'));
+    expect(parsed.mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(destDb);
+  });
+
   test('rejects malformed host config before moving the database', () => {
     const settings = join(tempDir, '.claude', 'settings.json');
     mkdirSync(join(tempDir, '.claude'), { recursive: true });
@@ -225,6 +243,16 @@ describe('recall migrate', () => {
     expect(statSync(destDb).size).toBeGreaterThan(0);
   });
 
+  test('refuses to overwrite an empty destination', () => {
+    mkdirSync(dirname(destDb), { recursive: true });
+    writeFileSync(destDb, '');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(statSync(destDb).size).toBe(0);
+  });
+
   test('refuses a destination sidecar of any type or size and does not unlink it', () => {
     mkdirSync(join(tempDir, 'dest'), { recursive: true });
     writeFileSync(destDb + '-wal', '');
@@ -240,7 +268,7 @@ describe('recall migrate', () => {
     expect(lstatSync(destDb + '-shm').isDirectory()).toBe(true);
     expect(readFileSync(destDb + '-journal', 'utf-8')).toBe('old-journal');
     const err = capturedErr.join('\n');
-    expect(err).toContain(`destination already exists and is non-empty: ${destDb}-wal`);
+    expect(err).toContain(`destination already exists: ${destDb}-wal`);
     expect(err).toContain('Refusing to overwrite');
   });
 
@@ -323,6 +351,7 @@ describe('recall migrate', () => {
     });
     writeFileSync(legacy, body);
     writeFileSync(settings, body);
+    chmodSync(legacy, 0o444);
     migrateTestHooks.failCommitPath = settings;
 
     expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
@@ -331,8 +360,63 @@ describe('recall migrate', () => {
     expect(existsSync(srcDb + '-wal')).toBe(true);
     expect(existsSync(destDb)).toBe(false);
     expect(readFileSync(legacy, 'utf-8')).toBe(body);
+    expect(statSync(legacy).mode & 0o777).toBe(0o444);
     expect(readFileSync(settings, 'utf-8')).toBe(body);
     expect(capturedErr.join('\n')).toContain('injected commit failure');
+  });
+
+  test('does not overwrite a main database created after preflight', () => {
+    migrateTestHooks.beforeMove = () => writeFileSync(destDb, 'FOREIGN');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(readFileSync(srcDb, 'utf-8')).toBe('fake-sqlite-bytes');
+    expect(readFileSync(destDb, 'utf-8')).toBe('FOREIGN');
+  });
+
+  test('does not overwrite a sidecar created after preflight', () => {
+    migrateTestHooks.beforeMove = () => writeFileSync(destDb + '-wal', 'FOREIGN');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(readFileSync(srcDb, 'utf-8')).toBe('fake-sqlite-bytes');
+    expect(readFileSync(srcDb + '-wal', 'utf-8')).toBe('wal');
+    expect(existsSync(destDb)).toBe(false);
+    expect(readFileSync(destDb + '-wal', 'utf-8')).toBe('FOREIGN');
+  });
+
+  test('does not delete a journal created after preflight', () => {
+    migrateTestHooks.beforeMove = () => writeFileSync(destDb + '-journal', 'FOREIGN');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(readFileSync(destDb + '-journal', 'utf-8')).toBe('FOREIGN');
+  });
+
+  test('does not overwrite databases or sidecars recreated during rollback', () => {
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    }));
+    migrateTestHooks.failCommitPath = settings;
+    migrateTestHooks.onCommitFailure = () => {
+      writeFileSync(srcDb, 'FOREIGN DB');
+      writeFileSync(srcDb + '-wal', 'FOREIGN WAL');
+      writeFileSync(srcDb + '-shm', 'FOREIGN SHM');
+    };
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(readFileSync(srcDb, 'utf-8')).toBe('FOREIGN DB');
+    expect(readFileSync(srcDb + '-wal', 'utf-8')).toBe('FOREIGN WAL');
+    expect(readFileSync(srcDb + '-shm', 'utf-8')).toBe('FOREIGN SHM');
+    expect(readFileSync(destDb, 'utf-8')).toBe('fake-sqlite-bytes');
+    expect(readFileSync(destDb + '-wal', 'utf-8')).toBe('wal');
+    expect(readFileSync(destDb + '-shm', 'utf-8')).toBe('shm');
+    expect(capturedErr.join('\n')).toContain('failed to move database back');
   });
 
   test('does not leave the database moved when the destination WAL is a directory', () => {
