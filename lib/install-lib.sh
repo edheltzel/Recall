@@ -3009,7 +3009,7 @@ recall_expected_embedding_model() {
 # Ensure the expected embedding model is present. Best-effort, never fatal.
 recall_provision_embedding_model() {
   local model
-  model="$(cd "$RECALL_REPO_DIR" && recall_expected_embedding_model)"
+  model="$(cd "$RECALL_REPO_DIR" && recall_expected_embedding_model)" || model=""
 
   if [[ -z "$model" ]]; then
     log_warn "Could not determine the expected embedding model — skipping semantic-tier check"
