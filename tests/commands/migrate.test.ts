@@ -1,3 +1,5 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+
 // Smoke tests for `recall migrate`. Exercises:
 //   - dry-run prints a plan without touching files
 //   - real run moves DB + sidecars to the destination
@@ -7,12 +9,11 @@
 // inside the test before invoking runMigrate (the resolver doesn't open
 // handles from other processes during these tests).
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync, lstatSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { runMigrate } from '../../src/commands/migrate';
+import { migrateTestHooks, runMigrate } from '../../src/commands/migrate';
 import { closeDb } from '../../src/db/connection';
 
 let tempDir: string;
@@ -36,6 +37,7 @@ function withExitThrow(run: () => void): void {
 }
 
 beforeEach(() => {
+  migrateTestHooks.failCommitPath = '';
   tempDir = mkdtempSync(join(tmpdir(), 'recall-migrate-test-'));
   srcDb = join(tempDir, 'src', 'recall.db');
   destDb = join(tempDir, 'dest', 'recall.db');
@@ -268,6 +270,27 @@ describe('recall migrate', () => {
     } finally {
       execFileSync('chflags', ['nouchg', settings]);
     }
+  });
+
+  test('restores an already-committed config when a later commit fails', () => {
+    const legacy = join(tempDir, '.claude.json');
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(dirname(settings), { recursive: true });
+    const body = JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    });
+    writeFileSync(legacy, body);
+    writeFileSync(settings, body);
+    migrateTestHooks.failCommitPath = settings;
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(srcDb + '-wal')).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(readFileSync(legacy, 'utf-8')).toBe(body);
+    expect(readFileSync(settings, 'utf-8')).toBe(body);
+    expect(capturedErr.join('\n')).toContain('injected commit failure');
   });
 
   test('does not leave the database moved when the destination WAL is a directory', () => {

@@ -13,15 +13,15 @@
 //   - Snapshots source DB + sidecars + configs under
 //     ~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/ before any mutation.
 //   - Moves <src>.db, <src>.db-wal, <src>.db-shm to the new path. A sidecar
-//     rename that still fails moves the database back; configs are probed
-//     before the first rename so a commit failure aborts with nothing moved.
+//     rename that still fails moves the database back. Config commits that
+//     already landed are restored from the bytes taken before commit().
 //   - Updates env.RECALL_DB_PATH in each config we detect:
 //       ~/.claude.json, ~/.claude/settings.json,
 //       ~/.config/opencode/opencode.json, ~/.pi/agent/mcp.json
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
@@ -32,6 +32,9 @@ import {
   validateClaudeConfigShape,
   type StagedJsonWrite,
 } from '../../lib/jsonc-mcp.js';
+
+/** Test-only. Set `failCommitPath` to throw on that config commit after earlier ones succeed. */
+export const migrateTestHooks = { failCommitPath: '' };
 
 export interface MigrateOptions {
   to: string;
@@ -52,10 +55,6 @@ function isOpen(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isSidecar(suffix: string): suffix is '-wal' | '-shm' {
-  return suffix === '-wal' || suffix === '-shm';
 }
 
 const DEST_SIDECARS = ['-wal', '-shm', '-journal'] as const;
@@ -230,7 +229,7 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   console.log('Plan:');
   console.log(`  1. snapshot source + configs to ${snapshotDir}`);
   console.log(`  2. move ${src} → ${dest}`);
-  for (const ext of ['-wal', '-shm']) {
+  for (const ext of MOVED_SIDECARS) {
     if (existsSync(src + ext)) console.log(`  3. move ${src + ext} → ${dest + ext}`);
   }
   let configIdx = 4;
@@ -248,8 +247,8 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   // 1. Snapshot.
   mkdirSync(snapshotDir, { recursive: true });
   copyFileSync(src, join(snapshotDir, 'source.db'));
-  for (const ext of ['-wal', '-shm']) {
-    if (isSidecar(ext) && existsSync(src + ext)) {
+  for (const ext of MOVED_SIDECARS) {
+    if (existsSync(src + ext)) {
       copyFileSync(src + ext, join(snapshotDir, `source.db${ext}`));
     }
   }
@@ -285,35 +284,58 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     process.exit(1);
   }
 
-  // 2. Move DB + sidecars. Roll the rename back if a later sidecar rename fails.
+  // 2. Move DB + sidecars. Roll renames and already-committed configs back on failure.
   const movedExts: string[] = [];
+  const committedConfigs: { path: string; bytes: Buffer; mode: number }[] = [];
   let dbMoved = false;
   try {
     mkdirSync(dirname(dest), { recursive: true });
     renameSync(src, dest);
     dbMoved = true;
     for (const ext of MOVED_SIDECARS) {
-      if (isSidecar(ext) && existsSync(src + ext)) {
+      if (existsSync(src + ext)) {
         renameSync(src + ext, dest + ext);
         movedExts.push(ext);
       }
     }
     console.log(`✓ Moved DB: ${dest}`);
 
-    // 3. Patch configs.
+    // 3. Patch configs. Record pre-commit bytes so a later commit can be undone.
     for (const patch of staged) {
+      const path = patch.target.path;
+      const prior = { path, bytes: readFileSync(path), mode: statSync(path).mode };
+      if (migrateTestHooks.failCommitPath === path) throw new Error('injected commit failure');
       patch.write.commit();
-      console.log(`✓ Patched ${patch.target.path}`);
+      committedConfigs.push(prior);
+      console.log(`✓ Patched ${path}`);
     }
   } catch (error) {
+    const problems = [error instanceof Error ? error.message : String(error)];
     for (const ext of movedExts.reverse()) {
-      try { renameSync(dest + ext, src + ext); } catch { /* snapshot remains */ }
+      try { renameSync(dest + ext, src + ext); }
+      catch (rollbackError) {
+        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        problems.push(`failed to move sidecar back from ${dest}${ext} (${message})`);
+      }
     }
     if (dbMoved) {
-      try { renameSync(dest, src); } catch { /* snapshot remains */ }
+      try { renameSync(dest, src); }
+      catch (rollbackError) {
+        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        problems.push(`failed to move database back from ${dest} (${message})`);
+      }
+    }
+    for (const prior of committedConfigs.reverse()) {
+      try {
+        writeFileSync(prior.path, prior.bytes);
+        chmodSync(prior.path, prior.mode);
+      } catch (rollbackError) {
+        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        problems.push(`failed to restore ${prior.path} (${message})`);
+      }
     }
     for (const item of staged) item.write.cleanup();
-    console.error(`Error: migration failed (${error instanceof Error ? error.message : String(error)})`);
+    console.error(`Error: migration failed (${problems.join('; ')})`);
     process.exit(1);
   }
 
