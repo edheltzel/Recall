@@ -261,12 +261,13 @@ function lstatIfPresent(file: string) {
   }
 }
 
-export type StagedJsonWrite = {
+export type StagedFileWrite = {
+  target: string;
   commit: () => void;
   cleanup: () => void;
 };
 
-function stageTextAtomic(file: string, text: string): StagedJsonWrite {
+export function stageFileAtomic(file: string, data: string | Uint8Array, modeOverride?: number): StagedFileWrite {
   const entry = lstatIfPresent(file);
   if (entry?.isSymbolicLink() && !existsSync(file)) {
     throw new Error(`refusing to replace dangling symlink: ${file}`);
@@ -277,7 +278,9 @@ function stageTextAtomic(file: string, text: string): StagedJsonWrite {
   if (tmpEntry && !tmpEntry.isFile()) {
     throw new Error(`refusing to replace non-file temporary path: ${tmp}`);
   }
-  const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined;
+  const mode = modeOverride === undefined
+    ? existsSync(target) ? statSync(target).mode & 0o7777 : undefined
+    : modeOverride & 0o7777;
   let pending = true;
   const cleanup = () => {
     if (!pending) return;
@@ -286,13 +289,14 @@ function stageTextAtomic(file: string, text: string): StagedJsonWrite {
   };
   try {
     if (mode !== undefined && tmpEntry) chmodSync(tmp, mode);
-    writeFileSync(tmp, text, mode === undefined ? undefined : { mode });
+    writeFileSync(tmp, data, mode === undefined ? undefined : { mode });
     if (mode !== undefined) chmodSync(tmp, mode);
   } catch (error) {
     cleanup();
     throw error;
   }
   return {
+    target,
     commit: () => {
       renameSync(tmp, target);
       pending = false;
@@ -302,7 +306,7 @@ function stageTextAtomic(file: string, text: string): StagedJsonWrite {
 }
 
 function writeTextAtomic(file: string, text: string): void {
-  const staged = stageTextAtomic(file, text);
+  const staged = stageFileAtomic(file, text);
   try {
     staged.commit();
   } finally {
@@ -310,8 +314,8 @@ function writeTextAtomic(file: string, text: string): void {
   }
 }
 
-export function stageJsonAtomic(file: string, value: unknown): StagedJsonWrite {
-  return stageTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+export function stageJsonAtomic(file: string, value: unknown): StagedFileWrite {
+  return stageFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function writeJsonAtomic(file: string, value: unknown): void {

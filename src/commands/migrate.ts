@@ -7,13 +7,13 @@
 //   recall migrate --to /new/path/recall.db --dry-run
 //
 // Behavior:
-//   - Refuses to overwrite a non-empty file at the destination, or any
+//   - Refuses to overwrite any path at the destination, or any
 //     destination sidecar (-wal, -shm, -journal) of any type or size.
 //   - Refuses to migrate while a process has the source DB open (lsof check).
 //   - Snapshots source DB + sidecars + configs under
 //     ~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/ before any mutation.
 //   - Moves <src>.db, <src>.db-wal, <src>.db-shm to the new path. A sidecar
-//     rename that still fails moves the database back. Config commits that
+//     move that still fails moves the database back. Config commits that
 //     already landed are restored from the bytes taken before commit().
 //   - Updates env.RECALL_DB_PATH in each config we detect:
 //       ~/.claude.json, ~/.claude/settings.json,
@@ -21,20 +21,24 @@
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, linkSync, readFileSync, unlinkSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
 import {
   parseJsonc,
+  stageFileAtomic,
   stageJsonAtomic,
   validateClaudeConfigShape,
-  type StagedJsonWrite,
+  type StagedFileWrite,
 } from '../../lib/jsonc-mcp.js';
 
-/** Test-only. Set `failCommitPath` to throw on that config commit after earlier ones succeed. */
-export const migrateTestHooks = { failCommitPath: '' };
+export const migrateTestHooks: {
+  failCommitPath: string;
+  beforeMove?: () => void;
+  onCommitFailure?: () => void;
+} = { failCommitPath: '' };
 
 export interface MigrateOptions {
   to: string;
@@ -63,21 +67,35 @@ const MOVED_SIDECARS = ['-wal', '-shm'] as const;
 const BLOCKING_FLAGS = 0x2 | 0x4 | 0x00020000 | 0x00040000;
 
 function refuseDestination(path: string): never {
-  console.error(`Error: destination already exists and is non-empty: ${path}`);
+  console.error(`Error: destination already exists: ${path}`);
   console.error('Refusing to overwrite. Delete the file or choose a different path.');
   process.exit(1);
 }
 
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 function existingDestinationSidecar(dest: string): string | undefined {
   for (const ext of DEST_SIDECARS) {
-    try {
-      lstatSync(dest + ext);
-      return dest + ext;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+    if (pathExists(dest + ext)) return dest + ext;
   }
   return undefined;
+}
+
+function destinationCollision(dest: string): string | undefined {
+  return pathExists(dest) ? dest : existingDestinationSidecar(dest);
+}
+
+function moveNoReplace(source: string, destination: string): void {
+  linkSync(source, destination);
+  unlinkSync(source);
 }
 
 function commitBlocked(path: string): string | undefined {
@@ -113,7 +131,7 @@ type PreparedConfigPatch = {
 
 type StagedConfigPatch = {
   target: McpConfigTarget;
-  write: StagedJsonWrite;
+  write: StagedFileWrite;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -192,12 +210,8 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     return;
   }
 
-  if (existsSync(dest)) {
-    const st = statSync(dest);
-    if (st.size > 0) refuseDestination(dest);
-  }
-  const sidecar = existingDestinationSidecar(dest);
-  if (sidecar) refuseDestination(sidecar);
+  const collision = destinationCollision(dest);
+  if (collision) refuseDestination(collision);
 
   // Refuse to migrate if the source DB is open. lsof's absence on the host
   // is treated as "probably safe" — best-effort check.
@@ -278,7 +292,7 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
 
   for (const patch of staged) {
     try {
-      const blocked = commitBlocked(patch.target.path);
+      const blocked = commitBlocked(patch.write.target);
       if (!blocked) continue;
       throw new Error(blocked);
     } catch (error) {
@@ -295,11 +309,14 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   let dbMoved = false;
   try {
     mkdirSync(dirname(dest), { recursive: true });
-    renameSync(src, dest);
+    migrateTestHooks.beforeMove?.();
+    const racedCollision = destinationCollision(dest);
+    if (racedCollision) throw new Error(`destination already exists: ${racedCollision}`);
+    moveNoReplace(src, dest);
     dbMoved = true;
     for (const ext of MOVED_SIDECARS) {
       if (existsSync(src + ext)) {
-        renameSync(src + ext, dest + ext);
+        moveNoReplace(src + ext, dest + ext);
         movedExts.push(ext);
       }
     }
@@ -307,9 +324,12 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
 
     // 3. Patch configs. Record pre-commit bytes so a later commit can be undone.
     for (const patch of staged) {
-      const path = patch.target.path;
+      const path = patch.write.target;
       const prior = { path, bytes: readFileSync(path), mode: statSync(path).mode };
-      if (migrateTestHooks.failCommitPath === path) throw new Error('injected commit failure');
+      if (migrateTestHooks.failCommitPath === patch.target.path) {
+        migrateTestHooks.onCommitFailure?.();
+        throw new Error('injected commit failure');
+      }
       patch.write.commit();
       committedConfigs.push(prior);
       console.log(`✓ Patched ${path}`);
@@ -317,14 +337,14 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   } catch (error) {
     const problems = [error instanceof Error ? error.message : String(error)];
     for (const ext of movedExts.reverse()) {
-      try { renameSync(dest + ext, src + ext); }
+      try { moveNoReplace(dest + ext, src + ext); }
       catch (rollbackError) {
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         problems.push(`failed to move sidecar back from ${dest}${ext} (${message})`);
       }
     }
     if (dbMoved) {
-      try { renameSync(dest, src); }
+      try { moveNoReplace(dest, src); }
       catch (rollbackError) {
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         problems.push(`failed to move database back from ${dest} (${message})`);
@@ -332,8 +352,9 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     }
     for (const prior of committedConfigs.reverse()) {
       try {
-        writeFileSync(prior.path, prior.bytes);
-        chmodSync(prior.path, prior.mode);
+        const restore = stageFileAtomic(prior.path, prior.bytes, prior.mode);
+        try { restore.commit(); }
+        finally { restore.cleanup(); }
       } catch (rollbackError) {
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         problems.push(`failed to restore ${prior.path} (${message})`);
@@ -364,7 +385,4 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     console.log(`Note: MEM_DB_PATH=${process.env.MEM_DB_PATH} is still set in this shell.`);
     console.log('It will be ignored when RECALL_DB_PATH is set elsewhere; consider unsetting it.');
   }
-
-  // If our process leaked into a stale connection during the run, reset.
-  try { unlinkSync(dest + '-journal'); } catch { /* nothing to clean */ }
 }
