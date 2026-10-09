@@ -532,7 +532,7 @@ describe('update.sh', () => {
     }
   });
 
-  test('active Claude plugin reports a removed custom pin selected back to default', () => {
+  test.each(['RECALL_DB_PATH', 'MEM_DB_PATH'] as const)('active Claude plugin reports a removed custom pin selected back to default via %s', overrideName => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-removed-custom-'));
     try {
       const claudeDir = join(tempRoot, '.claude');
@@ -552,17 +552,27 @@ describe('update.sh', () => {
         'source "$REPO/lib/install-lib.sh"',
         '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
       ].join('\n');
+      const {
+        RECALL_DB_PATH: _recallDbPath,
+        MEM_DB_PATH: _memDbPath,
+        ...baseEnv
+      } = process.env;
       const result = spawnSync('bash', ['-c', driver], {
         encoding: 'utf-8',
         cwd: REPO,
-        env: { ...process.env, REPO, RECALL_DB_PATH: defaultDb },
+        env: { ...baseEnv, REPO, [overrideName]: defaultDb },
       });
 
       expect(result.status).toBe(0);
       expect(JSON.parse(readFileSync(settingsFile, 'utf-8'))).toEqual({});
-      expect(`${result.stdout}${result.stderr}`).toContain('Removed the user recall-memory registration');
-      expect(`${result.stdout}${result.stderr}`).toContain(customDb);
-      expect(`${result.stdout}${result.stderr}`).toContain(defaultDb);
+      const output = `${result.stdout}${result.stderr}`;
+      expect(output).toContain('Removed the user recall-memory registration');
+      expect(output).toContain('discarded stored custom database path');
+      expect(output).toContain('explicit database override');
+      expect(output).toContain(customDb);
+      expect(output).toContain(defaultDb);
+      expect(output).not.toContain('inherited RECALL_DB_PATH');
+      expect(output).not.toContain('custom RECALL_DB_PATH');
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -593,7 +603,7 @@ describe('update.sh', () => {
       expect(result.status).not.toBe(0);
       expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
       expect(`${result.stdout}${result.stderr}`).toContain('existing config is invalid');
-      expect(`${result.stdout}${result.stderr}`).not.toContain('pins a custom RECALL_DB_PATH');
+      expect(`${result.stdout}${result.stderr}`).not.toContain('stored custom database path');
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

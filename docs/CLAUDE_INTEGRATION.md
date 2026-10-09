@@ -71,14 +71,14 @@ Run `recall install` once after that first `recall update`. Later updates reload
 With the plugin active they:
 
 1. Remove the `~/.claude/skills/do-recall-*` symlinks that point into `~/.agents/Recall/shared/skills/`. Only Recall-owned symlinks are removed; real files, user-authored skills, and other tools' links are left alone, and a skill directory is deleted only when it is already empty.
-2. Remove the user-scope `recall-memory` MCP registration, so the plugin's is the only one left.
+2. Reconcile the user-scope `recall-memory` MCP registration: remove it when the selected database is the default, or keep it for a non-default database the plugin cannot carry.
 3. Leave hooks and canonical files untouched.
 
 Skill canonicals under `~/.agents/Recall/shared/skills/` are still refreshed, because Pi, omp, and `recall doctor` read them.
 
-**A registration pinned to a non-default database is kept, not removed.** The plugin's bundled config cannot carry your custom path, so deleting the entry would silently repoint Recall at the default file and your history would read as empty.
+**A registration pinned to a non-default database is kept only when no explicit database override is present.** An explicit `--db-path` or an inherited `RECALL_DB_PATH` or `MEM_DB_PATH` replaces the stored pin. If that override selects `~/.agents/Recall/recall.db`, the installer removes the user registration so the plugin serves the default database.
 
-Custom-database installs therefore keep both surfaces by design, and re-running `update.sh` will not change that — the decision is made from the path stored in the entry, which stays custom. Collapsing them is a deliberate manual step, because only you can confirm the environment Claude actually launches with:
+Without an override, re-running `update.sh` preserves the stored custom pin. A non-default override still keeps both surfaces because the plugin's bundled config cannot carry your custom path. Collapsing them is a deliberate manual step, because only you can confirm the environment Claude actually launches with:
 
 ```bash
 export RECALL_DB_PATH=/path/to/your/recall.db   # where you launch Claude from

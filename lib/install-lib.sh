@@ -1595,7 +1595,7 @@ _recall_reconcile_claude_mcp() {
         if (!hadOwners) {
           console.log("success:recall-memory MCP provided by the Claude plugin");
         } else if (discardedCustomPaths.length > 0) {
-          console.log(`warn:Removed the user recall-memory registration and discarded custom RECALL_DB_PATH ${discardedCustomPaths.join(", ")} because inherited RECALL_DB_PATH selects the plugin default ${process.env.DEFAULT_DB}`);
+          console.log(`warn:Removed the user recall-memory registration and discarded stored custom database path ${discardedCustomPaths.join(", ")} because the explicit database override selects the plugin default ${process.env.DEFAULT_DB}`);
         } else {
           console.log("success:Removed the default user recall-memory registration; recall-memory MCP is now provided by the Claude plugin");
         }
@@ -1624,19 +1624,19 @@ _recall_reconcile_claude_mcp() {
         if (process.env.MODE !== "plugin") {
           console.log("success:Configured recall-memory MCP registration");
         } else if (!hadOwners) {
-          console.log(`warn:Added a user recall-memory registration for custom RECALL_DB_PATH ${selection.path} because the Claude plugin cannot carry it`);
+          console.log(`warn:Added a user recall-memory registration for custom database path ${selection.path} because the Claude plugin cannot carry it`);
         } else {
           const replacedPaths = [...new Set(previousPaths.filter(path => path !== selection.path))];
           if (replacedPaths.length > 0) {
             const discarded = replacedPaths.filter(path => path !== process.env.DEFAULT_DB);
             const prior = discarded.length > 0
-              ? `discarded custom RECALL_DB_PATH ${discarded.join(", ")}`
+              ? `discarded stored custom database path ${discarded.join(", ")}`
               : `replaced the default database path ${process.env.DEFAULT_DB}`;
-            console.log(`warn:Replaced the user recall-memory registration: ${prior} in favor of inherited RECALL_DB_PATH ${selection.path}`);
+            console.log(`warn:Replaced the user recall-memory registration: ${prior} in favor of explicit database override ${selection.path}`);
           } else if (registrationsNeedUpdate) {
-            console.log(`warn:Updated the user recall-memory registration while keeping custom RECALL_DB_PATH ${selection.path} because the Claude plugin cannot carry it`);
+            console.log(`warn:Updated the user recall-memory registration while keeping stored custom database path ${selection.path} because the Claude plugin cannot carry it`);
           } else {
-            console.log(`warn:Kept the user recall-memory registration for custom RECALL_DB_PATH ${selection.path} because the Claude plugin cannot carry it`);
+            console.log(`warn:Kept the user recall-memory registration for stored custom database path ${selection.path} because the Claude plugin cannot carry it`);
           }
         }
       }
