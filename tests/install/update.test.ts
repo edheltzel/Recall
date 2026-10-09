@@ -558,6 +558,50 @@ describe('update.sh', () => {
     }
   });
 
+  test('Claude plugin leaves invalid MCP environments unchanged', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-plugin-mcp-env-invalid-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      mkdirSync(claudeDir, { recursive: true });
+      const invalidEnvironments = [
+        [],
+        { RECALL_DB_PATH: 42 },
+        { MEM_DB_PATH: false },
+      ];
+      for (const settingsFile of [
+        join(tempRoot, '.claude.json'),
+        join(claudeDir, 'settings.json'),
+      ]) {
+        for (const env of invalidEnvironments) {
+          const original = JSON.stringify({
+            permissions: { allow: ['safe'] },
+            mcpServers: { 'recall-memory': { env } },
+          });
+          writeFileSync(settingsFile, original);
+          const driver = [
+            'set -e',
+            `export HOME="${tempRoot}"`,
+            `export CLAUDE_DIR="${claudeDir}"`,
+            `export RECALL_DIR="${join(tempRoot, '.agents', 'Recall')}"`,
+            'source "$REPO/lib/install-lib.sh"',
+            '_recall_reconcile_claude_mcp plugin "/bin/bun" "/new/path/recall-mcp"',
+          ].join('\n');
+          const result = spawnSync('bash', ['-c', driver], {
+            encoding: 'utf-8',
+            cwd: REPO,
+            env: { ...process.env, REPO },
+          });
+
+          expect(result.status).not.toBe(0);
+          expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+          rmSync(settingsFile, { force: true });
+        }
+      }
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('unparseable settings containing the name are not backed up', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-nobackup-'));
     try {

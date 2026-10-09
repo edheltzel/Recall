@@ -173,6 +173,17 @@ export function validateClaudeConfigShape(config: unknown): asserts config is Js
     if (recallEntry !== undefined && !isObject(recallEntry)) {
       throw new Error('mcpServers.recall-memory is not an object');
     }
+    if (isObject(recallEntry) && recallEntry.env !== undefined) {
+      if (!isObject(recallEntry.env)) {
+        throw new Error('mcpServers.recall-memory.env is not an object');
+      }
+      for (const key of ['RECALL_DB_PATH', 'MEM_DB_PATH']) {
+        const value = recallEntry.env[key];
+        if (value !== undefined && typeof value !== 'string') {
+          throw new Error(`mcpServers.recall-memory.env.${key} is not a string`);
+        }
+      }
+    }
   }
 }
 
@@ -241,7 +252,12 @@ function lstatIfPresent(file: string) {
   }
 }
 
-function writeTextAtomic(file: string, text: string): void {
+export type StagedJsonWrite = {
+  commit: () => void;
+  cleanup: () => void;
+};
+
+function stageTextAtomic(file: string, text: string): StagedJsonWrite {
   const entry = lstatIfPresent(file);
   if (entry?.isSymbolicLink() && !existsSync(file)) {
     throw new Error(`refusing to replace dangling symlink: ${file}`);
@@ -249,15 +265,40 @@ function writeTextAtomic(file: string, text: string): void {
   const target = entry?.isSymbolicLink() ? realpathSync(file) : file;
   const tmp = `${target}.tmp`;
   const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined;
+  let pending = true;
+  const cleanup = () => {
+    if (!pending) return;
+    pending = false;
+    try { unlinkSync(tmp); } catch { /* temp may not exist */ }
+  };
   try {
     if (mode !== undefined && existsSync(tmp)) chmodSync(tmp, mode);
     writeFileSync(tmp, text, mode === undefined ? undefined : { mode });
     if (mode !== undefined) chmodSync(tmp, mode);
-    renameSync(tmp, target);
   } catch (error) {
-    try { unlinkSync(tmp); } catch { /* temp may not exist */ }
+    cleanup();
     throw error;
   }
+  return {
+    commit: () => {
+      renameSync(tmp, target);
+      pending = false;
+    },
+    cleanup,
+  };
+}
+
+function writeTextAtomic(file: string, text: string): void {
+  const staged = stageTextAtomic(file, text);
+  try {
+    staged.commit();
+  } finally {
+    staged.cleanup();
+  }
+}
+
+export function stageJsonAtomic(file: string, value: unknown): StagedJsonWrite {
+  return stageTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function writeJsonAtomic(file: string, value: unknown): void {

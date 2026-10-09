@@ -24,7 +24,12 @@ import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
-import { parseJsonc, validateClaudeConfigShape, writeJsonAtomic } from '../../lib/jsonc-mcp.js';
+import {
+  parseJsonc,
+  stageJsonAtomic,
+  validateClaudeConfigShape,
+  type StagedJsonWrite,
+} from '../../lib/jsonc-mcp.js';
 
 export interface MigrateOptions {
   to: string;
@@ -55,63 +60,69 @@ function detectConfigs(home: string): McpConfigTarget[] {
   return configurableHosts.flatMap(host => host.mcpConfigTargets(home));
 }
 
-interface ConfigPatchResult {
-  changed: boolean;
-  reason?: string;
-  error?: boolean;
-}
+type ConfigPatchResult =
+  | { status: 'changed'; config: Record<string, unknown> }
+  | { status: 'skipped'; reason: string }
+  | { status: 'error'; reason: string };
+
+type PreparedConfigPatch = {
+  target: McpConfigTarget;
+  result: ConfigPatchResult;
+};
+
+type StagedConfigPatch = {
+  target: McpConfigTarget;
+  write: StagedJsonWrite;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function patchConfigEnv(target: McpConfigTarget, newDbPath: string, dryRun: boolean): ConfigPatchResult {
-  if (!existsSync(target.path)) return { changed: false, reason: 'not present' };
+function prepareConfigPatch(target: McpConfigTarget, newDbPath: string): ConfigPatchResult {
+  if (!existsSync(target.path)) return { status: 'skipped', reason: 'not present' };
   let raw: string;
   try {
     raw = readFileSync(target.path, 'utf-8');
   } catch (e) {
-    return { changed: false, reason: `read error: ${(e as Error).message}`, error: true };
+    return { status: 'error', reason: `read error: ${(e as Error).message}` };
   }
   let parsed: unknown;
   try {
     parsed = parseJsonc(raw);
   } catch (e) {
-    return { changed: false, reason: `invalid JSONC: ${(e as Error).message}`, error: true };
+    return { status: 'error', reason: `invalid JSONC: ${(e as Error).message}` };
   }
-  if (!isRecord(parsed)) return { changed: false, reason: 'invalid JSONC root', error: true };
+  if (!isRecord(parsed)) return { status: 'error', reason: 'invalid JSONC root' };
   if (target.host === 'claude') {
     try {
       validateClaudeConfigShape(parsed);
     } catch (e) {
-      return { changed: false, reason: `invalid Claude config: ${(e as Error).message}`, error: true };
+      return { status: 'error', reason: `invalid Claude config: ${(e as Error).message}` };
     }
   }
 
   let node = parsed;
   for (let i = 0; i < target.envPath.length - 1; i++) {
     const next = node[target.envPath[i]];
-    if (next === undefined) return { changed: false, reason: 'recall-memory entry absent' };
-    if (!isRecord(next)) return { changed: false, reason: 'invalid recall-memory config', error: true };
+    if (next === undefined) return { status: 'skipped', reason: 'recall-memory entry absent' };
+    if (!isRecord(next)) return { status: 'error', reason: 'invalid recall-memory config' };
     node = next;
   }
 
   const envKey = target.envPath[target.envPath.length - 1];
   const currentEnv = node[envKey];
   if (currentEnv !== undefined && !isRecord(currentEnv)) {
-    return { changed: false, reason: 'invalid recall-memory environment', error: true };
+    return { status: 'error', reason: 'invalid recall-memory environment' };
   }
   const env = currentEnv ?? {};
   const existing = env.RECALL_DB_PATH;
-  if (existing === newDbPath) return { changed: false, reason: 'already up-to-date' };
-
-  if (dryRun) return { changed: true, reason: `would set RECALL_DB_PATH=${newDbPath}` };
+  if (existing === newDbPath) return { status: 'skipped', reason: 'already up-to-date' };
 
   env.RECALL_DB_PATH = newDbPath;
   if ('MEM_DB_PATH' in env) delete env.MEM_DB_PATH;
   node[envKey] = env;
-  writeJsonAtomic(target.path, parsed);
-  return { changed: true };
+  return { status: 'changed', config: parsed };
 }
 
 export function runMigrate(opts: MigrateOptions, home = homedir()): void {
@@ -161,10 +172,13 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   closeDb();
 
   const targets = detectConfigs(home);
-  for (const target of targets) {
-    const result = patchConfigEnv(target, dest, true);
-    if (result.error) {
-      console.error(`Error: cannot patch ${target.path} (${result.reason})`);
+  const patches: PreparedConfigPatch[] = targets.map(target => ({
+    target,
+    result: prepareConfigPatch(target, dest),
+  }));
+  for (const patch of patches) {
+    if (patch.result.status === 'error') {
+      console.error(`Error: cannot patch ${patch.target.path} (${patch.result.reason})`);
       process.exit(1);
     }
   }
@@ -208,28 +222,46 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   }
   console.log(`✓ Snapshot: ${snapshotDir}`);
 
-  // 2. Move DB + sidecars.
-  mkdirSync(dirname(dest), { recursive: true });
-  renameSync(src, dest);
-  for (const ext of ['-wal', '-shm']) {
-    if (isSidecar(ext) && existsSync(src + ext)) {
-      renameSync(src + ext, dest + ext);
+  const staged: StagedConfigPatch[] = [];
+  for (const patch of patches) {
+    if (patch.result.status !== 'changed') continue;
+    try {
+      staged.push({
+        target: patch.target,
+        write: stageJsonAtomic(patch.target.path, patch.result.config),
+      });
+    } catch (error) {
+      for (const item of staged) item.write.cleanup();
+      console.error(`Error: cannot stage ${patch.target.path} (${error instanceof Error ? error.message : String(error)})`);
+      process.exit(1);
     }
   }
-  // If destination existed as an empty file (we allowed that above), nothing
-  // to clean up — renameSync replaced it.
-  console.log(`✓ Moved DB: ${dest}`);
 
-  // 3. Patch configs.
-  for (const t of targets) {
-    const res = patchConfigEnv(t, dest, false);
-    if (res.changed) {
-      console.log(`✓ Patched ${t.path}`);
-    } else if (res.error) {
-      console.error(`Error: could not patch ${t.path} (${res.reason})`);
-      process.exit(1);
-    } else if (res.reason && res.reason !== 'not present') {
-      console.log(`  Skipped ${t.path} (${res.reason})`);
+  // 2. Move DB + sidecars.
+  try {
+    mkdirSync(dirname(dest), { recursive: true });
+    renameSync(src, dest);
+    for (const ext of ['-wal', '-shm']) {
+      if (isSidecar(ext) && existsSync(src + ext)) {
+        renameSync(src + ext, dest + ext);
+      }
+    }
+    console.log(`✓ Moved DB: ${dest}`);
+
+    // 3. Patch configs.
+    for (const patch of staged) {
+      patch.write.commit();
+      console.log(`✓ Patched ${patch.target.path}`);
+    }
+  } catch (error) {
+    for (const item of staged) item.write.cleanup();
+    console.error(`Error: migration failed (${error instanceof Error ? error.message : String(error)})`);
+    process.exit(1);
+  }
+
+  for (const patch of patches) {
+    if (patch.result.status === 'skipped' && patch.result.reason !== 'not present') {
+      console.log(`  Skipped ${patch.target.path} (${patch.result.reason})`);
     }
   }
 

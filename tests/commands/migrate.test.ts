@@ -177,6 +177,33 @@ describe('recall migrate', () => {
     expect(capturedErr.join('\n')).toContain('cannot patch');
   });
 
+  test('leaves the database and configs unchanged when an atomic config write cannot be staged', () => {
+    const legacy = join(tempDir, '.claude.json');
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(dirname(settings), { recursive: true });
+    const legacyOriginal = JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    });
+    const settingsOriginal = JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    });
+    writeFileSync(legacy, legacyOriginal);
+    writeFileSync(settings, settingsOriginal);
+    mkdirSync(`${settings}.tmp`);
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(srcDb + '-wal')).toBe(true);
+    expect(existsSync(srcDb + '-shm')).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(readFileSync(legacy, 'utf-8')).toBe(legacyOriginal);
+    expect(readFileSync(settings, 'utf-8')).toBe(settingsOriginal);
+    expect(existsSync(`${legacy}.tmp`)).toBe(false);
+    expect(statSync(`${settings}.tmp`).isDirectory()).toBe(true);
+    expect(capturedErr.join('\n')).toContain(`cannot stage ${settings}`);
+  });
+
   test('refuses to overwrite non-empty destination', () => {
     mkdirSync(join(tempDir, 'dest'), { recursive: true });
     writeFileSync(destDb, 'pre-existing');
