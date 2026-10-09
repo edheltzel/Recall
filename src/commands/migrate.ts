@@ -7,7 +7,7 @@
 //   recall migrate --to /new/path/recall.db --dry-run
 //
 // Behavior:
-//   - Refuses to overwrite any path at the destination, or any
+//   - Refuses to overwrite a non-empty file at the destination, or any
 //     destination sidecar (-wal, -shm, -journal) of any type or size.
 //   - Refuses to migrate while a process has the source DB open (lsof check).
 //   - Snapshots source DB + sidecars + configs under
@@ -21,7 +21,7 @@
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, linkSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
@@ -34,11 +34,7 @@ import {
   type StagedFileWrite,
 } from '../../lib/jsonc-mcp.js';
 
-export const migrateTestHooks: {
-  failCommitPath: string;
-  beforeMove?: () => void;
-  onCommitFailure?: () => void;
-} = { failCommitPath: '' };
+export const migrateTestHooks = { failCommitPath: '' };
 
 export interface MigrateOptions {
   to: string;
@@ -67,7 +63,7 @@ const MOVED_SIDECARS = ['-wal', '-shm'] as const;
 const BLOCKING_FLAGS = 0x2 | 0x4 | 0x00020000 | 0x00040000;
 
 function refuseDestination(path: string): never {
-  console.error(`Error: destination already exists: ${path}`);
+  console.error(`Error: destination already exists and is non-empty: ${path}`);
   console.error('Refusing to overwrite. Delete the file or choose a different path.');
   process.exit(1);
 }
@@ -87,15 +83,6 @@ function existingDestinationSidecar(dest: string): string | undefined {
     if (pathExists(dest + ext)) return dest + ext;
   }
   return undefined;
-}
-
-function destinationCollision(dest: string): string | undefined {
-  return pathExists(dest) ? dest : existingDestinationSidecar(dest);
-}
-
-function moveNoReplace(source: string, destination: string): void {
-  linkSync(source, destination);
-  unlinkSync(source);
 }
 
 function commitBlocked(path: string): string | undefined {
@@ -210,8 +197,12 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     return;
   }
 
-  const collision = destinationCollision(dest);
-  if (collision) refuseDestination(collision);
+  if (existsSync(dest)) {
+    const st = statSync(dest);
+    if (st.size > 0) refuseDestination(dest);
+  }
+  const sidecar = existingDestinationSidecar(dest);
+  if (sidecar) refuseDestination(sidecar);
 
   // Refuse to migrate if the source DB is open. lsof's absence on the host
   // is treated as "probably safe" — best-effort check.
@@ -309,14 +300,11 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   let dbMoved = false;
   try {
     mkdirSync(dirname(dest), { recursive: true });
-    migrateTestHooks.beforeMove?.();
-    const racedCollision = destinationCollision(dest);
-    if (racedCollision) throw new Error(`destination already exists: ${racedCollision}`);
-    moveNoReplace(src, dest);
+    renameSync(src, dest);
     dbMoved = true;
     for (const ext of MOVED_SIDECARS) {
       if (existsSync(src + ext)) {
-        moveNoReplace(src + ext, dest + ext);
+        renameSync(src + ext, dest + ext);
         movedExts.push(ext);
       }
     }
@@ -326,10 +314,7 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     for (const patch of staged) {
       const path = patch.write.target;
       const prior = { path, bytes: readFileSync(path), mode: statSync(path).mode };
-      if (migrateTestHooks.failCommitPath === patch.target.path) {
-        migrateTestHooks.onCommitFailure?.();
-        throw new Error('injected commit failure');
-      }
+      if (migrateTestHooks.failCommitPath === patch.target.path) throw new Error('injected commit failure');
       patch.write.commit();
       committedConfigs.push(prior);
       console.log(`✓ Patched ${path}`);
@@ -337,14 +322,14 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   } catch (error) {
     const problems = [error instanceof Error ? error.message : String(error)];
     for (const ext of movedExts.reverse()) {
-      try { moveNoReplace(dest + ext, src + ext); }
+      try { renameSync(dest + ext, src + ext); }
       catch (rollbackError) {
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         problems.push(`failed to move sidecar back from ${dest}${ext} (${message})`);
       }
     }
     if (dbMoved) {
-      try { moveNoReplace(dest, src); }
+      try { renameSync(dest, src); }
       catch (rollbackError) {
         const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         problems.push(`failed to move database back from ${dest} (${message})`);
