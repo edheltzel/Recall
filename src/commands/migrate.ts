@@ -34,7 +34,7 @@ import {
   type StagedFileWrite,
 } from '../../lib/jsonc-mcp.js';
 
-export const migrateTestHooks = { failCommitPath: '' };
+export const migrateTestHooks = { failCommitPath: '', commitProbeExecutable: '' };
 
 export interface MigrateOptions {
   to: string;
@@ -89,11 +89,13 @@ function commitBlocked(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   if (!statSync(path).isFile()) return `not a replaceable file: ${path}`;
   if (process.platform === 'darwin' || process.platform === 'freebsd') {
-    const flags = Number.parseInt(execFileSync('stat', ['-f', '%f', path], { encoding: 'utf-8' }).trim(), 10);
+    const probe = migrateTestHooks.commitProbeExecutable || 'stat';
+    const flags = Number.parseInt(execFileSync(probe, ['-f', '%f', path], { encoding: 'utf-8' }).trim(), 10);
     if ((flags & BLOCKING_FLAGS) !== 0) return `immutable: ${path}`;
   } else if (process.platform === 'linux') {
     try {
-      const attrs = execFileSync('lsattr', ['-d', path], { encoding: 'utf-8' }).trim().split(/\s+/)[0] ?? '';
+      const probe = migrateTestHooks.commitProbeExecutable || 'lsattr';
+      const attrs = execFileSync(probe, ['-d', path], { encoding: 'utf-8' }).trim().split(/\s+/)[0] ?? '';
       if (attrs.includes('i') || attrs.includes('a')) return `immutable: ${path}`;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
