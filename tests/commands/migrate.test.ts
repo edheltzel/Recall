@@ -23,6 +23,14 @@ let originalLog: typeof console.log;
 let originalErr: typeof console.error;
 let captured: string[] = [];
 let capturedErr: string[] = [];
+const immutabilityProbe = process.platform === 'darwin' || process.platform === 'freebsd'
+  ? 'stat'
+  : process.platform === 'linux'
+    ? 'lsattr'
+    : undefined;
+const chflags = process.platform === 'darwin' || process.platform === 'freebsd'
+  ? Bun.which('chflags')
+  : null;
 
 function withExitThrow(run: () => void): void {
   const originalExit = process.exit;
@@ -249,7 +257,7 @@ describe('recall migrate', () => {
     expect(readFileSync(destDb + '-wal', 'utf-8')).toBe('FOREIGN');
   });
 
-  test('aborts before moving when a staged config commit would fail', () => {
+  test.skipIf(chflags === null)('aborts before moving when a staged config commit would fail', () => {
     const legacy = join(tempDir, '.claude.json');
     const settings = join(tempDir, '.claude', 'settings.json');
     mkdirSync(dirname(settings), { recursive: true });
@@ -258,7 +266,7 @@ describe('recall migrate', () => {
     });
     writeFileSync(legacy, body);
     writeFileSync(settings, body);
-    execFileSync('chflags', ['uchg', settings]);
+    execFileSync(chflags!, ['uchg', settings]);
     try {
       expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
       expect(existsSync(srcDb)).toBe(true);
@@ -268,8 +276,42 @@ describe('recall migrate', () => {
       expect(readFileSync(settings, 'utf-8')).toBe(body);
       expect(capturedErr.join('\n')).toContain(`cannot commit ${settings}`);
     } finally {
-      execFileSync('chflags', ['nouchg', settings]);
+      execFileSync(chflags!, ['nouchg', settings]);
     }
+  });
+
+  test.skipIf(immutabilityProbe === undefined)('cleans staged configs when commit preflight fails', () => {
+    const legacy = join(tempDir, '.claude.json');
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(dirname(settings), { recursive: true });
+    const body = JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    });
+    writeFileSync(legacy, body);
+    writeFileSync(settings, body);
+
+    const binDir = join(tempDir, 'bin');
+    const probe = join(binDir, immutabilityProbe!);
+    mkdirSync(binDir);
+    writeFileSync(probe, '#!/bin/sh\nexit 1\n');
+    chmodSync(probe, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${originalPath ?? ''}`;
+    try {
+      expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+    } finally {
+      process.env.PATH = originalPath;
+    }
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(srcDb + '-wal')).toBe(true);
+    expect(existsSync(srcDb + '-shm')).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(readFileSync(legacy, 'utf-8')).toBe(body);
+    expect(readFileSync(settings, 'utf-8')).toBe(body);
+    expect(existsSync(`${legacy}.tmp`)).toBe(false);
+    expect(existsSync(`${settings}.tmp`)).toBe(false);
+    expect(capturedErr.join('\n')).toContain(`cannot commit ${legacy}`);
   });
 
   test('restores an already-committed config when a later commit fails', () => {

@@ -277,11 +277,16 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   }
 
   for (const patch of staged) {
-    const blocked = commitBlocked(patch.target.path);
-    if (!blocked) continue;
-    for (const item of staged) item.write.cleanup();
-    console.error(`Error: cannot commit ${patch.target.path} (${blocked})`);
-    process.exit(1);
+    try {
+      const blocked = commitBlocked(patch.target.path);
+      if (!blocked) continue;
+      throw new Error(blocked);
+    } catch (error) {
+      for (const item of staged) item.write.cleanup();
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`Error: cannot commit ${patch.target.path} (${reason})`);
+      process.exit(1);
+    }
   }
 
   // 2. Move DB + sidecars. Roll renames and already-committed configs back on failure.
