@@ -413,6 +413,22 @@ describe('probeMcpEnv', () => {
     expect(repair).toBeUndefined();
   });
 
+  test('doctor --fix leaves a stale fully invalid Claude config unchanged', () => {
+    const original = JSON.stringify({
+      hooks: [],
+      mcpServers: { 'recall-memory': { env: {} } },
+    });
+    writeFileSync(configPath, original);
+
+    const check = probeMcpEnv({ targets: [target(configPath)], resolvedDbPath: RESOLVED });
+    const fixed = resolveProbeResult(check, true);
+
+    expect(check.result.status).toBe('WARN');
+    expect(check.repair).toBeUndefined();
+    expect(fixed.status).toBe('WARN');
+    expect(readFileSync(configPath, 'utf-8')).toBe(original);
+  });
+
   // ── Fix 1 call site (issue #112): a throwing repair() degrades to FAIL and
   // does not propagate, so runDoctor still prints its summary ──
   test('resolveProbeResult: throwing repair() degrades to FAIL (no propagation)', () => {

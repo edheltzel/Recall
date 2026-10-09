@@ -942,22 +942,26 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   const detail = stale
     .map(o => `${o.target.path} (${o.primaryDbPath === undefined ? 'env.RECALL_DB_PATH missing' : `has ${o.primaryDbPath}`}; expected ${desiredDbPath})`)
     .join('; ');
+  const repairableStale = stale.filter(owner => !invalidConfigs.includes(owner.target.path));
+  const result: CheckResult = {
+    label,
+    status: 'WARN',
+    message: `${detail} — MCP server may diverge from CLI on next Claude restart${invalidNote}`,
+  };
+  if (repairableStale.length === 0) return { result };
   return {
-    result: {
-      label,
-      status: 'WARN',
-      message: `${detail} — MCP server may diverge from CLI on next Claude restart${invalidNote}`,
-    },
+    result,
     repair: () => {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
       const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
       const patched: string[] = [];
       const failed: string[] = [];
-      for (const owner of stale) {
+      for (const owner of repairableStale) {
         // Per-file isolation: a write failure on one owner (EACCES, full disk,
         // read-only settings.json) must not abort the others or escape the loop.
         try {
           const cfg = parseHostConfig(owner.target);
+          if (owner.target.host === 'claude') validateClaudeConfigShape(cfg);
           const entry = mcpEntryAt(cfg, owner.target);
           if (!entry) continue; // registration vanished between probe and repair — nothing to back up or patch
           const envKey = owner.target.envPath[owner.target.envPath.length - 1];
