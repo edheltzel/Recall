@@ -5,8 +5,6 @@ export interface McpConfigTarget {
   path: string;
   /** Path from the JSON root to the recall-memory environment object. */
   envPath: string[];
-  /** OpenCode permits comments; the other current targets are strict JSON. */
-  format: 'json' | 'jsonc';
 }
 
 export interface NativeHostAdapter {

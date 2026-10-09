@@ -151,7 +151,7 @@ recall dump "Session title"            # Capture current session
 recall onboard                         # Interactive L0 identity setup (run once per user)
 recall pin decisions 42 10             # Pin a record to high importance
 recall path                            # Show DB + install paths (handy for diagnostics)
-recall doctor --fix                    # Repair drifted/missing Recall symlinks
+recall doctor --fix                    # Repair Recall symlinks and stale Claude MCP DB paths
 recall migrate --to /new/path/recall.db  # Relocate the DB and rewrite MCP configs
 ```
 

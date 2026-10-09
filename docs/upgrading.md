@@ -46,13 +46,24 @@ cd /path/to/Recall
 ./packaging/update.sh
 ```
 
+### First update from an older updater
+
+If your installed release predates Claude MCP reconciliation, its already-running updater cannot use lifecycle functions that arrive during its own pull. Complete that first update with:
+
+```bash
+recall update
+recall install
+```
+
+Run `recall install` once after that first `recall update`. Later updates reload changed lifecycle files before refreshing runtime configuration.
+
 `update.sh` performs the full lifecycle:
 
 1. Fetches the latest release tag from GitHub and compares to
    `package.json`. Exits 0 if already current (unless `--force`).
 2. Creates a timestamped backup of `settings.json`, `recall.db`,
    `CLAUDE.md`, OpenCode/Pi configs, and `.mcp.json` at
-   `~/.claude/backups/recall/<TIMESTAMP>/`. Records the git `PRE_SHA`
+   `~/.agents/Recall/backups/<TIMESTAMP>/`. Records the git `PRE_SHA`
    in the manifest.
 3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
    dirty tree; resolve manually and re-run).
@@ -60,7 +71,9 @@ cd /path/to/Recall
 5. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 6. Copies refreshed hooks, shared lib files, agent skills, and
-   `FOR_CLAUDE.md`; refreshes detected OpenCode, Pi, and Grok integrations; and
+   `FOR_CLAUDE.md`; reconciles Claude MCP ownership under the
+   [Claude integration rules](CLAUDE_INTEGRATION.md#migrating-an-existing-install);
+   refreshes detected OpenCode, Pi, and Grok integrations; and
    runs the shared Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
    exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
    unmarked customized/external sections are preserved, while marked sections
@@ -97,7 +110,7 @@ not used.
 ### Rollback
 
 If `update.sh` fails at any step, it writes a rollback recipe to
-`~/.claude/backups/recall/<TIMESTAMP>/ROLLBACK.txt` with the exact
+`~/.agents/Recall/backups/<TIMESTAMP>/ROLLBACK.txt` with the exact
 commands to revert:
 
 ```
@@ -310,7 +323,7 @@ graph TD
 
 ### Automatic Backups
 
-The installer automatically backs up existing files before making any changes. Backups are stored at `~/.claude/backups/recall/`.
+The installer automatically backs up existing files before making any changes. Backups are stored at `~/.agents/Recall/backups/`.
 
 ### Managing Backups
 

@@ -71,15 +71,24 @@ describe('Claude native plugin package', () => {
     const claudeDir = join(tempDir, '.claude');
     mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
 
-    expect(claudePluginState(tempDir)).toEqual({ installed: false, active: false, version: null });
+    expect(claudePluginState(tempDir)).toEqual({ status: 'absent', version: null });
 
     writeFileSync(
       join(claudeDir, 'plugins', 'installed_plugins.json'),
       JSON.stringify({ version: 2, plugins: { [CLAUDE_PLUGIN_ID]: [{ scope: 'user', version: '0.9.4' }] } }),
     );
-    expect(claudePluginState(tempDir)).toEqual({ installed: true, active: true, version: '0.9.4' });
+    expect(claudePluginState(tempDir)).toEqual({ status: 'active', version: '0.9.4' });
 
-    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ enabledPlugins: { [CLAUDE_PLUGIN_ID]: false } }));
-    expect(claudePluginState(tempDir)).toEqual({ installed: true, active: false, version: '0.9.4' });
+    writeFileSync(join(claudeDir, 'settings.json'), `{
+      // Claude settings are edited by users and may contain JSONC.
+      "enabledPlugins": { "${CLAUDE_PLUGIN_ID}": false, },
+    }`);
+    expect(claudePluginState(tempDir)).toEqual({ status: 'disabled', version: '0.9.4' });
+
+    writeFileSync(join(claudeDir, 'settings.json'), '{"permissions":{},"permissions":{}}');
+    expect(claudePluginState(tempDir)).toEqual({ status: 'unknown', version: '0.9.4' });
+
+    writeFileSync(join(claudeDir, 'plugins', 'installed_plugins.json'), '{"plugins":{},"plugins":{}}');
+    expect(claudePluginState(tempDir)).toEqual({ status: 'unknown', version: null });
   });
 });

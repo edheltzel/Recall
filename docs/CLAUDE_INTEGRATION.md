@@ -32,7 +32,7 @@ The local repository path is required for the current checked-in marketplace. A 
 recall install
 ```
 
-With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks and skip duplicate skill symlinks and the user-scope `recall-memory` MCP entry. Running only the plugin gives skills and MCP, not automatic capture.
+With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks, skip duplicate skill symlinks, and reconcile the user-scope `recall-memory` MCP entry under the database-path rules below. Running only the plugin gives skills and MCP, not automatic capture.
 
 ## What MCP covers
 
@@ -53,23 +53,32 @@ An existing Recall install keeps working. It also keeps its own copies of what t
 
 Claude collapses the two MCP entries only when they resolve to an identical command and environment. `install.sh` writes `bun run <path>` plus an `env` block, so a real existing install always duplicates.
 
-`install.sh` and `update.sh` reconcile this, and both are idempotent — run either after installing the plugin:
+`install.sh` and current `update.sh` reconcile this, and both are idempotent. After installing the plugin, run:
 
 ```bash
 ./packaging/update.sh
 ```
 
+If you are upgrading from a release that predates this reconciliation, the old updater is already loaded before it pulls the new lifecycle code. Complete that first upgrade with:
+
+```bash
+recall update
+recall install
+```
+
+Run `recall install` once after that first `recall update`. Later updates reload changed lifecycle files automatically. See [Upgrading](upgrading.md#first-update-from-an-older-updater).
+
 With the plugin active they:
 
 1. Remove the `~/.claude/skills/do-recall-*` symlinks that point into `~/.agents/Recall/shared/skills/`. Only Recall-owned symlinks are removed; real files, user-authored skills, and other tools' links are left alone, and a skill directory is deleted only when it is already empty.
-2. Remove the user-scope `recall-memory` MCP registration, so the plugin's is the only one left.
+2. Reconcile the user-scope `recall-memory` MCP registration: remove it when the selected database is the default, or keep it for a non-default database the plugin cannot carry.
 3. Leave hooks and canonical files untouched.
 
 Skill canonicals under `~/.agents/Recall/shared/skills/` are still refreshed, because Pi, omp, and `recall doctor` read them.
 
-**A registration pinned to a non-default database is kept, not removed.** The plugin's bundled config cannot carry your custom path, so deleting the entry would silently repoint Recall at the default file and your history would read as empty.
+**A registration pinned to a non-default database is kept only when no explicit database override is present.** An explicit `--db-path` or an inherited `RECALL_DB_PATH` or `MEM_DB_PATH` replaces the stored pin. If that override selects `~/.agents/Recall/recall.db`, the installer removes the user registration so the plugin serves the default database.
 
-Custom-database installs therefore keep both surfaces by design, and re-running `update.sh` will not change that — the decision is made from the path stored in the entry, which stays custom. Collapsing them is a deliberate manual step, because only you can confirm the environment Claude actually launches with:
+Without an override, re-running `update.sh` preserves the stored custom pin. A non-default override still keeps both surfaces because the plugin's bundled config cannot carry your custom path. Collapsing them is a deliberate manual step, because only you can confirm the environment Claude actually launches with:
 
 ```bash
 export RECALL_DB_PATH=/path/to/your/recall.db   # where you launch Claude from
@@ -77,7 +86,7 @@ claude mcp list                                  # confirm plugin:recall:recall-
 claude mcp remove recall-memory -s user          # then drop the duplicate
 ```
 
-`recall doctor` reports the state under **Claude native plugin**: `PASS` when the plugin is the sole owner, `WARN` listing the duplicates when a legacy copy is still present, `INFO` when the plugin is absent or disabled.
+`recall doctor` reports the state under **Claude native plugin**: `PASS` when the plugin is the sole owner, `WARN` when duplicates exist or plugin ownership cannot be parsed, and `INFO` when the plugin is absent or disabled. `doctor --fix` does not apply ownership-dependent skill or MCP repairs while ownership is unknown.
 
 Uninstalling is a separate, user-owned action — `uninstall.sh` does not remove the plugin:
 

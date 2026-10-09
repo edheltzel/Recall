@@ -1,8 +1,8 @@
 // recall repair — core logic (issue #46).
 //
 // Explicit data/index maintenance, separate from `recall doctor --fix`
-// (doctor --fix only repairs install-layout symlinks and never runs data
-// repair; doctor may *recommend* repair).
+// (doctor --fix repairs install/configuration drift and never runs data repair;
+// doctor may *recommend* repair).
 //
 // Safety model:
 // - Dry-run by default; mutations require an explicit execute step.

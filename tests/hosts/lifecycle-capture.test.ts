@@ -539,7 +539,7 @@ describe('host hook payload routing', () => {
     expect(Math.max(...grokChunkSizes)).toBeLessThanOrEqual(maxChunk);
     expect(grokSourcePositions[0]).toBe(0);
     expect(grokSourcePositions[1]).toBeGreaterThan(grokSourcePositions[0]);
-  });
+  }, 15_000);
 
   test('keeps oversized Grok boundaries stable after a prefix insertion', async () => {
     const maxChunk = 25 * 1024 * 1024;

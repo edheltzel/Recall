@@ -32,9 +32,8 @@ if [[ -z "${RECALL_REPO_DIR:-}" ]]; then
 fi
 _RECALL_JSONC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/jsonc-mcp.ts"
 : "${CLAUDE_DIR:=$HOME/.claude}"
-# $CLAUDE_DIR is always absolute. Recall does not write a project-local .claude
-# relative to cwd, so running the installer from $HOME cannot collide a project
-# config with the user config. No separate collision guard.
+# Host config paths are absolute home paths; lifecycle installs never write a
+# project-local .claude, so running from $HOME cannot alias a project config.
 # Recall install root — canonical home for hooks, commands, guides, the DB,
 # and backups. Claude/OpenCode homes receive per-file symlinks back here; Pi's
 # extensions + skills load through its native package manifest. This is the
@@ -1026,9 +1025,9 @@ recall_do_restore() {
 
   log_info "Validating restored files..."
   if [[ -f "$CLAUDE_DIR/.mcp.json" ]]; then
-    if MCP_FILE="$CLAUDE_DIR/.mcp.json" bun -e \
-      'JSON.parse(require("fs").readFileSync(process.env.MCP_FILE))' 2>/dev/null; then
-      log_success "Validated: .mcp.json is valid JSON"
+    if MCP_FILE="$CLAUDE_DIR/.mcp.json" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e \
+      'const { parseJsonc } = await import(process.env.JSONC_LIB); parseJsonc(require("fs").readFileSync(process.env.MCP_FILE, "utf8"))' 2>/dev/null; then
+      log_success "Validated: .mcp.json is valid JSONC"
     else
       log_error "Restored .mcp.json is NOT valid JSON!"
       log_warn "You may need to manually fix $CLAUDE_DIR/.mcp.json"
@@ -1235,6 +1234,15 @@ recall_unlink_if_managed() {
   rm -f "$target"
 }
 
+
+_recall_warn_leftover_files() {
+  local dir="$1" leftover
+  for leftover in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+    [[ -e "$leftover" || -L "$leftover" ]] || continue
+    [[ -L "$leftover" ]] && continue
+    log_warn "Left user file in place: $leftover"
+  done
+}
 # ── Legacy slash-command cleanup ─────────────────────────────────────────────
 #
 # All Recall slash commands (`/Recall:*`) migrated to Agent Skills
@@ -1256,11 +1264,7 @@ recall_remove_legacy_slash_commands() {
     done
     rmdir "$dir" 2>/dev/null || true
     if [[ -d "$dir" ]]; then
-      local leftover
-      for leftover in "$dir"/*.md; do
-        [[ -e "$leftover" && ! -L "$leftover" ]] || continue
-        log_warn "Left user file in place: $leftover"
-      done
+      _recall_warn_leftover_files "$dir"
     else
       log_info "Removed legacy slash commands at $dir"
     fi
@@ -1277,6 +1281,7 @@ recall_remove_legacy_slash_commands() {
     done
     rmdir "$legacy" 2>/dev/null || true
     [[ -d "$legacy" ]] || log_info "Removed legacy lowercase slash commands at $legacy"
+    [[ -d "$legacy" ]] && _recall_warn_leftover_files "$legacy"
   fi
 
   # Command canonicals under $RECALL_CLAUDE_COMMANDS_DIR are no longer shipped.
@@ -1395,6 +1400,7 @@ _recall_remove_managed_skill_dirs_from() {
     done
     if [[ "${DRY_RUN:-false}" != "true" ]]; then
       rmdir "$dir" 2>/dev/null || true
+      [[ -d "$dir" ]] && _recall_warn_leftover_files "$dir"
     fi
   done
   _RECALL_REMOVED_SKILL_LINKS=$removed
@@ -1449,16 +1455,29 @@ recall_remove_legacy_skill_names() {
 # and must not be spawned mid-install.
 recall_claude_plugin_active() {
   local installed="$CLAUDE_DIR/plugins/installed_plugins.json"
-  [[ -f "$installed" ]] || return 1
   command -v bun &>/dev/null || return 1
-  INSTALLED_FILE="$installed" SETTINGS_FILE="$CLAUDE_DIR/settings.json" \
+  INSTALLED_FILE="$installed" SETTINGS_FILE="$CLAUDE_DIR/settings.json" JSONC_LIB="$_RECALL_JSONC_LIB" \
     PLUGIN_ID="$RECALL_CLAUDE_PLUGIN_ID" bun -e '
-    const fs = require("fs");
-    const read = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf-8")); } catch { return null; } };
-    const entry = read(process.env.INSTALLED_FILE)?.plugins?.[process.env.PLUGIN_ID];
-    if (!Array.isArray(entry) || entry.length === 0) process.exit(1);
-    const enabled = read(process.env.SETTINGS_FILE)?.enabledPlugins?.[process.env.PLUGIN_ID];
-    process.exit(enabled === false ? 1 : 0);
+    const { existsSync } = require("fs");
+    const { classifyClaudePluginState, readJsoncObject } = await import(process.env.JSONC_LIB);
+    let installed;
+    try {
+      installed = existsSync(process.env.INSTALLED_FILE)
+        ? readJsoncObject(process.env.INSTALLED_FILE)
+        : undefined;
+    } catch {
+      installed = null;
+    }
+    let settings;
+    try {
+      settings = existsSync(process.env.SETTINGS_FILE)
+        ? readJsoncObject(process.env.SETTINGS_FILE)
+        : undefined;
+    } catch {
+      settings = null;
+    }
+    const state = classifyClaudePluginState(installed, settings, process.env.PLUGIN_ID);
+    process.exit(state.status === "active" ? 0 : state.status === "unknown" ? 2 : 1);
   ' 2>/dev/null
 }
 
@@ -1492,51 +1511,159 @@ _recall_unlink_claude_skill_links() {
   fi
 }
 
-# Drop the user-scope recall-memory registration in favour of the plugin's, but
-# ONLY when both resolve to the same database. The plugin's bundled .mcp.json
-# carries no env block, so a registration pinned to a non-default RECALL_DB_PATH
-# must survive — removing it would silently repoint memory at the default file
-# and the user's history would look empty. Returns 0 when the legacy entry is
-# gone (or was never there), 1 when it was deliberately kept.
-_recall_unregister_legacy_claude_mcp() {
+_recall_reconcile_claude_mcp() {
+  local mode="$1"
+  local bun_path="$2"
+  local mem_mcp_path="$3"
   local default_db="$RECALL_DIR/recall.db"
-  local f
+  local explicit_db=""
+  if [[ -n "${RECALL_DB_PATH:-}" ]] || [[ -n "${MEM_DB_PATH:-}" ]]; then
+    explicit_db="$(recall_resolve_db_path)"
+  fi
 
-  for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
-    [[ -f "$f" ]] || continue
-    grep -q "recall-memory" "$f" || continue
-    if CFG_FILE="$f" DEFAULT_DB="$default_db" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const fs = require("fs");
-      const { parseJsonc, writeJsonAtomic, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
-      const file = process.env.CFG_FILE;
-      let cfg;
-      try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(1); }
-      const entry = cfg?.mcpServers?.["recall-memory"];
-      if (!entry) process.exit(0);
-      const pinned = entry.env?.RECALL_DB_PATH ?? entry.env?.MEM_DB_PATH;
-      if (pinned && pinned !== process.env.DEFAULT_DB) process.exit(1);
-      delete cfg.mcpServers["recall-memory"];
-      if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
-      if (isSemanticallyEmpty(cfg)) fs.unlinkSync(file);
-      else writeJsonAtomic(file, cfg);
-    ' 2>/dev/null; then
-      log_success "Removed duplicate recall-memory registration from $(basename "$f") — the plugin provides it"
-    else
-      log_warn "Kept recall-memory in $(basename "$f"): it pins a custom RECALL_DB_PATH the plugin cannot carry"
-      log_warn "  Both surfaces stay registered. To collapse them, export RECALL_DB_PATH where you launch"
-      log_warn "  Claude, confirm the plugin server resolves it, then run: claude mcp remove recall-memory -s user"
-    fi
-  done
+  export -f recall_backup_file
+  export BACKUP_DIR
+  local outcome status
+  if outcome="$(MODE="$mode" LEGACY_FILE="$HOME/.claude.json" SETTINGS_FILE="$CLAUDE_DIR/settings.json" \
+    DEFAULT_DB="$default_db" EXPLICIT_DB="$explicit_db" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
+    JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
+    const { execFileSync } = require("child_process");
+    const { existsSync, readFileSync } = require("fs");
+    const {
+      configuredMcpDbPath,
+      readJsoncObject,
+      selectMcpDbPath,
+      validateClaudeConfigShape,
+      writeJsonAtomic,
+      writeJsonAtomicOrRemoveEmpty,
+    } = await import(process.env.JSONC_LIB);
 
-  # Success means no user-scope registration is left to duplicate the plugin's —
-  # re-scanned rather than tracked in the loop, so a kept entry in either file wins.
-  for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
-    [[ -f "$f" ]] || continue
-    if grep -q "recall-memory" "$f"; then
-      return 1
-    fi
-  done
-  return 0
+    function ownedConfig(file) {
+      if (!existsSync(file) || !readFileSync(file, "utf8").includes("recall-memory")) return null;
+      const config = readJsoncObject(file);
+      validateClaudeConfigShape(config);
+      const entry = config.mcpServers?.["recall-memory"];
+      return entry ? { file, config, entry } : null;
+    }
+
+    function backup(file) {
+      if (!existsSync(file)) return;
+      execFileSync("bash", ["-c", "mkdir -p \"$BACKUP_DIR\" && recall_backup_file \"$CFG_FILE\" \"$BACKUP_DIR\""], {
+        env: { ...process.env, CFG_FILE: file },
+      });
+    }
+
+    function configure(owner, selectedPath) {
+      owner.entry.command = process.env.BUN_PATH;
+      owner.entry.args = ["run", process.env.MCP_PATH];
+      if (!owner.entry.env || typeof owner.entry.env !== "object" || Array.isArray(owner.entry.env)) {
+        owner.entry.env = {};
+      }
+      owner.entry.env.RECALL_DB_PATH = selectedPath;
+      delete owner.entry.env.MEM_DB_PATH;
+    }
+
+    let writeAttempted = false;
+    function persist(owners, removeEmpty) {
+      for (const owner of owners) {
+        backup(owner.file);
+        writeAttempted = true;
+        if (removeEmpty) writeJsonAtomicOrRemoveEmpty(owner.file, owner.config);
+        else writeJsonAtomic(owner.file, owner.config);
+      }
+    }
+
+    try {
+      const files = [process.env.LEGACY_FILE, process.env.SETTINGS_FILE];
+      const owners = files.map(ownedConfig).filter(Boolean);
+      const hadOwners = owners.length > 0;
+      const previousPaths = owners.map(owner => configuredMcpDbPath(owner.entry.env) ?? process.env.DEFAULT_DB);
+      const discardedCustomPaths = [...new Set(previousPaths.filter(path => path !== process.env.DEFAULT_DB))];
+      const selection = selectMcpDbPath(
+        previousPaths,
+        process.env.DEFAULT_DB,
+        process.env.EXPLICIT_DB || undefined,
+      );
+      if (selection.status === "conflict") process.exit(3);
+
+      if (process.env.MODE === "plugin" && selection.path === process.env.DEFAULT_DB) {
+        for (const owner of owners) {
+          delete owner.config.mcpServers["recall-memory"];
+          if (Object.keys(owner.config.mcpServers).length === 0) delete owner.config.mcpServers;
+        }
+        persist(owners, true);
+        if (!hadOwners) {
+          console.log("success:recall-memory MCP provided by the Claude plugin");
+        } else if (discardedCustomPaths.length > 0) {
+          console.log(`warn:Removed the user recall-memory registration and discarded stored custom database path ${discardedCustomPaths.join(", ")} because the explicit database override selects the plugin default ${process.env.DEFAULT_DB}`);
+        } else {
+          console.log("success:Removed the default user recall-memory registration; recall-memory MCP is now provided by the Claude plugin");
+        }
+      } else {
+        const registrationsNeedUpdate = owners.some(owner => {
+          const args = owner.entry.args;
+          const env = owner.entry.env;
+          return owner.entry.command !== process.env.BUN_PATH
+            || !Array.isArray(args)
+            || args.length !== 2
+            || args[0] !== "run"
+            || args[1] !== process.env.MCP_PATH
+            || configuredMcpDbPath(env) !== selection.path
+            || Object.prototype.hasOwnProperty.call(env ?? {}, "MEM_DB_PATH");
+        });
+        if (owners.length === 0) {
+          const config = readJsoncObject(process.env.SETTINGS_FILE, true);
+          validateClaudeConfigShape(config);
+          config.mcpServers ||= {};
+          const entry = {};
+          config.mcpServers["recall-memory"] = entry;
+          owners.push({ file: process.env.SETTINGS_FILE, config, entry });
+        }
+        for (const owner of owners) configure(owner, selection.path);
+        persist(owners, false);
+        if (process.env.MODE !== "plugin") {
+          console.log("success:Configured recall-memory MCP registration");
+        } else if (!hadOwners) {
+          console.log(`warn:Added a user recall-memory registration for custom database path ${selection.path} because the Claude plugin cannot carry it`);
+        } else {
+          const replacedPaths = [...new Set(previousPaths.filter(path => path !== selection.path))];
+          if (replacedPaths.length > 0) {
+            const discarded = replacedPaths.filter(path => path !== process.env.DEFAULT_DB);
+            const prior = discarded.length > 0
+              ? `discarded stored custom database path ${discarded.join(", ")}`
+              : `replaced the default database path ${process.env.DEFAULT_DB}`;
+            console.log(`warn:Replaced the user recall-memory registration: ${prior} in favor of explicit database override ${selection.path}`);
+          } else if (registrationsNeedUpdate) {
+            console.log(`warn:Updated the user recall-memory registration while keeping stored custom database path ${selection.path} because the Claude plugin cannot carry it`);
+          } else {
+            console.log(`warn:Kept the user recall-memory registration for stored custom database path ${selection.path} because the Claude plugin cannot carry it`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+      process.exit(writeAttempted ? 4 : 2);
+    }
+  ')"; then
+    case "$outcome" in
+      warn:*) log_warn "${outcome#warn:}" ;;
+      success:*) log_success "${outcome#success:}" ;;
+      *) log_success "$outcome" ;;
+    esac
+    return 0
+  else
+    status=$?
+  fi
+
+  if [[ $status -eq 3 ]]; then
+    log_error "Conflicting recall-memory database paths found in Claude user config (left unchanged)"
+  elif [[ $status -eq 4 ]]; then
+    log_error "Could not finish recall-memory Claude reconciliation; config may be partially updated"
+    log_error "Restore the Claude config backups from $BACKUP_DIR, then rerun the command"
+  else
+    log_error "Could not reconcile recall-memory Claude config before any write (existing config is invalid or inaccessible - left unchanged)"
+  fi
+  return "$status"
 }
 
 # Claude Code skills — core platform, installed unconditionally regardless of
@@ -1552,6 +1679,12 @@ recall_install_claude_skills() {
   if recall_claude_plugin_active; then
     _recall_unlink_claude_skill_links
     return 0
+  else
+    local plugin_status=$?
+    if [[ $plugin_status -ne 1 ]]; then
+      log_error "Could not read Claude plugin state (existing config is invalid - left unchanged)"
+      return "$plugin_status"
+    fi
   fi
   _recall_link_skills_to "$CLAUDE_DIR/skills"
 }
@@ -1627,17 +1760,27 @@ recall_verify_install() {
   # skills ship in this release. Skipped when the native plugin owns the surface:
   # the ~/.claude/skills links are removed on purpose there, so probing them
   # would fail a correctly converged install.
-  if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]] && ! recall_claude_plugin_active; then
-    local skill_dir skill_name skillfile base
-    for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
-      [[ -d "$skill_dir" ]] || continue
-      skill_name="$(basename "$skill_dir")"
-      for skillfile in "$skill_dir"*; do
-        [[ -f "$skillfile" ]] || continue
-        base="$(basename "$skillfile")"
-        _check_symlink "$CLAUDE_DIR/skills/$skill_name/$base" "$skillfile"
+  if [[ -d "$RECALL_SHARED_SKILLS_DIR" ]]; then
+    local plugin_active=false plugin_status=0
+    if recall_claude_plugin_active; then
+      plugin_active=true
+    else
+      plugin_status=$?
+    fi
+    if [[ $plugin_status -gt 1 ]]; then
+      missing+=("Claude plugin state: existing config is invalid")
+    elif [[ "$plugin_active" != "true" ]]; then
+      local skill_dir skill_name skillfile base
+      for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
+        [[ -d "$skill_dir" ]] || continue
+        skill_name="$(basename "$skill_dir")"
+        for skillfile in "$skill_dir"*; do
+          [[ -f "$skillfile" ]] || continue
+          base="$(basename "$skillfile")"
+          _check_symlink "$CLAUDE_DIR/skills/$skill_name/$base" "$skillfile"
+        done
       done
-    done
+    fi
   fi
 
   # extract_prompt.md (lives under Claude's MEMORY dir, not owned by us, but
@@ -1714,7 +1857,7 @@ recall_print_recovery() {
   local logger="${1:-log_info}"
   "$logger" "Recovery options:"
   "$logger" "  Recommended: re-run ./packaging/install.sh — it heals canonicals AND symlinks (idempotent)."
-  "$logger" "  Alternative: run 'recall doctor --fix' — repairs symlinks only (no reinstall)."
+  "$logger" "  Alternative: run 'recall doctor --fix' - repairs install and configuration drift (no reinstall)."
 }
 
 # Write the in-flight marker. Called once $RECALL_DIR exists, before the first
@@ -1867,28 +2010,29 @@ recall_auto_migrate() {
 # ── MCP registration ─────────────────────────────────────────────────────────
 
 recall_configure_mcp() {
-  # The native plugin registers recall-memory from its own bundle. Claude
-  # namespaces it, so a surviving user-scope entry is a duplicate rather than an
-  # override — clear it instead of re-adding one. When the legacy entry pins a
-  # custom database it is kept on purpose, and configuration continues below so
-  # that entry stays healthy.
-  if recall_claude_plugin_active; then
-    if _recall_unregister_legacy_claude_mcp; then
-      log_success "recall-memory MCP provided by the Claude plugin"
-      return 0
-    fi
-  fi
-
   local mem_mcp_path bun_path
   mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
   bun_path="$(which bun 2>/dev/null || echo "$HOME/.bun/bin/bun")"
-
   mkdir -p "$CLAUDE_DIR"
 
-  local already_registered=false
+  if recall_claude_plugin_active; then
+    local reconcile_status
+    if _recall_reconcile_claude_mcp plugin "$bun_path" "$mem_mcp_path"; then
+      return 0
+    else
+      reconcile_status=$?
+      return "$reconcile_status"
+    fi
+  else
+    local plugin_status=$?
+    if [[ $plugin_status -gt 1 ]]; then
+      log_error "Could not read Claude plugin state (existing config is invalid - left unchanged)"
+      return "$plugin_status"
+    fi
+  fi
+
   if command -v claude &>/dev/null; then
     if claude mcp list 2>/dev/null | grep -q "recall-memory"; then
-      already_registered=true
       log_success "MCP already configured for recall-memory"
     else
       log_info "Registering recall-memory MCP server..."
@@ -1896,91 +2040,14 @@ recall_configure_mcp() {
         "$bun_path" "run" "$mem_mcp_path" 2>/dev/null; then
         log_success "Registered recall-memory MCP server via Claude Code CLI"
       else
-        log_warn "claude mcp add failed — adding to settings.json directly"
-        _recall_write_mcp_settings "$bun_path" "$mem_mcp_path"
+        log_warn "claude mcp add failed — reconciling user config directly"
       fi
     fi
   else
-    log_warn "Claude Code CLI not found — adding recall-memory to settings.json directly"
-    _recall_write_mcp_settings "$bun_path" "$mem_mcp_path"
+    log_warn "Claude Code CLI not found — reconciling user config directly"
   fi
 
-  # `claude mcp add` does not let us set an env block, and historically left
-  # env: {} so recall-mcp resolved the DB path from defaults — which broke
-  # custom installs. Patch the existing entry in whichever config file owns
-  # the registration so it points at the renamed recall-mcp binary and passes
-  # RECALL_DB_PATH to the spawned process.
-  _recall_ensure_mcp_entry "$bun_path" "$mem_mcp_path"
-}
-
-# Ensure the recall-memory MCP registration points at recall-mcp and has
-# env.RECALL_DB_PATH set to the resolved canonical DB path. Patches both
-# ~/.claude.json and ~/.claude/settings.json if either contains the registration.
-# Idempotent, and preserves user-authored env keys.
-_recall_ensure_mcp_entry() {
-  local bun_path="$1"
-  local mem_mcp_path="$2"
-  local db_path_abs
-  db_path_abs="$(recall_resolve_db_path)"
-
-  local f
-  for f in "$HOME/.claude.json" "$CLAUDE_DIR/settings.json"; do
-    [[ -f "$f" ]] || continue
-    if ! grep -q "recall-memory" "$f"; then
-      continue
-    fi
-    mkdir -p "$BACKUP_DIR"
-    recall_backup_file "$f" "$BACKUP_DIR"
-    CFG_FILE="$f" DB_PATH_ABS="$db_path_abs" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
-      JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const fs = require("fs");
-      const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
-      const file = process.env.CFG_FILE;
-      const dbPath = process.env.DB_PATH_ABS;
-      const bunPath = process.env.BUN_PATH;
-      const mcpPath = process.env.MCP_PATH;
-      let cfg;
-      try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { process.exit(0); }
-      if (!cfg.mcpServers || !cfg.mcpServers["recall-memory"]) process.exit(0);
-      const entry = cfg.mcpServers["recall-memory"];
-      entry.command = bunPath;
-      entry.args = ["run", mcpPath];
-      if (!entry.env || typeof entry.env !== "object" || Array.isArray(entry.env)) entry.env = {};
-      entry.env.RECALL_DB_PATH = dbPath;
-      delete entry.env.MEM_DB_PATH;
-      writeJsonAtomic(file, cfg);
-    ' && log_success "Patched recall-memory command/env in $(basename "$f")"
-  done
-}
-
-_recall_write_mcp_settings() {
-  local bun_path="$1"
-  local mem_mcp_path="$2"
-  local settings_file="$CLAUDE_DIR/settings.json"
-  local db_path_abs
-  db_path_abs="$(recall_resolve_db_path)"
-
-  if [[ -f "$settings_file" ]] && grep -q "recall-memory" "$settings_file"; then
-    log_success "recall-memory already in settings.json"
-    return
-  fi
-
-  SETTINGS_FILE="$settings_file" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
-    DB_PATH_ABS="$db_path_abs" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-    const fs = require("fs");
-    const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
-    let config = {};
-    try { config = parseJsonc(fs.readFileSync(process.env.SETTINGS_FILE, "utf8")); } catch {}
-    if (!config || typeof config !== "object" || Array.isArray(config)) config = {};
-    config.mcpServers = config.mcpServers || {};
-    config.mcpServers["recall-memory"] = {
-      command: process.env.BUN_PATH,
-      args: ["run", process.env.MCP_PATH],
-      env: { RECALL_DB_PATH: process.env.DB_PATH_ABS }
-    };
-    writeJsonAtomic(process.env.SETTINGS_FILE, config);
-  '
-  log_success "Added recall-memory to settings.json mcpServers"
+  _recall_reconcile_claude_mcp user "$bun_path" "$mem_mcp_path"
 }
 
 # ── Hooks ────────────────────────────────────────────────────────────────────
@@ -2086,7 +2153,7 @@ recall_register_hook() {
   local matcher="${5:-}"
   local settings_file="$CLAUDE_DIR/settings.json"
 
-  SETTINGS_FILE="$settings_file" \
+  if SETTINGS_FILE="$settings_file" \
     EVENT="$event" \
     HOOK_NAME="$hook_name" \
     COMMAND="$command" \
@@ -2094,7 +2161,6 @@ recall_register_hook() {
     MATCHER="$matcher" \
     JSONC_LIB="$_RECALL_JSONC_LIB" \
     bun -e '
-      const fs = require("fs");
       const settingsFile = process.env.SETTINGS_FILE;
       const event = process.env.EVENT;
       const hookName = process.env.HOOK_NAME;
@@ -2102,11 +2168,11 @@ recall_register_hook() {
       const timeout = process.env.TIMEOUT;
       const matcher = process.env.MATCHER || "";
 
-      const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
-      let config = {};
-      try { config = parseJsonc(fs.readFileSync(settingsFile, "utf8")); } catch {}
-      config.hooks = config.hooks || {};
-      config.hooks[event] = config.hooks[event] || [];
+      const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+      const config = readJsoncObject(settingsFile, true);
+      validateClaudeConfigShape(config);
+      config.hooks ||= {};
+      config.hooks[event] ||= [];
 
       const exists = config.hooks[event].some(e =>
         e.hooks && e.hooks.some(h => h.command && h.command.includes(hookName))
@@ -2118,14 +2184,18 @@ recall_register_hook() {
       config.hooks[event].push({ matcher, hooks: [hookObj] });
 
       writeJsonAtomic(settingsFile, config);
-    '
+    '; then
+    log_success "Registered $hook_name hook ($event) in settings.json"
+  else
+    log_error "Failed to register $hook_name in $settings_file (existing config is invalid - left unchanged)"
+    return 1
+  fi
 }
 
 # recall_register_all_hooks
 #
-# Wires up all four runtime hooks that Recall ships. Each registration is
-# independent — a failure in one does not prevent the others from landing.
-# Always safe to re-run: hooks already present are skipped.
+# Wires up all four runtime hooks that Recall ships. Always safe to re-run:
+# hooks already present are skipped.
 recall_register_all_hooks() {
   local hooks_dir="$CLAUDE_DIR/hooks"
   local bun_path
@@ -2133,26 +2203,22 @@ recall_register_all_hooks() {
 
   if [[ -f "$hooks_dir/RecallExtract.ts" ]]; then
     recall_register_hook "Stop" "RecallExtract" \
-      "$bun_path run $hooks_dir/RecallExtract.ts"
-    log_success "Registered RecallExtract hook in settings.json"
+      "$bun_path run $hooks_dir/RecallExtract.ts" || return
   fi
 
   if [[ -f "$hooks_dir/RecallTelosSync.ts" ]]; then
     recall_register_hook "SessionStart" "RecallTelosSync" \
-      "$bun_path run $hooks_dir/RecallTelosSync.ts" 10000
-    log_success "Registered RecallTelosSync hook in settings.json"
+      "$bun_path run $hooks_dir/RecallTelosSync.ts" 10000 || return
   fi
 
   if [[ -f "$hooks_dir/RecallStart.ts" ]]; then
     recall_register_hook "SessionStart" "RecallStart" \
-      "$bun_path run $hooks_dir/RecallStart.ts"
-    log_success "Registered RecallStart hook (SessionStart) in settings.json"
+      "$bun_path run $hooks_dir/RecallStart.ts" || return
   fi
 
   if [[ -f "$hooks_dir/RecallPreCompact.ts" ]]; then
     recall_register_hook "PreCompact" "RecallPreCompact" \
-      "$bun_path run $hooks_dir/RecallPreCompact.ts" 10000
-    log_success "Registered RecallPreCompact hook (PreCompact) in settings.json"
+      "$bun_path run $hooks_dir/RecallPreCompact.ts" 10000 || return
   fi
 
   # Mid-session learning loop (#51). Registered unconditionally on BOTH events;
@@ -2160,16 +2226,14 @@ recall_register_all_hooks() {
   # default), not registration — the disabled hook exits ~free on every fire.
   if [[ -f "$hooks_dir/RecallInSession.ts" ]]; then
     recall_register_hook "PostToolUse" "RecallInSession" \
-      "$bun_path run $hooks_dir/RecallInSession.ts" 10000
+      "$bun_path run $hooks_dir/RecallInSession.ts" 10000 || return
     recall_register_hook "UserPromptSubmit" "RecallInSession" \
-      "$bun_path run $hooks_dir/RecallInSession.ts" 10000
-    log_success "Registered RecallInSession hook (PostToolUse + UserPromptSubmit) in settings.json"
+      "$bun_path run $hooks_dir/RecallInSession.ts" 10000 || return
   fi
 
   if [[ -f "$hooks_dir/RecallClearExtract.ts" ]]; then
     recall_register_hook "SessionStart" "RecallClearExtract" \
-      "$bun_path run $hooks_dir/RecallClearExtract.ts" "" "clear"
-    log_success "Registered RecallClearExtract hook (SessionStart matcher=clear) in settings.json"
+      "$bun_path run $hooks_dir/RecallClearExtract.ts" "" "clear" || return
   fi
 }
 
@@ -2191,13 +2255,12 @@ recall_rename_hooks_in_settings() {
   local settings_file="$CLAUDE_DIR/settings.json"
   [[ ! -f "$settings_file" ]] && return 0
 
-  SETTINGS_FILE="$settings_file" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-    const fs = require("fs");
-    const { parseJsonc, writeJsonAtomic } = await import(process.env.JSONC_LIB);
+  if SETTINGS_FILE="$settings_file" JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
+    const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomic } = await import(process.env.JSONC_LIB);
     const file = process.env.SETTINGS_FILE;
-    let cfg;
-    try { cfg = parseJsonc(fs.readFileSync(file, "utf-8")); } catch { return; }
-    if (!cfg.hooks || typeof cfg.hooks !== "object") return;
+    const cfg = readJsoncObject(file, true);
+    validateClaudeConfigShape(cfg);
+    if (!cfg.hooks) process.exit(0);
 
     // Map of old hook name → new hook name. Order matters in the substitution
     // loop: longest patterns first so we never rename a substring that
@@ -2214,7 +2277,6 @@ recall_rename_hooks_in_settings() {
     let changed = false;
     for (const event of Object.keys(cfg.hooks)) {
       const list = cfg.hooks[event];
-      if (!Array.isArray(list)) continue;
       for (const entry of list) {
         const inner = (entry && entry.hooks) || [];
         for (const h of inner) {
@@ -2241,7 +2303,11 @@ recall_rename_hooks_in_settings() {
       writeJsonAtomic(file, cfg);
       console.log("Migrated hook names in " + file);
     }
-  ' 2>/dev/null
+  '; then
+    return 0
+  fi
+  log_error "Failed to migrate hooks in $settings_file (existing config is invalid - left unchanged)"
+  return 1
 }
 
 # ── CLAUDE.md ────────────────────────────────────────────────────────────────
@@ -2473,8 +2539,6 @@ _recall_jsonc_merge_mcp_entry() {
 # after damaging or ignoring a user config.
 _recall_jsonc_remove_mcp_entry() {
   bun run "$RECALL_REPO_DIR/lib/jsonc-mcp.ts" remove "$1" "$2"
-  return $?
-
 }
 
 # ── OpenCode ─────────────────────────────────────────────────────────────────
@@ -2980,7 +3044,7 @@ recall_expected_embedding_model() {
 # Ensure the expected embedding model is present. Best-effort, never fatal.
 recall_provision_embedding_model() {
   local model
-  model="$(cd "$RECALL_REPO_DIR" && recall_expected_embedding_model)"
+  model="$(cd "$RECALL_REPO_DIR" && recall_expected_embedding_model)" || model=""
 
   if [[ -z "$model" ]]; then
     log_warn "Could not determine the expected embedding model — skipping semantic-tier check"

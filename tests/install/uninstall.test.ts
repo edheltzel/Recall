@@ -20,14 +20,14 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
+import { parseJsonc } from '../../lib/jsonc-mcp.ts';
 import { legacyClaudeMemorySection, legacyPiMemorySection } from '../fixtures/legacy-memory-sections';
 
 const REPO = process.cwd();
 const UNINSTALL = join(REPO, 'packaging', 'uninstall.sh');
 
 /**
- * Shadow the host's `pi` with a no-op and return the directory to prepend to
- * PATH.
+ * Shadow a host CLI with a no-op and return the directory to prepend to PATH.
  *
  * `remove_pi` runs `pi remove ... --no-approve` whenever `pi` is on PATH, so on
  * a developer machine that actually has Pi installed these tests inherit a real
@@ -37,9 +37,9 @@ const UNINSTALL = join(REPO, 'packaging', 'uninstall.sh');
  * stubbing it keeps the tests hermetic without losing coverage. Same reasoning
  * as the `bun unlink` stub used further down.
  */
-function stubPiOnPath(binDir: string): string {
+function stubCommandOnPath(binDir: string, command: string): string {
   mkdirSync(binDir, { recursive: true });
-  writeFileSync(join(binDir, 'pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(binDir, command), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   return binDir;
 }
 
@@ -54,6 +54,7 @@ function runUninstall(
   backupBase: string,
   extraArgs: string[] = [],
 ): RunResult {
+  const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
   const r = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', ...extraArgs],
@@ -65,6 +66,7 @@ function runUninstall(
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir, // ~ -> tmp (avoids touching real $HOME binaries)
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         // bun unlink / npm unlink -g operate on the host's global registry
         // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
         // the developer's live `recall` link.
@@ -80,6 +82,7 @@ function runUninstall(
 }
 
 function runPurge(claudeDir: string, backupBase: string): RunResult {
+  const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
@@ -92,6 +95,7 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         CLAUDE_DIR: claudeDir,
         BACKUP_BASE: backupBase,
         HOME: claudeDir,
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -122,6 +126,9 @@ function runUninstallIncludingPi(
   backupBase: string,
   piConfigDir: string,
 ): RunResult {
+  const stubBin = join(dirname(claudeDir), 'stub-bin');
+  stubCommandOnPath(stubBin, 'claude');
+  stubCommandOnPath(stubBin, 'pi');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode'],
@@ -134,7 +141,7 @@ function runUninstallIncludingPi(
         BACKUP_BASE: backupBase,
         PI_CONFIG_DIR: piConfigDir,
         HOME: claudeDir,
-        PATH: `${stubPiOnPath(join(dirname(claudeDir), 'stub-bin'))}:${process.env.PATH ?? ''}`,
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -151,6 +158,7 @@ function runUninstallIncludingOpenCode(
   backupBase: string,
   opencodeConfigDir: string,
 ): RunResult {
+  const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-pi'],
@@ -163,6 +171,7 @@ function runUninstallIncludingOpenCode(
         BACKUP_BASE: backupBase,
         OPENCODE_CONFIG_DIR: opencodeConfigDir,
         HOME: claudeDir,
+        PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
       },
     },
@@ -182,6 +191,7 @@ function runUninstallAll(
   unlinkMarker: string,
   fakeBin: string,
 ): RunResult {
+  stubCommandOnPath(fakeBin, 'claude');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-omp'],
@@ -392,13 +402,26 @@ This content must be preserved across an uninstall.
     expect(existsSync(join(backupBase, '20260101_000000'))).toBe(true);
   });
 
-  test('hook uninstall inventories cover every installed TypeScript file', () => {
-    const uninstall = readFileSync(UNINSTALL, 'utf-8');
-    for (const filename of installedHookFiles()) {
-      expect(uninstall).toContain(`"$CLAUDE_DIR/hooks/${filename}"`);
+  test('uninstall removes every shipped TypeScript hook', () => {
+    const hooks = installedHookFiles();
+    const helpers = hookLibFiles(join(REPO, 'hooks', 'lib'));
+    for (const filename of hooks) {
+      writeFileSync(join(claudeDir, 'hooks', filename), '// installed');
     }
-    for (const relative of hookLibFiles(join(REPO, 'hooks', 'lib'))) {
-      expect(uninstall).toContain(`"$CLAUDE_DIR/hooks/lib/${relative}"`);
+    for (const relative of helpers) {
+      const installed = join(claudeDir, 'hooks', 'lib', relative);
+      mkdirSync(dirname(installed), { recursive: true });
+      writeFileSync(installed, '// installed');
+    }
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    for (const filename of hooks) {
+      expect(existsSync(join(claudeDir, 'hooks', filename))).toBe(false);
+    }
+    for (const relative of helpers) {
+      expect(existsSync(join(claudeDir, 'hooks', 'lib', relative))).toBe(false);
     }
   });
 
@@ -428,6 +451,84 @@ This content must be preserved across an uninstall.
     // mcpServers: recall-memory removed, other-server kept
     expect(s.mcpServers?.['recall-memory']).toBeUndefined();
     expect(s.mcpServers?.['other-server']).toBeDefined();
+  });
+
+  test('uninstall leaves an unowned Claude JSONC file byte-for-byte unchanged', () => {
+    const legacySettings = join(claudeDir, '.claude.json');
+    const original = `{
+  // Unrelated user configuration.
+  "hooks": { "Stop": [], },
+}
+`;
+    writeFileSync(legacySettings, original);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(legacySettings)).toBe(true);
+    expect(readFileSync(legacySettings, 'utf-8')).toBe(original);
+  });
+
+  test('preserves settings.json after removing its only Recall entry', () => {
+    writeFileSync(settingsFile, `{
+      // Recall's sole settings entry.
+      "mcpServers": { "recall-memory": {}, },
+    }`);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(settingsFile)).toBe(true);
+    expect(JSON.parse(readFileSync(settingsFile, 'utf-8'))).toEqual({});
+  });
+
+  test('preserves a settings.json symlink when only Recall entries are removed', () => {
+    const realDir = join(tempRoot, 'dotfiles');
+    const realSettings = join(realDir, 'settings.json');
+    mkdirSync(realDir, { recursive: true });
+    rmSync(settingsFile);
+    writeFileSync(realSettings, JSON.stringify({
+      mcpServers: { 'recall-memory': { command: 'recall-mcp' } },
+    }));
+    symlinkSync(realSettings, settingsFile);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(realSettings, 'utf-8'))).toEqual({});
+  });
+
+  test('invalid Claude settings remain unchanged and make uninstall incomplete', () => {
+    const original = '{"permissions":{},"permissions":{},"mcpServers":{"recall-memory":{}}}';
+    writeFileSync(settingsFile, original);
+
+    const result = runUninstall(claudeDir, backupBase);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+    expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+
+  test('invalid nested Claude settings remain unchanged and make uninstall incomplete', () => {
+    const invalidConfigs = [
+      '{"hooks":[],"mcpServers":{"recall-memory":{}}}',
+      '{"hooks":{"Stop":{}},"mcpServers":{"recall-memory":{}}}',
+      '{"hooks":{},"mcpServers":[]}',
+      '{"hooks":{},"mcpServers":{"recall-memory":[]}}',
+    ];
+
+    for (const original of invalidConfigs) {
+      writeFileSync(settingsFile, original);
+
+      const result = runUninstall(claudeDir, backupBase);
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+      expect(result.stdout).toContain('Uninstall Incomplete');
+      expect(result.stdout).not.toContain('Recall uninstalled successfully');
+    }
   });
 
   test('CLAUDE.md: Recall-managed MEMORY section removed, other sections preserved', () => {
@@ -671,20 +772,89 @@ Preserve this.
     expect(`${result.stdout}${result.stderr}`).not.toContain('left unchanged');
   });
 
-  test('OpenCode uninstall rejects malformed config without writing', () => {
-    const opencodeConfigDir = join(tempRoot, 'opencode-malformed');
+  test('OpenCode uninstall removes a sole trailing-comma JSONC registration', () => {
+    const opencodeConfigDir = join(tempRoot, 'opencode-sole');
     mkdirSync(opencodeConfigDir, { recursive: true });
     const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
-    const original = '{ "mcp": { "recall-memory": { } }';
-    writeFileSync(opencodeConfig, original);
+    writeFileSync(opencodeConfig, '{ "mcp": { "recall-memory": {}, }, }\n');
 
     const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
 
     expect(result.status).toBe(0);
-    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(original);
+    expect(existsSync(opencodeConfig)).toBe(false);
+    expect(`${result.stdout}${result.stderr}`).not.toContain('left unchanged');
   });
 
-  test('malformed OpenCode JSONC does not abort the remaining uninstall', () => {
+  test('Pi uninstall reads JSONC and preserves unrelated MCP registrations', () => {
+    const piConfigDir = join(tempRoot, 'pi-jsonc');
+    mkdirSync(piConfigDir, { recursive: true });
+    const piConfig = join(piConfigDir, 'mcp.json');
+    writeFileSync(piConfig, `{
+  // User-managed Pi settings.
+  "mcpServers": {
+    "recall-memory": { "command": "recall-mcp", },
+    "other": { "command": "other-mcp", },
+  },
+}
+`);
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).toBe(0);
+    const after = readFileSync(piConfig, 'utf-8');
+    expect(after).toContain('other-mcp');
+    expect(after).not.toContain('recall-memory');
+  });
+
+  test('Pi uninstall preserves a config symlink after removing its sole JSONC registration', () => {
+    const piConfigDir = join(tempRoot, 'pi-symlink');
+    const realDir = join(tempRoot, 'pi-dotfiles');
+    mkdirSync(piConfigDir, { recursive: true });
+    mkdirSync(realDir, { recursive: true });
+    const realConfig = join(realDir, 'mcp.json');
+    const piConfig = join(piConfigDir, 'mcp.json');
+    writeFileSync(realConfig, '{ "mcpServers": { "recall-memory": {}, }, }\n');
+    symlinkSync(realConfig, piConfig);
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).toBe(0);
+    expect(lstatSync(piConfig).isSymbolicLink()).toBe(true);
+    const parsed = parseJsonc(readFileSync(realConfig, 'utf-8')) as {
+      mcpServers?: Record<string, unknown>;
+    };
+    expect(parsed.mcpServers?.['recall-memory']).toBeUndefined();
+  });
+
+  test('OpenCode uninstall rejects duplicate-key config without writing', () => {
+    const opencodeConfigDir = join(tempRoot, 'opencode-malformed');
+    mkdirSync(opencodeConfigDir, { recursive: true });
+    const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
+    const original = '{"mcp":{"recall-memory":{}} ,"mcp":{"other":{}}}';
+    writeFileSync(opencodeConfig, original);
+
+    const result = runUninstallIncludingOpenCode(claudeDir, backupBase, opencodeConfigDir);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+  });
+
+  test('Pi uninstall rejects duplicate-key config without writing', () => {
+    const piConfigDir = join(tempRoot, 'pi-malformed');
+    mkdirSync(piConfigDir, { recursive: true });
+    const piConfig = join(piConfigDir, 'mcp.json');
+    const original = '{"mcpServers":{"recall-memory":{}} ,"mcpServers":{"other":{}}}';
+    writeFileSync(piConfig, original);
+
+    const result = runUninstallIncludingPi(claudeDir, backupBase, piConfigDir);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(piConfig, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+  });
+
+  test('duplicate-key OpenCode JSONC does not abort the remaining uninstall', () => {
     const opencodeConfigDir = join(tempRoot, 'opencode-malformed-continuation');
     const piConfigDir = join(tempRoot, 'pi');
     const fakeBin = join(tempRoot, 'bin');
@@ -694,8 +864,8 @@ Preserve this.
     mkdirSync(fakeBin, { recursive: true });
 
     const opencodeConfig = join(opencodeConfigDir, 'opencode.json');
-    const malformed = '{ "mcp": { "recall-memory": { } }';
-    writeFileSync(opencodeConfig, malformed);
+    const invalid = '{"mcp":{"recall-memory":{}} ,"mcp":{"other":{}}}';
+    writeFileSync(opencodeConfig, invalid);
     const piConfig = join(piConfigDir, 'mcp.json');
     writeFileSync(piConfig, JSON.stringify({ mcpServers: { 'recall-memory': { command: 'recall-mcp' } } }));
     writeFileSync(
@@ -703,14 +873,15 @@ Preserve this.
       `#!/bin/sh\nif [ "$1" = unlink ]; then touch "$RECALL_TEST_UNLINK"; exit 0; fi\nexec ${process.execPath} "$@"\n`,
       { mode: 0o755 },
     );
-    stubPiOnPath(fakeBin);
+    stubCommandOnPath(fakeBin, 'pi');
 
     const result = runUninstallAll(claudeDir, backupBase, opencodeConfigDir, piConfigDir, unlinkMarker, fakeBin);
 
-    expect(result.status).toBe(0);
-    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(malformed);
-    expect(JSON.parse(readFileSync(piConfig, 'utf-8')).mcpServers).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(opencodeConfig, 'utf-8')).toBe(invalid);
+    expect(existsSync(piConfig)).toBe(false);
     expect(existsSync(unlinkMarker)).toBe(true);
-    expect(result.stdout).toContain('Uninstall Complete');
+    expect(result.stdout).toContain('Uninstall Incomplete');
+    expect(result.stdout).not.toContain('Recall uninstalled successfully');
   });
 });

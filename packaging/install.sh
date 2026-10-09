@@ -97,7 +97,7 @@ do_install() {
   # (see RECALL_PACKAGED guard below) — drop 3 from the total.
   STEP_NUM=0
   STEP_TOTAL=12
-  [[ "${RECALL_PACKAGED:-false}" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL - 3))
+  [[ "${RECALL_PACKAGED:-false}" == "1" ]] && STEP_TOTAL=$((STEP_TOTAL - 3))
   [[ "$OPENCODE_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$PI_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
   [[ "$GROK_DETECTED" == "true" ]] && STEP_TOTAL=$((STEP_TOTAL + 1))
@@ -150,7 +150,7 @@ do_install() {
   # bins. Packaged installs (RECALL_PACKAGED=1, set by `recall install`) already
   # have all three from the package manager, so they are skipped there. The
   # git-checkout `./packaging/install.sh` path (RECALL_PACKAGED unset) runs them as before.
-  if [[ "${RECALL_PACKAGED:-false}" != "true" ]]; then
+  if [[ "${RECALL_PACKAGED:-false}" != "1" ]]; then
     _step "Installing" "Bun dependencies"
     if ! _run_quiet "bun install" bun install; then
       log_info "Try running: bun install (manually to see errors)"

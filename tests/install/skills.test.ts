@@ -16,6 +16,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readlinkSync,
   rmSync,
   symlinkSync,
@@ -129,6 +130,77 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     expect(lstatSync(doctorTarget).isSymbolicLink()).toBe(true);
     expect(readlinkSync(doctorTarget)).toBe(doctorCanonical);
     expect(existsSync(statsTarget)).toBe(true);
+  });
+
+  test('plugin activation honors JSONC enabledPlugins settings', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      plugins: { 'recall@recall-marketplace': [{ version: '1.0.0' }] },
+    }));
+    writeFileSync(join(claudeDir, 'settings.json'), `{
+      // Hand-edited Claude settings.
+      "enabledPlugins": { "recall@recall-marketplace": false, },
+    }`);
+
+    const result = runDriver(['if recall_claude_plugin_active; then echo active; else echo inactive; fi']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('inactive');
+  });
+
+  test('semantically invalid plugin state stops skill ownership changes', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    const pluginId = 'recall@recall-marketplace';
+    mkdirSync(pluginsDir, { recursive: true });
+
+    const cases = [
+      {
+        installed: { plugins: [] },
+        settings: {},
+      },
+      {
+        installed: { plugins: { [pluginId]: {} } },
+        settings: {},
+      },
+      {
+        installed: { plugins: { [pluginId]: [null] } },
+        settings: {},
+      },
+      {
+        installed: { plugins: { [pluginId]: [{ version: '1.0.0' }] } },
+        settings: { enabledPlugins: [] },
+      },
+      {
+        installed: { plugins: { [pluginId]: [{ version: '1.0.0' }] } },
+        settings: { enabledPlugins: { [pluginId]: 'false' } },
+      },
+    ];
+
+    for (const fixture of cases) {
+      writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify(fixture.installed));
+      writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify(fixture.settings));
+
+      const result = runDriver(['recall_install_claude_skills']);
+
+      expect(result.status).toBe(2);
+      expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(false);
+    }
+  });
+
+  test('malformed plugin settings stop skill ownership changes', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      plugins: { 'recall@recall-marketplace': [{ version: '1.0.0' }] },
+    }));
+    const original = '{"permissions":{},"permissions":{}}';
+    writeFileSync(join(claudeDir, 'settings.json'), original);
+
+    const result = runDriver(['recall_install_claude_skills']);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(join(claudeDir, 'settings.json'), 'utf-8')).toBe(original);
+    expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(false);
   });
 
   test('idempotent: running twice does not fail or duplicate', () => {
@@ -325,6 +397,7 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
     expect(r.status).toBe(0);
     expect(() => lstatSync(planted.skillMd)).toThrow();
     expect(existsSync(join(planted.dir, 'notes.md'))).toBe(true);
+    expect(r.stdout).toContain('Left user file in place');
   });
 
   test('without --skip-omp, both eras are removed from the omp skills root', () => {
