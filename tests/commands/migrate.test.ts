@@ -8,7 +8,8 @@
 // handles from other processes during these tests).
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync, lstatSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { runMigrate } from '../../src/commands/migrate';
@@ -212,6 +213,72 @@ describe('recall migrate', () => {
     expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow(/exit:1/);
     expect(existsSync(srcDb)).toBe(true);
     expect(statSync(destDb).size).toBeGreaterThan(0);
+  });
+
+  test('refuses a destination sidecar of any type or size and does not unlink it', () => {
+    mkdirSync(join(tempDir, 'dest'), { recursive: true });
+    writeFileSync(destDb + '-wal', '');
+    mkdirSync(destDb + '-shm');
+    writeFileSync(destDb + '-journal', 'old-journal');
+    rmSync(srcDb + '-wal');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+    expect(statSync(destDb + '-wal').size).toBe(0);
+    expect(lstatSync(destDb + '-shm').isDirectory()).toBe(true);
+    expect(readFileSync(destDb + '-journal', 'utf-8')).toBe('old-journal');
+    const err = capturedErr.join('\n');
+    expect(err).toContain(`destination already exists and is non-empty: ${destDb}-wal`);
+    expect(err).toContain('Refusing to overwrite');
+  });
+
+  test('refuses to overwrite a foreign destination WAL when the source also has one', () => {
+    mkdirSync(join(tempDir, 'dest'), { recursive: true });
+    writeFileSync(destDb + '-wal', 'FOREIGN');
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(srcDb + '-wal')).toBe(true);
+    expect(readFileSync(srcDb + '-wal', 'utf-8')).toBe('wal');
+    expect(existsSync(destDb)).toBe(false);
+    expect(readFileSync(destDb + '-wal', 'utf-8')).toBe('FOREIGN');
+  });
+
+  test('aborts before moving when a staged config commit would fail', () => {
+    const legacy = join(tempDir, '.claude.json');
+    const settings = join(tempDir, '.claude', 'settings.json');
+    mkdirSync(dirname(settings), { recursive: true });
+    const body = JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: srcDb } } },
+    });
+    writeFileSync(legacy, body);
+    writeFileSync(settings, body);
+    execFileSync('chflags', ['uchg', settings]);
+    try {
+      expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+      expect(existsSync(srcDb)).toBe(true);
+      expect(existsSync(srcDb + '-wal')).toBe(true);
+      expect(existsSync(destDb)).toBe(false);
+      expect(readFileSync(legacy, 'utf-8')).toBe(body);
+      expect(readFileSync(settings, 'utf-8')).toBe(body);
+      expect(capturedErr.join('\n')).toContain(`cannot commit ${settings}`);
+    } finally {
+      execFileSync('chflags', ['nouchg', settings]);
+    }
+  });
+
+  test('does not leave the database moved when the destination WAL is a directory', () => {
+    mkdirSync(destDb + '-wal', { recursive: true });
+
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+
+    expect(existsSync(srcDb)).toBe(true);
+    expect(readFileSync(srcDb + '-wal', 'utf-8')).toBe('wal');
+    expect(existsSync(destDb)).toBe(false);
+    expect(lstatSync(destDb + '-wal').isDirectory()).toBe(true);
   });
 
   test('source absent → graceful no-op', () => {
