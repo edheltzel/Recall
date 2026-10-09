@@ -331,7 +331,7 @@ Sourced by all three scripts. Key functions:
 
 | Function | Purpose |
 |---|---|
-| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, OpenCode/Pi configs into `~/.claude/backups/recall/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
+| `recall_create_backup` | Snapshot of `settings.json`, `CLAUDE.md`, `recall.db`, OpenCode/Pi configs into `~/.agents/Recall/backups/<TIMESTAMP>/` with a manifest including the git `PRE_SHA` for rollback |
 | `recall_register_hook <event> <name> <command> [timeout]` | Idempotent single-hook writer for `settings.json`. Every hook is registered independently — no blanket early-return (fixes the pre-0.7.1 bug class structurally) |
 | `recall_register_all_hooks` | Registers every installer-owned Claude hook whose source file exists. Safe to re-run — missing registrations are added and present registrations are skipped |
 | `recall_link_global` | Hardened `bun link` flow: bun link → verify bin symlinks → `npm link` fallback → verify → exit 1 with recovery recipe. Catches the silent-no-op case where `bun link` exits 0 but doesn't refresh `~/.bun/bin/recall` / `recall-mcp` (added in 0.7.22) |
@@ -348,7 +348,7 @@ Callers can override these before sourcing `lib/install-lib.sh`:
 
 ```bash
 CLAUDE_DIR="$HOME/.claude"
-BACKUP_BASE="$CLAUDE_DIR/backups/recall"
+BACKUP_BASE="$HOME/.agents/Recall/backups"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$BACKUP_BASE/$TIMESTAMP"
 OPENCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"

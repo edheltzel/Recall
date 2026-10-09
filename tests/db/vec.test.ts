@@ -83,11 +83,11 @@ describe('sqlite-vec index (issue #148)', () => {
   beforeEach(() => {
     setupTestDb();
     resetVecSyncCache();
-  });
+  }, 15_000);
   afterEach(() => {
     teardownTestDb();
     resetVecSyncCache();
-  });
+  }, 15_000);
 
   test('reindexVec builds the index from the canonical BLOBs', () => {
     if (!isVecAvailable()) return; // extension-less host: brute-force only

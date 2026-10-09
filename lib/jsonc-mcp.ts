@@ -4,7 +4,7 @@
 // Recall package ships lib/ but not node_modules/, so installer/uninstaller
 // config repair cannot require the repository's jsonc-parser installation.
 
-import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
 
 type JsonObject = Record<string, unknown>;
 type Property = { key: string; keyStart: number; value: Node };
@@ -15,10 +15,12 @@ type Node = {
   properties?: Property[];
   contentEnd?: number;
   trailingComma?: boolean;
+  hasComments?: boolean;
 };
 
 class JsoncParser {
   private index = 0;
+  private hasComments = false;
 
   constructor(private readonly text: string) {}
 
@@ -27,6 +29,7 @@ class JsoncParser {
     const root = this.value();
     this.skipSpaceAndComments();
     if (this.index !== this.text.length) throw new Error('trailing content');
+    root.hasComments = this.hasComments;
     return root;
   }
 
@@ -65,17 +68,21 @@ class JsoncParser {
   private object(): Node {
     const start = this.index++;
     const properties: Property[] = [];
-    const value: JsonObject = {};
+    const value: JsonObject = Object.create(null);
     let contentEnd = this.index;
     let trailingComma = false;
     this.skipSpaceAndComments();
     while (this.text[this.index] !== '}') {
       const keyNode = this.string();
+      const key = keyNode.value as string;
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        throw new Error(`duplicate key ${JSON.stringify(key)} at ${keyNode.start}`);
+      }
       this.skipSpaceAndComments();
       if (this.text[this.index++] !== ':') throw new Error(`expected colon at ${this.index}`);
       const child = this.value();
-      properties.push({ key: keyNode.value as string, keyStart: keyNode.start, value: child });
-      value[keyNode.value as string] = child.value;
+      properties.push({ key, keyStart: keyNode.start, value: child });
+      value[key] = child.value;
       contentEnd = child.end;
       trailingComma = false;
       this.skipSpaceAndComments();
@@ -117,11 +124,13 @@ class JsoncParser {
         continue;
       }
       if (this.text.startsWith('//', this.index)) {
+        this.hasComments = true;
         const end = this.text.indexOf('\n', this.index + 2);
         this.index = end < 0 ? this.text.length : end + 1;
         continue;
       }
       if (this.text.startsWith('/*', this.index)) {
+        this.hasComments = true;
         const end = this.text.indexOf('*/', this.index + 2);
         if (end < 0) throw new Error('unterminated comment');
         this.index = end + 2;
@@ -140,24 +149,197 @@ export function parseJsonc(text: string): unknown {
   return parse(text).value;
 }
 
-export function writeJsonAtomic(file: string, value: unknown): void {
-  const target = existsSync(file) && lstatSync(file).isSymbolicLink() ? realpathSync(file) : file;
-  const tmp = `${target}.tmp`;
+export function readJsoncObject(file: string, emptyIfMissingOrBlank = false): JsonObject {
+  if (!existsSync(file)) {
+    if (emptyIfMissingOrBlank) return Object.create(null) as JsonObject;
+    throw new Error(`file not found: ${file}`);
+  }
+  const text = readFileSync(file, 'utf8');
+  if (text.trim() === '') {
+    if (emptyIfMissingOrBlank) return Object.create(null) as JsonObject;
+    throw new Error(`empty JSONC file: ${file}`);
+  }
+  const value = parseJsonc(text);
+  if (!isObject(value)) throw new Error('root is not an object');
+  return value;
+}
+
+export function validateClaudeConfigShape(config: unknown): asserts config is JsonObject {
+  validateClaudeMcpConfigShape(config);
+  if (config.hooks !== undefined) {
+    if (!isObject(config.hooks)) throw new Error('hooks is not an object');
+    for (const [event, entries] of Object.entries(config.hooks)) {
+      if (!Array.isArray(entries)) throw new Error(`hooks.${event} is not an array`);
+    }
+  }
+}
+
+export function validateClaudeMcpConfigShape(config: unknown): asserts config is JsonObject {
+  if (!isObject(config)) throw new Error('root is not an object');
+  if (config.mcpServers !== undefined) {
+    if (!isObject(config.mcpServers)) throw new Error('mcpServers is not an object');
+    const recallEntry = config.mcpServers['recall-memory'];
+    if (recallEntry !== undefined && !isObject(recallEntry)) {
+      throw new Error('mcpServers.recall-memory is not an object');
+    }
+    if (isObject(recallEntry) && recallEntry.env !== undefined) {
+      if (!isObject(recallEntry.env)) {
+        throw new Error('mcpServers.recall-memory.env is not an object');
+      }
+      for (const key of ['RECALL_DB_PATH', 'MEM_DB_PATH']) {
+        const value = recallEntry.env[key];
+        if (value !== undefined && typeof value !== 'string') {
+          throw new Error(`mcpServers.recall-memory.env.${key} is not a string`);
+        }
+      }
+    }
+  }
+}
+
+export function configuredMcpDbPath(env: unknown): string | undefined {
+  if (!isObject(env)) return undefined;
+  const primary = env.RECALL_DB_PATH;
+  if (typeof primary === 'string' && primary.length > 0) return primary;
+  const legacy = env.MEM_DB_PATH;
+  return typeof legacy === 'string' && legacy.length > 0 ? legacy : undefined;
+}
+
+export type McpDbPathSelection =
+  | { status: 'selected'; path: string }
+  | { status: 'conflict'; paths: string[] };
+
+export function selectMcpDbPath(
+  configuredPaths: Array<string | undefined>,
+  defaultPath: string,
+  runtimeOverride?: string,
+): McpDbPathSelection {
+  if (runtimeOverride) return { status: 'selected', path: runtimeOverride };
+  const paths = [...new Set(configuredPaths.map(path => path ?? defaultPath))];
+  if (paths.length > 1) return { status: 'conflict', paths };
+  return { status: 'selected', path: paths[0] ?? defaultPath };
+}
+
+export interface ClaudePluginState {
+  status: 'absent' | 'active' | 'disabled' | 'unknown';
+  version: string | null;
+}
+
+export function classifyClaudePluginState(
+  installedPlugins: unknown | null | undefined,
+  settings: unknown | null | undefined,
+  pluginId: string,
+): ClaudePluginState {
+  if (installedPlugins === undefined) return { status: 'absent', version: null };
+  if (!isObject(installedPlugins)) return { status: 'unknown', version: null };
+  const plugins = installedPlugins.plugins;
+  if (plugins !== undefined && !isObject(plugins)) return { status: 'unknown', version: null };
+  const entries = isObject(plugins) ? plugins[pluginId] : undefined;
+  if (entries !== undefined && !Array.isArray(entries)) return { status: 'unknown', version: null };
+  const first = entries?.[0];
+  if (first !== undefined && !isObject(first)) return { status: 'unknown', version: null };
+  if (!isObject(first)) return { status: 'absent', version: null };
+
+  const version = typeof first.version === 'string' ? first.version : null;
+  if (settings === null || (settings !== undefined && !isObject(settings))) {
+    return { status: 'unknown', version };
+  }
+  const enabledPlugins = isObject(settings) ? settings.enabledPlugins : undefined;
+  if (enabledPlugins !== undefined && !isObject(enabledPlugins)) {
+    return { status: 'unknown', version };
+  }
+  const enabled = isObject(enabledPlugins) ? enabledPlugins[pluginId] : undefined;
+  if (enabled !== undefined && typeof enabled !== 'boolean') return { status: 'unknown', version };
+  return { status: enabled === false ? 'disabled' : 'active', version };
+}
+
+function lstatIfPresent(file: string) {
   try {
-    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
-    renameSync(tmp, target);
+    return lstatSync(file);
   } catch (error) {
-    try { unlinkSync(tmp); } catch { /* temp may not exist */ }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
 }
 
-export function isSemanticallyEmpty(value: unknown): boolean {
-  if (Array.isArray(value)) return value.every(isSemanticallyEmpty);
-  if (value !== null && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).every(isSemanticallyEmpty);
+export type StagedJsonWrite = {
+  commit: () => void;
+  cleanup: () => void;
+};
+
+function stageTextAtomic(file: string, text: string): StagedJsonWrite {
+  const entry = lstatIfPresent(file);
+  if (entry?.isSymbolicLink() && !existsSync(file)) {
+    throw new Error(`refusing to replace dangling symlink: ${file}`);
   }
-  return false;
+  const target = entry?.isSymbolicLink() ? realpathSync(file) : file;
+  const tmp = `${target}.tmp`;
+  const tmpEntry = lstatIfPresent(tmp);
+  if (tmpEntry && !tmpEntry.isFile()) {
+    throw new Error(`refusing to replace non-file temporary path: ${tmp}`);
+  }
+  const mode = existsSync(target) ? statSync(target).mode & 0o7777 : undefined;
+  let pending = true;
+  const cleanup = () => {
+    if (!pending) return;
+    pending = false;
+    try { unlinkSync(tmp); } catch { /* temp may not exist */ }
+  };
+  try {
+    if (mode !== undefined && tmpEntry) chmodSync(tmp, mode);
+    writeFileSync(tmp, text, mode === undefined ? undefined : { mode });
+    if (mode !== undefined) chmodSync(tmp, mode);
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+  return {
+    commit: () => {
+      renameSync(tmp, target);
+      pending = false;
+    },
+    cleanup,
+  };
+}
+
+function writeTextAtomic(file: string, text: string): void {
+  const staged = stageTextAtomic(file, text);
+  try {
+    staged.commit();
+  } finally {
+    staged.cleanup();
+  }
+}
+
+export function stageJsonAtomic(file: string, value: unknown): StagedJsonWrite {
+  return stageTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export function writeJsonAtomic(file: string, value: unknown): void {
+  writeTextAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function isOnlyEmptyMcpParent(root: Node): boolean {
+  if (root.hasComments || !isObject(root.value)) return false;
+  const properties = root.properties ?? [];
+  if (properties.length !== 1) return false;
+  const parent = properties[0];
+  return (parent.key === 'mcp' || parent.key === 'mcpServers')
+    && isObject(parent.value.value)
+    && (parent.value.properties?.length ?? 0) === 0;
+}
+
+function writeAtomicOrRemoveEmpty(file: string, root: Node, text: string): void {
+  const entry = lstatIfPresent(file);
+  if (isOnlyEmptyMcpParent(root) && !entry?.isSymbolicLink()) {
+    if (entry) unlinkSync(file);
+    return;
+  }
+  writeTextAtomic(file, text);
+}
+
+export function writeJsonAtomicOrRemoveEmpty(file: string, value: unknown): void {
+  const text = `${JSON.stringify(value, null, 2)}\n`;
+  writeAtomicOrRemoveEmpty(file, parse(text), text);
 }
 
 function isObject(value: unknown): value is JsonObject {
@@ -222,7 +404,8 @@ function merge(file: string, parentKey: string, entry: JsonObject, preserveKeys:
 }
 
 function remove(file: string, parentKey: string): void {
-  const text = readFileSync(file, 'utf8');
+  const original = readFileSync(file, 'utf8');
+  const text = original.trim() === '' ? '{}' : original;
   const root = parse(text);
   if (!isObject(root.value)) throw new Error('root is not an object');
   const parent = root.properties?.find(property => property.key === parentKey);
@@ -232,15 +415,17 @@ function remove(file: string, parentKey: string): void {
   const currentIndex = properties.findIndex(property => property.key === 'recall-memory');
   if (currentIndex < 0) return;
   const current = properties[currentIndex];
+  let updated: string;
   if (properties.length === 1) {
-    writeFileSync(file, apply(text, current.keyStart, current.value.end, ''));
-    return;
-  }
-  if (currentIndex < properties.length - 1) {
-    writeFileSync(file, apply(text, current.keyStart, properties[currentIndex + 1].keyStart, ''));
+    const end = parent.value.trailingComma ? parent.value.contentEnd ?? current.value.end : current.value.end;
+    updated = apply(text, current.keyStart, end, '');
+  } else if (currentIndex < properties.length - 1) {
+    updated = apply(text, current.keyStart, properties[currentIndex + 1].keyStart, '');
   } else {
-    writeFileSync(file, apply(text, properties[currentIndex - 1].value.end, current.value.end, ''));
+    updated = apply(text, properties[currentIndex - 1].value.end, current.value.end, '');
   }
+  const parsed = parse(updated);
+  writeAtomicOrRemoveEmpty(file, parsed, updated);
 }
 
 if (process.argv[1]?.endsWith('jsonc-mcp.ts') || process.argv[1]?.endsWith('jsonc-mcp.js')) {

@@ -19,20 +19,26 @@
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, copyFileSync, renameSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, statSync, copyFileSync, renameSync, readFileSync, unlinkSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
+import {
+  parseJsonc,
+  stageJsonAtomic,
+  validateClaudeConfigShape,
+  type StagedJsonWrite,
+} from '../../lib/jsonc-mcp.js';
 
 export interface MigrateOptions {
   to: string;
   dryRun?: boolean;
 }
 
-function expandHome(p: string): string {
-  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
-  if (p === '~') return homedir();
+function expandHome(p: string, home: string): string {
+  if (p.startsWith('~/')) return join(home, p.slice(2));
+  if (p === '~') return home;
   return p;
 }
 
@@ -50,53 +56,76 @@ function isSidecar(suffix: string): suffix is '-wal' | '-shm' {
   return suffix === '-wal' || suffix === '-shm';
 }
 
-function detectConfigs(): McpConfigTarget[] {
-  const home = homedir();
+function detectConfigs(home: string): McpConfigTarget[] {
   return configurableHosts.flatMap(host => host.mcpConfigTargets(home));
 }
 
-function patchConfigEnv(target: McpConfigTarget, newDbPath: string, dryRun: boolean): { changed: boolean; reason?: string } {
-  if (!existsSync(target.path)) return { changed: false, reason: 'not present' };
+type ConfigPatchResult =
+  | { status: 'changed'; config: Record<string, unknown> }
+  | { status: 'skipped'; reason: string }
+  | { status: 'error'; reason: string };
+
+type PreparedConfigPatch = {
+  target: McpConfigTarget;
+  result: ConfigPatchResult;
+};
+
+type StagedConfigPatch = {
+  target: McpConfigTarget;
+  write: StagedJsonWrite;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function prepareConfigPatch(target: McpConfigTarget, newDbPath: string): ConfigPatchResult {
+  if (!existsSync(target.path)) return { status: 'skipped', reason: 'not present' };
   let raw: string;
   try {
     raw = readFileSync(target.path, 'utf-8');
   } catch (e) {
-    return { changed: false, reason: `read error: ${(e as Error).message}` };
+    return { status: 'error', reason: `read error: ${(e as Error).message}` };
   }
-  const stripped = target.format === 'jsonc'
-    ? raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
-    : raw;
-  let cfg: any;
+  let parsed: unknown;
   try {
-    cfg = JSON.parse(stripped);
+    parsed = parseJsonc(raw);
   } catch (e) {
-    return { changed: false, reason: `invalid JSON: ${(e as Error).message}` };
+    return { status: 'error', reason: `invalid JSONC: ${(e as Error).message}` };
+  }
+  if (!isRecord(parsed)) return { status: 'error', reason: 'invalid JSONC root' };
+  if (target.host === 'claude') {
+    try {
+      validateClaudeConfigShape(parsed);
+    } catch (e) {
+      return { status: 'error', reason: `invalid Claude config: ${(e as Error).message}` };
+    }
   }
 
-  // Walk the envPath, returning early if any segment is missing.
-  let node: any = cfg;
+  let node = parsed;
   for (let i = 0; i < target.envPath.length - 1; i++) {
-    if (!node || typeof node !== 'object') return { changed: false, reason: 'recall-memory entry absent' };
-    node = node[target.envPath[i]];
+    const next = node[target.envPath[i]];
+    if (next === undefined) return { status: 'skipped', reason: 'recall-memory entry absent' };
+    if (!isRecord(next)) return { status: 'error', reason: 'invalid recall-memory config' };
+    node = next;
   }
-  if (!node || typeof node !== 'object') return { changed: false, reason: 'recall-memory entry absent' };
 
   const envKey = target.envPath[target.envPath.length - 1];
-  node[envKey] = node[envKey] || {};
-  const env = node[envKey];
+  const currentEnv = node[envKey];
+  if (currentEnv !== undefined && !isRecord(currentEnv)) {
+    return { status: 'error', reason: 'invalid recall-memory environment' };
+  }
+  const env = currentEnv ?? {};
   const existing = env.RECALL_DB_PATH;
-  if (existing === newDbPath) return { changed: false, reason: 'already up-to-date' };
-
-  if (dryRun) return { changed: true, reason: `would set RECALL_DB_PATH=${newDbPath}` };
+  if (existing === newDbPath) return { status: 'skipped', reason: 'already up-to-date' };
 
   env.RECALL_DB_PATH = newDbPath;
-  // Drop legacy MEM_DB_PATH if present so we don't leave a conflicting value.
   if ('MEM_DB_PATH' in env) delete env.MEM_DB_PATH;
-  writeFileSync(target.path, JSON.stringify(cfg, null, 2));
-  return { changed: true };
+  node[envKey] = env;
+  return { status: 'changed', config: parsed };
 }
 
-export function runMigrate(opts: MigrateOptions): void {
+export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   if (!opts.to || opts.to.trim() === '') {
     console.error('Error: --to <path> is required');
     process.exit(2);
@@ -104,7 +133,7 @@ export function runMigrate(opts: MigrateOptions): void {
 
   const dryRun = !!opts.dryRun;
   const src = resolve(getDbPath());
-  const dest = resolve(expandHome(opts.to));
+  const dest = resolve(expandHome(opts.to, home));
 
   console.log(`recall migrate${dryRun ? ' (dry-run)' : ''}`);
   console.log(`  source:      ${src}`);
@@ -142,9 +171,21 @@ export function runMigrate(opts: MigrateOptions): void {
   // Close our own connection before moving the file.
   closeDb();
 
+  const targets = detectConfigs(home);
+  const patches: PreparedConfigPatch[] = targets.map(target => ({
+    target,
+    result: prepareConfigPatch(target, dest),
+  }));
+  for (const patch of patches) {
+    if (patch.result.status === 'error') {
+      console.error(`Error: cannot patch ${patch.target.path} (${patch.result.reason})`);
+      process.exit(1);
+    }
+  }
+
   // Build the pre-migrate snapshot path under the install root.
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_').replace(/-/g, '');
-  const snapshotDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'pre-migrate');
+  const snapshotDir = join(home, '.agents', 'Recall', 'backups', stamp, 'pre-migrate');
 
   console.log('Plan:');
   console.log(`  1. snapshot source + configs to ${snapshotDir}`);
@@ -152,7 +193,6 @@ export function runMigrate(opts: MigrateOptions): void {
   for (const ext of ['-wal', '-shm']) {
     if (existsSync(src + ext)) console.log(`  3. move ${src + ext} → ${dest + ext}`);
   }
-  const targets = detectConfigs();
   let configIdx = 4;
   for (const t of targets) {
     if (!existsSync(t.path)) continue;
@@ -175,32 +215,53 @@ export function runMigrate(opts: MigrateOptions): void {
   }
   for (const t of targets) {
     if (!existsSync(t.path)) continue;
-    const rel = t.path.startsWith(homedir() + '/') ? t.path.slice(homedir().length + 1) : t.path.replace(/^\//, '');
+    const rel = t.path.startsWith(home + '/') ? t.path.slice(home.length + 1) : t.path.replace(/^\//, '');
     const outFile = join(snapshotDir, rel);
     mkdirSync(dirname(outFile), { recursive: true });
     copyFileSync(t.path, outFile);
   }
   console.log(`✓ Snapshot: ${snapshotDir}`);
 
-  // 2. Move DB + sidecars.
-  mkdirSync(dirname(dest), { recursive: true });
-  renameSync(src, dest);
-  for (const ext of ['-wal', '-shm']) {
-    if (isSidecar(ext) && existsSync(src + ext)) {
-      renameSync(src + ext, dest + ext);
+  const staged: StagedConfigPatch[] = [];
+  for (const patch of patches) {
+    if (patch.result.status !== 'changed') continue;
+    try {
+      staged.push({
+        target: patch.target,
+        write: stageJsonAtomic(patch.target.path, patch.result.config),
+      });
+    } catch (error) {
+      for (const item of staged) item.write.cleanup();
+      console.error(`Error: cannot stage ${patch.target.path} (${error instanceof Error ? error.message : String(error)})`);
+      process.exit(1);
     }
   }
-  // If destination existed as an empty file (we allowed that above), nothing
-  // to clean up — renameSync replaced it.
-  console.log(`✓ Moved DB: ${dest}`);
 
-  // 3. Patch configs.
-  for (const t of targets) {
-    const res = patchConfigEnv(t, dest, false);
-    if (res.changed) {
-      console.log(`✓ Patched ${t.path}`);
-    } else if (res.reason && res.reason !== 'not present') {
-      console.log(`  Skipped ${t.path} (${res.reason})`);
+  // 2. Move DB + sidecars.
+  try {
+    mkdirSync(dirname(dest), { recursive: true });
+    renameSync(src, dest);
+    for (const ext of ['-wal', '-shm']) {
+      if (isSidecar(ext) && existsSync(src + ext)) {
+        renameSync(src + ext, dest + ext);
+      }
+    }
+    console.log(`✓ Moved DB: ${dest}`);
+
+    // 3. Patch configs.
+    for (const patch of staged) {
+      patch.write.commit();
+      console.log(`✓ Patched ${patch.target.path}`);
+    }
+  } catch (error) {
+    for (const item of staged) item.write.cleanup();
+    console.error(`Error: migration failed (${error instanceof Error ? error.message : String(error)})`);
+    process.exit(1);
+  }
+
+  for (const patch of patches) {
+    if (patch.result.status === 'skipped' && patch.result.reason !== 'not present') {
+      console.log(`  Skipped ${patch.target.path} (${patch.result.reason})`);
     }
   }
 

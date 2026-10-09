@@ -171,9 +171,9 @@ print_summary() {
   [[ "$SKIP_GROK" == "true" ]] && echo "Skipping: Grok"
   [[ "$SKIP_OMP" == "true" ]] && echo "Skipping: omp"
   echo ""
-  echo "Will REMOVE (integration symlinks; canonical runtime files stay unless --purge):"
-  echo "  • ~/.claude/commands/Recall/ (legacy, and lowercase ~/.claude/commands/recall/ if present)"
-  echo "  • ~/.claude/skills/do-recall-*/ (all 9 Recall-owned skills, plus legacy recall-* dirs)"
+  echo "Will REMOVE (Recall integration files; skill/command cleanup unlinks managed symlinks only and removes directories only when empty):"
+  echo "  • Legacy ~/.claude/commands/Recall/ and lowercase ~/.claude/commands/recall/"
+  echo "  • Recall-owned skills in Claude, Pi, and omp skills directories"
   echo "  • ~/.claude/Recall_GUIDE.md"
   echo "  • Recall hook entries in ~/.claude/settings.json and ~/.claude.json"
   echo "  • Recall mcpServers entry in ~/.claude/settings.json and ~/.claude.json"
@@ -184,7 +184,7 @@ print_summary() {
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
   [[ "$SKIP_GROK" != "true" ]] && echo "  • Grok Recall lifecycle hook (~/.grok/hooks/RecallLifecycle.json)"
-  [[ "$SKIP_OMP" != "true" ]] && echo "  • omp agent skills (~/.omp/agent/skills/)"
+  [[ "$SKIP_OMP" != "true" ]] && echo "  • Recall-managed omp skill symlinks (user files are preserved; directories only when empty)"
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
   if [[ "$PURGE" == "true" ]]; then
@@ -263,43 +263,49 @@ remove_skills_from() {
 # A file that is empty after that removal is deleted (#231).
 filter_claude_settings() {
   local f
+  local config_failed=false
   for f in "$CLAUDE_DIR/settings.json" "$HOME/.claude.json"; do
     [[ -f "$f" ]] || continue
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would filter Recall entries out of $f"
       continue
     fi
-    SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
+    if SETTINGS_FILE="$f" HOOK_NAMES_CSV="$(IFS=,; echo "${RECALL_HOOK_NAMES[*]}")" \
       JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
-      const fs = require("fs");
-      const { parseJsonc, writeJsonAtomic, isSemanticallyEmpty } = await import(process.env.JSONC_LIB);
+      const { readJsoncObject, validateClaudeConfigShape, writeJsonAtomicOrRemoveEmpty } = await import(process.env.JSONC_LIB);
       const file = process.env.SETTINGS_FILE;
       const names = process.env.HOOK_NAMES_CSV.split(",");
-      let config;
-      try { config = parseJsonc(fs.readFileSync(file, "utf8")); } catch { process.exit(0); }
-      if (!config || typeof config !== "object" || Array.isArray(config)) process.exit(0);
-      if (config.hooks && typeof config.hooks === "object") {
+      const config = readJsoncObject(file, true);
+      validateClaudeConfigShape(config);
+      let changed = false;
+      if (config.hooks) {
         for (const event of Object.keys(config.hooks)) {
           const list = config.hooks[event];
-          if (!Array.isArray(list)) continue;
           const kept = list.filter(entry => {
             const inner = (entry && entry.hooks) || [];
             return !inner.some(h => h && h.command && names.some(n => h.command.includes(n)));
           });
+          if (kept.length === list.length) continue;
+          changed = true;
           if (kept.length === 0) delete config.hooks[event];
           else config.hooks[event] = kept;
         }
         if (Object.keys(config.hooks).length === 0) delete config.hooks;
       }
-      if (config.mcpServers && config.mcpServers["recall-memory"]) {
+      if (config.mcpServers && Object.prototype.hasOwnProperty.call(config.mcpServers, "recall-memory")) {
+        changed = true;
         delete config.mcpServers["recall-memory"];
         if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
       }
-      if (isSemanticallyEmpty(config)) fs.unlinkSync(file);
-      else writeJsonAtomic(file, config);
-    '
-    log_success "Filtered Recall entries from $f"
+      if (changed) writeJsonAtomicOrRemoveEmpty(file, config);
+    '; then
+      log_success "Filtered Recall entries from $f"
+    else
+      log_error "Failed to filter Recall entries from $f (existing config is invalid - left unchanged)"
+      config_failed=true
+    fi
   done
+  [[ "$config_failed" == "false" ]]
 }
 
 # Some Claude Code installs register MCP servers via `claude mcp remove`
@@ -441,7 +447,7 @@ remove_opencode() {
       if _recall_jsonc_remove_mcp_entry "$config" "mcp"; then
         log_success "Removed recall-memory from $config"
       else
-        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported — left unchanged)"
+        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported - left unchanged)"
         config_failed=true
       fi
     fi
@@ -524,6 +530,7 @@ remove_grok() {
 
 remove_pi() {
   local config="$PI_CONFIG_DIR/mcp.json"
+  local config_failed=false
 
   # Recall is a local Pi package for extensions + skills. The MCP adapter is a
   # separate shared Pi package and may serve other servers, so leave it alone.
@@ -540,20 +547,12 @@ remove_pi() {
     if [[ "$DRY_RUN" == "true" ]]; then
       echo "  [dry-run] would remove recall-memory from $config"
     else
-      CONFIG_PATH="$config" bun -e '
-        const fs = require("fs");
-        const path = process.env.CONFIG_PATH;
-        let raw = fs.readFileSync(path, "utf-8")
-          .replace(/\/\/.*$/gm, "")
-          .replace(/\/\*[\s\S]*?\*\//g, "");
-        const cfg = JSON.parse(raw);
-        if (cfg.mcpServers && cfg.mcpServers["recall-memory"]) {
-          delete cfg.mcpServers["recall-memory"];
-          if (Object.keys(cfg.mcpServers).length === 0) delete cfg.mcpServers;
-        }
-        fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
-      '
-      log_success "Removed recall-memory from $config"
+      if _recall_jsonc_remove_mcp_entry "$config" "mcpServers"; then
+        log_success "Removed recall-memory from $config"
+      else
+        log_error "Failed to remove recall-memory from $config (existing config is invalid or unsupported - left unchanged)"
+        config_failed=true
+      fi
     fi
   fi
 
@@ -590,6 +589,7 @@ remove_pi() {
 
   remove_memory_section "$agents_md" pi
   remove_skills_from "$PI_CONFIG_DIR/skills"
+  [[ "$config_failed" == "false" ]]
 }
 
 # ── omp removal ──────────────────────────────────────────────────────────────
@@ -718,6 +718,7 @@ do_purge() {
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
+  local lifecycle_failed=false
   print_summary
   confirm_or_exit
   confirm_purge_or_exit
@@ -737,7 +738,9 @@ main() {
 
   log_info "Removing Claude Code MCP registration..."
   unregister_claude_mcp_cli
-  filter_claude_settings
+  if ! filter_claude_settings; then
+    lifecycle_failed=true
+  fi
   echo ""
 
   log_info "Removing hook files..."
@@ -753,13 +756,17 @@ main() {
     log_info "Removing OpenCode integration..."
     if ! remove_opencode; then
       log_warn "OpenCode config was left unchanged; continuing uninstall"
+      lifecycle_failed=true
     fi
     echo ""
   fi
 
   if [[ "$SKIP_PI" != "true" ]]; then
     log_info "Removing Pi integration..."
-    remove_pi
+    if ! remove_pi; then
+      log_warn "Pi config was left unchanged; continuing uninstall"
+      lifecycle_failed=true
+    fi
     echo ""
   fi
 
@@ -783,6 +790,13 @@ main() {
     log_info "Purging install root + databases..."
     do_purge
     echo ""
+  fi
+
+  if [[ "$lifecycle_failed" == "true" ]]; then
+    _banner error "Uninstall Incomplete"
+    echo ""
+    log_error "Recall cleanup finished, but one or more invalid config files were left unchanged."
+    return 1
   fi
 
   _banner success "Uninstall Complete"

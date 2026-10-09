@@ -12,8 +12,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync, spawnSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from 'fs';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
+import { assertMetadataUnchanged, assertSafeTestDb, metadata } from '../../scripts/lib/e2e-isolation.js';
 
 const REPO = process.cwd();
 
@@ -103,6 +104,7 @@ describe('npm package: files whitelist', () => {
 describe('npm package: shims resolve bundled scripts under a packaged layout', () => {
   let stage: string; // tmpdir holding the .tgz, extracted package/, and a bin/
   let pkgRoot: string; // <stage>/package — mimics node_modules/<pkg>/
+  let binDir: string; // isolated PATH containing the packaged CLI + required runtimes
   let binLink: string; // <stage>/bin/recall — mimics a global-install bin symlink
 
   beforeAll(() => {
@@ -121,8 +123,14 @@ describe('npm package: shims resolve bundled scripts under a packaged layout', (
     // the network when the extracted CLI imports its runtime dependencies.
     symlinkSync(join(REPO, 'node_modules'), join(pkgRoot, 'node_modules'), 'dir');
 
-    const binDir = join(stage, 'bin');
+    binDir = join(stage, 'bin');
     mkdirSync(binDir, { recursive: true });
+    symlinkSync(process.execPath, join(binDir, 'bun'));
+    for (const command of ['node', 'npm']) {
+      const executable = Bun.which(command);
+      if (!executable) throw new Error(`${command} is required for the install harness`);
+      symlinkSync(executable, join(binDir, command));
+    }
     binLink = join(binDir, 'recall');
     symlinkSync(join(pkgRoot, 'dist', 'index.js'), binLink);
   });
@@ -155,6 +163,34 @@ describe('npm package: shims resolve bundled scripts under a packaged layout', (
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('Recall Install Script');
   });
+
+  test('packaged install skips source bootstrap steps', () => {
+    const home = join(stage, 'install-home');
+    const recallHome = join(home, '.agents', 'Recall');
+    const dbPath = join(recallHome, 'recall.db');
+    const productionDb = join(homedir(), '.agents', 'Recall', 'recall.db');
+    assertSafeTestDb(dbPath, productionDb);
+    const productionBefore = metadata(productionDb);
+    mkdirSync(home, { recursive: true });
+    const r = runBin(
+      join(pkgRoot, 'dist', 'index.js'),
+      ['install', '--yes', '--no-gum'],
+      env({
+        HOME: home,
+        CLAUDE_DIR: join(home, '.claude'),
+        RECALL_DIR: recallHome,
+        RECALL_HOME: recallHome,
+        RECALL_DB_PATH: dbPath,
+        RECALL_INSTALL_LOG: join(home, 'install.log'),
+        PATH: `${binDir}:/usr/bin:/bin`,
+        NO_COLOR: '1',
+      }),
+    );
+    const output = `${r.stdout}\n${r.stderr}`;
+    assertMetadataUnchanged(productionDb, productionBefore);
+    if (r.status !== 0) throw new Error(`packaged install failed (${r.status})\n${output}`);
+    expect(output).toContain('Packaged install');
+  }, 60_000);
 
   test('bundled package resolves uninstall.sh (dry-run, no mutation)', () => {
     const home = mkdtempSync(join(tmpdir(), 'recall-home-'));

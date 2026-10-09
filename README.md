@@ -69,7 +69,7 @@ First-run walkthrough (install, first commands, where the database lives, how a 
 
 Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
 
-Install the binaries and database once:
+Install the binaries and initialize the database once:
 
 ```bash
 bun install -g recall-memory
@@ -82,8 +82,8 @@ Then attach each coding agent with **that harness's native plugin or extension**
 
 | Harness | Preferred install | Notes |
 | --- | --- | --- |
-| **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace` | Plugin owns the nine `do-recall-*` skills and `recall-memory` MCP. Claude hooks stay installer-owned (`recall install`) because plugin hooks *merge* with `settings.json` and would double-capture. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
-| **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
+| **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` | Plugin owns the nine `do-recall-*` skills and `recall-memory` MCP. Install the plugin before the lifecycle hooks so `recall install` can reconcile user-scope surfaces. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
+| **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `packaging/install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
 | **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
 | **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |
 | **Grok** | `recall install` / `./packaging/install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
@@ -102,17 +102,14 @@ Restart each attached agent so it loads the plugin, extension, or snippets.
 `recall install` still initializes installer-owned surfaces: Claude lifecycle hooks, Grok's global hook, OpenCode, omp skill links, and Pi's MCP adapter/config alongside the native Pi package. It is the **only** supported install for Grok. It is not the preferred attach path for Claude, Codex, Pi, or omp.
 
 ```bash
-# Packaged
+# Packaged (for Claude Code, run after installing the plugin)
 recall install
 
 # One-shot (Bun must be on PATH)
 npx --package=recall-memory recall install
-
-# Source checkout
-git clone https://github.com/edheltzel/Recall.git
-cd Recall
-./packaging/install.sh
 ```
+
+For a source checkout, follow the [canonical source-checkout sequence](docs/installation.md#source-checkout). It clones the local marketplace root, attaches the Claude plugin when applicable, and only then runs installer-owned setup.
 
 </details>
 

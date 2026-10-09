@@ -12,7 +12,7 @@ Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP
 
 Recall requires [Bun](https://bun.sh) (`bun:sqlite` and Bun-native hooks). Put Bun on `PATH` first.
 
-Install binaries and the database once:
+Install the binaries and initialize the database once:
 
 ```bash
 bun install -g recall-memory
@@ -23,7 +23,7 @@ Then attach each harness with its **native plugin or extension** when it has one
 
 | Harness | Preferred attach |
 | --- | --- |
-| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall` then `claude plugin install recall@recall-marketplace`. Hooks still need `recall install`. |
+| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` for hooks and user-scope reconciliation. |
 | Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
 | Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
 | omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
@@ -32,12 +32,7 @@ Then attach each harness with its **native plugin or extension** when it has one
 
 `recall install` (or `./packaging/install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
 
-```bash
-# Source checkout (builds from the working tree, then the same installer-owned setup)
-git clone https://github.com/edheltzel/Recall.git
-cd Recall
-./packaging/install.sh
-```
+For a source checkout, follow the [canonical source-checkout sequence](installation.md#source-checkout). It builds from the working tree after any native host attach that must precede installer-owned setup.
 
 Do not clone into `/tmp` — `bun link` points back at the checkout.
 
@@ -81,7 +76,7 @@ recall stats                # record counts (zeros on a fresh install)
 recall doctor               # health check: database, MCP, hooks, embeddings
 ```
 
-`recall doctor` is the authoritative check. Run it first whenever something looks wrong. `recall doctor --fix` repairs missing or drifted install-layout symlinks only; it does not touch data.
+`recall doctor` is the authoritative check. Run it first whenever something looks wrong. `recall doctor --fix` repairs missing or drifted install-layout symlinks and stale Claude MCP database paths. It may rewrite Claude configuration, but it does not repair or mutate memory data.
 
 ---
 
@@ -137,11 +132,11 @@ It exposes nine tools against the same SQLite file as the CLI:
 
 Per-host registration:
 
-- **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer removes the duplicate user-scope entry.
+- **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer reconciles that entry under the [Claude ownership rules](CLAUDE_INTEGRATION.md#migrating-an-existing-install).
 - **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
 - **omp** — no MCP registration. Native capture and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
 - **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.
-- **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `install.sh` does not duplicate it.
+- **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `packaging/install.sh` does not duplicate it.
 - **Cursor** — snippets only. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`). No marketplace plugin.
 
 Full tool reference: [MCP Tools](mcp-tools.md).

@@ -149,9 +149,9 @@ recall repair --execute  # rebuild the indexes from the source tables
 ```
 
 See [Repair in the CLI reference](cli-reference.md#repair) for the full
-safety model. `recall doctor --fix` does **not** fix this — doctor's `--fix`
-only repairs symlinks; data and index maintenance always goes through
-`recall repair`.
+safety model. `recall doctor --fix` does **not** fix this. Doctor repairs
+install and Claude MCP configuration drift; data and index maintenance always
+goes through `recall repair`.
 
 ### "Embedding service unavailable"
 

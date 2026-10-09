@@ -1,7 +1,12 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
+import {
+  classifyClaudePluginState,
+  readJsoncObject,
+  type ClaudePluginState as SharedClaudePluginState,
+} from '../../lib/jsonc-mcp.js';
 
 export interface ClaudePaths {
   root: string;
@@ -40,20 +45,12 @@ export function claudePaths(home: string): ClaudePaths {
  */
 export const CLAUDE_PLUGIN_ID = 'recall@recall-marketplace';
 
-export interface ClaudePluginState {
-  installed: boolean;
-  /** Installed and not disabled in settings — i.e. actually contributing skills and MCP. */
-  active: boolean;
-  version: string | null;
-}
+export type ClaudePluginState = SharedClaudePluginState;
 
-function readJson(path: string): Record<string, unknown> | null {
-  if (!existsSync(path)) return null;
+function readJson(path: string): Record<string, unknown> | null | undefined {
+  if (!existsSync(path)) return undefined;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return readJsoncObject(path);
   } catch {
     return null;
   }
@@ -63,24 +60,16 @@ function readJson(path: string): Record<string, unknown> | null {
 export function claudePluginState(home: string): ClaudePluginState {
   const paths = claudePaths(home);
   const installedPlugins = readJson(join(paths.root, 'plugins', 'installed_plugins.json'));
-  const entries = (installedPlugins?.plugins as Record<string, unknown> | undefined)?.[CLAUDE_PLUGIN_ID];
-  const record = Array.isArray(entries) ? (entries[0] as Record<string, unknown> | undefined) : undefined;
-  if (!record) return { installed: false, active: false, version: null };
-
-  const enabledPlugins = readJson(paths.settings)?.enabledPlugins as Record<string, unknown> | undefined;
-  return {
-    installed: true,
-    active: enabledPlugins?.[CLAUDE_PLUGIN_ID] !== false,
-    version: typeof record.version === 'string' ? record.version : null,
-  };
+  const settings = installedPlugins === undefined ? undefined : readJson(paths.settings);
+  return classifyClaudePluginState(installedPlugins, settings, CLAUDE_PLUGIN_ID);
 }
 
 export function claudeMcpConfigTargets(home: string): McpConfigTarget[] {
   const paths = claudePaths(home);
   const envPath = ['mcpServers', 'recall-memory', 'env'];
   return [
-    { host: 'claude', path: paths.legacySettings, envPath, format: 'json' },
-    { host: 'claude', path: paths.settings, envPath, format: 'json' },
+    { host: 'claude', path: paths.legacySettings, envPath },
+    { host: 'claude', path: paths.settings, envPath },
   ];
 }
 

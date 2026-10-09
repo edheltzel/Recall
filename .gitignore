@@ -47,3 +47,4 @@ MEMORY/
 
 # Worktrees
 .worktrees/
+.empryo

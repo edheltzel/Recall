@@ -1,6 +1,6 @@
 // recall doctor — health check for all memory subsystems
 
-import { existsSync, statSync, readFileSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync, renameSync, realpathSync } from 'fs';
+import { existsSync, statSync, readFileSync, lstatSync, readlinkSync, mkdirSync, copyFileSync, unlinkSync, symlinkSync, readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -9,10 +9,17 @@ import { getDb, getDbPath } from '../db/connection.js';
 import { checkAllFts } from '../lib/repair.js';
 import { getLifecycleSearchReadiness } from '../lib/lifecycle-search.js';
 import { VERSION } from '../version.js';
-import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli } from '../hosts/claude.js';
+import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli, type ClaudePluginState } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
 import { getRecallHome } from '../lib/runtime-paths.js';
-import { parseJsonc } from '../../lib/jsonc-mcp.js';
+import {
+  configuredMcpDbPath,
+  parseJsonc,
+  selectMcpDbPath,
+  validateClaudeConfigShape,
+  validateClaudeMcpConfigShape,
+  writeJsonAtomic,
+} from '../../lib/jsonc-mcp.js';
 export interface DoctorOptions {
   fix?: boolean;
 }
@@ -149,7 +156,7 @@ function checkStructuredData(): CheckResult {
 //
 // Read-only by design (issue #46): doctor only RECOMMENDS `recall repair`.
 // This check is exported as a plain CheckResult with no repair fn, so the
-// --fix loop (symlinks only) can never run data repair implicitly.
+// --fix loop (install/configuration drift only) can never run data repair implicitly.
 export function checkFtsIndexes(): CheckResult {
   const label = 'FTS5 search indexes in sync';
 
@@ -491,7 +498,11 @@ export function listSkillCanonicalFiles(root: string): { name: string; file: str
   return out;
 }
 
-export function buildSymlinkProbes(home = homedir(), root = getRecallHome()): SymlinkProbe[] {
+export function buildSymlinkProbes(
+  home = homedir(),
+  root = getRecallHome(),
+  pluginState: ClaudePluginState = claudePluginState(home),
+): SymlinkProbe[] {
   const claude = claudePaths(home);
   const probes: SymlinkProbe[] = [];
 
@@ -523,11 +534,9 @@ export function buildSymlinkProbes(home = homedir(), root = getRecallHome()): Sy
   // lets `recall doctor --fix` repair without reinstall. (The former slash
   // commands migrated to these skills — #228.)
   //
-  // Skipped once the native plugin is active: it ships the same nine skills from
-  // its own cache, and install/update deliberately remove the ~/.claude/skills
-  // symlinks so the surface isn't listed twice. Probing them then would report a
-  // converged install as broken.
-  if (!claudePluginState(home).active) {
+  // Added only when plugin state confirms lifecycle ownership. An active plugin
+  // supplies the same skills, while unreadable state cannot safely choose an owner.
+  if (pluginState.status === 'absent' || pluginState.status === 'disabled') {
     for (const { name, file } of listSkillCanonicalFiles(root)) {
       probes.push({
         label: `agent skill: ${name}/${file}`,
@@ -568,34 +577,56 @@ export function probeSkillSurface(root: string): CheckResult {
 // two recall-memory MCP servers exposing the same nine tools. install.sh/update.sh
 // reconcile that; this check reports the un-reconciled state and how to clear it.
 // Exported + path-injected for unit testing, mirroring probeSkillSurface.
-export function probeClaudePlugin(home: string, root: string): CheckResult {
+export function probeClaudePlugin(
+  home: string,
+  root: string,
+  state: ClaudePluginState = claudePluginState(home),
+): CheckResult {
   const label = 'Claude native plugin';
-  const state = claudePluginState(home);
-  if (!state.installed) {
+  if (state.status === 'unknown') {
+    return {
+      label,
+      status: 'WARN',
+      message: 'Plugin state is unreadable; ownership is unknown, so doctor skipped ownership-dependent skill and MCP repairs',
+    };
+  }
+  if (state.status === 'absent') {
     return { label, status: 'INFO', message: `Not installed — lifecycle install owns skills and MCP (${CLAUDE_PLUGIN_ID})` };
   }
-  if (!state.active) {
+  if (state.status === 'disabled') {
     return { label, status: 'INFO', message: 'Installed but disabled — lifecycle install owns skills and MCP' };
   }
 
   const skillsDir = claudePaths(home).skills;
   const leftoverSkills = [...new Set(listSkillCanonicalFiles(root).map(entry => entry.name))]
     .filter(name => existsSync(join(skillsDir, name)));
-  const leftoverMcp = claudeMcpConfigTargets(home)
-    .filter(target => {
-      if (!existsSync(target.path)) return false;
-      try {
-        const cfg: unknown = JSON.parse(readFileSync(target.path, 'utf-8'));
-        return !!(cfg as { mcpServers?: Record<string, unknown> })?.mcpServers?.['recall-memory'];
-      } catch {
-        return false;
+  const leftoverMcp: string[] = [];
+  const invalidMcp: string[] = [];
+  for (const target of claudeMcpConfigTargets(home)) {
+    if (!existsSync(target.path)) continue;
+    try {
+      const cfg: unknown = parseJsonc(readFileSync(target.path, 'utf-8'));
+      validateClaudeConfigShape(cfg);
+      const servers = cfg.mcpServers;
+      if (servers && Object.prototype.hasOwnProperty.call(servers, 'recall-memory')) {
+        leftoverMcp.push(basename(target.path));
       }
-    })
-    .map(target => basename(target.path));
+    } catch {
+      invalidMcp.push(basename(target.path));
+    }
+  }
 
   const duplicates: string[] = [];
   if (leftoverSkills.length) duplicates.push(`${leftoverSkills.length} skill(s) also in ~/.claude/skills`);
   if (leftoverMcp.length) duplicates.push(`recall-memory also registered in ${leftoverMcp.join(', ')}`);
+  if (invalidMcp.length) {
+    const knownDuplicates = duplicates.length ? ` Known duplicates: ${duplicates.join('; ')}.` : '';
+    return {
+      label,
+      status: 'WARN',
+      message: `Plugin active${state.version ? ` (v${state.version})` : ''}, but sole MCP ownership is unknown due to invalid config: ${invalidMcp.join(', ')}.${knownDuplicates}`,
+    };
+  }
   if (duplicates.length) {
     return {
       label,
@@ -738,7 +769,7 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
 }
 
 // ─────────────────────────────────────────
-// Check: MCP registration carries env.RECALL_DB_PATH matching the resolved DB
+// Check: MCP registration carries a canonical env.RECALL_DB_PATH
 // ─────────────────────────────────────────
 //
 // Pre-Phase-1 installs registered recall-memory via `claude mcp add`, which
@@ -746,17 +777,12 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
 // DB path from defaults instead of the user's explicit RECALL_DB_PATH, so the
 // server's DB view can silently diverge from the CLI's after the next Claude
 // restart (issue #28). This probe + repair is the in-place fix for installs
-// that predate `_recall_ensure_mcp_entry` in lib/install-lib.sh.
+// that predate lifecycle MCP reconciliation in lib/install-lib.sh.
 //
-// Cross-language parallel (NOT a DRY violation — bash and TS can't share code):
-// the repair below mirrors `_recall_ensure_mcp_entry` in lib/install-lib.sh —
-// for each config file that owns the registration, ensure env is an object,
-// set env.RECALL_DB_PATH to the resolved path, and drop the legacy MEM_DB_PATH
-// key. Command/args rewrites stay owned by the installer; doctor only repairs
-// the env block, which is the surgical fix issue #28 calls for.
 export interface McpEnvProbe {
-  targets: McpConfigTarget[]; // native-host config owners, in resolution order
-  resolvedDbPath: string;  // getDbPath() — the value the env block should carry
+  targets: McpConfigTarget[];
+  resolvedDbPath: string;
+  runtimeDbPathOverride?: string;
 }
 
 interface McpEntry {
@@ -766,23 +792,32 @@ interface McpEntry {
 
 interface McpRegistration {
   target: McpConfigTarget;
-  envDbPath: string | undefined; // value of env.RECALL_DB_PATH, if present
+  primaryDbPath: string | undefined;
+  configuredDbPath: string | undefined;
+  hasLegacyDbPath: boolean;
 }
 
 interface McpScan {
   owners: McpRegistration[];
-  // Config files that exist but failed to parse — doctor must never touch a
-  // file it can't read as JSON, so these are surfaced (WARN), not silently
-  // conflated with a genuinely-absent registration.
-  unparseable: string[];
+  // Existing config files that could not be fully validated. A readable MCP
+  // registration still participates even when an unrelated Claude field fails.
+  invalidConfigs: string[];
 }
 
 // Locate every config file that owns an mcpServers["recall-memory"] entry.
-// Mirrors the file selection in _recall_ensure_mcp_entry (exists + contains the
-// registration). Malformed/unreadable JSON is never fatal, but it is recorded
-// (not dropped) so the caller can distinguish it from a missing registration.
+// Mirrors lifecycle MCP reconciliation file selection (exists + contains the
+// registration). Invalid config is never fatal, but it is recorded so the
+// caller can distinguish it from a missing registration.
 function parseHostConfig(target: McpConfigTarget): Record<string, unknown> {
-  return parseJsonc(readFileSync(target.path, 'utf-8')) as Record<string, unknown>;
+  const config = parseJsonc(readFileSync(target.path, 'utf-8'));
+  if (target.host === 'claude') {
+    validateClaudeMcpConfigShape(config);
+    return config;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('root is not an object');
+  }
+  return config as Record<string, unknown>;
 }
 
 function mcpEntryAt(config: Record<string, unknown>, target: McpConfigTarget): McpEntry | null {
@@ -796,54 +831,67 @@ function mcpEntryAt(config: Record<string, unknown>, target: McpConfigTarget): M
 
 function findMcpRegistrations(targets: McpConfigTarget[]): McpScan {
   const owners: McpRegistration[] = [];
-  const unparseable: string[] = [];
+  const invalidConfigs: string[] = [];
   for (const target of targets) {
     if (!existsSync(target.path)) continue;
     let cfg: Record<string, unknown>;
     try {
       cfg = parseHostConfig(target);
     } catch {
-      unparseable.push(target.path);
+      invalidConfigs.push(target.path);
       continue;
+    }
+    if (target.host === 'claude') {
+      try {
+        validateClaudeConfigShape(cfg);
+      } catch {
+        invalidConfigs.push(target.path);
+      }
     }
     const entry = mcpEntryAt(cfg, target);
     if (!entry) continue;
     const envKey = target.envPath[target.envPath.length - 1];
     const env = entry[envKey];
-    const raw = env && typeof env === 'object' && !Array.isArray(env)
-      ? (env as Record<string, unknown>).RECALL_DB_PATH
+    const envRecord = env && typeof env === 'object' && !Array.isArray(env)
+      ? env as Record<string, unknown>
       : undefined;
-    owners.push({ target, envDbPath: typeof raw === 'string' ? raw : undefined });
+    const raw = envRecord?.RECALL_DB_PATH;
+    owners.push({
+      target,
+      primaryDbPath: typeof raw === 'string' && raw.length > 0 ? raw : undefined,
+      configuredDbPath: configuredMcpDbPath(envRecord),
+      hasLegacyDbPath: !!envRecord && Object.prototype.hasOwnProperty.call(envRecord, 'MEM_DB_PATH'),
+    });
   }
-  return { owners, unparseable };
+  return { owners, invalidConfigs };
 }
 
 // Exported for unit tests. Pure with respect to its args (config-file paths +
 // resolved DB path); the repair closure patches the owning config file(s).
 export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   const label = 'MCP env carries RECALL_DB_PATH';
-  const { targets, resolvedDbPath } = probe;
+  const { targets, resolvedDbPath, runtimeDbPathOverride } = probe;
 
-  const { owners, unparseable } = findMcpRegistrations(targets);
+  const { owners, invalidConfigs } = findMcpRegistrations(targets);
 
   // A config that exists but can't be parsed is never silently dropped: doctor
   // names it and leaves it untouched. When there are no valid owners this is the
   // whole result (WARN); when there are valid owners it rides along as a note so
   // the malformed sibling can't hide behind a PASS/WARN/FAIL on the others.
-  const unparseableNote = unparseable.length > 0
-    ? ` — could not parse ${unparseable.join(', ')} (left untouched)`
+  const invalidNote = invalidConfigs.length > 0
+    ? ` — invalid or unparseable config: ${invalidConfigs.join(', ')}`
     : '';
 
   // No config file owns the registration. Distinguish a genuinely-absent
   // registration (INFO — nothing to do) from a config that exists but is
   // unparseable (WARN — doctor refuses to touch a file it can't parse).
   if (owners.length === 0) {
-    if (unparseable.length > 0) {
+    if (invalidConfigs.length > 0) {
       return {
         result: {
           label,
           status: 'WARN',
-          message: `config present but unparseable — refusing to touch ${unparseable.join(', ')}`,
+          message: `config present but unparseable — refusing to touch ${invalidConfigs.join(', ')}`,
         },
       };
     }
@@ -852,64 +900,82 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
     };
   }
 
-  // Healthy: every owner already carries the resolved DB path.
-  const stale = owners.filter(o => o.envDbPath !== resolvedDbPath);
-  if (stale.length === 0) {
+  const selection = selectMcpDbPath(
+    owners.map(owner => owner.configuredDbPath),
+    resolvedDbPath,
+    runtimeDbPathOverride,
+  );
+  if (selection.status === 'conflict') {
     return {
       result: {
         label,
-        status: 'PASS',
-        message: `env.RECALL_DB_PATH matches resolved DB path in ${owners.length} config file(s)${unparseableNote}`,
+        status: 'WARN',
+        message: `conflicting stored database paths: ${selection.paths.join(', ')} — refusing to rewrite MCP registrations${invalidNote}`,
       },
     };
   }
 
-  // At least one owner has a missing/empty env or a divergent value — the
-  // next-Claude-restart hazard from issue #28.
+  if (!runtimeDbPathOverride && selection.path !== resolvedDbPath) {
+    return {
+      result: {
+        label,
+        status: 'WARN',
+        message: `stored MCP database path ${selection.path} differs from current CLI path ${resolvedDbPath}; export RECALL_DB_PATH=${selection.path} before launching Recall and Claude${invalidNote}`,
+      },
+    };
+  }
+
+  const desiredDbPath = resolvedDbPath;
+  const stale = owners.filter(owner =>
+    owner.primaryDbPath !== desiredDbPath || owner.hasLegacyDbPath
+  );
+  if (stale.length === 0) {
+    return {
+      result: {
+        label,
+        status: invalidConfigs.length > 0 ? 'WARN' : 'PASS',
+        message: `env.RECALL_DB_PATH is canonical in ${owners.length} config file(s)${invalidNote}`,
+      },
+    };
+  }
+
   const detail = stale
-    .map(o => `${o.target.path} (${o.envDbPath === undefined ? 'env.RECALL_DB_PATH missing' : `has ${o.envDbPath}`})`)
+    .map(o => `${o.target.path} (${o.primaryDbPath === undefined ? 'env.RECALL_DB_PATH missing' : `has ${o.primaryDbPath}`}; expected ${desiredDbPath})`)
     .join('; ');
+  const repairableStale = stale.filter(owner => !invalidConfigs.includes(owner.target.path));
+  const result: CheckResult = {
+    label,
+    status: 'WARN',
+    message: `${detail} — MCP server may diverge from CLI on next Claude restart${invalidNote}`,
+  };
+  if (repairableStale.length === 0) return { result };
   return {
-    result: {
-      label,
-      status: 'WARN',
-      message: `env.RECALL_DB_PATH should be ${resolvedDbPath} but ${detail} — MCP server may diverge from CLI on next Claude restart${unparseableNote}`,
-    },
+    result,
     repair: () => {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
       const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
       const patched: string[] = [];
       const failed: string[] = [];
-      for (const owner of stale) {
+      for (const owner of repairableStale) {
         // Per-file isolation: a write failure on one owner (EACCES, full disk,
         // read-only settings.json) must not abort the others or escape the loop.
-        let tmpPath: string | undefined;
         try {
           const cfg = parseHostConfig(owner.target);
+          if (owner.target.host === 'claude') validateClaudeConfigShape(cfg);
           const entry = mcpEntryAt(cfg, owner.target);
           if (!entry) continue; // registration vanished between probe and repair — nothing to back up or patch
           const envKey = owner.target.envPath[owner.target.envPath.length - 1];
           if (!entry[envKey] || typeof entry[envKey] !== 'object' || Array.isArray(entry[envKey])) entry[envKey] = {};
           const env = entry[envKey] as Record<string, unknown>;
-          env.RECALL_DB_PATH = resolvedDbPath;
+          env.RECALL_DB_PATH = desiredDbPath;
           delete env.MEM_DB_PATH;
-          // Resolve through any symlink so the write goes THROUGH the link rather
-          // than replacing it with a regular file (which would orphan the
-          // canonical target and break stow/chezmoi-style dotfiles). Safe here:
-          // the file was just read successfully.
-          const target = realpathSync(owner.target.path);
-          tmpPath = target + '.tmp';
           // Back up only once the write is confirmed to happen (after the re-read
           // + entry guard), so a vanished registration leaves no orphan backup.
           mkdirSync(backupDir, { recursive: true });
-          copyFileSync(target, join(backupDir, owner.target.path.replace(/[/\\]/g, '_')));
-          // Atomic write: stage to a temp sibling then rename over the resolved
-          // target, so an interrupt mid-write can't truncate the user's config.
-          writeFileSync(tmpPath, JSON.stringify(cfg, null, 2));
-          renameSync(tmpPath, target);
+          copyFileSync(owner.target.path, join(backupDir, owner.target.path.replace(/[/\\]/g, '_')));
+          writeJsonAtomic(owner.target.path, cfg);
           patched.push(owner.target.path);
         } catch (err) {
-          if (tmpPath) { try { if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort temp cleanup */ } }
           // Capture the cause so a real EACCES/disk-full is diagnosable.
           failed.push(`${owner.target.path} (${err instanceof Error ? err.message : String(err)})`);
         }
@@ -917,13 +983,13 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
       // Every stale owner's registration vanished before we could patch it —
       // don't claim work that didn't happen.
       if (patched.length === 0 && failed.length === 0) {
-        return { label, status: 'PASS', message: `Nothing to patch — registration(s) vanished before repair${unparseableNote}` };
+        return { label, status: invalidConfigs.length > 0 ? 'WARN' : 'PASS', message: `Nothing to patch — registration(s) vanished before repair${invalidNote}` };
       }
       if (failed.length > 0) {
         const patchedNote = patched.length ? `patched ${patched.join(', ')}; ` : '';
-        return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}${unparseableNote}` };
+        return { label, status: 'FAIL', message: `${patchedNote}failed to patch ${failed.join(', ')}${invalidNote}` };
       }
-      return { label, status: 'PASS', message: `Patched env.RECALL_DB_PATH=${resolvedDbPath} in ${patched.join(', ')}${unparseableNote}` };
+      return { label, status: invalidConfigs.length > 0 ? 'WARN' : 'PASS', message: `Patched env.RECALL_DB_PATH in ${patched.join(', ')}${invalidNote}` };
     },
   };
 }
@@ -949,7 +1015,7 @@ export function probeInstallSentinel(markerPath: string): CheckResult {
   return {
     label,
     status: 'WARN',
-    message: `A previous install/update did not finish${suffix} — re-run ./packaging/install.sh to converge (idempotent), or 'recall doctor --fix' for symlinks only`,
+    message: `A previous install/update did not finish${suffix} - re-run ./packaging/install.sh to converge (idempotent), or 'recall doctor --fix' for install/configuration drift`,
   };
 }
 
@@ -984,7 +1050,10 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // Symlink health checks (new in Phase 3 of the install-layout refactor).
   // Each probe returns a result + optional repair fn; with --fix we apply
   // repairs and substitute the post-repair result for the report.
-  const symlinkChecks = buildSymlinkProbes().map(probeSymlink);
+  const home = homedir();
+  const root = getRecallHome();
+  const pluginState = claudePluginState(home);
+  const symlinkChecks = buildSymlinkProbes(home, root, pluginState).map(probeSymlink);
   for (const sc of symlinkChecks) {
     results.push(resolveProbeResult(sc, !!opts.fix));
   }
@@ -992,18 +1061,15 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // Skill command surface floor (#235): the per-file probes above go silent
   // when zero skill canonicals exist, so add an explicit WARN for a blanked
   // command surface — the sole command surface since #228.
-  results.push(probeSkillSurface(getRecallHome()));
-  results.push(probeClaudePlugin(homedir(), getRecallHome()));
+  results.push(probeSkillSurface(root));
+  results.push(probeClaudePlugin(home, root, pluginState));
 
-  // MCP env health (issue #28): the recall-memory registration must carry
-  // env.RECALL_DB_PATH matching the resolved DB path, or the MCP server can
-  // diverge from the CLI after the next Claude restart. Same repair contract as
-  // the symlink probes — with --fix we patch the owning config file(s).
   const mcpEnvCheck = probeMcpEnv({
-    targets: claudeMcpConfigTargets(homedir()),
+    targets: claudeMcpConfigTargets(home),
     resolvedDbPath: getDbPath(),
+    runtimeDbPathOverride: process.env.RECALL_DB_PATH || process.env.MEM_DB_PATH || undefined,
   });
-  results.push(resolveProbeResult(mcpEnvCheck, !!opts.fix));
+  results.push(resolveProbeResult(mcpEnvCheck, !!opts.fix && pluginState.status !== 'unknown'));
 
   // Completion sentinel (#27): a leftover .install-incomplete marker means a
   // prior install/update was interrupted before its self-check ran. Warn-only —

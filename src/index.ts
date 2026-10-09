@@ -845,7 +845,7 @@ program
 
 // recall repair — data/index maintenance (issue #46)
 // Dry-run by default; --execute rebuilds FTS5 indexes and re-embeds rows
-// missing embeddings. Separate from `recall doctor --fix` (symlinks only).
+// missing embeddings. Separate from `recall doctor --fix` (install/config drift).
 program
   .command('repair')
   .description('Rebuild FTS5 indexes and re-embed missing embeddings (dry-run by default)')

@@ -11,7 +11,7 @@
 // config, not the backup.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { probeMcpEnv, resolveProbeResult } from '../../src/commands/doctor';
@@ -58,12 +58,15 @@ function target(path: string): McpConfigTarget {
     host: 'claude',
     path,
     envPath: ['mcpServers', 'recall-memory', 'env'],
-    format: 'json',
   };
 }
 
 function probe() {
-  return probeMcpEnv({ targets: [target(configPath)], resolvedDbPath: RESOLVED });
+  return probeMcpEnv({
+    targets: [target(configPath)],
+    resolvedDbPath: RESOLVED,
+    runtimeDbPathOverride: RESOLVED,
+  });
 }
 
 // repair() backs files up under the real home (Bun's homedir() ignores $HOME),
@@ -133,6 +136,88 @@ describe('probeMcpEnv', () => {
     expect(env.MEM_DB_PATH).toBeUndefined();
   });
 
+  test('stored custom path warns when the runtime override is absent', () => {
+    const stored = '/stored/custom.db';
+    writeConfig({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: stored } } },
+    });
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath)],
+      resolvedDbPath: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('differs from current CLI path');
+    expect(repair).toBeUndefined();
+    expect((readEntry().env as Record<string, unknown>).RECALL_DB_PATH).toBe(stored);
+  });
+
+  test('conflicting stored paths warn without offering a repair', () => {
+    const siblingPath = join(tempDir, 'settings.json');
+    const first = {
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/one.db' } } },
+    };
+    const second = {
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/two.db' } } },
+    };
+    writeConfig(first);
+    writeFileSync(siblingPath, JSON.stringify(second, null, 2));
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath), target(siblingPath)],
+      resolvedDbPath: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('conflicting stored database paths');
+    expect(repair).toBeUndefined();
+    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual(first);
+    expect(JSON.parse(readFileSync(siblingPath, 'utf-8'))).toEqual(second);
+  });
+
+  test('runtime override converges conflicting stored paths', () => {
+    const siblingPath = join(tempDir, 'settings.json');
+    writeConfig({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/one.db' } } },
+    });
+    writeFileSync(siblingPath, JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/two.db' } } },
+    }, null, 2));
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath), target(siblingPath)],
+      resolvedDbPath: RESOLVED,
+      runtimeDbPathOverride: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(repair!().status).toBe('PASS');
+    for (const path of [configPath, siblingPath]) {
+      const config = JSON.parse(readFileSync(path, 'utf-8'));
+      expect(config.mcpServers['recall-memory'].env).toEqual({ RECALL_DB_PATH: RESOLVED });
+    }
+  });
+
+  test('stored legacy path warns without rewriting when the runtime override is absent', () => {
+    const stored = '/stored/legacy.db';
+    writeConfig({
+      mcpServers: {
+        'recall-memory': { env: { RECALL_DB_PATH: '', MEM_DB_PATH: stored } },
+      },
+    });
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(configPath)],
+      resolvedDbPath: RESOLVED,
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('differs from current CLI path');
+    expect(repair).toBeUndefined();
+    expect(readEntry().env).toEqual({ RECALL_DB_PATH: '', MEM_DB_PATH: stored });
+  });
+
   test('repair preserves other entry keys and sibling mcpServers', () => {
     writeConfig({
       mcpServers: {
@@ -182,6 +267,18 @@ describe('probeMcpEnv', () => {
     expect(repair).toBeUndefined();
   });
 
+  test('invalid root and Recall entry shapes are WARN and not repairable', () => {
+    for (const invalid of [[], { mcpServers: { 'recall-memory': [] } }]) {
+      writeConfig(invalid);
+
+      const { result, repair } = probe();
+
+      expect(result.status).toBe('WARN');
+      expect(result.message).toContain('unparseable');
+      expect(repair).toBeUndefined();
+    }
+  });
+
   // ── Fix 2 (issue #112): atomic write leaves valid JSON and no .tmp orphan ──
   test('successful repair leaves no .tmp orphan and writes valid JSON', () => {
     writeConfig({
@@ -193,6 +290,18 @@ describe('probeMcpEnv', () => {
     // Throws if the file is not intact, valid JSON.
     const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(cfg.mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(RESOLVED);
+  });
+
+  test('repair preserves the existing config mode', () => {
+    writeConfig({
+      mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } },
+    });
+    chmodSync(configPath, 0o600);
+
+    const fixed = probe().repair!();
+
+    expect(fixed.status).toBe('PASS');
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   // ── Fix 1 (issue #112): per-file error isolation ──
@@ -273,9 +382,51 @@ describe('probeMcpEnv', () => {
       { mcpServers: { 'recall-memory': { command: 'bun', args: ['run', 'recall-mcp'], env: {} } } }, null, 2));
     writeFileSync(badPath, '{ not valid json ');
 
-    const { result } = probeMcpEnv({ targets: [target(validPath), target(badPath)], resolvedDbPath: RESOLVED });
+    const { result, repair } = probeMcpEnv({ targets: [target(validPath), target(badPath)], resolvedDbPath: RESOLVED });
     expect(result.status).toBe('WARN'); // stale valid owner
     expect(result.message).toContain(badPath); // malformed sibling surfaced, not dropped
+
+    writeFileSync(validPath, JSON.stringify({ mcpServers: {} }));
+    expect(repair!().status).toBe('WARN');
+  });
+
+  test('invalid Claude hooks do not hide a readable conflicting MCP path', () => {
+    const validPath = join(tempDir, 'valid.json');
+    const invalidSiblingPath = join(tempDir, 'invalid-sibling.json');
+    writeFileSync(validPath, JSON.stringify(
+      { mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/cli.db' } } } }));
+    writeFileSync(invalidSiblingPath, JSON.stringify({
+      hooks: [],
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: '/other.db' } } },
+    }));
+
+    const { result, repair } = probeMcpEnv({
+      targets: [target(validPath), target(invalidSiblingPath)],
+      resolvedDbPath: '/cli.db',
+    });
+
+    expect(result.status).toBe('WARN');
+    expect(result.message).toContain('conflicting stored database paths');
+    expect(result.message).toContain('/cli.db');
+    expect(result.message).toContain('/other.db');
+    expect(result.message).toContain(invalidSiblingPath);
+    expect(repair).toBeUndefined();
+  });
+
+  test('doctor --fix leaves a stale fully invalid Claude config unchanged', () => {
+    const original = JSON.stringify({
+      hooks: [],
+      mcpServers: { 'recall-memory': { env: {} } },
+    });
+    writeFileSync(configPath, original);
+
+    const check = probeMcpEnv({ targets: [target(configPath)], resolvedDbPath: RESOLVED });
+    const fixed = resolveProbeResult(check, true);
+
+    expect(check.result.status).toBe('WARN');
+    expect(check.repair).toBeUndefined();
+    expect(fixed.status).toBe('WARN');
+    expect(readFileSync(configPath, 'utf-8')).toBe(original);
   });
 
   // ── Fix 1 call site (issue #112): a throwing repair() degrades to FAIL and
