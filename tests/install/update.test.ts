@@ -359,6 +359,53 @@ describe('update.sh', () => {
     }
   });
 
+  test('Claude MCP reconciliation reports a failed second owner write as partial', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-partial-write-'));
+    try {
+      const claudeDir = join(tempRoot, '.claude');
+      const legacyFile = join(tempRoot, '.claude.json');
+      const settingsFile = join(claudeDir, 'settings.json');
+      const backupDir = join(tempRoot, 'backups');
+      mkdirSync(claudeDir, { recursive: true });
+      const legacyOriginal = JSON.stringify({
+        mcpServers: { 'recall-memory': { command: 'bun', env: { RECALL_DB_PATH: '/old.db' } } },
+      });
+      const settingsOriginal = JSON.stringify({
+        mcpServers: { 'recall-memory': { command: 'bun', env: { RECALL_DB_PATH: '/old.db' } } },
+      });
+      writeFileSync(legacyFile, legacyOriginal);
+      writeFileSync(settingsFile, settingsOriginal);
+      mkdirSync(`${settingsFile}.tmp`);
+
+      const driver = [
+        'set -e',
+        `export HOME="${tempRoot}"`,
+        `export CLAUDE_DIR="${claudeDir}"`,
+        `export BACKUP_DIR="${backupDir}"`,
+        'source "$REPO/lib/install-lib.sh"',
+        '_recall_reconcile_claude_mcp user "/bin/bun" "/new/path/recall-mcp"',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', driver], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: { ...process.env, REPO, RECALL_DB_PATH: '/selected.db' },
+      });
+
+      expect(result.status).toBe(4);
+      const legacyEntry = JSON.parse(readFileSync(legacyFile, 'utf-8')).mcpServers['recall-memory'];
+      expect(legacyEntry.env.RECALL_DB_PATH).toBe('/selected.db');
+      expect(readFileSync(settingsFile, 'utf-8')).toBe(settingsOriginal);
+      expect(readFileSync(join(backupDir, '.claude.json'), 'utf-8')).toBe(legacyOriginal);
+      expect(readFileSync(join(backupDir, 'settings.json'), 'utf-8')).toBe(settingsOriginal);
+      const output = `${result.stdout}${result.stderr}`;
+      expect(output).toMatch(/EISDIR|is a directory/i);
+      expect(output).toContain('config may be partially updated');
+      expect(output).toContain(`Restore the Claude config backups from ${backupDir}, then rerun the command`);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('symlinked settings.json is written through the link, with backup and no temp file', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-symlink-'));
     try {
@@ -712,7 +759,7 @@ describe('update.sh', () => {
     expect(r.stdout).toMatch(/would: migrate Recall-owned Claude\/Pi MEMORY bootstraps/);
   });
 
-  test('one update uses a freshly pulled lifecycle library to reconcile Claude MCP', () => {
+  test('a bootstrap-capable updater reloads a changed lifecycle library', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-reexec-'));
     try {
       const checkout = join(tempRoot, 'checkout');

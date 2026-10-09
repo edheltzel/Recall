@@ -53,11 +53,20 @@ An existing Recall install keeps working. It also keeps its own copies of what t
 
 Claude collapses the two MCP entries only when they resolve to an identical command and environment. `install.sh` writes `bun run <path>` plus an `env` block, so a real existing install always duplicates.
 
-`install.sh` and `update.sh` reconcile this, and both are idempotent — run either after installing the plugin:
+`install.sh` and current `update.sh` reconcile this, and both are idempotent. After installing the plugin, run:
 
 ```bash
 ./packaging/update.sh
 ```
+
+If you are upgrading from a release that predates this reconciliation, the old updater is already loaded before it pulls the new lifecycle code. Complete that first upgrade with:
+
+```bash
+recall update
+recall install
+```
+
+Run `recall install` once after that first `recall update`. Later updates reload changed lifecycle files automatically. See [Upgrading](upgrading.md#first-update-from-an-older-updater).
 
 With the plugin active they:
 

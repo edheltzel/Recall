@@ -64,6 +64,8 @@ Both run the same canonical steps and are **idempotent** — re-running repairs 
 
 **Source / git checkout — `recall update`** (delegates to `./packaging/update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, force-re-registers the hooks, and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
 
+If the installed release predates Claude MCP reconciliation, run `recall install` once after the first `recall update`. The already-running old updater cannot use lifecycle functions pulled during that same run; later updates reload changed lifecycle files automatically. See [First update from an older updater](upgrading.md#first-update-from-an-older-updater).
+
 Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--force`, `--no-migrate`, `--no-confirm`. Check-only, without changing anything: `recall update --check`, or `/do-recall-update` from inside Claude Code (see [Agent Skills](agent-skills.md)).
 
 Two situations the original scripts didn't spell out:

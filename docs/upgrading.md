@@ -46,6 +46,17 @@ cd /path/to/Recall
 ./packaging/update.sh
 ```
 
+### First update from an older updater
+
+If your installed release predates Claude MCP reconciliation, its already-running updater cannot use lifecycle functions that arrive during its own pull. Complete that first update with:
+
+```bash
+recall update
+recall install
+```
+
+Run `recall install` once after that first `recall update`. Later updates reload changed lifecycle files before refreshing runtime configuration.
+
 `update.sh` performs the full lifecycle:
 
 1. Fetches the latest release tag from GitHub and compares to

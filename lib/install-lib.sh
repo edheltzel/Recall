@@ -1563,6 +1563,16 @@ _recall_reconcile_claude_mcp() {
       delete owner.entry.env.MEM_DB_PATH;
     }
 
+    let writeAttempted = false;
+    function persist(owners, removeEmpty) {
+      for (const owner of owners) {
+        backup(owner.file);
+        writeAttempted = true;
+        if (removeEmpty) writeJsonAtomicOrRemoveEmpty(owner.file, owner.config);
+        else writeJsonAtomic(owner.file, owner.config);
+      }
+    }
+
     try {
       const files = [process.env.LEGACY_FILE, process.env.SETTINGS_FILE];
       const owners = files.map(ownedConfig).filter(Boolean);
@@ -1578,10 +1588,7 @@ _recall_reconcile_claude_mcp() {
           delete owner.config.mcpServers["recall-memory"];
           if (Object.keys(owner.config.mcpServers).length === 0) delete owner.config.mcpServers;
         }
-        for (const owner of owners) {
-          backup(owner.file);
-          writeJsonAtomicOrRemoveEmpty(owner.file, owner.config);
-        }
+        persist(owners, true);
         console.log("plugin");
       } else {
         if (owners.length === 0) {
@@ -1593,16 +1600,14 @@ _recall_reconcile_claude_mcp() {
           owners.push({ file: process.env.SETTINGS_FILE, config, entry });
         }
         for (const owner of owners) configure(owner, selection.path);
-        for (const owner of owners) {
-          backup(owner.file);
-          writeJsonAtomic(owner.file, owner.config);
-        }
+        persist(owners, false);
         console.log(selection.path === process.env.DEFAULT_DB ? "default" : "custom");
       }
-    } catch {
-      process.exit(2);
+    } catch (error) {
+      console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+      process.exit(writeAttempted ? 4 : 2);
     }
-  ' 2>/dev/null)"; then
+  ')"; then
     if [[ "$mode" == "plugin" && "$outcome" == "custom" ]]; then
       log_warn "Kept a user recall-memory registration to persist the custom RECALL_DB_PATH the plugin cannot carry"
     elif [[ "$mode" == "plugin" ]]; then
@@ -1617,8 +1622,11 @@ _recall_reconcile_claude_mcp() {
 
   if [[ $status -eq 3 ]]; then
     log_error "Conflicting recall-memory database paths found in Claude user config (left unchanged)"
+  elif [[ $status -eq 4 ]]; then
+    log_error "Could not finish recall-memory Claude reconciliation; config may be partially updated"
+    log_error "Restore the Claude config backups from $BACKUP_DIR, then rerun the command"
   else
-    log_error "Could not reconcile recall-memory Claude config (existing config is invalid - left unchanged)"
+    log_error "Could not reconcile recall-memory Claude config before any write (existing config is invalid or inaccessible - left unchanged)"
   fi
   return "$status"
 }
