@@ -7,19 +7,21 @@
 //   recall migrate --to /new/path/recall.db --dry-run
 //
 // Behavior:
-//   - Refuses to overwrite a non-empty file at the destination.
+//   - Refuses to overwrite a non-empty file at the destination, or any
+//     destination sidecar (-wal, -shm, -journal) of any type or size.
 //   - Refuses to migrate while a process has the source DB open (lsof check).
 //   - Snapshots source DB + sidecars + configs under
 //     ~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/ before any mutation.
-//   - Moves <src>.db, <src>.db-wal, <src>.db-shm to the new path (renames
-//     sidecars in lockstep so SQLite still finds them).
+//   - Moves <src>.db, <src>.db-wal, <src>.db-shm to the new path. A sidecar
+//     rename that still fails moves the database back; configs are probed
+//     before the first rename so a commit failure aborts with nothing moved.
 //   - Updates env.RECALL_DB_PATH in each config we detect:
 //       ~/.claude.json, ~/.claude/settings.json,
 //       ~/.config/opencode/opencode.json, ~/.pi/agent/mcp.json
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, copyFileSync, renameSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync, unlinkSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
@@ -54,6 +56,46 @@ function isOpen(path: string): boolean {
 
 function isSidecar(suffix: string): suffix is '-wal' | '-shm' {
   return suffix === '-wal' || suffix === '-shm';
+}
+
+const DEST_SIDECARS = ['-wal', '-shm', '-journal'] as const;
+const MOVED_SIDECARS = ['-wal', '-shm'] as const;
+// UF/SF immutable and append. Rename over these fails with EPERM; mode bits do not.
+const BLOCKING_FLAGS = 0x2 | 0x4 | 0x00020000 | 0x00040000;
+
+function refuseDestination(path: string): never {
+  console.error(`Error: destination already exists and is non-empty: ${path}`);
+  console.error('Refusing to overwrite. Delete the file or choose a different path.');
+  process.exit(1);
+}
+
+function existingDestinationSidecar(dest: string): string | undefined {
+  for (const ext of DEST_SIDECARS) {
+    try {
+      lstatSync(dest + ext);
+      return dest + ext;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return undefined;
+}
+
+function commitBlocked(path: string): string | undefined {
+  if (!existsSync(path)) return undefined;
+  if (!statSync(path).isFile()) return `not a replaceable file: ${path}`;
+  if (process.platform === 'darwin' || process.platform === 'freebsd') {
+    const flags = Number.parseInt(execFileSync('stat', ['-f', '%f', path], { encoding: 'utf-8' }).trim(), 10);
+    if ((flags & BLOCKING_FLAGS) !== 0) return `immutable: ${path}`;
+  } else if (process.platform === 'linux') {
+    try {
+      const attrs = execFileSync('lsattr', ['-d', path], { encoding: 'utf-8' }).trim().split(/\s+/)[0] ?? '';
+      if (attrs.includes('i') || attrs.includes('a')) return `immutable: ${path}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return undefined;
 }
 
 function detectConfigs(home: string): McpConfigTarget[] {
@@ -153,12 +195,10 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
 
   if (existsSync(dest)) {
     const st = statSync(dest);
-    if (st.size > 0) {
-      console.error(`Error: destination already exists and is non-empty: ${dest}`);
-      console.error('Refusing to overwrite. Delete the file or choose a different path.');
-      process.exit(1);
-    }
+    if (st.size > 0) refuseDestination(dest);
   }
+  const sidecar = existingDestinationSidecar(dest);
+  if (sidecar) refuseDestination(sidecar);
 
   // Refuse to migrate if the source DB is open. lsof's absence on the host
   // is treated as "probably safe" — best-effort check.
@@ -237,13 +277,25 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     }
   }
 
-  // 2. Move DB + sidecars.
+  for (const patch of staged) {
+    const blocked = commitBlocked(patch.target.path);
+    if (!blocked) continue;
+    for (const item of staged) item.write.cleanup();
+    console.error(`Error: cannot commit ${patch.target.path} (${blocked})`);
+    process.exit(1);
+  }
+
+  // 2. Move DB + sidecars. Roll the rename back if a later sidecar rename fails.
+  const movedExts: string[] = [];
+  let dbMoved = false;
   try {
     mkdirSync(dirname(dest), { recursive: true });
     renameSync(src, dest);
-    for (const ext of ['-wal', '-shm']) {
+    dbMoved = true;
+    for (const ext of MOVED_SIDECARS) {
       if (isSidecar(ext) && existsSync(src + ext)) {
         renameSync(src + ext, dest + ext);
+        movedExts.push(ext);
       }
     }
     console.log(`✓ Moved DB: ${dest}`);
@@ -254,6 +306,12 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
       console.log(`✓ Patched ${patch.target.path}`);
     }
   } catch (error) {
+    for (const ext of movedExts.reverse()) {
+      try { renameSync(dest + ext, src + ext); } catch { /* snapshot remains */ }
+    }
+    if (dbMoved) {
+      try { renameSync(dest, src); } catch { /* snapshot remains */ }
+    }
     for (const item of staged) item.write.cleanup();
     console.error(`Error: migration failed (${error instanceof Error ? error.message : String(error)})`);
     process.exit(1);
