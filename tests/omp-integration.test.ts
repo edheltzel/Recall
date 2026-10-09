@@ -6,7 +6,6 @@ import recallOmpExtension, {
   MAX_OMP_STDIN_BYTES,
   OMP_SESSION_START_CUSTOM_TYPE,
   runBoundedChild,
-  runBoundedChildCapture,
   START_CHILD_TIMEOUT_MS,
   type OmpExtensionAPI,
   type OmpExtensionContext,
@@ -283,13 +282,11 @@ describe('omp native extension', () => {
           sent.push(message);
         },
       },
-      (_file, _args, stdin, signal, cwd) => runBoundedChildCapture(
-        process.execPath,
-        ['-e', 'await Bun.sleep(60_000)'],
-        stdin,
-        signal,
-        cwd,
-      ),
+      (_file, _args, _stdin, signal) => {
+        const { promise, resolve } = Promise.withResolvers<{ code: number | null; stdout: string }>();
+        signal.addEventListener('abort', () => resolve({ code: null, stdout: '' }), { once: true });
+        return promise;
+      },
       20,
     );
     expect(messages).toEqual(['Recall omp inject cancelled']);
