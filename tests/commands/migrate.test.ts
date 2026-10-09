@@ -46,6 +46,7 @@ function withExitThrow(run: () => void): void {
 
 beforeEach(() => {
   migrateTestHooks.failCommitPath = '';
+  migrateTestHooks.commitProbeExecutable = '';
   tempDir = mkdtempSync(join(tmpdir(), 'recall-migrate-test-'));
   srcDb = join(tempDir, 'src', 'recall.db');
   destDb = join(tempDir, 'dest', 'recall.db');
@@ -307,17 +308,12 @@ describe('recall migrate', () => {
     writeFileSync(settings, body);
 
     const binDir = join(tempDir, 'bin');
-    const probe = join(binDir, immutabilityProbe!);
+    const probe = join(binDir, 'commit-probe');
     mkdirSync(binDir);
     writeFileSync(probe, '#!/bin/sh\nexit 1\n');
     chmodSync(probe, 0o755);
-    const originalPath = process.env.PATH;
-    process.env.PATH = `${binDir}:${originalPath ?? ''}`;
-    try {
-      expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
-    } finally {
-      process.env.PATH = originalPath;
-    }
+    migrateTestHooks.commitProbeExecutable = probe;
+    expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
 
     expect(existsSync(srcDb)).toBe(true);
     expect(existsSync(srcDb + '-wal')).toBe(true);
