@@ -277,9 +277,9 @@ crontab -e
 
 ### Quarterly aging (cron)
 
-Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October). The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. `uninstall.sh` removes it. Pass `--skip-age-cron` to install without scheduling. If `crontab` is not on PATH, install warns and continues.
+Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October) when `recall` resolves to a durable source checkout or Bun-global install. The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. `uninstall.sh` removes it. Pass `--skip-age-cron` to install without scheduling. If the runner is not durable, `crontab` is unavailable, or crontab access fails, the lifecycle command warns without changing the existing schedule.
 
-The job uses absolute paths to `bun` and `recall`, and appends to `~/.agents/Recall/logs/age.log`. Aging expires old breadcrumbs, demotes old low-importance decisions, learnings, and LoA (LoA floor 5), and deletes raw messages older than 180 days within existing guards. Pinned importance 10 is never touched. Remove it with `crontab -e` or `./packaging/uninstall.sh`. See [Age](cli-reference.md#age).
+The job uses absolute paths to `bun` and `recall`, preserves the resolved `RECALL_DB_PATH`, and appends to `~/.agents/Recall/logs/age.log`. With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing deduplication and foreign-key guards still apply. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched. Remove it with `crontab -e` or `./packaging/uninstall.sh`. See [Age](cli-reference.md#age).
 
 ---
 

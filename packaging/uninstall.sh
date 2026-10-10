@@ -727,6 +727,11 @@ main() {
   echo ""
   log_info "Removing quarterly age cron..."
   recall_remove_age_cron
+  if [[ "${_RECALL_AGE_CRON_STATUS:-}" == "missing" \
+    || "${_RECALL_AGE_CRON_STATUS:-}" == "read-error" \
+    || "${_RECALL_AGE_CRON_STATUS:-}" == "write-error" ]]; then
+    lifecycle_failed=true
+  fi
   echo ""
   log_info "Removing slash commands..."
   remove_slash_commands
@@ -799,7 +804,7 @@ main() {
   if [[ "$lifecycle_failed" == "true" ]]; then
     _banner error "Uninstall Incomplete"
     echo ""
-    log_error "Recall cleanup finished, but one or more invalid config files were left unchanged."
+    log_error "Recall cleanup finished, but one or more managed integrations were left unchanged."
     return 1
   fi
 

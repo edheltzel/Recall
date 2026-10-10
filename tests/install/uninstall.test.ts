@@ -53,9 +53,10 @@ function runUninstall(
   claudeDir: string,
   backupBase: string,
   extraArgs: string[] = [],
+  extraEnv: NodeJS.ProcessEnv = {},
 ): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
-  stubCommandOnPath(stubBin, 'crontab');
+  if (!extraEnv.RECALL_CRONTAB_BIN) stubCommandOnPath(stubBin, 'crontab');
   const r = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', ...extraArgs],
@@ -72,6 +73,7 @@ function runUninstall(
         // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
         // the developer's live `recall` link.
         RECALL_SKIP_BUN_UNLINK: 'true',
+        ...extraEnv,
       },
     },
   );
@@ -512,6 +514,38 @@ This content must be preserved across an uninstall.
 
     expect(result.status).not.toBe(0);
     expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+    expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+
+  test('crontab write failure finishes cleanup before reporting incomplete', () => {
+    const cronFile = join(tempRoot, 'cron');
+    const cronBin = join(tempRoot, 'crontab');
+    const original = '15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * /bin/true # recall-memory: quarterly age\n';
+    writeFileSync(cronFile, original);
+    writeFileSync(
+      cronBin,
+      `#!/bin/sh
+if [ "\${1:-}" = "-l" ]; then
+  cat ${JSON.stringify(cronFile)}
+  exit 0
+fi
+cat >/dev/null
+exit 2
+`,
+      { mode: 0o755 },
+    );
+
+    const result = runUninstall(
+      claudeDir,
+      backupBase,
+      [],
+      { RECALL_CRONTAB_BIN: cronBin },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallExtract.ts'))).toBe(false);
     expect(result.stdout).toContain('Uninstall Incomplete');
     expect(result.stdout).not.toContain('Recall uninstalled successfully');
   });

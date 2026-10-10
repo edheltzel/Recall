@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -15,7 +15,10 @@ function cronStub(binDir: string, file: string): void {
     `#!/bin/bash
 file=${JSON.stringify(file)}
 if [[ "\${1:-}" == "-l" ]]; then
-  [[ -f "$file" ]] || exit 1
+  if [[ ! -f "$file" ]]; then
+    echo "no crontab for test-user" >&2
+    exit 1
+  fi
   cat "$file"
   exit 0
 fi
@@ -27,7 +30,23 @@ exit 0
   chmodSync(join(binDir, 'crontab'), 0o755);
 }
 
-function runLib(home: string, recallDir: string, pathDir: string, body: string) {
+function installDurableRunner(home: string): void {
+  const bunBin = join(home, '.bun', 'bin');
+  const runner = join(home, '.bun', 'install', 'global', 'node_modules', 'recall-memory', 'dist', 'index.js');
+  mkdirSync(bunBin, { recursive: true });
+  mkdirSync(join(runner, '..'), { recursive: true });
+  writeFileSync(join(bunBin, 'bun'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  writeFileSync(runner, '#!/usr/bin/env bun\n', { mode: 0o755 });
+  symlinkSync(runner, join(bunBin, 'recall'));
+}
+
+function runLib(
+  home: string,
+  recallDir: string,
+  pathDir: string,
+  body: string,
+  extraEnv: NodeJS.ProcessEnv = {},
+) {
   return spawnSync(
     'bash',
     ['-c', `set -euo pipefail\nsource ${JSON.stringify(LIB)}\n${body}`],
@@ -43,6 +62,9 @@ function runLib(home: string, recallDir: string, pathDir: string, body: string) 
         NO_COLOR: '1',
         DRY_RUN: '',
         SKIP_AGE_CRON: '',
+        RECALL_DB_PATH: '',
+        MEM_DB_PATH: '',
+        ...extraEnv,
       },
     },
   );
@@ -57,9 +79,7 @@ describe('quarterly age cron', () => {
       const bin = join(root, 'bin');
       const cronFile = join(root, 'cron');
       mkdirSync(home, { recursive: true });
-      mkdirSync(join(home, '.bun', 'bin'), { recursive: true });
-      writeFileSync(join(home, '.bun', 'bin', 'bun'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-      writeFileSync(join(home, '.bun', 'bin', 'recall'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      installDurableRunner(home);
       writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
       cronStub(bin, cronFile);
 
@@ -89,6 +109,7 @@ describe('quarterly age cron', () => {
       const bin = join(root, 'bin');
       const cronFile = join(root, 'cron');
       mkdirSync(home, { recursive: true });
+      installDurableRunner(home);
       writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
       cronStub(bin, cronFile);
       const before = readFileSync(cronFile, 'utf-8');
@@ -126,6 +147,7 @@ describe('quarterly age cron', () => {
       const bin = join(root, 'bin');
       const cronFile = join(root, 'cron');
       mkdirSync(home, { recursive: true });
+      installDurableRunner(home);
       writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
       cronStub(bin, cronFile);
       const recallDir = join(home, '.agents', 'Recall');
@@ -146,9 +168,7 @@ describe('quarterly age cron', () => {
       const home = join(root, 'home');
       const bin = join(root, 'bin');
       const cronFile = join(root, 'cron');
-      mkdirSync(join(home, '.bun', 'bin'), { recursive: true });
-      writeFileSync(join(home, '.bun', 'bin', 'bun'), '#!/bin/sh\n', { mode: 0o755 });
-      writeFileSync(join(home, '.bun', 'bin', 'recall'), '#!/bin/sh\n', { mode: 0o755 });
+      installDurableRunner(home);
       writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
       cronStub(bin, cronFile);
       const recallDir = join(home, '.agents', 'Recall');
@@ -182,6 +202,7 @@ describe('quarterly age cron', () => {
       const bin = join(root, 'bin');
       const cronFile = join(root, 'cron');
       mkdirSync(home, { recursive: true });
+      installDurableRunner(home);
       writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
       cronStub(bin, cronFile);
       const before = readFileSync(cronFile, 'utf-8');
@@ -202,6 +223,7 @@ describe('quarterly age cron', () => {
       const bin = join(root, 'bin');
       mkdirSync(bin, { recursive: true });
       mkdirSync(home, { recursive: true });
+      installDurableRunner(home);
       const r = spawnSync('/bin/bash', ['-c', `set -euo pipefail\nsource ${JSON.stringify(LIB)}\nrecall_install_age_cron`], {
         encoding: 'utf-8',
         cwd: REPO,
@@ -209,13 +231,193 @@ describe('quarterly age cron', () => {
           ...process.env,
           HOME: home,
           RECALL_DIR: join(home, '.agents', 'Recall'),
-          PATH: bin,
+          PATH: `${bin}:/usr/bin:/bin`,
           RECALL_CRONTAB_BIN: join(bin, 'missing-crontab'),
           NO_COLOR: '1',
         },
       });
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('crontab not found');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  for (const dbEnv of ['RECALL_DB_PATH', 'MEM_DB_PATH'] as const) {
+    for (const mode of ['install', 'refresh'] as const) {
+      test(`${mode} preserves a custom database selected through ${dbEnv}`, () => {
+        const root = mkdtempSync(join(tmpdir(), 'recall-age-db-'));
+        try {
+          const home = join(root, 'home');
+          const bin = join(root, 'bin');
+          const cronFile = join(root, 'cron');
+          const customDb = join(root, 'custom data', 'recall.db');
+          mkdirSync(home, { recursive: true });
+          installDurableRunner(home);
+          cronStub(bin, cronFile);
+          if (mode === 'refresh') {
+            writeFileSync(cronFile, `0 3 1 1,4,7,10 * /old/recall age --execute ${MARKER}\n`);
+          }
+
+          const result = runLib(
+            home,
+            join(home, '.agents', 'Recall'),
+            bin,
+            mode === 'install' ? 'recall_install_age_cron' : 'recall_refresh_age_cron',
+            {
+              RECALL_DB_PATH: dbEnv === 'RECALL_DB_PATH' ? customDb : '',
+              MEM_DB_PATH: dbEnv === 'MEM_DB_PATH' ? customDb : '',
+            },
+          );
+
+          expect(result.status).toBe(0);
+          const line = readFileSync(cronFile, 'utf-8');
+          expect(line).toContain(`RECALL_DB_PATH=${customDb.replaceAll(' ', '\\ ')}`);
+          expect(line).not.toContain('MEM_DB_PATH=');
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+
+  test('source checkout runner is scheduled', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-source-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const repo = join(root, 'Recall');
+      const runner = join(repo, 'dist', 'index.js');
+      const cronFile = join(root, 'cron');
+      mkdirSync(join(home, '.bun', 'bin'), { recursive: true });
+      mkdirSync(join(repo, '.git'), { recursive: true });
+      mkdirSync(join(repo, 'dist'), { recursive: true });
+      writeFileSync(join(home, '.bun', 'bin', 'bun'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(runner, '#!/usr/bin/env bun\n', { mode: 0o755 });
+      symlinkSync(runner, join(home, '.bun', 'bin', 'recall'));
+      cronStub(bin, cronFile);
+
+      const result = runLib(
+        home,
+        join(home, '.agents', 'Recall'),
+        bin,
+        'recall_install_age_cron',
+        { RECALL_REPO_DIR: repo },
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(cronFile, 'utf-8')).toContain(runner);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('ephemeral recall runner is not scheduled and prints the retry command', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-ephemeral-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      mkdirSync(home, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(bin, 'recall'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(join(bin, 'bun'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
+      cronStub(bin, cronFile);
+
+      const result = runLib(
+        home,
+        join(home, '.agents', 'Recall'),
+        bin,
+        'recall_install_age_cron\nrecall_print_age_cron_notice',
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(cronFile, 'utf-8')).not.toContain(MARKER);
+      expect(result.stdout).toContain('NOT scheduled');
+      expect(result.stdout).toContain('recall install');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('crontab read errors preserve state for every lifecycle mode', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-read-error-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      const writeMarker = join(root, 'write-attempted');
+      mkdirSync(home, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      installDurableRunner(home);
+      writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
+      writeFileSync(
+        join(bin, 'crontab'),
+        `#!/bin/sh
+if [ "\${1:-}" = "-l" ]; then
+  echo "permission denied" >&2
+  exit 2
+fi
+echo attempted > ${JSON.stringify(writeMarker)}
+exit 2
+`,
+        { mode: 0o755 },
+      );
+      const before = readFileSync(cronFile, 'utf-8');
+
+      const result = runLib(
+        home,
+        join(home, '.agents', 'Recall'),
+        bin,
+        'recall_install_age_cron\nrecall_refresh_age_cron\nrecall_remove_age_cron',
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(cronFile, 'utf-8')).toBe(before);
+      expect(existsSync(writeMarker)).toBe(false);
+      expect(result.stdout).toContain('Could not read crontab');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('crontab write errors preserve state and remain nonfatal', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-write-error-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      mkdirSync(home, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      installDurableRunner(home);
+      writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
+      writeFileSync(
+        join(bin, 'crontab'),
+        `#!/bin/sh
+if [ "\${1:-}" = "-l" ]; then
+  cat ${JSON.stringify(cronFile)}
+  exit 0
+fi
+cat >/dev/null
+echo "permission denied" >&2
+exit 2
+`,
+        { mode: 0o755 },
+      );
+      const before = readFileSync(cronFile, 'utf-8');
+
+      const result = runLib(
+        home,
+        join(home, '.agents', 'Recall'),
+        bin,
+        'recall_install_age_cron\nrecall_print_age_cron_notice',
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(cronFile, 'utf-8')).toBe(before);
+      expect(result.stdout).toContain('Could not update crontab');
+      expect(result.stdout).toContain('Schedule unchanged');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

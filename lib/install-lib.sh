@@ -3083,21 +3083,56 @@ _recall_abs_path() {
   printf '%s' "$p"
 }
 
-# Same resolution install.sh uses after linking, then forced absolute so cron's
-# empty PATH can still run it.
-_recall_age_cron_line() {
-  local bun_path recall_bin
-  bun_path="$(command -v bun 2>/dev/null || true)"
-  [[ -z "$bun_path" ]] && bun_path="$HOME/.bun/bin/bun"
-  bun_path="$(_recall_abs_path "$bun_path")"
-  recall_bin="$HOME/.bun/bin/recall"
+_recall_resolve_command_path() {
+  local path="$1" target
+  path="$(_recall_abs_path "$path")"
+  if [[ -L "$path" ]]; then
+    target="$(readlink "$path" 2>/dev/null || true)"
+    [[ -z "$target" ]] && return 1
+    if [[ "$target" != /* ]]; then
+      target="$(dirname "$path")/$target"
+    fi
+    path="$(_recall_abs_path "$target")"
+  fi
+  if [[ -e "$path" ]]; then
+    path="$(cd "$(dirname "$path")" && pwd -P)/$(basename "$path")"
+  fi
+  printf '%s' "$path"
+}
+
+_recall_age_cron_runner() {
+  local recall_bin="$HOME/.bun/bin/recall"
   if [[ ! -x "$recall_bin" ]]; then
     recall_bin="$(command -v recall 2>/dev/null || true)"
   fi
-  [[ -z "$recall_bin" ]] && recall_bin="$HOME/.bun/bin/recall"
-  recall_bin="$(_recall_abs_path "$recall_bin")"
-  printf '%s %q %q age --execute >> %q 2>&1 %s' \
+  [[ -n "$recall_bin" ]] && [[ -x "$recall_bin" ]] || return 1
+
+  local target repo_runner bun_global
+  target="$(_recall_resolve_command_path "$recall_bin")" || return 1
+  repo_runner="$(_recall_resolve_command_path "$RECALL_REPO_DIR/dist/index.js")" || return 1
+  bun_global="$(_recall_resolve_command_path "$HOME/.bun/install/global")" || return 1
+
+  if [[ -e "$RECALL_REPO_DIR/.git" ]] && [[ "$target" == "$repo_runner" ]]; then
+    printf '%s' "$target"
+    return 0
+  fi
+  if [[ "$target" == "$bun_global/node_modules/recall-memory/dist/index.js" ]]; then
+    printf '%s' "$target"
+    return 0
+  fi
+  return 1
+}
+
+_recall_age_cron_line() {
+  local recall_bin="$1"
+  local bun_path db_path
+  bun_path="$(command -v bun 2>/dev/null || true)"
+  [[ -z "$bun_path" ]] && bun_path="$HOME/.bun/bin/bun"
+  bun_path="$(_recall_abs_path "$bun_path")"
+  db_path="$(_recall_abs_path "$(recall_resolve_db_path)")"
+  printf '%s RECALL_DB_PATH=%q %q %q age --execute >> %q 2>&1 %s' \
     "$RECALL_AGE_CRON_SCHEDULE" \
+    "$db_path" \
     "$bun_path" \
     "$recall_bin" \
     "$RECALL_DIR/logs/age.log" \
@@ -3142,12 +3177,22 @@ _recall_crontab_bin() {
 _recall_age_cron_apply() {
   local mode="$1"
   _RECALL_AGE_CRON_STATUS=ok
-  _RECALL_AGE_CRON_LINE="$(_recall_age_cron_line)"
+  _RECALL_AGE_CRON_LINE=""
 
   if _recall_age_cron_blocked; then
     echo "Skipping quarterly age cron: HOME is not the account home (set RECALL_CRONTAB_BIN to schedule anyway)"
     _RECALL_AGE_CRON_STATUS=sandbox
     return 0
+  fi
+
+  if [[ "$mode" != "remove" ]]; then
+    local recall_bin
+    if ! recall_bin="$(_recall_age_cron_runner)"; then
+      log_warn "Quarterly aging was NOT scheduled: recall does not resolve to a durable source checkout or Bun-global install"
+      _RECALL_AGE_CRON_STATUS=unsupported
+      return 0
+    fi
+    _RECALL_AGE_CRON_LINE="$(_recall_age_cron_line "$recall_bin")"
   fi
 
   local cron_bin
@@ -3158,8 +3203,17 @@ _recall_age_cron_apply() {
     return 0
   fi
 
-  local existing="" filtered="" has=false
-  existing="$("$cron_bin" -l 2>/dev/null || true)"
+  local existing="" filtered="" has=false read_output="" read_status=0
+  read_output="$(LC_ALL=C "$cron_bin" -l 2>&1)" || read_status=$?
+  if [[ $read_status -eq 0 ]]; then
+    existing="$read_output"
+  elif [[ $read_status -eq 1 ]] && [[ "$read_output" == *"no crontab for "* ]]; then
+    existing=""
+  else
+    log_warn "Could not read crontab; left the quarterly recall age schedule unchanged"
+    _RECALL_AGE_CRON_STATUS=read-error
+    return 0
+  fi
   if printf '%s\n' "$existing" | grep -q -F "$RECALL_AGE_CRON_MARKER"; then
     has=true
   fi
@@ -3178,20 +3232,27 @@ _recall_age_cron_apply() {
     return 0
   fi
 
+  local updated=""
   if [[ "$mode" != "remove" ]]; then
     mkdir -p "$RECALL_DIR/logs"
     if [[ -n "$filtered" ]]; then
-      printf '%s\n%s\n' "$filtered" "$_RECALL_AGE_CRON_LINE" | "$cron_bin" -
+      updated="${filtered}"$'\n'"${_RECALL_AGE_CRON_LINE}"
     else
-      printf '%s\n' "$_RECALL_AGE_CRON_LINE" | "$cron_bin" -
+      updated="$_RECALL_AGE_CRON_LINE"
     fi
+  else
+    updated="$filtered"
+  fi
+
+  if ! { [[ -n "$updated" ]] && printf '%s\n' "$updated" || printf ''; } | "$cron_bin" -; then
+    log_warn "Could not update crontab; left the quarterly recall age schedule unchanged"
+    _RECALL_AGE_CRON_STATUS=write-error
+    return 0
+  fi
+
+  if [[ "$mode" != "remove" ]]; then
     log_success "Scheduled quarterly recall age"
   else
-    if [[ -n "$filtered" ]]; then
-      printf '%s\n' "$filtered" | "$cron_bin" -
-    else
-      printf '' | "$cron_bin" -
-    fi
     log_success "Removed quarterly recall age cron"
   fi
 }
@@ -3214,18 +3275,26 @@ recall_remove_age_cron() {
 }
 
 recall_print_age_cron_notice() {
-  local line="${_RECALL_AGE_CRON_LINE:-$(_recall_age_cron_line)}"
   echo "Quarterly aging:"
-  if [[ "${_RECALL_AGE_CRON_STATUS:-}" == "missing" ]]; then
+  if [[ "${_RECALL_AGE_CRON_STATUS:-}" == "unsupported" ]]; then
+    echo "  NOT scheduled: recall does not resolve to a durable source checkout or Bun-global install."
+    echo "  After making recall durable, schedule it with: recall install"
+  elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "missing" ]]; then
     echo "  Not scheduled (crontab is not on PATH). Install it later or add the line yourself."
   elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "sandbox" ]]; then
     echo "  Not scheduled (HOME is not the account home)."
+  elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "read-error" ]]; then
+    echo "  Schedule unchanged (the current crontab could not be read)."
+  elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "write-error" ]]; then
+    echo "  Schedule unchanged (crontab rejected the update)."
   else
     echo "  Scheduled. Re-running install replaces this line only."
   fi
   echo "  Schedule: ${RECALL_AGE_CRON_SCHEDULE} (03:00 on the 1st of Jan, Apr, Jul, Oct)"
-  echo "  Command:  ${line}"
+  if [[ -n "${_RECALL_AGE_CRON_LINE:-}" ]]; then
+    echo "  Command:  ${_RECALL_AGE_CRON_LINE}"
+  fi
   echo "  Log:      ${RECALL_DIR}/logs/age.log"
-  echo "  Aging expires old breadcrumbs, demotes old low-importance decisions, learnings, and LoA (LoA floor 5), and deletes raw messages older than 180 days within existing guards. Pinned importance 10 is never touched."
+  echo "  Aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from LoA-consolidated sessions within existing guards. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched."
   echo "  Remove:   crontab -e, or ./packaging/uninstall.sh"
 }
