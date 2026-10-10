@@ -12,25 +12,26 @@ Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP
 
 Recall requires [Bun](https://bun.sh) (`bun:sqlite` and Bun-native hooks). Put Bun on `PATH` first.
 
-Install the binaries and initialize the database once:
+Recall is not published to npm (#312). Canonical install:
 
 ```bash
-bun install -g recall-memory
-recall init
+git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
 ```
+
+Updates: `recall update`. Global binary from that checkout: `bun run build && npm pack --pack-destination <dir>`, then `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install`.
 
 Then attach each harness with its **native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Commands and ownership are in the README Quick Start table and the per-host guides: [Claude](CLAUDE_INTEGRATION.md), [Codex](CODEX_INTEGRATION.md), [Pi](PI_INTEGRATION.md), [omp](OMP_INTEGRATION.md).
 
 | Harness | Preferred attach |
 | --- | --- |
-| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` for hooks and user-scope reconciliation. |
+| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` for hooks and user-scope reconciliation. Attach the plugin before `./packaging/install.sh`. |
 | Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
-| Pi | `pi install npm:recall-memory`, then MCP adapter/config (`recall install --yes` coordinates that). |
+| Pi | `pi install /absolute/path/to/Recall`, then MCP adapter/config (`recall install --yes` coordinates that). |
 | omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
 | Grok | `recall install` / `./packaging/install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
 | Cursor | Merge `templates/cursor/` snippets. No marketplace plugin. |
 
-`recall install` (or `./packaging/install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter. Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+`recall install` (or `./packaging/install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter.
 
 For a source checkout, follow the [canonical source-checkout sequence](installation.md#source-checkout). It builds from the working tree after any native host attach that must precede installer-owned setup.
 
@@ -38,7 +39,7 @@ Do not clone into `/tmp` — `bun link` points back at the checkout.
 
 After any attach, **restart each configured agent** so it loads the plugin, extension, or snippets.
 
-Which command when (npm vs source, re-install, custom DB path) lives in [Managing Recall](lifecycle.md).
+Which command when (source checkout vs local tarball, re-install, custom DB path) lives in [Managing Recall](lifecycle.md).
 
 ---
 
@@ -110,7 +111,7 @@ Then **open a new session in your agent**. What happens next depends on the host
 | Claude Code | Yes — installer-owned `RecallStart` SessionStart hook | Preferred: native plugin for skills/MCP ([Claude Integration](CLAUDE_INTEGRATION.md)), plus `recall install` for hooks. Restart Claude Code. |
 | Codex CLI | Yes — plugin `SessionStart` → `additionalContext` | Preferred: native plugin ([Codex Integration](CODEX_INTEGRATION.md)), then start a Codex session. |
 | Cursor | Beta — `sessionStart` `{ additional_context }` | Merge the snippets under `templates/cursor/`. The hook command is unqualified `recall start --format cursor`. Cursor.app GUI PATH typically lacks `~/.bun/bin`, so the hook is a no-op until `recall` is on that app PATH. CLI Cursor, or a shell where `recall` resolves, is fine. Durable GUI PATH / `recall start --format cursor` accuracy is pending FM-321/327 — this table describes the as-built unqualified command, not that future fix. |
-| Pi | Beta — `before_agent_start` | Preferred: `pi install npm:recall-memory`. See [Pi Integration](PI_INTEGRATION.md). |
+| Pi | Beta — `before_agent_start` | `pi install /absolute/path/to/Recall`. See [Pi Integration](PI_INTEGRATION.md). |
 | omp | No automatic injection | Pack and link the native extension for main-session `session_stop` capture, then restart omp. See [omp Integration](OMP_INTEGRATION.md). |
 | OpenCode | No verified compaction injection | MCP + skills + `session.idle` capture. See [OpenCode Integration](OPENCODE_INTEGRATION.md). |
 | Grok | No automatic injection | Capture is installer-owned; search via MCP. See [Grok Integration](GROK_INTEGRATION.md). |

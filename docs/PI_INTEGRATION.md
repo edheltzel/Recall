@@ -40,15 +40,14 @@ MCP cannot join that unit because `mcp` is not a Pi package resource.
 
 ## Install (preferred)
 
-Install the Recall binaries, then attach Pi through its native package:
+Install the Recall binaries, then attach Pi through its native package. Recall is not published to npm (#312).
 
 ```bash
-bun install -g recall-memory
-recall init
-pi install npm:recall-memory
+git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
+pi install /absolute/path/to/Recall
 ```
 
-From a source checkout, the equivalent native attach is `pi install /absolute/path/to/Recall`.
+`pi install /absolute/path/to/Recall` is the extensions + skills attach.
 
 That command loads extensions and skills. It does **not** register MCP or put `recall` / `recall-mcp` on `PATH`. Complete the MCP half:
 
@@ -71,7 +70,7 @@ An existing adapter is preserved if npm is temporarily unavailable.
 
 A fresh install fails instead of claiming success when the adapter or native Recall package cannot be installed.
 
-Do not treat `pi install npm:recall-memory` as a complete Recall install. It is the preferred **extensions + skills** attach; MCP still needs the adapter and config.
+Do not treat `pi install /absolute/path/to/Recall` as a complete Recall install. It is the **extensions + skills** attach; MCP still needs the adapter and config.
 
 ## What MCP covers
 

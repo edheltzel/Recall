@@ -22,7 +22,7 @@ omp plugin link "$HOME/.agents/Recall/omp-package/package"
 
 Restart omp after linking. `/reload-plugins` does not reload extension modules. Keep the extracted directory in place for the lifetime of the link. To update a development install, rebuild and repeat the pack/extract steps, then restart omp.
 
-Once a release containing this integration is published, `omp plugin install recall-memory` installs the same package directly from npm. Use the packed checkout for the unreleased feature.
+Do not install the npm package named `recall-memory`; that name is an unrelated project (#312). Keep using the packed checkout above.
 
 ## Capture contract
 
