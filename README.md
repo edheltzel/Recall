@@ -237,7 +237,7 @@ The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](as
 
 ### Where Jev sits
 
-Jev scores structured extraction: one POST, one Choice per candidate. `recall capture` does not call it. A missing key or a failed Jev request still writes the parsed rows.
+Jev scores structured extraction: one POST, one Choice per candidate. `recall capture` does not call it. If neither a non-blank process value nor `$HOME/.env` provides a key, or if a Jev request fails, Recall still writes the parsed rows.
 
 ```mermaid
 flowchart TD

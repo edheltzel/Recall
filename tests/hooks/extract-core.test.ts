@@ -12,7 +12,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runExtractCore, type ExtractCoreContext } from '../../hooks/lib/extract-core';
 
 // A clearly-fake Anthropic key that matches P0's `anthropic-key` pattern
@@ -62,14 +62,11 @@ function deriveMeta(extracted: string): { topics: string[]; summary: string } {
 
 let dbPath: string;
 let savedKey: string | undefined;
-let savedHome: string | undefined;
-let jevHome: string;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 
 beforeEach(() => {
-  savedHome = process.env.HOME;
-  jevHome = mkdtempSync(join(tmpdir(), 'recall-no-jev-env-'));
-  process.env.HOME = jevHome;
+  restoreHome = isolateTestHome();
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
   delete process.env.JEV_RECALL_KEY;
@@ -83,9 +80,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
-  rmSync(jevHome, { recursive: true, force: true });
+  restoreHome();
   teardownTestDb();
 });
 

@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   conversationSourceAdapters,
   detectConversationFormat,
@@ -33,14 +33,11 @@ Imported conversations can become structured memory.
 let dbPath: string;
 let tempDir: string;
 let savedJevKey: string | undefined;
-let savedHome: string | undefined;
-let jevHome: string;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 
 beforeEach(() => {
-  savedHome = process.env.HOME;
-  jevHome = mkdtempSync(join(tmpdir(), 'recall-no-jev-env-'));
-  process.env.HOME = jevHome;
+  restoreHome = isolateTestHome();
   savedJevKey = process.env.JEV_RECALL_KEY;
   delete process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
@@ -52,9 +49,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedJevKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedJevKey;
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
-  rmSync(jevHome, { recursive: true, force: true });
+  restoreHome();
   teardownTestDb();
   rmSync(tempDir, { recursive: true, force: true });
 });
