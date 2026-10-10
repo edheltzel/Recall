@@ -193,6 +193,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, while a confirmed absent or disabled plugin makes the installer link them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
 | 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
+| 11. Schedule aging | Reconciles the [managed quarterly aging job](#quarterly-aging-cron) after the self-check succeeds |
 
 **After install:** Restart each configured host to load its integration.
 
@@ -217,7 +218,8 @@ flowchart LR
     I --> J
     J --> K[Copy Guide\nRecall_GUIDE.md]
     K --> L[Configure Memory Pointer\nor defer to managed Recall rule]
-    L --> M[Done\nRestart Claude Code]
+    L --> M[Reconcile Quarterly Aging Cron]
+    M --> N[Done\nRestart Claude Code]
 ```
 
 ---
