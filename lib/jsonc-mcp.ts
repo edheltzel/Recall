@@ -4,7 +4,8 @@
 // Recall package ships lib/ but not node_modules/, so installer/uninstaller
 // config repair cannot require the repository's jsonc-parser installation.
 
-import { chmodSync, existsSync, lstatSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fchmodSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { randomBytes } from 'crypto';
 
 type JsonObject = Record<string, unknown>;
 type Property = { key: string; keyStart: number; value: Node };
@@ -288,24 +289,24 @@ export function stageFileAtomic(file: string, data: string | Uint8Array, modeOve
     throw new Error(`refusing to replace dangling symlink: ${file}`);
   }
   const target = entry?.isSymbolicLink() ? realpathSync(file) : file;
-  const tmp = `${target}.tmp`;
-  const tmpEntry = lstatIfPresent(tmp);
-  if (tmpEntry && !tmpEntry.isFile()) {
-    throw new Error(`refusing to replace non-file temporary path: ${tmp}`);
-  }
   const mode = modeOverride === undefined
     ? existsSync(target) ? statSync(target).mode & 0o7777 : undefined
     : modeOverride & 0o7777;
+  let tmp = '';
   let pending = true;
   const cleanup = () => {
-    if (!pending) return;
+    if (!pending || tmp === '') return;
     pending = false;
     try { unlinkSync(tmp); } catch { /* temp may not exist */ }
   };
   try {
-    if (mode !== undefined && tmpEntry) chmodSync(tmp, mode);
-    writeFileSync(tmp, data, mode === undefined ? undefined : { mode });
-    if (mode !== undefined) chmodSync(tmp, mode);
+    const fd = createExclusiveTemp(target, mode, (path) => { tmp = path; });
+    try {
+      writeAll(fd, data);
+      if (mode !== undefined) fchmodSync(fd, mode);
+    } finally {
+      closeSync(fd);
+    }
   } catch (error) {
     cleanup();
     throw error;
@@ -318,6 +319,38 @@ export function stageFileAtomic(file: string, data: string | Uint8Array, modeOve
     },
     cleanup,
   };
+}
+
+function createExclusiveTemp(target: string, mode: number | undefined, claim: (path: string) => void): number {
+  let last: unknown;
+  for (let attempt = 0; attempt < 128; attempt++) {
+    const path = `${target}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+    const existing = lstatIfPresent(path);
+    if (existing) continue;
+    try {
+      const fd = openSync(path, 'wx', mode ?? 0o666);
+      claim(path);
+      return fd;
+    } catch (error) {
+      last = error;
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
+      throw error;
+    }
+  }
+  throw last instanceof Error ? last : new Error(`cannot create temporary file for ${target}`);
+}
+
+function writeAll(fd: number, data: string | Uint8Array): void {
+  if (typeof data === 'string') {
+    writeSync(fd, data);
+    return;
+  }
+  let offset = 0;
+  while (offset < data.length) {
+    const wrote = writeSync(fd, data, offset);
+    if (wrote <= 0) throw new Error('short write to temporary file');
+    offset += wrote;
+  }
 }
 
 function writeTextAtomic(file: string, text: string): void {
