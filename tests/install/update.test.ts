@@ -12,6 +12,7 @@ import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { atomicTempEntries } from '../helpers/fs';
 
 const REPO = process.cwd();
 const UPDATE = join(REPO, 'packaging', 'update.sh');
@@ -425,6 +426,8 @@ describe('update.sh', () => {
         mcpServers: { 'recall-memory': { command: 'bun', args: ['run', '/old/path/mem-mcp'], env: {} } },
       }));
       symlinkSync(realFile, settingsFile);
+      const realTempsBefore = atomicTempEntries(realFile);
+      const settingsTempsBefore = atomicTempEntries(settingsFile);
 
       const driver = [
         'set -e',
@@ -446,8 +449,8 @@ describe('update.sh', () => {
         mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: string } } };
       };
       expect(after.mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe('/new/db');
-      expect(existsSync(`${realFile}.tmp`)).toBe(false);
-      expect(existsSync(`${settingsFile}.tmp`)).toBe(false);
+      expect(atomicTempEntries(realFile)).toEqual(realTempsBefore);
+      expect(atomicTempEntries(settingsFile)).toEqual(settingsTempsBefore);
       const backups = join(tempRoot, '.agents', 'Recall', 'backups');
       const stamp = readdirSync(backups).find(name => name !== 'latest') ?? '';
       expect(readFileSync(join(backups, stamp, 'settings.json'), 'utf-8')).toContain('/old/path/mem-mcp');
