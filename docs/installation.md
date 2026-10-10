@@ -288,7 +288,7 @@ crontab -e
 
 ### Quarterly aging (cron)
 
-Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October) when `recall` resolves to a durable source checkout or Bun-global install. The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. Re-install and update retain the database assignment stored in that line unless `RECALL_DB_PATH` or `MEM_DB_PATH` explicitly replaces it. `uninstall.sh` removes it. The [`--skip-age-cron`](#install-flags) install flag also removes an existing managed line; a later install without the flag schedules it again. If the runner is not durable, `crontab` is unavailable, or crontab access fails, the lifecycle command warns without changing the existing schedule.
+Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October) when `recall` resolves to a durable source checkout or Bun-global install. The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. Re-install and update retain the database assignment stored in that line unless `RECALL_DB_PATH` or `MEM_DB_PATH` explicitly replaces it. `uninstall.sh` removes it when it can read and update the user crontab. The [`--skip-age-cron`](#install-flags) install flag also removes an existing managed line; a later install without the flag schedules it again. If the runner is not durable, `crontab` is unavailable, or crontab access fails, the lifecycle command warns without changing the existing schedule.
 
 The job single-quotes absolute paths to `bun` and `recall`, preserves the resolved `RECALL_DB_PATH`, and appends to `~/.agents/Recall/logs/age.log`. If the database, Bun, runner, or log path contains `%`, `\`, `'`, or a control character, install and update leave crontab unchanged and tell you to schedule the job manually with `crontab -e`. Remove it with `crontab -e` or `./packaging/uninstall.sh`. For aging behavior and safeguards, see [Age](cli-reference.md#age).
 
@@ -359,7 +359,7 @@ cd /path/to/Recall
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
 - The managed crontab line marked `# recall-memory: quarterly age`; other crontab lines are left alone
 
-If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, it does not rewrite that file, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
+If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, or if managed cron cleanup cannot read or update the user crontab, it leaves that surface unchanged, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
 
 Separately installed omp capture is removed with `omp plugin uninstall recall-memory`, followed by an omp restart. The lifecycle uninstaller does not manage that native plugin registration.
 
