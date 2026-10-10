@@ -164,6 +164,20 @@ export function readJsoncObject(file: string, emptyIfMissingOrBlank = false): Js
   return value;
 }
 
+export function readJsoncObjectState(file: string): Record<string, unknown> | null | undefined {
+  try {
+    statSync(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    return null;
+  }
+  try {
+    return readJsoncObject(file);
+  } catch {
+    return null;
+  }
+}
+
 export function validateClaudeConfigShape(config: unknown): asserts config is JsonObject {
   validateClaudeMcpConfigShape(config);
   if (config.hooks !== undefined) {

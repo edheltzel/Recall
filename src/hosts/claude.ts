@@ -1,10 +1,10 @@
-import { existsSync, statSync } from 'fs';
+import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
 import {
   classifyClaudePluginState,
-  readJsoncObject,
+  readJsoncObjectState,
   type ClaudePluginState as SharedClaudePluginState,
 } from '../../lib/jsonc-mcp.js';
 
@@ -47,27 +47,11 @@ export const CLAUDE_PLUGIN_ID = 'recall@recall-marketplace';
 
 export type ClaudePluginState = SharedClaudePluginState;
 
-function readJson(path: string): Record<string, unknown> | null | undefined {
-  try {
-    statSync(path);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return undefined;
-    // EACCES/EPERM (and any other stat failure) is unreadable, not missing.
-    return null;
-  }
-  try {
-    return readJsoncObject(path);
-  } catch {
-    return null;
-  }
-}
-
 /** Read Claude's own plugin state files; never shells out to the CLI. */
 export function claudePluginState(home: string): ClaudePluginState {
   const paths = claudePaths(home);
-  const installedPlugins = readJson(join(paths.root, 'plugins', 'installed_plugins.json'));
-  const settings = installedPlugins === undefined ? undefined : readJson(paths.settings);
+  const installedPlugins = readJsoncObjectState(join(paths.root, 'plugins', 'installed_plugins.json'));
+  const settings = installedPlugins === undefined ? undefined : readJsoncObjectState(paths.settings);
   return classifyClaudePluginState(installedPlugins, settings, CLAUDE_PLUGIN_ID);
 }
 
