@@ -14,12 +14,15 @@ The plugin owns three distinct surfaces:
 
 ## Install (preferred)
 
-Install Recall first so `recall`, `recall-mcp`, and the SQLite schema are available:
+Install Recall first so `recall`, `recall-mcp`, and the SQLite schema are available. Recall is not published to npm (#312). From a checkout:
 
 ```bash
-bun install -g recall-memory
+bun run build && npm pack --pack-destination <dir>
+bun install -g <dir>/recall-memory-<version>.tgz
 recall init
 ```
+
+Or `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh`.
 
 Then add this repository as a Codex marketplace and install its plugin:
 

@@ -10,12 +10,15 @@ The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plu
 
 ## Install (preferred)
 
-Install Recall so `recall-mcp` is on `PATH` and the database exists:
+Install Recall so `recall-mcp` is on `PATH` and the database exists. Recall is not published to npm (#312). From a checkout:
 
 ```bash
-bun install -g recall-memory
+bun run build && npm pack --pack-destination <dir>
+bun install -g <dir>/recall-memory-<version>.tgz
 recall init
 ```
+
+Or the [source checkout](installation.md#source-checkout): `git clone https://github.com/edheltzel/Recall.git && cd Recall`, attach the plugin below, then `./packaging/install.sh`.
 
 Then add this repository as a marketplace and install its plugin:
 

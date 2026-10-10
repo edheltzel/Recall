@@ -12,18 +12,17 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 
 | Situation | Command |
 |---|---|
-| Fresh install - Claude plugin + hooks | `bun install -g recall-memory` then `recall init`, install the [Claude plugin](CLAUDE_INTEGRATION.md), then run `recall install` |
-| Fresh install - Codex plugin | `bun install -g recall-memory` then `recall init`, then install the [Codex plugin](CODEX_INTEGRATION.md) |
-| Fresh install — Pi native package | `bun install -g recall-memory` then `pi install npm:recall-memory`; MCP still needs the adapter ([Pi Integration](PI_INTEGRATION.md)) |
+| Fresh install - Claude plugin + hooks | [Source checkout](installation.md#source-checkout): clone, install the [Claude plugin](CLAUDE_INTEGRATION.md), then `./packaging/install.sh` |
+| Fresh install - Codex plugin | `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh`, then install the [Codex plugin](CODEX_INTEGRATION.md) |
+| Fresh install — Pi native package | Source checkout, then `pi install /absolute/path/to/Recall`; MCP still needs the adapter ([Pi Integration](PI_INTEGRATION.md)) |
 | Fresh install — omp native capture | Build and link the clean packed checkout ([omp Integration](OMP_INTEGRATION.md)); skills remain installer-owned |
-| Fresh install — Grok (no plugin path) | `bun install -g recall-memory` then `recall install` ([Grok Integration](GROK_INTEGRATION.md)) |
+| Fresh install — Grok (no plugin path) | `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh` ([Grok Integration](GROK_INTEGRATION.md)) |
 | Fresh install — Cursor snippets | Merge `templates/cursor/`; no marketplace plugin |
-| Fresh install — npm installer (Grok / Claude hooks / detected hosts) | `bun install -g recall-memory` then `recall install` |
-| Fresh install — one-shot (Bun on PATH) | `npx --package=recall-memory recall install` |
+| Fresh install — local tarball (Grok / Claude hooks / detected hosts) | From a checkout: `bun run build && npm pack --pack-destination <dir>`, then `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install` |
 | Fresh install — source / dev checkout | Follow [Installation → Source checkout](installation.md#source-checkout) |
-| Re-install / repair a broken install | `recall install` (packaged) or `./packaging/install.sh` (source) — both idempotent |
+| Re-install / repair a broken install | `recall install` (tarball) or `./packaging/install.sh` (source) — both idempotent |
 | Upgrade to the latest release — source checkout | `recall update` (or `./packaging/update.sh`) |
-| Upgrade a packaged (npm) install | `bun install -g recall-memory@latest` then `recall install` |
+| Upgrade a local-tarball install | Rebuild, `npm pack`, `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install` |
 | Just check for a newer release | `recall update --check` — or `/do-recall-update` in Claude Code |
 | Uninstall, keep your memory database | `recall uninstall` (or `./packaging/uninstall.sh`) |
 | Uninstall **and** destroy the database + backups | `recall uninstall --purge` |
@@ -42,10 +41,10 @@ Recall installs runtime state under `~/.agents/Recall/`. **Preferred attach** fo
 
 Pick the on-ramp that matches how you got Recall:
 
-- **Binaries first:** `bun install -g recall-memory` puts `recall` / `recall-mcp` on PATH, then `recall init` creates the database. Prefer `bun install -g` over `npm install -g`: the `#!/usr/bin/env bun` shebang needs Bun on PATH, and nvm/fnm shells can hide it.
-- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). Claude Code must run `recall install` after its plugin attach because lifecycle hooks remain installer-owned. The Codex plugin already owns its lifecycle hooks. omp skills remain installer-owned. Grok has no plugin path; run `recall install`.
-- **npx (one-shot installer):** `npx --package=recall-memory recall install` — installer-owned surfaces only, no global install. Bun must still be on PATH.
-- **Source / dev checkout:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup, then builds from your working tree (`bun install` + `bun run build` + `bun link`).
+- **Source checkout (canonical):** `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh` puts `recall` / `recall-mcp` on PATH and runs installer-owned setup. Recall is not on the npm registry (#312).
+- **Local tarball:** from a checkout, `bun run build && npm pack --pack-destination <dir>`, then `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall init` and `recall install`.
+- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). Claude Code must attach the plugin before installer-owned setup, then run `recall install`, because lifecycle hooks remain installer-owned. The Codex plugin already owns its lifecycle hooks. omp skills remain installer-owned. Grok has no plugin path; the source checkout installer is enough.
+- **Source / dev checkout detail:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup, then builds from your working tree (`bun install` + `bun run build` + `bun link`).
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
@@ -54,7 +53,7 @@ After any attach, **restart your agent** so it loads the plugin, extension, or s
 Both run the same canonical steps and are **idempotent** — re-running repairs symlinks and registrations, so there is no separate "re-install" command. They differ only in the bootstrap:
 
 - **`./packaging/install.sh`** (source checkout) builds from the working tree. Use it when developing, on a feature branch, or repairing a source install.
-- **`recall install`** (packaged) skips `bun install` / `bun run build` / `bun link` (`RECALL_PACKAGED=1`) because the npm package already shipped a prebuilt binary and its dependencies. Use it for npm / `npx` / `bun install -g` installs.
+- **`recall install`** (local tarball) skips `bun install` / `bun run build` / `bun link` (`RECALL_PACKAGED=1`) because the packed tarball already shipped a prebuilt binary and its dependencies. Use it after `bun install -g <dir>/recall-memory-<version>.tgz`.
 
 ---
 
@@ -71,7 +70,7 @@ Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--for
 Two situations the original scripts didn't spell out:
 
 - **You're on a feature branch or have local commits.** `recall update` does `git pull --ff-only origin main` plus a GitHub-release version check, so it will refuse to fast-forward (or report "already current") rather than clobber your work. That's expected. To rebuild from your **working tree** instead, run `./packaging/install.sh`.
-- **You installed from npm.** A packaged install has no git checkout, so `recall update` has nothing to pull. Bump the binary with `bun install -g recall-memory@latest`, then run `recall install` to refresh the canonical setup.
+- **You installed from a local tarball.** A packed install has no git checkout, so `recall update` has nothing to pull. Rebuild, `npm pack`, and `bun install -g <dir>/recall-memory-<version>.tgz`, then run `recall install` to refresh the canonical setup.
 
 ---
 
