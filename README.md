@@ -248,7 +248,7 @@ flowchart TD
     import["conversation import"] --> structured["writeStructuredExtraction"]
     extract --> parse["parse decisions, learnings, breadcrumbs"]
     structured --> parse
-    parse --> key{"JEV_RECALL_KEY set?"}
+    parse --> key{"Jev key resolves?"}
     key -->|no| write["write every parsed row"]
     key -->|yes| jev["one POST, one Choice per candidate"]
     jev -->|scored| gate{"keep / demote / drop"}
