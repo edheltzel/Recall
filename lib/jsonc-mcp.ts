@@ -325,8 +325,6 @@ function createExclusiveTemp(target: string, mode: number | undefined, claim: (p
   let last: unknown;
   for (let attempt = 0; attempt < 128; attempt++) {
     const path = `${target}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-    const existing = lstatIfPresent(path);
-    if (existing) continue;
     try {
       const fd = openSync(path, 'wx', mode ?? 0o666);
       claim(path);
@@ -341,13 +339,10 @@ function createExclusiveTemp(target: string, mode: number | undefined, claim: (p
 }
 
 function writeAll(fd: number, data: string | Uint8Array): void {
-  if (typeof data === 'string') {
-    writeSync(fd, data);
-    return;
-  }
+  const bytes = typeof data === 'string' ? Buffer.from(data) : data;
   let offset = 0;
-  while (offset < data.length) {
-    const wrote = writeSync(fd, data, offset);
+  while (offset < bytes.length) {
+    const wrote = writeSync(fd, bytes, offset);
     if (wrote <= 0) throw new Error('short write to temporary file');
     offset += wrote;
   }

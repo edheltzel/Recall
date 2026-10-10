@@ -15,6 +15,7 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { migrateTestHooks, runMigrate } from '../../src/commands/migrate';
 import { closeDb } from '../../src/db/connection';
+import { atomicTempEntries } from '../helpers/fs';
 
 let tempDir: string;
 let srcDb: string;
@@ -219,6 +220,8 @@ describe('recall migrate', () => {
     writeFileSync(settings, settingsOriginal);
     mkdirSync(`${settings}.tmp`);
     chmodSync(`${settings}.tmp`, 0o751);
+    const legacyTempsBefore = atomicTempEntries(legacy);
+    const settingsTempsBefore = atomicTempEntries(settings);
 
     runMigrate({ to: destDb }, tempDir);
 
@@ -226,7 +229,8 @@ describe('recall migrate', () => {
     expect(existsSync(destDb)).toBe(true);
     expect(JSON.parse(readFileSync(settings, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(destDb);
     expect(JSON.parse(readFileSync(legacy, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(destDb);
-    expect(existsSync(`${legacy}.tmp`)).toBe(false);
+    expect(atomicTempEntries(legacy)).toEqual(legacyTempsBefore);
+    expect(atomicTempEntries(settings)).toEqual(settingsTempsBefore);
     expect(statSync(`${settings}.tmp`).isDirectory()).toBe(true);
     expect(statSync(`${settings}.tmp`).mode & 0o777).toBe(0o751);
   });
@@ -310,6 +314,8 @@ describe('recall migrate', () => {
     writeFileSync(probe, '#!/bin/sh\nexit 1\n');
     chmodSync(probe, 0o755);
     migrateTestHooks.commitProbeExecutable = probe;
+    const legacyTempsBefore = atomicTempEntries(legacy);
+    const settingsTempsBefore = atomicTempEntries(settings);
     expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
 
     expect(existsSync(srcDb)).toBe(true);
@@ -318,8 +324,8 @@ describe('recall migrate', () => {
     expect(existsSync(destDb)).toBe(false);
     expect(readFileSync(legacy, 'utf-8')).toBe(body);
     expect(readFileSync(settings, 'utf-8')).toBe(body);
-    expect(existsSync(`${legacy}.tmp`)).toBe(false);
-    expect(existsSync(`${settings}.tmp`)).toBe(false);
+    expect(atomicTempEntries(legacy)).toEqual(legacyTempsBefore);
+    expect(atomicTempEntries(settings)).toEqual(settingsTempsBefore);
     expect(capturedErr.join('\n')).toContain(`cannot commit ${legacy}`);
   });
 

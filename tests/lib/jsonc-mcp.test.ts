@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { parseJsonc, stageFileAtomic, validateClaudeConfigShape, writeJsonAtomic, writeJsonAtomicOrRemoveEmpty } from '../../lib/jsonc-mcp.ts';
+import { atomicTempEntries } from '../helpers/fs.ts';
 
 let dir: string;
 
@@ -57,13 +58,17 @@ describe('jsonc settings helpers', () => {
     const planted = `${file}.tmp`;
     mkdirSync(planted);
     chmodSync(planted, 0o751);
+    const before = atomicTempEntries(file);
 
     const first = stageFileAtomic(file, '{"n":1}\n');
     const second = stageFileAtomic(file, '{"n":2}\n');
+    expect(atomicTempEntries(file)).toHaveLength(before.length + 2);
     first.cleanup();
+    expect(atomicTempEntries(file)).toHaveLength(before.length + 1);
     second.commit();
     second.cleanup();
 
+    expect(atomicTempEntries(file)).toEqual(before);
     expect(readFileSync(file, 'utf8')).toBe('{"n":2}\n');
     expect(statSync(file).mode & 0o777).toBe(0o640);
     expect(lstatSync(planted).isDirectory()).toBe(true);
