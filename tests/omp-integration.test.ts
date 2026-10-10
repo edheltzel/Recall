@@ -30,7 +30,28 @@ describe('omp native extension', () => {
     expect(messages.join('')).not.toContain('hi');
   });
 
-  test('oversize payload warns and does not spawn', async () => {
+  test('large tool output does not block capture of small conversation text', async () => {
+    let stdin = '';
+    await captureOmpSessionStop({}, uiCtx(() => {}, {
+      sessionManager: {
+        getSessionId: () => 'sess-tools',
+        getBranch: () => [
+          { type: 'message', id: 'u1', message: { role: 'user', content: 'keep this question' } },
+          {
+            type: 'message',
+            id: 'r1',
+            message: { role: 'toolResult', content: [{ type: 'text', text: 'x'.repeat(MAX_OMP_STDIN_BYTES) }] },
+          },
+        ],
+      },
+    }), undefined, async (_file, _args, childStdin) => {
+      stdin = childStdin;
+      return 0;
+    });
+    expect(JSON.parse(stdin).text).toBe('keep this question');
+  });
+
+  test('oversize conversation text warns and does not spawn', async () => {
     const messages: string[] = [];
     let spawned = false;
     await captureOmpSessionStop(
@@ -38,7 +59,9 @@ describe('omp native extension', () => {
       uiCtx((message) => messages.push(message), {
         sessionManager: {
           getSessionId: () => 'sess-big',
-          getBranch: () => [{ pad: 'x'.repeat(MAX_OMP_STDIN_BYTES) }],
+          getBranch: () => [
+            { type: 'message', id: 'u1', message: { role: 'user', content: 'x'.repeat(MAX_OMP_STDIN_BYTES) } },
+          ],
         },
       }),
       undefined,
