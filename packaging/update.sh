@@ -210,6 +210,7 @@ step_confirm() {
   if [[ "$NO_CONFIRM" == "true" ]] || [[ "$DRY_RUN" == "true" ]]; then return; fi
   log_warn "Update will pull, rebuild, and reload hooks."
   log_warn "If Claude Code / OpenCode / Pi is running, exit them BEFORE continuing."
+  recall_print_age_cron_plan refresh
   if ! _confirm "Proceed?" "N"; then
     log_warn "Update cancelled"
     exit 0
@@ -321,6 +322,11 @@ step_link_global() {
   if ! recall_link_global; then
     exit 1
   fi
+}
+
+step_refresh_age_cron() {
+  log_info "Refreshing quarterly age cron if it is already scheduled..."
+  recall_refresh_age_cron
 }
 
 step_migrate() {
@@ -487,6 +493,7 @@ run_post_pull_steps() {
   step_refresh_runtime
   step_reregister_hooks
   step_verify
+  step_refresh_age_cron
   step_report
 }
 

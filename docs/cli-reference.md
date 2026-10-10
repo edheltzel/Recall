@@ -479,7 +479,7 @@ recall doctor --fix                     # Repair install and Claude MCP configur
 recall stats                            # Database statistics
 recall path                             # Print resolved paths (DB, install root, symlinks)
 recall path --json                      # Same, as JSON
-recall migrate --to /new/path/recall.db # Relocate the database and rewrite MCP configs
+recall migrate --to /new/path/recall.db   # Relocate the database (details below)
 recall migrate --to ... --dry-run       # Preview the migration plan
 recall onboard                          # Interactive L0 identity interview (see Onboard)
 recall start                            # Render L0/L1 session-start memory (see Identity & Onboarding)
@@ -499,11 +499,11 @@ Recall's direct config editors reject malformed configuration, duplicate keys, a
 
 `recall path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
 
-`recall migrate` moves the database to a new path and rewrites MCP configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file.
+`recall migrate` moves the database to a new path and rewrites MCP configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. When the [quarterly aging wrapper](installation.md#quarterly-aging-cron) exists, migration also rewrites its exported database assignment through the same staged-write and rollback path. It does not create a wrapper or change the crontab.
 
 It expands `~` and the `~/` prefix in `--to` and makes relative source and destination paths absolute by prefixing the current working directory. Rewritten MCP configs retain that destination spelling. If source and destination have the same filename and their existing parent directories resolve to the same physical directory, migration exits successfully without snapshots, file moves, or config changes.
 
-For a different destination, it refuses to overwrite a non-empty file or proceed when any destination `-wal`, `-shm`, or `-journal` sidecar already exists. It snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. If an existing target config is invalid, cannot be staged for an atomic write, or cannot safely accept the staged replacement, migration stops before moving the database. If a later database sidecar move or config commit fails, migration attempts to move the database and any moved sidecars back and restore configs that were already committed. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
+For a different destination, migration refuses to overwrite a non-empty file or proceed when any destination `-wal`, `-shm`, or `-journal` sidecar already exists. If `lsof` detects an open source database, migration also refuses to proceed; this check is best-effort when `lsof` is unavailable. It snapshots the source DB + WAL/SHM sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation, then moves the database and those sidecars. If an existing target config or aging wrapper cannot be read, safely parsed, staged for an atomic write, or replaced, migration stops before moving the database. If a later database sidecar move or staged commit fails, migration attempts to move the database and any moved sidecars back and restore the bytes and permissions of files already committed. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
 
 ### Onboard
 
@@ -556,3 +556,16 @@ summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
 
 Prune also fails closed before mutation when the lifecycle schema is not ready.
 If it reports `RETRYABLE`, run `recall init` and retry the same command.
+
+### Age
+
+Type-aware aging. Dry-run by default. Pass `--execute` to apply.
+
+```bash
+recall age
+recall age --execute
+```
+
+With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing guards still apply: recorded dedup survivors, marked duplicates, and foreign-key references are withheld. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched.
+
+For managed cron scheduling, opt-out, paths, and lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).

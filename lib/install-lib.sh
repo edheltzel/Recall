@@ -1082,8 +1082,9 @@ recall_create_install_root() {
 #   1. RECALL_DB_PATH
 #   2. MEM_DB_PATH (deprecated; still honored)
 #   3. $RECALL_DIR/recall.db (default)
+# Expands the current user's leading tilde without evaluating path contents.
 recall_resolve_db_path() {
-  local raw
+  local destination="${1:-}" raw resolved
   if [[ -n "${RECALL_DB_PATH:-}" ]]; then
     raw="$RECALL_DB_PATH"
   elif [[ -n "${MEM_DB_PATH:-}" ]]; then
@@ -1091,11 +1092,18 @@ recall_resolve_db_path() {
   else
     raw="$RECALL_DIR/recall.db"
   fi
-  case "$raw" in
-    '~') raw="$HOME" ;;
-    '~/'*) raw="$HOME/${raw:2}" ;;
-  esac
-  printf '%s\n' "$raw"
+  if [[ "$raw" == "~" ]]; then
+    resolved="$HOME"
+  elif [[ "$raw" == "~/"* ]]; then
+    resolved="$HOME/${raw:2}"
+  else
+    resolved="$raw"
+  fi
+  if [[ -n "$destination" ]]; then
+    printf -v "$destination" '%s' "$resolved"
+  else
+    printf '%s\n' "$resolved"
+  fi
 }
 
 # Copy a file from the repo into its canonical location under $RECALL_DIR.
@@ -1508,7 +1516,6 @@ _recall_reconcile_claude_mcp() {
   if [[ -n "${RECALL_DB_PATH:-}" ]] || [[ -n "${MEM_DB_PATH:-}" ]]; then
     explicit_db="$(recall_resolve_db_path)"
   fi
-
   export -f recall_backup_file
   export BACKUP_DIR
   local outcome status
@@ -1516,23 +1523,16 @@ _recall_reconcile_claude_mcp() {
     DEFAULT_DB="$default_db" EXPLICIT_DB="$explicit_db" BUN_PATH="$bun_path" MCP_PATH="$mem_mcp_path" \
     JSONC_LIB="$_RECALL_JSONC_LIB" bun -e '
     const { execFileSync } = require("child_process");
-    const { existsSync, readFileSync } = require("fs");
+    const { existsSync } = require("fs");
     const {
       configuredMcpDbPath,
+      readClaudeRecallOwner: ownedConfig,
       readJsoncObject,
       selectMcpDbPath,
       validateClaudeConfigShape,
       writeJsonAtomic,
       writeJsonAtomicOrRemoveEmpty,
     } = await import(process.env.JSONC_LIB);
-
-    function ownedConfig(file) {
-      if (!existsSync(file) || !readFileSync(file, "utf8").includes("recall-memory")) return null;
-      const config = readJsoncObject(file);
-      validateClaudeConfigShape(config);
-      const entry = config.mcpServers?.["recall-memory"];
-      return entry ? { file, config, entry } : null;
-    }
 
     function backup(file) {
       if (!existsSync(file)) return;
@@ -1573,7 +1573,6 @@ _recall_reconcile_claude_mcp() {
         process.env.EXPLICIT_DB || undefined,
       );
       if (selection.status === "conflict") process.exit(3);
-
       if (process.env.MODE === "plugin" && selection.path === process.env.DEFAULT_DB) {
         for (const owner of owners) {
           delete owner.config.mcpServers["recall-memory"];
@@ -3066,4 +3065,568 @@ recall_provision_embedding_model() {
     log_warn "  Retry manually: ollama pull $model"
   fi
   return 0
+}
+
+# Quarterly `recall age --execute`. The crontab line is fixed text that runs
+# $RECALL_DIR/shared/age-quarterly.sh via /bin/sh, so a user SHELL override
+# does not change how the job starts. The wrapper holds the database, bun, and
+# runner paths. A marked line is replaced in place so a CRON_TZ above it still
+# applies. Append only when no marked line exists.
+RECALL_AGE_CRON_MARKER='# recall-memory: quarterly age'
+RECALL_AGE_CRON_SCHEDULE='0 3 1 1,4,7,10 *'
+
+_recall_abs_path() {
+  local p="$1"
+  if [[ "$p" == /* ]]; then
+    printf '%s' "$p"
+    return
+  fi
+  if [[ -e "$p" ]]; then
+    printf '%s/%s' "$(cd "$(dirname "$p")" && pwd)" "$(basename "$p")"
+    return
+  fi
+  printf '%s' "$p"
+}
+
+# POSIX single quotes. Reject a newline before any command substitution can
+# strip it. A NUL cannot survive in a bash string.
+_recall_sh_quote() {
+  local value="$1" out="'" rest="$1" chunk
+  [[ "$value" == *$'\n'* ]] && return 1
+  while [[ "$rest" == *"'"* ]]; do
+    chunk="${rest%%\'*}"
+    out+="${chunk}'\\''"
+    rest="${rest#*\'}"
+  done
+  printf '%s' "${out}${rest}'"
+}
+
+_recall_age_dir_rejected() {
+  local dir="$1"
+  [[ "$dir" == *"%"* || "$dir" == *"'"* || "$dir" =~ [[:cntrl:]] ]]
+}
+
+_recall_age_parse_db_line() {
+  local rest="${1#export RECALL_DB_PATH=}" value=""
+  [[ "${rest:0:1}" == "'" ]] || return 1
+  rest="${rest:1}"
+  while [[ -n "$rest" ]]; do
+    if [[ "$rest" == "'\\''"* ]]; then
+      value+="'"
+      rest="${rest:4}"
+      continue
+    fi
+    if [[ "${rest:0:1}" == "'" ]]; then
+      [[ ${#rest} -eq 1 ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+    value+="${rest:0:1}"
+    rest="${rest:1}"
+  done
+  return 1
+}
+
+_recall_age_script_db() {
+  local file="$1" line="" found="" parsed=""
+  [[ -f "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "export RECALL_DB_PATH="* ]]; then
+      [[ -n "$found" ]] && return 2
+      found="$line"
+    fi
+  done < "$file"
+  [[ -n "$found" ]] || return 1
+  parsed="$(_recall_age_parse_db_line "$found")" || return 2
+  [[ -n "$parsed" ]] || return 2
+  printf '%s' "$parsed"
+}
+
+# Prefer the package that ran install. A stale ~/.bun/bin/recall is not enough.
+_recall_age_cron_runner() {
+  local runner="$RECALL_REPO_DIR/dist/index.js" build_planned="${1:-false}" global repo_real global_real
+  [[ "$RECALL_REPO_DIR" == *$'\n'* || "$runner" == *$'\n'* ]] && return 1
+  [[ -f "$runner" || "$build_planned" == true ]] || return 1
+  if [[ -e "$RECALL_REPO_DIR/.git" ]]; then
+    printf '%s' "$(_recall_abs_path "$runner")"
+    return 0
+  fi
+  global="$HOME/.bun/install/global/node_modules/recall-memory"
+  [[ -d "$global" ]] || return 1
+  repo_real="$(cd "$RECALL_REPO_DIR" && pwd -P)" || return 1
+  global_real="$(cd "$global" && pwd -P)" || return 1
+  [[ "$repo_real" == "$global_real" ]] || return 1
+  printf '%s' "$(_recall_abs_path "$runner")"
+}
+
+_recall_age_bun_path() {
+  local bun_path=""
+  bun_path="$(command -v bun 2>/dev/null)" || return 1
+  [[ "$bun_path" == *$'\n'* ]] && return 1
+  bun_path="$(_recall_abs_path "$bun_path")"
+  [[ "$bun_path" == *$'\n'* ]] && return 1
+  printf '%s' "$bun_path"
+}
+
+_recall_age_script_body() {
+  local db="$1" bun="$2" runner="$3" log="$4"
+  local db_q bun_q runner_q log_q
+  db_q="$(_recall_sh_quote "$db")" || return 1
+  bun_q="$(_recall_sh_quote "$bun")" || return 1
+  runner_q="$(_recall_sh_quote "$runner")" || return 1
+  log_q="$(_recall_sh_quote "$log")" || return 1
+  printf '%s\n' \
+    '#!/bin/sh' \
+    "export RECALL_DB_PATH=${db_q}" \
+    "exec ${bun_q} ${runner_q} age --execute >> ${log_q} 2>&1"
+}
+
+_recall_age_cron_line_text() {
+  printf "%s /bin/sh '%s/shared/age-quarterly.sh' %s" \
+    "$RECALL_AGE_CRON_SCHEDULE" \
+    "$RECALL_DIR" \
+    "$RECALL_AGE_CRON_MARKER"
+}
+
+# Read-only. Same owner files and DEFAULT_DB input as
+# _recall_reconcile_claude_mcp. Selection stays in lib/jsonc-mcp.ts.
+_recall_age_mcp_db_path() {
+  local default_db="$RECALL_DIR/recall.db" selected=""
+  selected="$(LEGACY_FILE="$HOME/.claude.json" SETTINGS_FILE="$CLAUDE_DIR/settings.json" \
+    DEFAULT_DB="$default_db" JSONC_LIB="$_RECALL_JSONC_LIB" \
+    bun -e '
+    const {
+      configuredMcpDbPath,
+      readClaudeRecallOwner,
+      selectMcpDbPath,
+    } = await import(process.env.JSONC_LIB);
+    function ownedPath(file) {
+      const owner = readClaudeRecallOwner(file);
+      return owner ? configuredMcpDbPath(owner.entry.env) ?? process.env.DEFAULT_DB : undefined;
+    }
+    const paths = [process.env.LEGACY_FILE, process.env.SETTINGS_FILE]
+      .map(ownedPath)
+      .filter((path) => path !== undefined);
+    const selection = selectMcpDbPath(paths, process.env.DEFAULT_DB);
+    if (selection.status !== "selected") process.exit(3);
+    if (selection.path.includes("\n") || selection.path.includes("\0")) process.exit(2);
+    process.stdout.write(selection.path);
+  ')" || return 1
+  [[ -n "$selected" ]] || return 1
+  printf '%s' "$selected"
+}
+
+# Validate the raw override before command substitution. Otherwise: stored
+# wrapper, then the MCP selection above, then the default.
+_recall_age_select_db() {
+  local script="$1" raw="" stored="" status=0
+  _RECALL_AGE_DB=""
+  _RECALL_AGE_DB_ERROR=""
+  if [[ -n "${RECALL_DB_PATH:-}" ]]; then
+    raw="$RECALL_DB_PATH"
+  elif [[ -n "${MEM_DB_PATH:-}" ]]; then
+    raw="$MEM_DB_PATH"
+  fi
+  if [[ -n "$raw" ]]; then
+    if [[ "$raw" == *$'\n'* ]]; then
+      _RECALL_AGE_DB_ERROR="a path contains a newline or NUL"
+      return 1
+    fi
+    recall_resolve_db_path _RECALL_AGE_DB
+    [[ "$_RECALL_AGE_DB" == /* ]] || _RECALL_AGE_DB="${PWD%/}/$_RECALL_AGE_DB"
+  elif [[ -f "$script" ]]; then
+    stored="$(_recall_age_script_db "$script")" || status=$?
+    if [[ $status -ne 0 || -z "$stored" ]]; then
+      _RECALL_AGE_DB_ERROR="the stored database path cannot be read"
+      return 1
+    fi
+    _RECALL_AGE_DB="$stored"
+  else
+    # The selector returns the default when no pin exists, so any failure
+    # (unreadable config, conflicting pins, newline) means not scheduled.
+    if ! _RECALL_AGE_DB="$(_recall_age_mcp_db_path)"; then
+      _RECALL_AGE_DB=""
+      _RECALL_AGE_DB_ERROR="the Claude MCP database path cannot be determined"
+      return 1
+    fi
+  fi
+  if [[ "$_RECALL_AGE_DB" == *$'\n'* ]]; then
+    _RECALL_AGE_DB_ERROR="a path contains a newline or NUL"
+    return 1
+  fi
+  if [[ "$_RECALL_AGE_DB" != /* ]]; then
+    _RECALL_AGE_DB_ERROR="the stored database path is relative"
+    return 1
+  fi
+}
+
+# Account home, independent of $HOME. Tilde-user expansion does not follow HOME.
+_recall_account_home() {
+  local user home
+  user="$(id -un)"
+  home="$(eval echo "~${user}")"
+  if [[ -d "$home" ]]; then
+    (cd "$home" && pwd -P)
+  else
+    printf '%s' "$home"
+  fi
+}
+
+# A test or e2e run that points HOME at a temp dir must not touch the real
+# per-user crontab. Opt in with RECALL_CRONTAB_BIN (absolute stub or name).
+_recall_age_cron_blocked() {
+  [[ -n "${RECALL_CRONTAB_BIN:-}" ]] && return 1
+  local real="${HOME%/}"
+  [[ -d "$real" ]] && real="$(cd "$real" && pwd -P)"
+  [[ "$real" != "$(_recall_account_home)" ]]
+}
+
+_recall_crontab_bin() {
+  local bin="${RECALL_CRONTAB_BIN:-crontab}"
+  if [[ "$bin" == /* ]]; then
+    if [[ -x "$bin" ]]; then
+      printf '%s' "$bin"
+    fi
+    return 0
+  fi
+  command -v "$bin" 2>/dev/null || true
+  return 0
+}
+
+_recall_age_cron_read_state() {
+  _RECALL_AGE_CRON_READ_STATUS=ok
+  _RECALL_AGE_CRON_BIN=""
+  _RECALL_AGE_CRON_EXISTING=""
+  _RECALL_AGE_CRON_PRESENT=false
+
+  if _recall_age_cron_blocked; then
+    _RECALL_AGE_CRON_READ_STATUS=sandbox
+    return 0
+  fi
+
+  _RECALL_AGE_CRON_BIN="$(_recall_crontab_bin)"
+  if [[ -z "$_RECALL_AGE_CRON_BIN" ]]; then
+    _RECALL_AGE_CRON_READ_STATUS=missing
+    return 0
+  fi
+
+  local read_output="" read_status=0 candidate=""
+  read_output="$(LC_ALL=C "$_RECALL_AGE_CRON_BIN" -l 2>&1)" || read_status=$?
+  if [[ $read_status -eq 0 ]]; then
+    _RECALL_AGE_CRON_EXISTING="$read_output"
+  elif [[ $read_status -ne 1 ]] || [[ "$read_output" != *"no crontab for "* ]]; then
+    _RECALL_AGE_CRON_READ_STATUS=read-error
+    return 0
+  fi
+
+  while IFS= read -r candidate || [[ -n "$candidate" ]]; do
+    if [[ "$candidate" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
+      _RECALL_AGE_CRON_PRESENT=true
+    fi
+  done <<< "$_RECALL_AGE_CRON_EXISTING"
+}
+
+# One decision for preview and apply: add, refresh, keep, remove, or
+# "not scheduled" plus a reason.
+_recall_age_cron_decide() {
+  local mode="$1" build_planned="${2:-false}" script="$RECALL_DIR/shared/age-quarterly.sh"
+  local has_script=false runner="" bun_path=""
+  _RECALL_AGE_CRON_ACTION=""
+  _RECALL_AGE_CRON_REASON=""
+  _RECALL_AGE_CRON_LINE=""
+  _RECALL_AGE_CRON_SCRIPT=""
+  _RECALL_AGE_CRON_STATUS=""
+  [[ -f "$script" ]] && has_script=true
+
+  _recall_age_cron_read_state
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == sandbox ]]; then
+    _RECALL_AGE_CRON_ACTION=keep
+    _RECALL_AGE_CRON_REASON="HOME is not the account home"
+    _RECALL_AGE_CRON_STATUS=sandbox
+    return 0
+  fi
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == missing ]]; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="crontab not found"
+    _RECALL_AGE_CRON_STATUS=missing
+    return 0
+  fi
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == read-error ]]; then
+    _RECALL_AGE_CRON_ACTION=keep
+    _RECALL_AGE_CRON_REASON="crontab could not be read"
+    _RECALL_AGE_CRON_STATUS=read-error
+    return 0
+  fi
+
+  if [[ "$mode" == remove ]]; then
+    if [[ "$_RECALL_AGE_CRON_PRESENT" == true || "$has_script" == true ]]; then
+      _RECALL_AGE_CRON_ACTION=remove
+      _RECALL_AGE_CRON_STATUS=removed
+    else
+      _RECALL_AGE_CRON_ACTION="not scheduled"
+      _RECALL_AGE_CRON_REASON="no managed schedule was present"
+      _RECALL_AGE_CRON_STATUS=absent
+    fi
+    return 0
+  fi
+  if [[ "$mode" == refresh && "$_RECALL_AGE_CRON_PRESENT" != true ]]; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="no managed schedule was present"
+    _RECALL_AGE_CRON_STATUS=absent
+    return 0
+  fi
+
+  if _recall_age_dir_rejected "$RECALL_DIR"; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="the install path cannot be written to crontab"
+    _RECALL_AGE_CRON_STATUS=invalid-path
+    return 0
+  fi
+  if [[ "$RECALL_REPO_DIR" == *$'\n'* ]]; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="a path contains a newline or NUL"
+    _RECALL_AGE_CRON_STATUS=invalid-path
+    return 0
+  fi
+  if ! runner="$(_recall_age_cron_runner "$build_planned")"; then
+    if [[ "$_RECALL_AGE_CRON_PRESENT" == true ]]; then
+      _RECALL_AGE_CRON_ACTION=keep
+      _RECALL_AGE_CRON_STATUS=kept
+    else
+      _RECALL_AGE_CRON_ACTION="not scheduled"
+      _RECALL_AGE_CRON_STATUS=unsupported
+    fi
+    _RECALL_AGE_CRON_REASON="recall does not resolve to a durable install"
+    return 0
+  fi
+  if ! _recall_age_select_db "$script"; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="$_RECALL_AGE_DB_ERROR"
+    _RECALL_AGE_CRON_STATUS=invalid-path
+    return 0
+  fi
+  if ! bun_path="$(_recall_age_bun_path)"; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="Bun could not be resolved from PATH"
+    _RECALL_AGE_CRON_STATUS=invalid-path
+    return 0
+  fi
+  if ! _RECALL_AGE_CRON_SCRIPT="$(_recall_age_script_body "$_RECALL_AGE_DB" "$bun_path" "$runner" "$RECALL_DIR/logs/age.log")"; then
+    _RECALL_AGE_CRON_ACTION="not scheduled"
+    _RECALL_AGE_CRON_REASON="a path contains a newline or NUL"
+    _RECALL_AGE_CRON_STATUS=invalid-path
+    return 0
+  fi
+  _RECALL_AGE_CRON_LINE="$(_recall_age_cron_line_text)"
+  if [[ "$_RECALL_AGE_CRON_PRESENT" == true ]]; then
+    _RECALL_AGE_CRON_ACTION=refresh
+  else
+    _RECALL_AGE_CRON_ACTION=add
+  fi
+  _RECALL_AGE_CRON_STATUS=ok
+}
+
+_recall_age_cron_render() {
+  local new_line="$1" remove_only="$2"
+  local existing="$_RECALL_AGE_CRON_EXISTING" line="" out="" replaced=false
+  if [[ -n "$existing" ]]; then
+    existing="${existing%$'\n'}"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
+        if [[ "$remove_only" == true ]]; then
+          continue
+        fi
+        if [[ "$replaced" == false ]]; then
+          line="$new_line"
+          replaced=true
+        else
+          continue
+        fi
+      fi
+      out+="${line}"$'\n'
+    done <<< "$existing"
+  fi
+  if [[ "$remove_only" != true && "$replaced" == false ]]; then
+    out+="${new_line}"$'\n'
+  fi
+  printf '%s' "$out"
+}
+
+_recall_age_crontab_write() {
+  local body="$1" cron_bin="$_RECALL_AGE_CRON_BIN"
+  if [[ -n "$body" ]]; then
+    printf '%s\n' "$body" | "$cron_bin" -
+  else
+    printf '' | "$cron_bin" -
+  fi
+}
+
+_recall_age_script_install() {
+  local content="$1" dest="$RECALL_DIR/shared/age-quarterly.sh" tmp=""
+  mkdir -p "$RECALL_DIR/shared" "$RECALL_DIR/logs" || return 1
+  tmp="$(mktemp "$RECALL_DIR/shared/.age-quarterly.XXXXXX")" || return 1
+  if ! printf '%s\n' "$content" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! chmod 0700 "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$dest"; then
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+_recall_age_cron_commit() {
+  local updated=""
+  updated="$(_recall_age_cron_render "$_RECALL_AGE_CRON_LINE" false)"
+  if ! _recall_age_crontab_write "$updated"; then
+    log_warn "Could not update crontab; left the quarterly recall age schedule unchanged"
+    _RECALL_AGE_CRON_STATUS=write-error
+    return 0
+  fi
+  if ! _recall_age_script_install "$_RECALL_AGE_CRON_SCRIPT"; then
+    if _recall_age_crontab_write "$_RECALL_AGE_CRON_EXISTING"; then
+      log_warn "Could not write the quarterly aging wrapper; left the schedule unchanged"
+      _RECALL_AGE_CRON_STATUS=write-error
+    else
+      log_warn "Could not write the quarterly aging wrapper and could not restore the previous crontab"
+      _RECALL_AGE_CRON_STATUS=rollback-error
+    fi
+    return 0
+  fi
+  log_success "Scheduled quarterly recall age"
+  _RECALL_AGE_CRON_STATUS=ok
+}
+
+_recall_age_cron_remove_files() {
+  local script="$RECALL_DIR/shared/age-quarterly.sh" updated=""
+  if [[ "$_RECALL_AGE_CRON_PRESENT" == true ]]; then
+    updated="$(_recall_age_cron_render "" true)"
+    if ! _recall_age_crontab_write "$updated"; then
+      log_warn "Could not update crontab; left the quarterly recall age schedule unchanged"
+      _RECALL_AGE_CRON_STATUS=write-error
+      return 0
+    fi
+  fi
+  if [[ -e "$script" || -L "$script" ]]; then
+    if ! rm -f "$script"; then
+      log_warn "Quarterly aging is disabled, but the wrapper could not be removed; left it in place"
+      _RECALL_AGE_CRON_STATUS=wrapper-remove-error
+      return 0
+    fi
+  fi
+  log_success "Removed quarterly recall age cron and wrapper script"
+  _RECALL_AGE_CRON_STATUS=removed
+}
+
+_recall_age_cron_apply() {
+  local mode="$1"
+  _recall_age_cron_decide "$mode"
+  case "$_RECALL_AGE_CRON_STATUS" in
+    sandbox)
+      echo "Skipping quarterly age cron: HOME is not the account home (set RECALL_CRONTAB_BIN to schedule anyway)"
+      return 0
+      ;;
+    missing)
+      log_warn "crontab not found; left the quarterly recall age schedule unchanged"
+      return 0
+      ;;
+    read-error)
+      log_warn "Could not read crontab; left the quarterly recall age schedule unchanged"
+      return 0
+      ;;
+    kept)
+      log_warn "Kept the existing quarterly aging schedule: recall does not resolve to a durable source checkout or Bun-global install"
+      return 0
+      ;;
+    unsupported)
+      log_warn "Quarterly aging was NOT scheduled: recall does not resolve to a durable source checkout or Bun-global install"
+      return 0
+      ;;
+    invalid-path)
+      log_warn "Quarterly aging was NOT scheduled: ${_RECALL_AGE_CRON_REASON}"
+      return 0
+      ;;
+    absent)
+      return 0
+      ;;
+  esac
+
+  if [[ "${DRY_RUN:-}" == "true" ]]; then
+    echo "  [dry-run] ${mode} quarterly age cron: ${_RECALL_AGE_CRON_LINE}"
+    _RECALL_AGE_CRON_STATUS=dry-run
+    return 0
+  fi
+  if [[ "$_RECALL_AGE_CRON_ACTION" == remove ]]; then
+    _recall_age_cron_remove_files
+    return 0
+  fi
+  _recall_age_cron_commit
+}
+
+recall_install_age_cron() {
+  _recall_age_cron_apply install
+}
+
+recall_refresh_age_cron() {
+  _recall_age_cron_apply refresh
+}
+
+recall_remove_age_cron() {
+  _recall_age_cron_apply remove
+}
+
+recall_print_age_cron_plan() {
+  local mode="$1" build_planned=false
+  if [[ "$mode" == refresh || ( "$mode" == install && "${RECALL_PACKAGED:-}" != 1 ) ]]; then
+    build_planned=true
+  fi
+  _recall_age_cron_decide "$mode" "$build_planned"
+  echo "Quarterly aging cron: ${_RECALL_AGE_CRON_ACTION}"
+  if [[ -n "${_RECALL_AGE_CRON_REASON:-}" ]]; then
+    echo "  Reason: ${_RECALL_AGE_CRON_REASON}"
+  fi
+  if [[ "$_RECALL_AGE_CRON_ACTION" == add || "$_RECALL_AGE_CRON_ACTION" == refresh ]]; then
+    echo "  Database: ${_RECALL_AGE_DB}"
+  fi
+  echo "  Schedule: $RECALL_AGE_CRON_SCHEDULE | Command: recall age --execute"
+}
+
+recall_print_age_cron_notice() {
+  local status="${_RECALL_AGE_CRON_STATUS:-}" reason="${_RECALL_AGE_CRON_REASON:-}"
+  if [[ "$status" == removed ]]; then
+    echo "Quarterly aging: disabled; removed the existing managed schedule and wrapper script."
+  elif [[ "$status" == absent ]]; then
+    echo "Quarterly aging: disabled; no managed schedule was present."
+  elif [[ "$status" == kept ]]; then
+    echo "Quarterly aging: Existing quarterly schedule kept unchanged because the current recall runner is not durable."
+  elif [[ "$status" == unsupported ]]; then
+    echo "Quarterly aging: NOT scheduled because recall does not resolve to a durable install."
+    echo "After making recall durable, schedule it with: recall install"
+  elif [[ "$status" == missing ]]; then
+    echo "Quarterly aging: Schedule unchanged because crontab is not on PATH."
+  elif [[ "$status" == sandbox ]]; then
+    echo "Quarterly aging: Schedule unchanged because HOME is not the account home."
+  elif [[ "$status" == read-error ]]; then
+    echo "Quarterly aging: Schedule unchanged because crontab could not be read."
+  elif [[ "$status" == write-error ]]; then
+    echo "Quarterly aging: Schedule unchanged because the quarterly aging update failed."
+  elif [[ "$status" == rollback-error ]]; then
+    echo "Quarterly aging: Crontab changed and could not be restored after the aging wrapper failed. Review it with: crontab -e"
+  elif [[ "$status" == wrapper-remove-error ]]; then
+    echo "Quarterly aging: disabled; no managed schedule remains, but the wrapper could not be removed."
+  elif [[ "$status" == invalid-path ]]; then
+    echo "Quarterly aging: NOT scheduled or changed because ${reason}."
+    if [[ "$reason" == "the install path cannot be written to crontab" ]]; then
+      echo "Schedule it manually with: crontab -e"
+    fi
+  elif [[ "$status" == dry-run ]]; then
+    echo "Quarterly aging: dry run only; the existing schedule was not changed."
+  else
+    echo "Quarterly aging: scheduled."
+  fi
+  echo "Details: https://github.com/edheltzel/Recall/blob/main/docs/installation.md#quarterly-aging-cron"
 }

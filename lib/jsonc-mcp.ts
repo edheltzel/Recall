@@ -220,6 +220,15 @@ export function configuredMcpDbPath(env: unknown): string | undefined {
   return typeof legacy === 'string' && legacy.length > 0 ? legacy : undefined;
 }
 
+/** The Claude config's recall-memory entry, or null when the file has none. */
+export function readClaudeRecallOwner(file: string): { file: string; config: JsonObject; entry: unknown } | null {
+  if (!existsSync(file) || !readFileSync(file, 'utf8').includes('recall-memory')) return null;
+  const config = readJsoncObject(file);
+  validateClaudeConfigShape(config);
+  const entry = (config.mcpServers as JsonObject | undefined)?.['recall-memory'];
+  return entry ? { file, config, entry } : null;
+}
+
 export type McpDbPathSelection =
   | { status: 'selected'; path: string }
   | { status: 'conflict'; paths: string[] };
