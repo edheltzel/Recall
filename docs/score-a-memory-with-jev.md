@@ -5,7 +5,7 @@
 In this tutorial, we'll turn Jev on for structured extraction and prove it with one score. By the end, `recall jev` prints a keep, demote, or drop decision, and the key is in `~/.env` so hooks can read it without a sourced export.
 
 > [!NOTE]
-> This tutorial takes about 10 minutes. You need a TypeSafe API key and a terminal you can use to start Claude Code.
+> This tutorial takes about 10 minutes. You need a TypeSafe API key and a terminal.
 
 ## What you'll build
 
@@ -18,7 +18,6 @@ A `JEV_RECALL_KEY` in `~/.env`, and one score from `recall jev`.
 ## Prerequisites
 
 - Recall is installed and `recall` is on `PATH`.
-- Claude Code is installed.
 - You have a TypeSafe API key. Do not paste it into the Recall repo, a commit, or a chat.
 
 ## Step 1: Confirm the CLI

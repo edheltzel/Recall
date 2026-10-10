@@ -1,9 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   dualWriteToSqlite,
   parseDecisionItems,
@@ -58,15 +55,12 @@ const UNSCORED_SUMMARY = 'session summary stays unscored';
 
 let dbPath: string;
 let savedKey: string | undefined;
-let savedHome: string | undefined;
-let jevHome: string;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 let jevCalls: string[];
 
 beforeEach(() => {
-  savedHome = process.env.HOME;
-  jevHome = mkdtempSync(join(tmpdir(), 'recall-no-jev-env-'));
-  process.env.HOME = jevHome;
+  restoreHome = isolateTestHome();
   dbPath = setupTestDb();
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
@@ -82,9 +76,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
-  if (savedHome === undefined) delete process.env.HOME;
-  else process.env.HOME = savedHome;
-  rmSync(jevHome, { recursive: true, force: true });
+  restoreHome();
   teardownTestDb();
 });
 
