@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { generateClaudePluginSkills, repoRoot } from '../../scripts/build-claude-plugin';
@@ -90,5 +90,24 @@ describe('Claude native plugin package', () => {
 
     writeFileSync(join(claudeDir, 'plugins', 'installed_plugins.json'), '{"plugins":{},"plugins":{}}');
     expect(claudePluginState(tempDir)).toEqual({ status: 'unknown', version: null });
+  });
+
+  test('unreadable plugins directory is unknown; a missing file stays absent', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'recall-claude-eacces-'));
+    const pluginsDir = join(tempDir, '.claude', 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+
+    expect(claudePluginState(tempDir)).toEqual({ status: 'absent', version: null });
+
+    writeFileSync(
+      join(pluginsDir, 'installed_plugins.json'),
+      JSON.stringify({ plugins: { [CLAUDE_PLUGIN_ID]: [{ version: '1.0.0' }] } }),
+    );
+    chmodSync(pluginsDir, 0);
+    try {
+      expect(claudePluginState(tempDir)).toEqual({ status: 'unknown', version: null });
+    } finally {
+      chmodSync(pluginsDir, 0o755);
+    }
   });
 });

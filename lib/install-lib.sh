@@ -1458,24 +1458,23 @@ recall_claude_plugin_active() {
   command -v bun &>/dev/null || return 1
   INSTALLED_FILE="$installed" SETTINGS_FILE="$CLAUDE_DIR/settings.json" JSONC_LIB="$_RECALL_JSONC_LIB" \
     PLUGIN_ID="$RECALL_CLAUDE_PLUGIN_ID" bun -e '
-    const { existsSync } = require("fs");
+    const { statSync } = require("fs");
     const { classifyClaudePluginState, readJsoncObject } = await import(process.env.JSONC_LIB);
-    let installed;
-    try {
-      installed = existsSync(process.env.INSTALLED_FILE)
-        ? readJsoncObject(process.env.INSTALLED_FILE)
-        : undefined;
-    } catch {
-      installed = null;
-    }
-    let settings;
-    try {
-      settings = existsSync(process.env.SETTINGS_FILE)
-        ? readJsoncObject(process.env.SETTINGS_FILE)
-        : undefined;
-    } catch {
-      settings = null;
-    }
+    const readState = (file) => {
+      try {
+        statSync(file);
+      } catch (error) {
+        if (error?.code === "ENOENT") return undefined;
+        return null;
+      }
+      try {
+        return readJsoncObject(file);
+      } catch {
+        return null;
+      }
+    };
+    const installed = readState(process.env.INSTALLED_FILE);
+    const settings = installed === undefined ? undefined : readState(process.env.SETTINGS_FILE);
     const state = classifyClaudePluginState(installed, settings, process.env.PLUGIN_ID);
     process.exit(state.status === "active" ? 0 : state.status === "unknown" ? 2 : 1);
   ' 2>/dev/null

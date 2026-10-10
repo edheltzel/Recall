@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -146,6 +147,39 @@ describe('Agent Skills install (lib/install-lib.sh)', () => {
     const result = runDriver(['if recall_claude_plugin_active; then echo active; else echo inactive; fi']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('inactive');
+  });
+
+  test('unreadable plugins directory is unknown and does not link skills', () => {
+    const pluginsDir = join(claudeDir, 'plugins');
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      plugins: { 'recall@recall-marketplace': [{ version: '1.0.0' }] },
+    }));
+    chmodSync(pluginsDir, 0);
+    try {
+      const result = runDriver([
+        'status=0',
+        'recall_claude_plugin_active || status=$?',
+        'printf "plugin_status=%s\\n" "$status"',
+        'recall_install_claude_skills || printf "install_status=%s\\n" "$?"',
+      ]);
+      expect(result.stdout).toContain('plugin_status=2');
+      expect(result.stdout).toContain('install_status=2');
+      expect(existsSync(join(claudeDir, 'skills', 'do-recall-doctor', 'SKILL.md'))).toBe(false);
+    } finally {
+      chmodSync(pluginsDir, 0o755);
+    }
+  });
+
+  test('missing installed_plugins.json stays inactive, not unknown', () => {
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    const result = runDriver([
+      'status=0',
+      'recall_claude_plugin_active || status=$?',
+      'printf "plugin_status=%s\\n" "$status"',
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('plugin_status=1');
   });
 
   test('semantically invalid plugin state stops skill ownership changes', () => {
