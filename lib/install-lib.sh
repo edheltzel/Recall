@@ -3129,73 +3129,30 @@ _recall_age_cron_runner() {
   return 1
 }
 
-_recall_cron_escape_percent() {
-  local value="$1" escaped="" char="" i=0 backslashes=0
-  while [[ $i -lt ${#value} ]]; do
-    char="${value:$i:1}"
-    if [[ "$char" == "%" ]] && (( backslashes % 2 == 0 )); then
-      escaped="${escaped}\\"
-    fi
-    escaped="${escaped}${char}"
-    if [[ "$char" == "\\" ]]; then
-      backslashes=$((backslashes + 1))
-    else
-      backslashes=0
-    fi
-    i=$((i + 1))
-  done
-  printf '%s' "$escaped"
-}
-
 _recall_cron_quote() {
-  local value="$1" quoted="'" char="" i=0
-  [[ "$value" =~ [[:cntrl:]] ]] && return 1
-  while [[ $i -lt ${#value} ]]; do
-    char="${value:$i:1}"
-    case "$char" in
-      "'") quoted="${quoted}'\\''" ;;
-      "%") quoted="${quoted}\\%" ;;
-      *) quoted="${quoted}${char}" ;;
-    esac
-    i=$((i + 1))
-  done
-  printf "%s'" "$quoted"
+  local value="$1"
+  if [[ "$value" == *"%"* || "$value" == *"\\"* || "$value" == *"'"* || "$value" =~ [[:cntrl:]] ]]; then
+    return 1
+  fi
+  printf "'%s'" "$value"
 }
 
 _recall_age_cron_db_word() {
-  local line="$1" rest word="" char="" i=0 escaped=false single_quoted=false
-  rest="${line#* RECALL_DB_PATH=}"
-  [[ "$rest" != "$line" ]] || return 1
+  local line="$1" marker=" RECALL_DB_PATH='" rest path="" char="" i=0
+  [[ "$line" == *" RECALL_DB_PATH="* ]] || return 1
+  [[ "$line" == *"$marker"* ]] || return 2
+  rest="${line#*"$marker"}"
   while [[ $i -lt ${#rest} ]]; do
     char="${rest:$i:1}"
-    if [[ "$single_quoted" == "true" ]]; then
-      word="${word}${char}"
-      [[ "$char" == "'" ]] && single_quoted=false
-    elif [[ "$escaped" == "true" ]]; then
-      word="${word}${char}"
-      escaped=false
-    elif [[ "$char" == "\\" ]]; then
-      word="${word}${char}"
-      escaped=true
-    elif [[ "$char" == "'" ]]; then
-      word="${word}${char}"
-      single_quoted=true
-    elif [[ "$char" == " " || "$char" == $'\t' ]]; then
-      break
-    else
-      word="${word}${char}"
+    if [[ "$char" == "'" ]]; then
+      [[ "${rest:$((i + 1)):1}" == " " ]] || return 2
+      _recall_cron_quote "$path"
+      return
     fi
+    path="${path}${char}"
     i=$((i + 1))
   done
-  [[ -n "$word" ]] || return 1
-  if [[ "$escaped" == "true" || "$single_quoted" == "true" || "$word" == "\$'"* || "$word" =~ [[:cntrl:]] ]]; then
-    return 2
-  fi
-  if [[ "$word" == "'"* ]]; then
-    printf '%s' "$word"
-  else
-    _recall_cron_escape_percent "$word"
-  fi
+  return 2
 }
 
 _recall_age_cron_line() {
@@ -3311,13 +3268,13 @@ _recall_age_cron_apply() {
     if [[ "$has" == "true" ]] && [[ -z "${RECALL_DB_PATH:-}" ]] && [[ -z "${MEM_DB_PATH:-}" ]]; then
       db_word="$(_recall_age_cron_db_word "$managed_line")" || db_word_status=$?
       if [[ $db_word_status -eq 2 ]]; then
-        log_warn "Quarterly aging schedule unchanged: the stored database path is not safe for cron's POSIX shell"
+        log_warn "Quarterly aging schedule unchanged: the stored database path cannot be safely written to crontab"
         _RECALL_AGE_CRON_STATUS=invalid-path
         return 0
       fi
     fi
     if ! _RECALL_AGE_CRON_LINE="$(_recall_age_cron_line "$recall_bin" "$db_word")"; then
-      log_warn "Quarterly aging was not scheduled: cron paths cannot contain control characters"
+      log_warn "Quarterly aging was NOT scheduled: a path cannot be safely written to crontab"
       _RECALL_AGE_CRON_STATUS=invalid-path
       return 0
     fi
@@ -3391,7 +3348,8 @@ recall_print_age_cron_notice() {
   elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "write-error" ]]; then
     echo "Quarterly aging: Schedule unchanged because crontab rejected the update."
   elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "invalid-path" ]]; then
-    echo "Quarterly aging: Schedule unchanged because a cron path is not portable."
+    echo "Quarterly aging: NOT scheduled or changed because a path cannot be safely written to crontab."
+    echo "Schedule it manually with: crontab -e"
   elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "dry-run" ]]; then
     echo "Quarterly aging: dry run only; the existing schedule was not changed."
   else
