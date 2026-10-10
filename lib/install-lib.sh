@@ -1084,7 +1084,7 @@ recall_create_install_root() {
 #   3. $RECALL_DIR/recall.db (default)
 # Expands the current user's leading tilde without evaluating path contents.
 recall_resolve_db_path() {
-  local raw
+  local destination="${1:-}" raw resolved
   if [[ -n "${RECALL_DB_PATH:-}" ]]; then
     raw="$RECALL_DB_PATH"
   elif [[ -n "${MEM_DB_PATH:-}" ]]; then
@@ -1093,11 +1093,16 @@ recall_resolve_db_path() {
     raw="$RECALL_DIR/recall.db"
   fi
   if [[ "$raw" == "~" ]]; then
-    printf '%s\n' "$HOME"
+    resolved="$HOME"
   elif [[ "$raw" == "~/"* ]]; then
-    printf '%s/%s\n' "$HOME" "${raw:2}"
+    resolved="$HOME/${raw:2}"
   else
-    printf '%s\n' "$raw"
+    resolved="$raw"
+  fi
+  if [[ -n "$destination" ]]; then
+    printf -v "$destination" '%s' "$resolved"
+  else
+    printf '%s\n' "$resolved"
   fi
 }
 
@@ -3162,7 +3167,9 @@ _recall_age_cron_line() {
   [[ -z "$bun_path" ]] && bun_path="$HOME/.bun/bin/bun"
   bun_path="$(_recall_abs_path "$bun_path")"
   if [[ -z "$db_word" ]]; then
-    db_path="$(_recall_abs_path "$(recall_resolve_db_path)")"
+    recall_resolve_db_path db_path
+    _recall_cron_quote "$db_path" >/dev/null || return 1
+    db_path="$(_recall_abs_path "$db_path")"
     db_word="$(_recall_cron_quote "$db_path")" || return 1
   fi
   bun_word="$(_recall_cron_quote "$bun_path")" || return 1

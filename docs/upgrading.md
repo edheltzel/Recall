@@ -68,8 +68,7 @@ Run `recall install` once after that first `recall update`. Later updates reload
 3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
    dirty tree; resolve manually and re-run).
 4. `bun install && bun run build`.
-5. Re-links the global binaries, then refreshes the managed quarterly aging
-   cron according to [Quarterly aging](installation.md#quarterly-aging-cron).
+5. Re-links the global binaries.
 6. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
 7. Copies refreshed hooks, shared lib files, agent skills, and
@@ -91,6 +90,8 @@ Run `recall install` once after that first `recall update`. Later updates reload
    prevents the pre-0.7.1 bug class where a partial install could
    leave hooks missing.
 9. Verifies via `recall --version` and `recall stats`.
+10. After verification succeeds, refreshes the managed quarterly aging cron
+    according to [Quarterly aging](installation.md#quarterly-aging-cron).
 
 The OpenCode integration now follows the current OpenCode 1.18.x contract:
 restart OpenCode after an update so its plugin reloads, then verify

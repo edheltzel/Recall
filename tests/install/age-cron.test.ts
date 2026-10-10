@@ -330,14 +330,22 @@ describe('quarterly age cron', () => {
       installDurableRunner(home);
       cronStub(bin, cronFile);
 
-      for (const unsafe of ['%', '\\', "'", '\t', '\n']) {
+      const unsafePaths = [
+        join(root, 'bad%path', 'recall.db'),
+        join(root, 'bad\\path', 'recall.db'),
+        join(root, "bad'path", 'recall.db'),
+        join(root, 'bad\tpath', 'recall.db'),
+        join(root, 'bad\npath', 'recall.db'),
+        `${join(root, 'trailing-newline', 'recall.db')}\n`,
+      ];
+      for (const unsafePath of unsafePaths) {
         writeFileSync(cronFile, original);
         const result = runLib(
           home,
           join(home, '.agents', 'Recall'),
           bin,
           'recall_install_age_cron\nrecall_print_age_cron_notice',
-          { RECALL_DB_PATH: join(root, `bad${unsafe}path`, 'recall.db') },
+          { RECALL_DB_PATH: unsafePath },
         );
         expect(result.status).toBe(0);
         expect(readFileSync(cronFile, 'utf-8')).toBe(original);

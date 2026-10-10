@@ -43,6 +43,25 @@ function stubCommandOnPath(binDir: string, command: string): string {
   return binDir;
 }
 
+function crontabStub(bin: string, file: string, writeStatus = 0): void {
+  writeFileSync(
+    bin,
+    `#!/bin/sh
+file=${JSON.stringify(file)}
+if [ "\${1:-}" = "-l" ]; then
+  cat "$file"
+  exit 0
+fi
+if [ ${writeStatus} -ne 0 ]; then
+  cat >/dev/null
+  exit ${writeStatus}
+fi
+cat > "$file"
+`,
+    { mode: 0o755 },
+  );
+}
+
 interface RunResult {
   stdout: string;
   stderr: string;
@@ -528,18 +547,7 @@ This content must be preserved across an uninstall.
     const cronBin = join(tempRoot, 'crontab');
     const original = '15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * /bin/true # recall-memory: quarterly age\n';
     writeFileSync(cronFile, original);
-    writeFileSync(
-      cronBin,
-      `#!/bin/sh
-if [ "\${1:-}" = "-l" ]; then
-  cat ${JSON.stringify(cronFile)}
-  exit 0
-fi
-cat >/dev/null
-exit 2
-`,
-      { mode: 0o755 },
-    );
+    crontabStub(cronBin, cronFile, 2);
 
     const result = runUninstall(
       claudeDir,
@@ -553,6 +561,27 @@ exit 2
     expect(existsSync(join(claudeDir, 'hooks', 'RecallExtract.ts'))).toBe(false);
     expect(result.stdout).toContain('Uninstall Incomplete');
     expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+
+  test('summary discloses a managed quarterly crontab line before removal', () => {
+    const cronFile = join(tempRoot, 'cron');
+    const cronBin = join(tempRoot, 'crontab');
+    writeFileSync(
+      cronFile,
+      '15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * /bin/true # recall-memory: quarterly age\n',
+    );
+    crontabStub(cronBin, cronFile);
+
+    const result = runUninstall(
+      claudeDir,
+      backupBase,
+      [],
+      { RECALL_CRONTAB_BIN: cronBin },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Managed quarterly aging crontab line (# recall-memory: quarterly age)');
+    expect(readFileSync(cronFile, 'utf-8')).toBe('15 2 * * * /usr/bin/true # user\n');
   });
 
   test('invalid nested Claude settings remain unchanged and make uninstall incomplete', () => {

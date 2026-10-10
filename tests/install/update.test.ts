@@ -105,6 +105,35 @@ describe('update.sh', () => {
     expect(r.status).toBe(0);
   });
 
+  test('failed verification does not refresh the quarterly cron', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-cron-order-'));
+    try {
+      const refreshed = join(tempRoot, 'refreshed');
+      const harness = `
+        set -e
+        source ${JSON.stringify(UPDATE)}
+        step_install_and_build() { :; }
+        step_link_global() { :; }
+        step_migrate() { :; }
+        step_refresh_runtime() { :; }
+        step_reregister_hooks() { :; }
+        step_verify() { return 1; }
+        step_refresh_age_cron() { : > ${JSON.stringify(refreshed)}; }
+        step_report() { :; }
+        run_post_pull_steps
+      `;
+      const result = spawnSync('bash', ['-c', harness], {
+        encoding: 'utf-8',
+        cwd: REPO,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(existsSync(refreshed)).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('legacy CLI bin cleanup removes only Recall-managed symlinks', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-bin-cleanup-'));
     try {

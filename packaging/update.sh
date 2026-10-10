@@ -488,11 +488,11 @@ step_report() {
 run_post_pull_steps() {
   step_install_and_build
   step_link_global
-  step_refresh_age_cron
   step_migrate
   step_refresh_runtime
   step_reregister_hooks
   step_verify
+  step_refresh_age_cron
   step_report
 }
 
