@@ -40,6 +40,15 @@ function installDurableRunner(home: string): void {
   symlinkSync(runner, join(bunBin, 'recall'));
 }
 
+function hasUnescapedPercent(value: string): boolean {
+  let backslashes = 0;
+  for (const char of value) {
+    if (char === '%' && backslashes % 2 === 0) return true;
+    backslashes = char === '\\' ? backslashes + 1 : 0;
+  }
+  return false;
+}
+
 function runLib(
   home: string,
   recallDir: string,
@@ -61,7 +70,6 @@ function runLib(
         RECALL_CRONTAB_BIN: join(pathDir, 'crontab'),
         NO_COLOR: '1',
         DRY_RUN: '',
-        SKIP_AGE_CRON: '',
         RECALL_DB_PATH: '',
         MEM_DB_PATH: '',
         ...extraEnv,
@@ -102,26 +110,14 @@ describe('quarterly age cron', () => {
     }
   });
 
-  test('skip flag adds nothing', () => {
+  test('install flag skips scheduling', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-age-skip-'));
     try {
       const home = join(root, 'home');
-      const bin = join(root, 'bin');
       const cronFile = join(root, 'cron');
       mkdirSync(home, { recursive: true });
-      installDurableRunner(home);
       writeFileSync(cronFile, '15 2 * * * /usr/bin/true # user\n');
-      cronStub(bin, cronFile);
       const before = readFileSync(cronFile, 'utf-8');
-      const r = runLib(
-        home,
-        join(home, '.agents', 'Recall'),
-        bin,
-        'SKIP_AGE_CRON=true recall_install_age_cron',
-      );
-      expect(r.status).toBe(0);
-      expect(readFileSync(cronFile, 'utf-8')).toBe(before);
-
       const trap = join(root, 'trap.sh');
       writeFileSync(
         trap,
@@ -130,7 +126,7 @@ describe('quarterly age cron', () => {
       const flagged = spawnSync('bash', [INSTALL, '--skip-age-cron', '--yes'], {
         encoding: 'utf-8',
         cwd: REPO,
-        env: { ...process.env, BASH_ENV: trap, NO_COLOR: '1', HOME: home },
+        env: { ...process.env, BASH_ENV: trap, NO_COLOR: '1', HOME: home, RECALL_CRONTAB_BIN: '' },
       });
       expect(flagged.status).toBe(0);
       expect(flagged.stdout).toContain('SKIP=true');
@@ -281,6 +277,60 @@ describe('quarterly age cron', () => {
     }
   }
 
+  test('refresh keeps the stored database when no override is supplied', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-db-refresh-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      const customDb = join(root, 'custom data', 'recall.db');
+      const recallDir = join(home, '.agents', 'Recall');
+      mkdirSync(home, { recursive: true });
+      installDurableRunner(home);
+      cronStub(bin, cronFile);
+
+      const installed = runLib(home, recallDir, bin, 'recall_install_age_cron', {
+        RECALL_DB_PATH: customDb,
+      });
+      expect(installed.status).toBe(0);
+
+      const moved = join(home, 'moved-recall');
+      const refreshed = runLib(home, moved, bin, 'recall_refresh_age_cron');
+      expect(refreshed.status).toBe(0);
+
+      const line = readFileSync(cronFile, 'utf-8');
+      expect(line).toContain(`RECALL_DB_PATH=${customDb.replaceAll(' ', '\\ ')}`);
+      expect(line).toContain(`${moved}/logs/age.log`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('cron escapes percent signs in every generated path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-percent-'));
+    try {
+      const home = join(root, 'home 100%');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      const recallDir = join(home, '.agents', 'Recall 100%');
+      const customDb = join(root, 'custom 100%', 'recall.db');
+      mkdirSync(home, { recursive: true });
+      installDurableRunner(home);
+      cronStub(bin, cronFile);
+
+      const result = runLib(home, recallDir, bin, 'recall_install_age_cron', {
+        RECALL_DB_PATH: customDb,
+      });
+
+      expect(result.status).toBe(0);
+      const line = readFileSync(cronFile, 'utf-8');
+      expect(line).toContain('\\%');
+      expect(hasUnescapedPercent(line)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('source checkout runner is scheduled', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-age-source-'));
     try {
@@ -336,6 +386,36 @@ describe('quarterly age cron', () => {
       expect(readFileSync(cronFile, 'utf-8')).not.toContain(MARKER);
       expect(result.stdout).toContain('NOT scheduled');
       expect(result.stdout).toContain('recall install');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('ephemeral runner keeps and accurately reports an existing schedule', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-ephemeral-existing-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      mkdirSync(home, { recursive: true });
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(bin, 'recall'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(join(bin, 'bun'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const original = `15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * RECALL_DB_PATH=/stored/recall.db /old/bun /old/recall age --execute >> /old/age.log 2>&1 ${MARKER}\n`;
+      writeFileSync(cronFile, original);
+      cronStub(bin, cronFile);
+
+      const result = runLib(
+        home,
+        join(home, '.agents', 'Recall'),
+        bin,
+        'recall_install_age_cron\nrecall_print_age_cron_notice\nrecall_refresh_age_cron\nrecall_print_age_cron_notice',
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+      expect(result.stdout.match(/Existing quarterly schedule kept unchanged/g)).toHaveLength(2);
+      expect(result.stdout).not.toContain('NOT scheduled');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

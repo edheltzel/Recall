@@ -73,6 +73,7 @@ function runUninstall(
         // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
         // the developer's live `recall` link.
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
         ...extraEnv,
       },
     },
@@ -101,6 +102,7 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         HOME: claudeDir,
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -148,6 +150,7 @@ function runUninstallIncludingPi(
         HOME: claudeDir,
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -179,6 +182,7 @@ function runUninstallIncludingOpenCode(
         HOME: claudeDir,
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -214,6 +218,7 @@ function runUninstallAll(
         HOME: claudeDir,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
         RECALL_TEST_UNLINK: unlinkMarker,
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );

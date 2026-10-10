@@ -372,6 +372,7 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
           RECALL_DIR: recallDir,
           RECALL_SKIP_BUN_UNLINK: 'true',
           PATH: `${stubBin}:${process.env.PATH ?? ''}`,
+          RECALL_CRONTAB_BIN: '',
           ...extraEnv,
         },
       },
@@ -462,6 +463,7 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
           OMP_CONFIG_DIR: join(tempRoot, '.omp', 'agent'),
           RECALL_SKIP_BUN_UNLINK: 'true',
           PATH: `${join(tempRoot, 'stub-bin')}:${process.env.PATH ?? ''}`,
+          RECALL_CRONTAB_BIN: '',
         },
       },
     );
