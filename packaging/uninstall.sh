@@ -17,6 +17,7 @@
 #   ./packaging/uninstall.sh --skip-grok      # leave Grok lifecycle capture alone
 #   ./packaging/uninstall.sh --skip-omp       # leave installer-owned omp skills alone
 #   ./packaging/uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
+#   Also removes the managed quarterly age cron line (# recall-memory: quarterly age).
 #   ./packaging/uninstall.sh --help           # show this help
 #
 # Environment:
@@ -52,7 +53,7 @@ while [[ $# -gt 0 ]]; do
   --skip-omp) SKIP_OMP=true ;;
   --no-gum) export RECALL_NO_GUM=1 ;;
   --help | -h)
-    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   *)
@@ -723,6 +724,9 @@ main() {
   confirm_or_exit
   confirm_purge_or_exit
 
+  echo ""
+  log_info "Removing quarterly age cron..."
+  recall_remove_age_cron
   echo ""
   log_info "Removing slash commands..."
   remove_slash_commands

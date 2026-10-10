@@ -3064,3 +3064,168 @@ recall_provision_embedding_model() {
   fi
   return 0
 }
+
+# Quarterly `recall age --execute`. One managed crontab line, marked so
+# re-install replaces it and uninstall removes only that line.
+RECALL_AGE_CRON_MARKER='# recall-memory: quarterly age'
+RECALL_AGE_CRON_SCHEDULE='0 3 1 1,4,7,10 *'
+
+_recall_abs_path() {
+  local p="$1"
+  if [[ "$p" == /* ]]; then
+    printf '%s' "$p"
+    return
+  fi
+  if [[ -e "$p" ]]; then
+    printf '%s/%s' "$(cd "$(dirname "$p")" && pwd)" "$(basename "$p")"
+    return
+  fi
+  printf '%s' "$p"
+}
+
+# Same resolution install.sh uses after linking, then forced absolute so cron's
+# empty PATH can still run it.
+_recall_age_cron_line() {
+  local bun_path recall_bin
+  bun_path="$(command -v bun 2>/dev/null || true)"
+  [[ -z "$bun_path" ]] && bun_path="$HOME/.bun/bin/bun"
+  bun_path="$(_recall_abs_path "$bun_path")"
+  recall_bin="$HOME/.bun/bin/recall"
+  if [[ ! -x "$recall_bin" ]]; then
+    recall_bin="$(command -v recall 2>/dev/null || true)"
+  fi
+  [[ -z "$recall_bin" ]] && recall_bin="$HOME/.bun/bin/recall"
+  recall_bin="$(_recall_abs_path "$recall_bin")"
+  printf '%s %q %q age --execute >> %q 2>&1 %s' \
+    "$RECALL_AGE_CRON_SCHEDULE" \
+    "$bun_path" \
+    "$recall_bin" \
+    "$RECALL_DIR/logs/age.log" \
+    "$RECALL_AGE_CRON_MARKER"
+}
+
+# Account home, independent of $HOME. Tilde-user expansion does not follow HOME.
+_recall_account_home() {
+  local user home
+  user="$(id -un)"
+  home="$(eval echo "~${user}")"
+  if [[ -d "$home" ]]; then
+    (cd "$home" && pwd -P)
+  else
+    printf '%s' "$home"
+  fi
+}
+
+# A test or e2e run that points HOME at a temp dir must not touch the real
+# per-user crontab. Opt in with RECALL_CRONTAB_BIN (absolute stub or name).
+_recall_age_cron_blocked() {
+  [[ -n "${RECALL_CRONTAB_BIN:-}" ]] && return 1
+  local real="${HOME%/}"
+  [[ -d "$real" ]] && real="$(cd "$real" && pwd -P)"
+  [[ "$real" != "$(_recall_account_home)" ]]
+}
+
+_recall_crontab_bin() {
+  local bin="${RECALL_CRONTAB_BIN:-crontab}"
+  if [[ "$bin" == /* ]]; then
+    if [[ -x "$bin" ]]; then
+      printf '%s' "$bin"
+    fi
+    return 0
+  fi
+  command -v "$bin" 2>/dev/null || true
+  return 0
+}
+
+# mode: install | refresh | remove
+# refresh rewrites the managed line only when it already exists.
+_recall_age_cron_apply() {
+  local mode="$1"
+  _RECALL_AGE_CRON_STATUS=ok
+  _RECALL_AGE_CRON_LINE="$(_recall_age_cron_line)"
+
+  if _recall_age_cron_blocked; then
+    echo "Skipping quarterly age cron: HOME is not the account home (set RECALL_CRONTAB_BIN to schedule anyway)"
+    _RECALL_AGE_CRON_STATUS=sandbox
+    return 0
+  fi
+
+  local cron_bin
+  cron_bin="$(_recall_crontab_bin)"
+  if [[ -z "$cron_bin" ]]; then
+    log_warn "crontab not found; left the quarterly recall age schedule unchanged"
+    _RECALL_AGE_CRON_STATUS=missing
+    return 0
+  fi
+
+  local existing="" filtered="" has=false
+  existing="$("$cron_bin" -l 2>/dev/null || true)"
+  if printf '%s\n' "$existing" | grep -q -F "$RECALL_AGE_CRON_MARKER"; then
+    has=true
+  fi
+  if [[ "$mode" == "refresh" || "$mode" == "remove" ]] && [[ "$has" != "true" ]]; then
+    _RECALL_AGE_CRON_STATUS=absent
+    return 0
+  fi
+
+  if [[ -n "$existing" ]]; then
+    filtered="$(printf '%s\n' "$existing" | grep -v -F "$RECALL_AGE_CRON_MARKER" || true)"
+  fi
+
+  if [[ "${DRY_RUN:-}" == "true" ]]; then
+    echo "  [dry-run] ${mode} quarterly age cron: ${_RECALL_AGE_CRON_LINE}"
+    _RECALL_AGE_CRON_STATUS=dry-run
+    return 0
+  fi
+
+  if [[ "$mode" != "remove" ]]; then
+    mkdir -p "$RECALL_DIR/logs"
+    if [[ -n "$filtered" ]]; then
+      printf '%s\n%s\n' "$filtered" "$_RECALL_AGE_CRON_LINE" | "$cron_bin" -
+    else
+      printf '%s\n' "$_RECALL_AGE_CRON_LINE" | "$cron_bin" -
+    fi
+    log_success "Scheduled quarterly recall age"
+  else
+    if [[ -n "$filtered" ]]; then
+      printf '%s\n' "$filtered" | "$cron_bin" -
+    else
+      printf '' | "$cron_bin" -
+    fi
+    log_success "Removed quarterly recall age cron"
+  fi
+}
+
+
+recall_install_age_cron() {
+  if [[ "${SKIP_AGE_CRON:-}" == "true" ]]; then
+    _RECALL_AGE_CRON_STATUS=skipped
+    return 0
+  fi
+  _recall_age_cron_apply install
+}
+
+recall_refresh_age_cron() {
+  _recall_age_cron_apply refresh
+}
+
+recall_remove_age_cron() {
+  _recall_age_cron_apply remove
+}
+
+recall_print_age_cron_notice() {
+  local line="${_RECALL_AGE_CRON_LINE:-$(_recall_age_cron_line)}"
+  echo "Quarterly aging:"
+  if [[ "${_RECALL_AGE_CRON_STATUS:-}" == "missing" ]]; then
+    echo "  Not scheduled (crontab is not on PATH). Install it later or add the line yourself."
+  elif [[ "${_RECALL_AGE_CRON_STATUS:-}" == "sandbox" ]]; then
+    echo "  Not scheduled (HOME is not the account home)."
+  else
+    echo "  Scheduled. Re-running install replaces this line only."
+  fi
+  echo "  Schedule: ${RECALL_AGE_CRON_SCHEDULE} (03:00 on the 1st of Jan, Apr, Jul, Oct)"
+  echo "  Command:  ${line}"
+  echo "  Log:      ${RECALL_DIR}/logs/age.log"
+  echo "  Aging expires old breadcrumbs, demotes old low-importance decisions, learnings, and LoA (LoA floor 5), and deletes raw messages older than 180 days within existing guards. Pinned importance 10 is never touched."
+  echo "  Remove:   crontab -e, or ./packaging/uninstall.sh"
+}

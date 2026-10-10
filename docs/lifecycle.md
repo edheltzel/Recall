@@ -43,6 +43,8 @@ Follow [Installation → Install Recall](installation.md#install-recall) for the
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
+Install also schedules quarterly `recall age --execute` (`0 3 1 1,4,7,10 *`) unless you pass `--skip-age-cron`. The installer prints the schedule, command, and log path. Update refreshes that crontab line only when it is still there. Uninstall removes it. Details: [Installation](installation.md#quarterly-aging-cron).
+
 ### `install.sh` vs. `recall install`
 
 Both run the same canonical steps and are **idempotent** — re-running repairs symlinks and registrations, so there is no separate "re-install" command. They differ only in the bootstrap:

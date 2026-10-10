@@ -289,6 +289,14 @@ do_install() {
   fi
 
   _banner success "Installation Complete"
+  if [[ "${SKIP_AGE_CRON:-}" == "true" ]]; then
+    echo "Quarterly age cron skipped (--skip-age-cron)."
+    echo ""
+  else
+    recall_install_age_cron
+    recall_print_age_cron_notice
+    echo ""
+  fi
   echo ""
   log_success "Recall installed successfully — all systems operational."
   echo ""
@@ -348,6 +356,7 @@ help | --help | -h)
   echo "  ./packaging/install.sh                          Install Recall (creates backup first)"
   echo "  ./packaging/install.sh --yes | -y               Install non-interactively (configure all detected agents)"
   echo "  ./packaging/install.sh --no-gum                 Skip gum auto-install; use bash UX for this run"
+  echo "  ./packaging/install.sh --skip-age-cron          Do not schedule quarterly recall age"
   echo "  ./packaging/install.sh --db-path PATH           Use a custom database path (skips the interactive prompt)"
   echo "  ./packaging/install.sh restore                  Restore from most recent backup"
   echo "  ./packaging/install.sh restore TIMESTAMP        Restore specific backup"
@@ -371,6 +380,10 @@ help | --help | -h)
         ;;
       --no-gum)
         export RECALL_NO_GUM=1
+        shift
+        ;;
+      --skip-age-cron)
+        SKIP_AGE_CRON=true
         shift
         ;;
       --db-path)

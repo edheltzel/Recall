@@ -55,6 +55,7 @@ function runUninstall(
   extraArgs: string[] = [],
 ): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
+  stubCommandOnPath(stubBin, 'crontab');
   const r = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', ...extraArgs],
@@ -83,6 +84,7 @@ function runUninstall(
 
 function runPurge(claudeDir: string, backupBase: string): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
+  stubCommandOnPath(stubBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
@@ -129,6 +131,7 @@ function runUninstallIncludingPi(
   const stubBin = join(dirname(claudeDir), 'stub-bin');
   stubCommandOnPath(stubBin, 'claude');
   stubCommandOnPath(stubBin, 'pi');
+  stubCommandOnPath(stubBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode'],
@@ -159,6 +162,7 @@ function runUninstallIncludingOpenCode(
   opencodeConfigDir: string,
 ): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
+  stubCommandOnPath(stubBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-pi'],
@@ -192,6 +196,7 @@ function runUninstallAll(
   fakeBin: string,
 ): RunResult {
   stubCommandOnPath(fakeBin, 'claude');
+  stubCommandOnPath(fakeBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-omp'],

@@ -323,6 +323,11 @@ step_link_global() {
   fi
 }
 
+step_refresh_age_cron() {
+  log_info "Refreshing quarterly age cron if it is already scheduled..."
+  recall_refresh_age_cron
+}
+
 step_migrate() {
   if [[ "$NO_MIGRATE" == "true" ]]; then
     log_warn "--no-migrate: skipping database migrations"
@@ -483,6 +488,7 @@ step_report() {
 run_post_pull_steps() {
   step_install_and_build
   step_link_global
+  step_refresh_age_cron
   step_migrate
   step_refresh_runtime
   step_reregister_hooks

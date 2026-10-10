@@ -550,3 +550,16 @@ summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
 
 Prune also fails closed before mutation when the lifecycle schema is not ready.
 If it reports `RETRYABLE`, run `recall init` and retry the same command.
+
+### Age
+
+Type-aware aging. Dry-run by default. Pass `--execute` to apply.
+
+```bash
+recall age
+recall age --execute
+```
+
+With the defaults, aging expires old breadcrumbs, demotes old low-importance decisions, learnings, and LoA (LoA floor 5), and deletes raw messages older than 180 days. Existing guards still apply: recorded dedup survivors, marked duplicates, and foreign-key references are withheld. Pinned importance 10 is never touched.
+
+Install schedules `recall age --execute` quarterly (`0 3 1 1,4,7,10 *`) and logs to `~/.agents/Recall/logs/age.log`. Skip with `./packaging/install.sh --skip-age-cron`. Remove with `crontab -e` or `./packaging/uninstall.sh`. See [Quarterly aging](installation.md#quarterly-aging-cron).

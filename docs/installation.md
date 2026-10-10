@@ -275,6 +275,12 @@ crontab -e
 */30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/RecallBatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1
 ```
 
+### Quarterly aging (cron)
+
+Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October). The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. `uninstall.sh` removes it. Pass `--skip-age-cron` to install without scheduling. If `crontab` is not on PATH, install warns and continues.
+
+The job uses absolute paths to `bun` and `recall`, and appends to `~/.agents/Recall/logs/age.log`. Aging expires old breadcrumbs, demotes old low-importance decisions, learnings, and LoA (LoA floor 5), and deletes raw messages older than 180 days within existing guards. Pinned importance 10 is never touched. Remove it with `crontab -e` or `./packaging/uninstall.sh`. See [Age](cli-reference.md#age).
+
 ---
 
 ## Environment Variables
@@ -340,6 +346,7 @@ cd /path/to/Recall
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
+- The managed crontab line marked `# recall-memory: quarterly age`; other crontab lines are left alone
 
 If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, it does not rewrite that file, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
 
@@ -363,6 +370,7 @@ Separately installed omp capture is removed with `omp plugin uninstall recall-me
 | `--skip-pi` | Leave Pi integration alone |
 | `--skip-grok` | Leave Grok lifecycle capture alone |
 | `--skip-omp` | Leave omp Agent Skills alone |
+| `--skip-age-cron` | Do not schedule quarterly `recall age` (install only) |
 | `--no-gum` | Skip optional gum setup and use the bash interface for this run |
 | `--help` | Show usage |
 
