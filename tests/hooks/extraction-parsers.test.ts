@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   dualWriteToSqlite,
   parseDecisionItems,
@@ -55,10 +55,12 @@ const UNSCORED_SUMMARY = 'session summary stays unscored';
 
 let dbPath: string;
 let savedKey: string | undefined;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 let jevCalls: string[];
 
 beforeEach(() => {
+  restoreHome = isolateTestHome();
   dbPath = setupTestDb();
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
@@ -74,6 +76,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
+  restoreHome();
   teardownTestDb();
 });
 

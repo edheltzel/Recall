@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   conversationSourceAdapters,
   detectConversationFormat,
@@ -33,9 +33,11 @@ Imported conversations can become structured memory.
 let dbPath: string;
 let tempDir: string;
 let savedJevKey: string | undefined;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 
 beforeEach(() => {
+  restoreHome = isolateTestHome();
   savedJevKey = process.env.JEV_RECALL_KEY;
   delete process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
@@ -47,6 +49,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedJevKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedJevKey;
+  restoreHome();
   teardownTestDb();
   rmSync(tempDir, { recursive: true, force: true });
 });

@@ -1,6 +1,6 @@
 // Canonical scorer lives in hooks/lib/jev.ts. Hooks must not import src/.
 export {
-  JEV_KEY_ENV,
+  resolveJevKey,
   applyChoices,
   jevCounts,
   scoreCandidate,

@@ -42,7 +42,7 @@ export interface DualWriteResult {
   breadcrumbs: number;
   errors: number;
   loa: number;
-  /** Disposition counts for scored rows. `skipped` is a missing or blank key. A request error leaves every counter at 0. */
+  /** Disposition counts for scored rows. `skipped` means no key resolved from the environment or `$HOME/.env`. A request error leaves every counter at 0. */
   jev: { kept: number; demoted: number; dropped: number; skipped: number };
   failures: Record<string, string>;
 }
@@ -222,10 +222,11 @@ function scrubMemoryRows(
  * whole function must not throw.
  *
  * Decisions, learnings, and breadcrumbs are scored before those inserts when
- * JEV_RECALL_KEY is set. Scoring finishes before any writer runs. A missing
- * or blank key writes every parsed row and sets `jev.skipped` to that candidate
- * count. A failed score writes every parsed row, sets `failures.jev`, and leaves
- * the `jev` counters at 0. Sessions, extraction errors, and LoA are not scored.
+ * a key resolves from a non-blank JEV_RECALL_KEY or `$HOME/.env`. Scoring
+ * finishes before any writer runs. When no key resolves, every parsed row is
+ * written and `jev.skipped` is set to that candidate count. A failed score
+ * writes every parsed row, sets `failures.jev`, and leaves the `jev` counters at
+ * 0. Sessions, extraction errors, and LoA are not scored.
  *
  * The plain-INSERT writers run with `skipDuplicates` because this seam is
  * replayed: the Stop hook marks a conversation extracted only after its markdown

@@ -13,7 +13,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runAddBreadcrumb, runAddDecision, runAddLearning } from '../../src/commands/add';
 import { importConversations } from '../../src/lib/conversation-import';
 import { writeStructuredExtraction } from '../../src/lib/structured-extraction';
@@ -33,11 +33,13 @@ const SECRET = 'sk-ant-FAKEKEYFORTESTINGONLY0000000000000000';
 
 let dbPath: string;
 let savedKey: string | undefined;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 let jevCalls: string[];
 const originalLog = console.log;
 
 beforeEach(() => {
+  restoreHome = isolateTestHome();
   dbPath = setupTestDb();
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
@@ -54,6 +56,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
+  restoreHome();
   console.log = originalLog;
   teardownTestDb();
 });
