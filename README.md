@@ -69,14 +69,23 @@ First-run walkthrough (install, first commands, where the database lives, how a 
 
 Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
 
-Install the binaries and initialize the database once:
+Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312).
+
+Canonical install is a source checkout. `./packaging/install.sh` runs `bun install`, the build, and links `recall` / `recall-mcp`. Updates: `recall update` (git checkout pulls).
 
 ```bash
-bun install -g recall-memory
-recall init
+git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
 ```
 
-Prefer `bun install -g`: with `npm install -g`, the `#!/usr/bin/env bun` shebang depends on Bun being on PATH (nvm/fnm shells can hide it).
+Claude Code: attach the plugin before `./packaging/install.sh` so the installer can reconcile user-scope surfaces. See [source checkout](docs/installation.md#source-checkout).
+
+Global binary from a local tarball (from the checkout), then `recall install`:
+
+```bash
+bun run build && npm pack --pack-destination <dir>
+bun install -g <dir>/recall-memory-<version>.tgz
+recall install
+```
 
 Then attach each coding agent with **that harness's native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Plugin source lives in this repository; that does not mean a given machine already has it installed.
 
@@ -84,7 +93,7 @@ Then attach each coding agent with **that harness's native plugin or extension**
 | --- | --- | --- |
 | **Claude Code** | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` | Plugin owns the nine `do-recall-*` skills and `recall-memory` MCP. Install the plugin before the lifecycle hooks so `recall install` can reconcile user-scope surfaces. See [Claude Integration](docs/CLAUDE_INTEGRATION.md). |
 | **Codex** | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace` | Plugin owns MCP, skills, and lifecycle hooks. `packaging/install.sh` does not wire Codex. See [Codex Integration](docs/CODEX_INTEGRATION.md). |
-| **Pi** | `pi install npm:recall-memory` (or `pi install /absolute/path/to/Recall`) | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
+| **Pi** | `pi install /absolute/path/to/Recall` | Native package owns extensions and skills. Pi packages cannot declare MCP — still install `pi-mcp-adapter` and the `recall-memory` entry. See [Pi Integration](docs/PI_INTEGRATION.md). |
 | **omp** | Build, pack, and link the extracted package using [omp Integration](docs/OMP_INTEGRATION.md) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. The feature is unreleased; do not link the repository root, which exposes development configuration. |
 | **Grok** | `recall install` / `./packaging/install.sh` | No working plugin hook surface in headless sessions — installer-owned global hook only. See [Grok Integration](docs/GROK_INTEGRATION.md). |
 | **Cursor** | Merge snippets under `templates/cursor/` | Marketplace plugin is locked off. |
@@ -102,14 +111,11 @@ Restart each attached agent so it loads the plugin, extension, or snippets.
 `recall install` still initializes installer-owned surfaces: Claude lifecycle hooks, Grok's global hook, OpenCode, omp skill links, and Pi's MCP adapter/config alongside the native Pi package. It is the **only** supported install for Grok. It is not the preferred attach path for Claude, Codex, Pi, or omp.
 
 ```bash
-# Packaged (for Claude Code, run after installing the plugin)
+# After the tarball link above (for Claude Code, run after installing the plugin)
 recall install
-
-# One-shot (Bun must be on PATH)
-npx --package=recall-memory recall install
 ```
 
-For a source checkout, follow the [canonical source-checkout sequence](docs/installation.md#source-checkout). It clones the local marketplace root, attaches the Claude plugin when applicable, and only then runs installer-owned setup.
+For a source checkout, follow the [canonical source-checkout sequence](docs/installation.md#source-checkout). It attaches the Claude plugin when applicable, and only then runs installer-owned setup.
 
 </details>
 
@@ -142,7 +148,7 @@ release and the exact command to run. From a shell:
 ./packaging/update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
-Installed from npm? Use `recall update` (same flags) — or `bun install -g recall-memory@latest && recall install` to bump the binary.
+Installed from a local tarball? `recall update` has no git checkout to pull. Rebuild, `npm pack`, and `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install`.
 
 ### Uninstalling
 
@@ -152,7 +158,7 @@ Installed from npm? Use `recall update` (same flags) — or `bun install -g reca
 ./packaging/uninstall.sh --purge     # destroy runtime + DBs; preserve identity/distilled snapshots (confirmed)
 ```
 
-Installed from npm? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
+Installed from a local tarball? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
 

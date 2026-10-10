@@ -6,13 +6,13 @@ This guide covers everything needed to install Recall: prerequisites, what the i
 
 > **First run?** Walk through [Getting Started](getting-started.md) for install, first commands, where the database lives, how a session starts, and how MCP/hooks get wired.
 
-> **Not sure which command to run** (install vs. update vs. uninstall, npm vs. source, re-install, custom DB path, recovery)? See **[Managing Recall — which command do I run?](lifecycle.md)** for the decision table.
+> **Not sure which command to run** (install vs. update vs. uninstall, source checkout vs. local tarball, re-install, custom DB path, recovery)? See **[Managing Recall — which command do I run?](lifecycle.md)** for the decision table.
 
 ---
 
 ## Prerequisites
 
-Install these before `bun install -g recall-memory` and `recall install`. Items marked **Optional** enhance Recall but are not required for core functionality.
+Install these before the [source checkout](#source-checkout) or a local tarball link, and before `recall install`. Items marked **Optional** enhance Recall but are not required for core functionality.
 
 **Supported platforms:** macOS 13+ (Apple Silicon and Intel) and Linux (Ubuntu 22.04+, Debian 12+).
 
@@ -129,14 +129,23 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not
 relocatable. `RECALL_DB_PATH`, `recall install --db-path`, and `./packaging/install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-Install the binaries and initialize the database once:
+Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312). Canonical install:
 
 ```bash
-bun install -g recall-memory
+git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
+```
+
+That script runs `bun install`, the build, and links `recall` / `recall-mcp`, then installer-owned setup. Updates: `recall update` (git checkout pulls). Claude Code should follow [Source checkout](#source-checkout) and attach the plugin before `./packaging/install.sh`.
+
+Global binary from a local tarball (from the checkout):
+
+```bash
+bun run build && npm pack --pack-destination <dir>
+bun install -g <dir>/recall-memory-<version>.tgz
 recall init
 ```
 
-Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
+Then `recall install`. Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged (tarball) mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
 
 ### Source checkout
 
