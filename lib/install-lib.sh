@@ -1450,9 +1450,9 @@ recall_remove_legacy_skill_names() {
 # `src/hosts/claude.ts` carries the same plugin id for the TypeScript side.
 : "${RECALL_CLAUDE_PLUGIN_ID:=recall@recall-marketplace}"
 
-# True when Claude has the Recall plugin installed AND not disabled. Reads Claude's
-# own state files rather than shelling out to the claude CLI, which may be absent
-# and must not be spawned mid-install.
+# With bun available, returns 0 when Claude has the Recall plugin installed and
+# enabled, 1 when it is absent or disabled, and 2 when its state is unreadable or
+# invalid. Reads Claude's own state files instead of spawning the CLI mid-install.
 recall_claude_plugin_active() {
   local installed="$CLAUDE_DIR/plugins/installed_plugins.json"
   command -v bun &>/dev/null || return 1

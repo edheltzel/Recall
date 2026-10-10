@@ -171,13 +171,15 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
 | 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
-| 6. Configure MCP | With an active Claude plugin, preserves a stored custom pin unless an explicit `--db-path` or inherited `RECALL_DB_PATH`/`MEM_DB_PATH` replaces it; if the selected path is the default, removes the user registration so the plugin serves that database. Without the plugin, registers `recall-memory` in `~/.claude/settings.json` at user scope |
+| 6. Configure MCP | With an active Claude plugin, preserves a stored custom pin unless an explicit `--db-path` or inherited `RECALL_DB_PATH`/`MEM_DB_PATH` replaces it; if the selected path is the default, removes the user registration so the plugin serves that database. When the plugin is confirmed absent or disabled, registers `recall-memory` in `~/.claude/settings.json` at user scope |
 | 7. Setup hooks | Copies the installer-owned Claude hooks and shared hook libraries to their canonical runtime paths, links them into `~/.claude/hooks/`, and registers the current Claude lifecycle events through the shared hook installer |
-| 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, otherwise the installer links them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
+| 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, while a confirmed absent or disabled plugin makes the installer link them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
 | 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
 
 **After install:** Restart each configured host to load its integration.
+
+Claude plugin ownership detection fails closed. If its state files are unreadable or invalid, the installer returns an error before ownership-dependent skill or MCP changes. See [Claude Code Integration](CLAUDE_INTEGRATION.md#hooks-and-the-installer-required-for-automatic-capture) for the state rules and recovery.
 
 ---
 
@@ -190,9 +192,10 @@ flowchart LR
     C --> D[bun run build]
     D --> E[bun link]
     E --> F[recall init\nInit DB]
-    F --> G{Claude plugin active?}
-    G -->|Yes| H[Reconcile plugin MCP and skills]
-    G -->|No| I[Register MCP and link skills]
+    F --> G{Claude plugin state?}
+    G -->|Active| H[Reconcile plugin MCP and skills]
+    G -->|Absent or disabled| I[Register MCP and link skills]
+    G -->|Unreadable or invalid| X[Stop before ownership-dependent changes]
     H --> J[Register installer-owned hooks]
     I --> J
     J --> K[Copy Guide\nRecall_GUIDE.md]
