@@ -12,13 +12,7 @@ Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP
 
 Recall requires [Bun](https://bun.sh) (`bun:sqlite` and Bun-native hooks). Put Bun on `PATH` first.
 
-Recall is not published to npm (#312). Canonical install:
-
-```bash
-git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
-```
-
-Updates: `recall update`. Global binary from that checkout: `bun run build && npm pack --pack-destination <dir>`, then `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install`.
+Recall is not published to npm (#312). Complete the canonical [source-checkout install](installation.md#source-checkout), or use the [local-tarball procedure](installation.md#local-tarball) when you need a packaged global binary. Return here after Recall is installed.
 
 Then attach each harness with its **native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Commands and ownership are in the README Quick Start table and the per-host guides: [Claude](CLAUDE_INTEGRATION.md), [Codex](CODEX_INTEGRATION.md), [Pi](PI_INTEGRATION.md), [omp](OMP_INTEGRATION.md).
 

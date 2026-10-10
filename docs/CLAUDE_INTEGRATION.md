@@ -10,15 +10,7 @@ The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plu
 
 ## Install (preferred)
 
-Install Recall so `recall-mcp` is on `PATH` and the database exists. Recall is not published to npm (#312). From a checkout:
-
-```bash
-bun run build && npm pack --pack-destination <dir>
-bun install -g <dir>/recall-memory-<version>.tgz
-recall init
-```
-
-Or the [source checkout](installation.md#source-checkout): `git clone https://github.com/edheltzel/Recall.git && cd Recall`, attach the plugin below, then `./packaging/install.sh`.
+Install Recall so `recall-mcp` is on `PATH` and the database exists. Recall is not published to npm (#312). Use the canonical [source-checkout](installation.md#source-checkout) or [local-tarball](installation.md#local-tarball) procedure. The source-checkout procedure attaches the plugin below before running `./packaging/install.sh`; the tarball procedure installs the binary first, then attaches the plugin before `recall install`.
 
 Then add this repository as a marketplace and install its plugin:
 
@@ -31,11 +23,14 @@ The local repository path is required for the current checked-in marketplace. A 
 
 ### Hooks and the installer (required for automatic capture)
 
+Finish the path you chose:
+
 ```bash
-recall install
+./packaging/install.sh  # source checkout
+recall install          # local tarball
 ```
 
-With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks, skip duplicate skill symlinks, and reconcile the user-scope `recall-memory` MCP entry under the database-path rules below. Running only the plugin gives skills and MCP, not automatic capture.
+With the plugin active, `./packaging/install.sh`, `recall install`, and `./packaging/update.sh` keep the Claude hooks, skip duplicate skill symlinks, and reconcile the user-scope `recall-memory` MCP entry under the database-path rules below. Running only the plugin gives skills and MCP, not automatic capture.
 
 Plugin-state detection fails closed. A missing `~/.claude/plugins/installed_plugins.json` confirms that the plugin is absent. An unreadable or invalid installed-plugin file, or an unreadable or invalid `settings.json` after an installation is detected, makes ownership unknown. In that state, install and update return an error before changing ownership-dependent skill links or MCP configuration. Restore read access or valid JSONC, then rerun the command.
 

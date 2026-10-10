@@ -69,23 +69,9 @@ First-run walkthrough (install, first commands, where the database lives, how a 
 
 Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
 
-Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312).
-
-Canonical install is a source checkout. `./packaging/install.sh` runs `bun install`, the build, and links `recall` / `recall-mcp`. Updates: `recall update` (git checkout pulls).
-
-```bash
-git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
-```
+Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312). Install Recall through the canonical [source-checkout procedure](docs/installation.md#source-checkout), or use the [local-tarball procedure](docs/installation.md#local-tarball) when you need a packaged global binary.
 
 Claude Code: attach the plugin before `./packaging/install.sh` so the installer can reconcile user-scope surfaces. See [source checkout](docs/installation.md#source-checkout).
-
-Global binary from a local tarball (from the checkout), then `recall install`:
-
-```bash
-bun run build && npm pack --pack-destination <dir>
-bun install -g <dir>/recall-memory-<version>.tgz
-recall install
-```
 
 Then attach each coding agent with **that harness's native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Plugin source lives in this repository; that does not mean a given machine already has it installed.
 
@@ -111,7 +97,7 @@ Restart each attached agent so it loads the plugin, extension, or snippets.
 `recall install` still initializes installer-owned surfaces: Claude lifecycle hooks, Grok's global hook, OpenCode, omp skill links, and Pi's MCP adapter/config alongside the native Pi package. It is the **only** supported install for Grok. It is not the preferred attach path for Claude, Codex, Pi, or omp.
 
 ```bash
-# After the tarball link above (for Claude Code, run after installing the plugin)
+# For a packaged install (for Claude Code, run after installing the plugin)
 recall install
 ```
 
@@ -148,7 +134,7 @@ release and the exact command to run. From a shell:
 ./packaging/update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
-Installed from a local tarball? `recall update` has no git checkout to pull. Rebuild, `npm pack`, and `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install`.
+Installed from a local tarball? `recall update` has no git checkout to pull. Follow the [local-tarball update procedure](docs/installation.md#local-tarball).
 
 ### Uninstalling
 

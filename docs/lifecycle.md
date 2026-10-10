@@ -12,17 +12,17 @@ Recall has three lifecycle actions — **install**, **update**, **uninstall** �
 
 | Situation | Command |
 |---|---|
-| Fresh install - Claude plugin + hooks | [Source checkout](installation.md#source-checkout): clone, install the [Claude plugin](CLAUDE_INTEGRATION.md), then `./packaging/install.sh` |
-| Fresh install - Codex plugin | `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh`, then install the [Codex plugin](CODEX_INTEGRATION.md) |
+| Fresh install - Claude plugin + hooks | Follow [Installation → Source checkout](installation.md#source-checkout); see [Claude Integration](CLAUDE_INTEGRATION.md) |
+| Fresh install - Codex plugin | Complete the [source checkout](installation.md#source-checkout), then install the [Codex plugin](CODEX_INTEGRATION.md) |
 | Fresh install — Pi native package | Source checkout, then `pi install /absolute/path/to/Recall`; MCP still needs the adapter ([Pi Integration](PI_INTEGRATION.md)) |
 | Fresh install — omp native capture | Build and link the clean packed checkout ([omp Integration](OMP_INTEGRATION.md)); skills remain installer-owned |
-| Fresh install — Grok (no plugin path) | `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh` ([Grok Integration](GROK_INTEGRATION.md)) |
+| Fresh install — Grok (no plugin path) | Complete the [source checkout](installation.md#source-checkout) ([Grok Integration](GROK_INTEGRATION.md)) |
 | Fresh install — Cursor snippets | Merge `templates/cursor/`; no marketplace plugin |
-| Fresh install — local tarball (Grok / Claude hooks / detected hosts) | From a checkout: `bun run build && npm pack --pack-destination <dir>`, then `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install` |
+| Fresh install — local tarball (Grok / Claude hooks / detected hosts) | Follow [Installation → Local tarball](installation.md#local-tarball) |
 | Fresh install — source / dev checkout | Follow [Installation → Source checkout](installation.md#source-checkout) |
 | Re-install / repair a broken install | `recall install` (tarball) or `./packaging/install.sh` (source) — both idempotent |
 | Upgrade to the latest release — source checkout | `recall update` (or `./packaging/update.sh`) |
-| Upgrade a local-tarball install | Rebuild, `npm pack`, `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall install` |
+| Upgrade a local-tarball install | Follow [Installation → Local tarball](installation.md#local-tarball) |
 | Just check for a newer release | `recall update --check` — or `/do-recall-update` in Claude Code |
 | Uninstall, keep your memory database | `recall uninstall` (or `./packaging/uninstall.sh`) |
 | Uninstall **and** destroy the database + backups | `recall uninstall --purge` |
@@ -41,10 +41,10 @@ Recall installs runtime state under `~/.agents/Recall/`. **Preferred attach** fo
 
 Pick the on-ramp that matches how you got Recall:
 
-- **Source checkout (canonical):** `git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh` puts `recall` / `recall-mcp` on PATH and runs installer-owned setup. Recall is not on the npm registry (#312).
-- **Local tarball:** from a checkout, `bun run build && npm pack --pack-destination <dir>`, then `bun install -g <dir>/recall-memory-<version>.tgz`, then `recall init` and `recall install`.
+- **Source checkout (canonical):** Follow [Installation → Source checkout](installation.md#source-checkout). Recall is not on the npm registry (#312).
+- **Local tarball:** Follow [Installation → Local tarball](installation.md#local-tarball).
 - **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). Claude Code must attach the plugin before installer-owned setup, then run `recall install`, because lifecycle hooks remain installer-owned. The Codex plugin already owns its lifecycle hooks. omp skills remain installer-owned. Grok has no plugin path; the source checkout installer is enough.
-- **Source / dev checkout detail:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup, then builds from your working tree (`bun install` + `bun run build` + `bun link`).
+- **Source / dev checkout detail:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup and builds from your working tree.
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
@@ -53,7 +53,7 @@ After any attach, **restart your agent** so it loads the plugin, extension, or s
 Both run the same canonical steps and are **idempotent** — re-running repairs symlinks and registrations, so there is no separate "re-install" command. They differ only in the bootstrap:
 
 - **`./packaging/install.sh`** (source checkout) builds from the working tree. Use it when developing, on a feature branch, or repairing a source install.
-- **`recall install`** (local tarball) skips `bun install` / `bun run build` / `bun link` (`RECALL_PACKAGED=1`) because the packed tarball already shipped a prebuilt binary and its dependencies. Use it after `bun install -g <dir>/recall-memory-<version>.tgz`.
+- **`recall install`** (local tarball) skips `bun install` / `bun run build` / `bun link` (`RECALL_PACKAGED=1`) because the packed tarball already shipped a prebuilt binary and its dependencies. Use it after completing the [local-tarball procedure](installation.md#local-tarball).
 
 ---
 
@@ -70,7 +70,7 @@ Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--for
 Two situations the original scripts didn't spell out:
 
 - **You're on a feature branch or have local commits.** `recall update` does `git pull --ff-only origin main` plus a GitHub-release version check, so it will refuse to fast-forward (or report "already current") rather than clobber your work. That's expected. To rebuild from your **working tree** instead, run `./packaging/install.sh`.
-- **You installed from a local tarball.** A packed install has no git checkout, so `recall update` has nothing to pull. Rebuild, `npm pack`, and `bun install -g <dir>/recall-memory-<version>.tgz`, then run `recall install` to refresh the canonical setup.
+- **You installed from a local tarball.** A packed install has no git checkout, so `recall update` has nothing to pull. Follow the [local-tarball update procedure](installation.md#local-tarball), which refreshes the retained checkout before packing.
 
 ---
 
