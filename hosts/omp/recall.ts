@@ -202,12 +202,6 @@ export async function captureOmpSessionStop(
       return;
     }
 
-    const rawEntries = JSON.stringify(entries);
-    if (Buffer.byteLength(rawEntries, 'utf8') > MAX_OMP_STDIN_BYTES) {
-      warn(ctx, pi, 'Recall omp capture skipped: payload exceeds 25MiB');
-      return;
-    }
-
     const text = ompBranchText(entries);
     if (!text.trim()) return;
 

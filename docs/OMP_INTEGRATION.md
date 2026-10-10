@@ -34,7 +34,7 @@ Do not install the npm package named `recall-memory`; that name is an unrelated 
 
 This is turn-completion capture, not crash recovery. An interrupted turn before `session_stop` is not guaranteed captured. Shutdown and pre-compaction hooks are not installed. The complete active branch is retried on the next stop after a failure.
 
-Capture accepts at most 25 MiB of serialized branch data and bounds its child process to 30 seconds. Oversize, malformed, cancelled, or failed captures warn without blocking the agent or publishing a partial branch. Large tool/image payloads count toward the input limit even though they are not stored.
+Capture sends only user and assistant text, at most 25 MiB per payload, and bounds its child process to 30 seconds. Tool output, images, and other non-message entries are not sent and do not count toward the limit. Oversize, malformed, cancelled, or failed captures warn without blocking the agent or publishing a partial branch.
 
 ## Skills and MCP remain separate
 
@@ -56,7 +56,7 @@ This verifies the packed local-link integration in headless text mode. It does n
 
 Restart omp after uninstalling. Saved Recall memory remains. `recall uninstall` removes installer-owned skills, not the separately managed omp plugin; uninstall the plugin through omp before removing Recall's runtime.
 
-If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. Oversize branches need a new session; restarting alone does not reduce their serialized size.
+If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. A branch whose user and assistant text alone exceeds 25 MiB needs a new session; restarting alone does not shrink it.
 
 ## Native documentation
 
