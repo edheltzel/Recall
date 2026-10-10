@@ -40,7 +40,7 @@ MCP cannot join that unit because `mcp` is not a Pi package resource.
 
 ## Install (preferred)
 
-Install the Recall binaries through the canonical [source-checkout](installation.md#source-checkout) or [local-tarball](installation.md#local-tarball) procedure, then attach Pi through its native package. Recall is not published to npm (#312).
+Install the Recall binaries through the canonical [Installation guide](installation.md#install-recall), then attach Pi through its native package.
 
 ```bash
 pi install /absolute/path/to/Recall

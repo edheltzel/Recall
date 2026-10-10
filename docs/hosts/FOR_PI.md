@@ -145,15 +145,7 @@ exit Pi first.
 
 **Preferred attach:** Pi's native package.
 
-```
-pi install /absolute/path/to/Recall
-```
-
-Pi packages can carry Recall's two extensions and nine Agent Skills together. Pi packages cannot register an MCP server, so `pi install /absolute/path/to/Recall` is not a complete Recall install — it omits the MCP adapter/configuration and does not guarantee that `recall` or `recall-mcp` is on `PATH`. Recall is not published to npm (#312).
-
-`recall install` coordinates the remaining native pieces: the Recall Pi package (if not already attached), the `pi-mcp-adapter` package, the owned `recall-memory` entry in `mcp.json`, and this guide. It also removes pre-package Recall extension and skill symlinks so Pi never loads two copies.
-
-See [`docs/PI_INTEGRATION.md`](docs/PI_INTEGRATION.md) for the verified Pi capability matrix and the explicit differences from Codex and Claude plugin bundles.
+See [`docs/PI_INTEGRATION.md`](../PI_INTEGRATION.md#install-preferred) for the authoritative attach commands, MCP completion steps, and verified Pi capability matrix.
 
 ## Core Rules
 

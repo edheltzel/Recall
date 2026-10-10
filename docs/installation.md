@@ -129,11 +129,11 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not
 relocatable. `RECALL_DB_PATH`, `recall install --db-path`, and `./packaging/install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312). Use a [source checkout](#source-checkout) for the canonical install, or a [local tarball](#local-tarball) when you need a packaged global binary.
+Recall itself is not published to npm; the `recall-memory` package there is an unrelated project (see #312). Use a [source checkout](#source-checkout) for the canonical install, or a [local tarball](#local-tarball) when you need a packaged global binary.
 
 ### Local tarball
 
-Start with the permanent checkout described under [Source checkout](#source-checkout), but stop before attaching a host or running `./packaging/install.sh`. Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
+Retain the permanent checkout described under [Source checkout](#source-checkout). Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
 
 ```bash
 cd /absolute/path/to/Recall
@@ -149,7 +149,7 @@ bun install -g "$package_dir/$archive"
 recall init
 ```
 
-Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged (tarball) mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
+Continue with the applicable integration guide: [Claude Code](CLAUDE_INTEGRATION.md#install-preferred), [Codex](CODEX_INTEGRATION.md#install-preferred), [Pi](PI_INTEGRATION.md#install-preferred), [omp](OMP_INTEGRATION.md#install-from-this-checkout), or [Grok](GROK_INTEGRATION.md). Each guide owns its host's attach commands and whether it also needs `recall install`. In packaged (tarball) mode, `recall install` runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, dependency installation, build, and link.
 
 ### Source checkout
 
@@ -160,14 +160,7 @@ git clone https://github.com/edheltzel/Recall.git
 cd Recall
 ```
 
-Claude Code users must attach the native plugin before installer-owned setup:
-
-```bash
-claude plugin marketplace add "$PWD"
-claude plugin install recall@recall-marketplace
-```
-
-Other hosts skip those two Claude-only commands. Then run the installer:
+Claude Code users must complete the plugin attach in [Claude Code Integration](CLAUDE_INTEGRATION.md#install-preferred) before installer-owned setup. Other hosts can run the source installer now, then continue with their integration guide:
 
 ```bash
 ./packaging/install.sh

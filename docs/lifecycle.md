@@ -39,12 +39,7 @@ The `recall update` / `recall uninstall` / `recall install` subcommands simply f
 
 Recall installs runtime state under `~/.agents/Recall/`. **Preferred attach** for Claude Code, Codex, Pi, and omp is the native plugin/extension; see the [Quick Start](../README.md#quick-start). The installer script is for Grok, Claude hooks, and detected hosts that still need installer-owned files.
 
-Pick the on-ramp that matches how you got Recall:
-
-- **Source checkout (canonical):** Follow [Installation → Source checkout](installation.md#source-checkout). Recall is not on the npm registry (#312).
-- **Local tarball:** Follow [Installation → Local tarball](installation.md#local-tarball).
-- **Then attach the harness** with its plugin/extension command (Claude, Codex, Pi, omp). Claude Code must attach the plugin before installer-owned setup, then run `recall install`, because lifecycle hooks remain installer-owned. The Codex plugin already owns its lifecycle hooks. omp skills remain installer-owned. Grok has no plugin path; the source checkout installer is enough.
-- **Source / dev checkout detail:** Follow the [canonical source-checkout sequence](installation.md#source-checkout). It orders any required native host attach before installer-owned setup and builds from your working tree.
+Follow [Installation → Install Recall](installation.md#install-recall) for the authoritative bootstrap procedure, then use the applicable host integration guide for native plugin or extension attachment.
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
