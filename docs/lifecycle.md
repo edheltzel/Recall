@@ -43,7 +43,7 @@ Follow [Installation → Install Recall](installation.md#install-recall) for the
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
-Install also schedules quarterly `recall age --execute` (`0 3 1 1,4,7,10 *`) unless you pass `--skip-age-cron`, but only when `recall` resolves to a durable source checkout or Bun-global install. Otherwise it leaves crontab unchanged and prints how to retry after making the install durable. The installer prints the schedule, command, and log path. Update refreshes that crontab line only when it is still there. Uninstall removes it. Details: [Installation](installation.md#quarterly-aging-cron).
+For the managed quarterly aging job and its lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).
 
 ### `install.sh` vs. `recall install`
 

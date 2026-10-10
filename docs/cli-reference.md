@@ -562,4 +562,4 @@ recall age --execute
 
 With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing guards still apply: recorded dedup survivors, marked duplicates, and foreign-key references are withheld. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched.
 
-Install schedules `recall age --execute` quarterly (`0 3 1 1,4,7,10 *`) when `recall` resolves to a durable source checkout or Bun-global install, preserves the resolved `RECALL_DB_PATH`, and logs to `~/.agents/Recall/logs/age.log`. Skip with `./packaging/install.sh --skip-age-cron`. Remove with `crontab -e` or `./packaging/uninstall.sh`. See [Quarterly aging](installation.md#quarterly-aging-cron).
+For managed cron scheduling, opt-out, paths, and lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).

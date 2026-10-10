@@ -174,7 +174,7 @@ The script runs `bun install`, builds Recall, links `recall` / `recall-mcp`, and
 |------|---------|
 | `--yes`, `-y` | Install non-interactively and configure all detected agents |
 | `--no-gum` | Skip optional gum setup and use the bash interface for this run |
-| `--skip-age-cron` | Do not schedule quarterly `recall age` |
+| `--skip-age-cron` | Remove the managed quarterly `recall age` schedule |
 | `--db-path PATH` | Use a custom database path without prompting |
 
 > **Note:** Do not clone to a temporary directory. `bun link` creates symlinks back to the clone location — if the directory is removed (e.g. on reboot), `recall` commands will break.
@@ -286,9 +286,9 @@ crontab -e
 
 ### Quarterly aging (cron)
 
-Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October) when `recall` resolves to a durable source checkout or Bun-global install. The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. Re-install and update retain the database assignment stored in that line unless `RECALL_DB_PATH` or `MEM_DB_PATH` explicitly replaces it. `uninstall.sh` removes it. Use the [`--skip-age-cron`](#install-flags) install flag to opt out. If the runner is not durable, `crontab` is unavailable, or crontab access fails, the lifecycle command warns without changing the existing schedule.
+Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October) when `recall` resolves to a durable source checkout or Bun-global install. The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. Re-install and update retain the database assignment stored in that line unless `RECALL_DB_PATH` or `MEM_DB_PATH` explicitly replaces it. `uninstall.sh` removes it. The [`--skip-age-cron`](#install-flags) install flag also removes an existing managed line; a later install without the flag schedules it again. If the runner is not durable, `crontab` is unavailable, or crontab access fails, the lifecycle command warns without changing the existing schedule.
 
-The job uses absolute paths to `bun` and `recall`, preserves the resolved `RECALL_DB_PATH`, and appends to `~/.agents/Recall/logs/age.log`. With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing deduplication and foreign-key guards still apply. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched. Remove it with `crontab -e` or `./packaging/uninstall.sh`. See [Age](cli-reference.md#age).
+The job uses POSIX-shell-safe absolute paths to `bun` and `recall`, preserves the resolved `RECALL_DB_PATH`, and appends to `~/.agents/Recall/logs/age.log`. Paths containing control characters are rejected without changing crontab. With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing deduplication and foreign-key guards still apply. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched. Remove it with `crontab -e` or `./packaging/uninstall.sh`. See [Age](cli-reference.md#age).
 
 ---
 
