@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import type { McpConfigTarget, NativeHostAdapter } from './types.js';
@@ -48,7 +48,14 @@ export const CLAUDE_PLUGIN_ID = 'recall@recall-marketplace';
 export type ClaudePluginState = SharedClaudePluginState;
 
 function readJson(path: string): Record<string, unknown> | null | undefined {
-  if (!existsSync(path)) return undefined;
+  try {
+    statSync(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return undefined;
+    // EACCES/EPERM (and any other stat failure) is unreadable, not missing.
+    return null;
+  }
   try {
     return readJsoncObject(path);
   } catch {
