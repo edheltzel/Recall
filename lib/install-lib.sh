@@ -1667,7 +1667,7 @@ recall_install_claude_skills() {
   else
     local plugin_status=$?
     if [[ $plugin_status -ne 1 ]]; then
-      log_error "Could not read Claude plugin state (existing config is invalid - left unchanged)"
+      log_error "Could not read Claude plugin state (existing config is invalid or inaccessible - left unchanged)"
       return "$plugin_status"
     fi
   fi
@@ -1753,7 +1753,7 @@ recall_verify_install() {
       plugin_status=$?
     fi
     if [[ $plugin_status -gt 1 ]]; then
-      missing+=("Claude plugin state: existing config is invalid")
+      missing+=("Claude plugin state: existing config is invalid or inaccessible")
     elif [[ "$plugin_active" != "true" ]]; then
       local skill_dir skill_name skillfile base
       for skill_dir in "$RECALL_SHARED_SKILLS_DIR"/*/; do
@@ -2011,7 +2011,7 @@ recall_configure_mcp() {
   else
     local plugin_status=$?
     if [[ $plugin_status -gt 1 ]]; then
-      log_error "Could not read Claude plugin state (existing config is invalid - left unchanged)"
+      log_error "Could not read Claude plugin state (existing config is invalid or inaccessible - left unchanged)"
       return "$plugin_status"
     fi
   fi
