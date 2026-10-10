@@ -69,7 +69,9 @@ async function main() {
   assertEq(dupe, false, 'duplicate semaphore acquire (same conv, diff pid) rejected');
 
   const priorJevKey = process.env.JEV_RECALL_KEY;
+  const priorHome = process.env.HOME;
   delete process.env.JEV_RECALL_KEY;
+  process.env.HOME = tmp;
   let result: Awaited<ReturnType<typeof dualWriteToSqlite>>;
   try {
     result = await dualWriteToSqlite(dbPath, {
@@ -85,6 +87,8 @@ async function main() {
   } finally {
     if (priorJevKey === undefined) delete process.env.JEV_RECALL_KEY;
     else process.env.JEV_RECALL_KEY = priorJevKey;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
   }
   if (Object.keys(result.failures).length > 0) {
     fail(`dualWrite failures: ${JSON.stringify(result.failures)}`);
