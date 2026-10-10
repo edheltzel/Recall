@@ -202,6 +202,7 @@ async function main(): Promise<void> {
     RECALL_DIR: testRecallHome,
     RECALL_REPO_DIR: repoRoot,
     RECALL_DB_PATH: testDb,
+    RECALL_CRONTAB_BIN: '',
     RECALL_SKIP_LEGACY_DATA_MIGRATIONS: '1',
     OPENCODE_CONFIG_DIR: opencodeConfigDir,
     XDG_CONFIG_HOME: xdgConfig,
@@ -310,7 +311,7 @@ async function main(): Promise<void> {
 
   const uninstall = spawnSync('bash', [join(repoRoot, 'packaging', 'uninstall.sh'), '--no-confirm', '--skip-pi', '--skip-omp'], {
     cwd: repoRoot,
-    env: { ...env, CLAUDE_DIR: join(testHome, '.claude'), BACKUP_BASE: join(tempRoot, 'backups'), RECALL_SKIP_BUN_UNLINK: 'true' },
+    env: { ...env, CLAUDE_DIR: join(testHome, '.claude'), BACKUP_BASE: join(tempRoot, 'backups'), RECALL_SKIP_BUN_UNLINK: 'true', RECALL_CRONTAB_BIN: '' },
     encoding: 'utf-8',
     maxBuffer: 20 * 1024 * 1024,
   });

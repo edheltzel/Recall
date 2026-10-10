@@ -43,6 +43,8 @@ Follow [Installation → Install Recall](installation.md#install-recall) for the
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
+For the managed quarterly aging job and its lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).
+
 ### `install.sh` vs. `recall install`
 
 Both run the same canonical steps and are **idempotent** — re-running repairs symlinks and registrations, so there is no separate "re-install" command. They differ only in the bootstrap:

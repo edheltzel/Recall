@@ -355,6 +355,9 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
   let backupBase: string;
 
   function runUninstall(extraArgs: string[] = [], extraEnv: Record<string, string> = {}): RunResult {
+    const stubBin = join(tempRoot, 'stub-bin');
+    mkdirSync(stubBin, { recursive: true });
+    writeFileSync(join(stubBin, 'crontab'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const r = spawnSync(
       'bash',
       [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', '--skip-omp', ...extraArgs],
@@ -368,6 +371,8 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
           HOME: claudeDir,
           RECALL_DIR: recallDir,
           RECALL_SKIP_BUN_UNLINK: 'true',
+          PATH: `${stubBin}:${process.env.PATH ?? ''}`,
+          RECALL_CRONTAB_BIN: '',
           ...extraEnv,
         },
       },
@@ -441,7 +446,8 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
     writeFileSync(join(leftover.dir, 'notes.md'), 'mine');
     mkdirSync(join(ompSkills, 'user-skill'), { recursive: true });
     writeFileSync(join(ompSkills, 'user-skill', 'SKILL.md'), '# mine');
-
+    mkdirSync(join(tempRoot, 'stub-bin'), { recursive: true });
+    writeFileSync(join(tempRoot, 'stub-bin', 'crontab'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const r = spawnSync(
       'bash',
       [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi'],
@@ -456,6 +462,8 @@ describe('Agent Skills uninstall (uninstall.sh)', () => {
           RECALL_DIR: recallDir,
           OMP_CONFIG_DIR: join(tempRoot, '.omp', 'agent'),
           RECALL_SKIP_BUN_UNLINK: 'true',
+          PATH: `${join(tempRoot, 'stub-bin')}:${process.env.PATH ?? ''}`,
+          RECALL_CRONTAB_BIN: '',
         },
       },
     );

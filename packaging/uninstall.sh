@@ -17,6 +17,7 @@
 #   ./packaging/uninstall.sh --skip-grok      # leave Grok lifecycle capture alone
 #   ./packaging/uninstall.sh --skip-omp       # leave installer-owned omp skills alone
 #   ./packaging/uninstall.sh --no-gum         # skip gum auto-install; use bash UX this run
+#   Also removes the managed quarterly age cron line (# recall-memory: quarterly age).
 #   ./packaging/uninstall.sh --help           # show this help
 #
 # Environment:
@@ -52,7 +53,7 @@ while [[ $# -gt 0 ]]; do
   --skip-omp) SKIP_OMP=true ;;
   --no-gum) export RECALL_NO_GUM=1 ;;
   --help | -h)
-    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   *)
@@ -185,6 +186,10 @@ print_summary() {
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
   [[ "$SKIP_GROK" != "true" ]] && echo "  • Grok Recall lifecycle hook (~/.grok/hooks/RecallLifecycle.json)"
   [[ "$SKIP_OMP" != "true" ]] && echo "  • Recall-managed omp skill symlinks (user files are preserved; directories only when empty)"
+  _recall_age_cron_read_state
+  if [[ "$_RECALL_AGE_CRON_PRESENT" == "true" ]]; then
+    echo "  • Managed quarterly aging crontab line ($RECALL_AGE_CRON_MARKER)"
+  fi
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"
   echo ""
   if [[ "$PURGE" == "true" ]]; then
@@ -724,6 +729,14 @@ main() {
   confirm_purge_or_exit
 
   echo ""
+  log_info "Removing quarterly age cron..."
+  recall_remove_age_cron
+  if [[ "${_RECALL_AGE_CRON_STATUS:-}" == "missing" \
+    || "${_RECALL_AGE_CRON_STATUS:-}" == "read-error" \
+    || "${_RECALL_AGE_CRON_STATUS:-}" == "write-error" ]]; then
+    lifecycle_failed=true
+  fi
+  echo ""
   log_info "Removing slash commands..."
   remove_slash_commands
   echo ""
@@ -795,7 +808,7 @@ main() {
   if [[ "$lifecycle_failed" == "true" ]]; then
     _banner error "Uninstall Incomplete"
     echo ""
-    log_error "Recall cleanup finished, but one or more invalid config files were left unchanged."
+    log_error "Recall cleanup finished, but one or more managed integrations were left unchanged."
     return 1
   fi
 

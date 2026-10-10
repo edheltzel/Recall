@@ -168,6 +168,15 @@ Claude Code users must complete the plugin attach in [Claude Code Integration](C
 
 The script runs `bun install`, builds Recall, links `recall` / `recall-mcp`, and performs installer-owned setup. Later updates use `recall update`, which refreshes the checkout before rebuilding.
 
+### Install flags
+
+| Flag | Purpose |
+|------|---------|
+| `--yes`, `-y` | Install non-interactively and configure all detected agents |
+| `--no-gum` | Skip optional gum setup and use the bash interface for this run |
+| `--skip-age-cron` | Remove the managed quarterly `recall age` schedule |
+| `--db-path PATH` | Use a custom database path without prompting |
+
 > **Note:** Do not clone to a temporary directory. `bun link` creates symlinks back to the clone location — if the directory is removed (e.g. on reboot), `recall` commands will break.
 
 The installer auto-detects your OS (macOS or Linux) and runs these steps:
@@ -184,6 +193,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, while a confirmed absent or disabled plugin makes the installer link them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
 | 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
+| 11. Schedule aging | Reconciles the [managed quarterly aging job](#quarterly-aging-cron) after the self-check succeeds |
 
 **After install:** Restart each configured host to load its integration.
 
@@ -208,7 +218,8 @@ flowchart LR
     I --> J
     J --> K[Copy Guide\nRecall_GUIDE.md]
     K --> L[Configure Memory Pointer\nor defer to managed Recall rule]
-    L --> M[Done\nRestart Claude Code]
+    L --> M[Reconcile Quarterly Aging Cron]
+    M --> N[Done\nRestart Claude Code]
 ```
 
 ---
@@ -275,6 +286,12 @@ crontab -e
 */30 * * * * ~/.bun/bin/bun run ~/.claude/hooks/RecallBatchExtract.ts --limit 20 >> /tmp/recall-batch.log 2>&1
 ```
 
+### Quarterly aging (cron)
+
+Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st of January, April, July, and October) when `recall` resolves to a durable source checkout or Bun-global install. The line is marked `# recall-memory: quarterly age`. Re-install replaces that line only. `update.sh` rewrites it only if it is still present, so deleting it stays deleted. Re-install and update retain the database assignment stored in that line unless `RECALL_DB_PATH` or `MEM_DB_PATH` explicitly replaces it. `uninstall.sh` removes it when it can read and update the user crontab. The [`--skip-age-cron`](#install-flags) install flag also removes an existing managed line; a later install without the flag schedules it again. If the runner is not durable, `crontab` is unavailable, or crontab access fails, the lifecycle command warns without changing the existing schedule.
+
+The job single-quotes absolute paths to `bun` and `recall`, preserves the resolved `RECALL_DB_PATH`, and appends to `~/.agents/Recall/logs/age.log`. If the database, Bun, runner, or log path contains `%`, `\`, `'`, or a control character, install and update leave crontab unchanged and tell you to schedule the job manually with `crontab -e`. Remove it with `crontab -e` or `./packaging/uninstall.sh`. For aging behavior and safeguards, see [Age](cli-reference.md#age).
+
 ---
 
 ## Environment Variables
@@ -340,8 +357,9 @@ cd /path/to/Recall
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
 - `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
+- The managed crontab line marked `# recall-memory: quarterly age`; other crontab lines are left alone
 
-If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, it does not rewrite that file, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
+If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, or if managed cron cleanup cannot read or update the user crontab, it leaves that surface unchanged, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
 
 Separately installed omp capture is removed with `omp plugin uninstall recall-memory`, followed by an omp restart. The lifecycle uninstaller does not manage that native plugin registration.
 

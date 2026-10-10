@@ -68,9 +68,10 @@ Run `recall install` once after that first `recall update`. Later updates reload
 3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
    dirty tree; resolve manually and re-run).
 4. `bun install && bun run build`.
-5. `recall init` applies any pending SQLite migrations
+5. Re-links the global binaries.
+6. `recall init` applies any pending SQLite migrations
    (`PRAGMA user_version`-driven, non-destructive).
-6. Copies refreshed hooks, shared lib files, agent skills, and
+7. Copies refreshed hooks, shared lib files, agent skills, and
    `FOR_CLAUDE.md`; reconciles Claude MCP ownership under the
    [Claude integration rules](CLAUDE_INTEGRATION.md#migrating-an-existing-install);
    refreshes detected OpenCode, Pi, and Grok integrations; and
@@ -84,11 +85,13 @@ Run `recall install` once after that first `recall update`. Later updates reload
    cross-host bundle.
    Canonical runtime files refresh in place; a foreign file at a managed host
    link is moved into the timestamped collision backup before replacement.
-7. Forces re-registration of every installer-owned Claude hook through
+8. Forces re-registration of every installer-owned Claude hook through
    `recall_register_all_hooks` — this permanently
    prevents the pre-0.7.1 bug class where a partial install could
    leave hooks missing.
-8. Verifies via `recall --version` and `recall stats`.
+9. Verifies via `recall --version` and `recall stats`.
+10. After verification succeeds, refreshes the managed quarterly aging cron
+    according to [Quarterly aging](installation.md#quarterly-aging-cron).
 
 The OpenCode integration now follows the current OpenCode 1.18.x contract:
 restart OpenCode after an update so its plugin reloads, then verify

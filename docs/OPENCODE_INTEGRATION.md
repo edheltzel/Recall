@@ -277,7 +277,7 @@ detect_claude_code() {
 register_opencode_mcp() {
   local config="$OPENCODE_CONFIG_DIR/opencode.json"
   local resolved_db_path
-  resolved_db_path="$(eval echo "$RECALL_DB_PATH_DEFAULT")"  # Resolve ~ to absolute
+  resolved_db_path="$(recall_resolve_db_path)"
 
   # Use the bundled dependency-free JSONC helper for a surgical merge.
   local mem_mcp_path

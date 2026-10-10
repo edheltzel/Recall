@@ -61,6 +61,16 @@ recall_detect_os
 
 # ── Main install orchestration ───────────────────────────────────────────────
 
+configure_age_cron() {
+  if [[ "${SKIP_AGE_CRON:-}" == "true" ]]; then
+    recall_remove_age_cron
+  else
+    recall_install_age_cron
+  fi
+  recall_print_age_cron_notice
+  echo ""
+}
+
 do_install() {
   # Best-effort gum install. Honors RECALL_NO_GUM=1; silently falls back to
   # bash mode on any failure (timeout, network, missing tar/curl, etc.).
@@ -127,6 +137,11 @@ do_install() {
       "Platforms:  $_plist" \
       "Backup:     $_backup_short" \
       "Steps:      $STEP_TOTAL total"
+    if [[ "${SKIP_AGE_CRON:-}" == "true" ]]; then
+      recall_print_age_cron_plan remove
+    else
+      recall_print_age_cron_plan install
+    fi
     echo ""
 
     if ! _confirm "Continue with installation?" "Y"; then
@@ -289,6 +304,7 @@ do_install() {
   fi
 
   _banner success "Installation Complete"
+  configure_age_cron
   echo ""
   log_success "Recall installed successfully — all systems operational."
   echo ""
@@ -348,6 +364,7 @@ help | --help | -h)
   echo "  ./packaging/install.sh                          Install Recall (creates backup first)"
   echo "  ./packaging/install.sh --yes | -y               Install non-interactively (configure all detected agents)"
   echo "  ./packaging/install.sh --no-gum                 Skip gum auto-install; use bash UX for this run"
+  echo "  ./packaging/install.sh --skip-age-cron          Remove the managed quarterly recall age schedule"
   echo "  ./packaging/install.sh --db-path PATH           Use a custom database path (skips the interactive prompt)"
   echo "  ./packaging/install.sh restore                  Restore from most recent backup"
   echo "  ./packaging/install.sh restore TIMESTAMP        Restore specific backup"
@@ -371,6 +388,10 @@ help | --help | -h)
         ;;
       --no-gum)
         export RECALL_NO_GUM=1
+        shift
+        ;;
+      --skip-age-cron)
+        SKIP_AGE_CRON=true
         shift
         ;;
       --db-path)

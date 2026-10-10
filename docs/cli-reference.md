@@ -550,3 +550,16 @@ summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
 
 Prune also fails closed before mutation when the lifecycle schema is not ready.
 If it reports `RETRYABLE`, run `recall init` and retry the same command.
+
+### Age
+
+Type-aware aging. Dry-run by default. Pass `--execute` to apply.
+
+```bash
+recall age
+recall age --execute
+```
+
+With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing guards still apply: recorded dedup survivors, marked duplicates, and foreign-key references are withheld. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched.
+
+For managed cron scheduling, opt-out, paths, and lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).

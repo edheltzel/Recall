@@ -43,6 +43,25 @@ function stubCommandOnPath(binDir: string, command: string): string {
   return binDir;
 }
 
+function crontabStub(bin: string, file: string, writeStatus = 0): void {
+  writeFileSync(
+    bin,
+    `#!/bin/sh
+file=${JSON.stringify(file)}
+if [ "\${1:-}" = "-l" ]; then
+  cat "$file"
+  exit 0
+fi
+if [ ${writeStatus} -ne 0 ]; then
+  cat >/dev/null
+  exit ${writeStatus}
+fi
+cat > "$file"
+`,
+    { mode: 0o755 },
+  );
+}
+
 interface RunResult {
   stdout: string;
   stderr: string;
@@ -53,8 +72,10 @@ function runUninstall(
   claudeDir: string,
   backupBase: string,
   extraArgs: string[] = [],
+  extraEnv: NodeJS.ProcessEnv = {},
 ): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
+  if (!extraEnv.RECALL_CRONTAB_BIN) stubCommandOnPath(stubBin, 'crontab');
   const r = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode', '--skip-pi', ...extraArgs],
@@ -71,6 +92,8 @@ function runUninstall(
         // regardless of CLAUDE_DIR. Skip them so the test suite doesn't wipe
         // the developer's live `recall` link.
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
+        ...extraEnv,
       },
     },
   );
@@ -83,6 +106,7 @@ function runUninstall(
 
 function runPurge(claudeDir: string, backupBase: string): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
+  stubCommandOnPath(stubBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--purge', '--no-confirm', '--skip-opencode', '--skip-pi'],
@@ -97,6 +121,7 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         HOME: claudeDir,
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -129,6 +154,7 @@ function runUninstallIncludingPi(
   const stubBin = join(dirname(claudeDir), 'stub-bin');
   stubCommandOnPath(stubBin, 'claude');
   stubCommandOnPath(stubBin, 'pi');
+  stubCommandOnPath(stubBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-opencode'],
@@ -143,6 +169,7 @@ function runUninstallIncludingPi(
         HOME: claudeDir,
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -159,6 +186,7 @@ function runUninstallIncludingOpenCode(
   opencodeConfigDir: string,
 ): RunResult {
   const stubBin = stubCommandOnPath(join(dirname(claudeDir), 'stub-bin'), 'claude');
+  stubCommandOnPath(stubBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-pi'],
@@ -173,6 +201,7 @@ function runUninstallIncludingOpenCode(
         HOME: claudeDir,
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -192,6 +221,7 @@ function runUninstallAll(
   fakeBin: string,
 ): RunResult {
   stubCommandOnPath(fakeBin, 'claude');
+  stubCommandOnPath(fakeBin, 'crontab');
   const result = spawnSync(
     'bash',
     [UNINSTALL, '--no-confirm', '--skip-omp'],
@@ -207,6 +237,7 @@ function runUninstallAll(
         HOME: claudeDir,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
         RECALL_TEST_UNLINK: unlinkMarker,
+        RECALL_CRONTAB_BIN: '',
       },
     },
   );
@@ -509,6 +540,48 @@ This content must be preserved across an uninstall.
     expect(readFileSync(settingsFile, 'utf-8')).toBe(original);
     expect(result.stdout).toContain('Uninstall Incomplete');
     expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+
+  test('crontab write failure finishes cleanup before reporting incomplete', () => {
+    const cronFile = join(tempRoot, 'cron');
+    const cronBin = join(tempRoot, 'crontab');
+    const original = '15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * /bin/true # recall-memory: quarterly age\n';
+    writeFileSync(cronFile, original);
+    crontabStub(cronBin, cronFile, 2);
+
+    const result = runUninstall(
+      claudeDir,
+      backupBase,
+      [],
+      { RECALL_CRONTAB_BIN: cronBin },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+    expect(existsSync(join(claudeDir, 'hooks', 'RecallExtract.ts'))).toBe(false);
+    expect(result.stdout).toContain('Uninstall Incomplete');
+    expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+
+  test('summary discloses a managed quarterly crontab line before removal', () => {
+    const cronFile = join(tempRoot, 'cron');
+    const cronBin = join(tempRoot, 'crontab');
+    writeFileSync(
+      cronFile,
+      '15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * /bin/true # recall-memory: quarterly age\n',
+    );
+    crontabStub(cronBin, cronFile);
+
+    const result = runUninstall(
+      claudeDir,
+      backupBase,
+      [],
+      { RECALL_CRONTAB_BIN: cronBin },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Managed quarterly aging crontab line (# recall-memory: quarterly age)');
+    expect(readFileSync(cronFile, 'utf-8')).toBe('15 2 * * * /usr/bin/true # user\n');
   });
 
   test('invalid nested Claude settings remain unchanged and make uninstall incomplete', () => {
