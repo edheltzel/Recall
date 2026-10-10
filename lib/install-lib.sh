@@ -3217,6 +3217,41 @@ _recall_crontab_bin() {
   return 0
 }
 
+_recall_age_cron_read_state() {
+  _RECALL_AGE_CRON_READ_STATUS=ok
+  _RECALL_AGE_CRON_BIN=""
+  _RECALL_AGE_CRON_EXISTING=""
+  _RECALL_AGE_CRON_PRESENT=false
+  _RECALL_AGE_CRON_MANAGED_LINE=""
+
+  if _recall_age_cron_blocked; then
+    _RECALL_AGE_CRON_READ_STATUS=sandbox
+    return 0
+  fi
+
+  _RECALL_AGE_CRON_BIN="$(_recall_crontab_bin)"
+  if [[ -z "$_RECALL_AGE_CRON_BIN" ]]; then
+    _RECALL_AGE_CRON_READ_STATUS=missing
+    return 0
+  fi
+
+  local read_output="" read_status=0 candidate=""
+  read_output="$(LC_ALL=C "$_RECALL_AGE_CRON_BIN" -l 2>&1)" || read_status=$?
+  if [[ $read_status -eq 0 ]]; then
+    _RECALL_AGE_CRON_EXISTING="$read_output"
+  elif [[ $read_status -ne 1 ]] || [[ "$read_output" != *"no crontab for "* ]]; then
+    _RECALL_AGE_CRON_READ_STATUS=read-error
+    return 0
+  fi
+
+  while IFS= read -r candidate; do
+    if [[ "$candidate" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
+      _RECALL_AGE_CRON_PRESENT=true
+      [[ -z "$_RECALL_AGE_CRON_MANAGED_LINE" ]] && _RECALL_AGE_CRON_MANAGED_LINE="$candidate"
+    fi
+  done <<< "$_RECALL_AGE_CRON_EXISTING"
+}
+
 # mode: install | refresh | remove
 # refresh rewrites the managed line only when it already exists.
 _recall_age_cron_apply() {
@@ -3224,37 +3259,26 @@ _recall_age_cron_apply() {
   _RECALL_AGE_CRON_STATUS=ok
   _RECALL_AGE_CRON_LINE=""
 
-  if _recall_age_cron_blocked; then
+  _recall_age_cron_read_state
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == "sandbox" ]]; then
     echo "Skipping quarterly age cron: HOME is not the account home (set RECALL_CRONTAB_BIN to schedule anyway)"
     _RECALL_AGE_CRON_STATUS=sandbox
     return 0
   fi
-
-  local cron_bin
-  cron_bin="$(_recall_crontab_bin)"
-  if [[ -z "$cron_bin" ]]; then
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == "missing" ]]; then
     log_warn "crontab not found; left the quarterly recall age schedule unchanged"
     _RECALL_AGE_CRON_STATUS=missing
     return 0
   fi
-
-  local existing="" filtered="" has=false managed_line="" candidate="" read_output="" read_status=0
-  read_output="$(LC_ALL=C "$cron_bin" -l 2>&1)" || read_status=$?
-  if [[ $read_status -eq 0 ]]; then
-    existing="$read_output"
-  elif [[ $read_status -eq 1 ]] && [[ "$read_output" == *"no crontab for "* ]]; then
-    existing=""
-  else
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == "read-error" ]]; then
     log_warn "Could not read crontab; left the quarterly recall age schedule unchanged"
     _RECALL_AGE_CRON_STATUS=read-error
     return 0
   fi
-  while IFS= read -r candidate; do
-    if [[ "$candidate" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
-      has=true
-      [[ -z "$managed_line" ]] && managed_line="$candidate"
-    fi
-  done <<< "$existing"
+
+  local cron_bin="$_RECALL_AGE_CRON_BIN"
+  local existing="$_RECALL_AGE_CRON_EXISTING" filtered=""
+  local has="$_RECALL_AGE_CRON_PRESENT" managed_line="$_RECALL_AGE_CRON_MANAGED_LINE"
   if [[ "$mode" == "refresh" || "$mode" == "remove" ]] && [[ "$has" != "true" ]]; then
     _RECALL_AGE_CRON_STATUS=absent
     return 0
@@ -3334,6 +3358,30 @@ recall_refresh_age_cron() {
 
 recall_remove_age_cron() {
   _recall_age_cron_apply remove
+}
+
+recall_print_age_cron_plan() {
+  local mode="$1" action=""
+  _recall_age_cron_read_state
+
+  if [[ "$_RECALL_AGE_CRON_READ_STATUS" == "read-error" || "$_RECALL_AGE_CRON_READ_STATUS" == "sandbox" ]]; then
+    action=keep
+  elif [[ "$_RECALL_AGE_CRON_READ_STATUS" == "missing" ]]; then
+    action="not scheduled"
+  elif [[ "$_RECALL_AGE_CRON_PRESENT" == "true" ]]; then
+    if [[ "$mode" == "remove" ]]; then
+      action=remove
+    else
+      action=refresh
+    fi
+  elif [[ "$mode" == "install" ]]; then
+    action=add
+  else
+    action="not scheduled"
+  fi
+
+  echo "Quarterly aging cron: $action"
+  echo "  Schedule: $RECALL_AGE_CRON_SCHEDULE | Command: recall age --execute"
 }
 
 recall_print_age_cron_notice() {

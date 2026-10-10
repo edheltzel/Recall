@@ -186,12 +186,8 @@ print_summary() {
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
   [[ "$SKIP_GROK" != "true" ]] && echo "  • Grok Recall lifecycle hook (~/.grok/hooks/RecallLifecycle.json)"
   [[ "$SKIP_OMP" != "true" ]] && echo "  • Recall-managed omp skill symlinks (user files are preserved; directories only when empty)"
-  local cron_bin="" existing_crontab=""
-  if ! _recall_age_cron_blocked; then
-    cron_bin="$(_recall_crontab_bin)"
-    [[ -n "$cron_bin" ]] && existing_crontab="$(LC_ALL=C "$cron_bin" -l 2>/dev/null || true)"
-  fi
-  if [[ "$existing_crontab" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
+  _recall_age_cron_read_state
+  if [[ "$_RECALL_AGE_CRON_PRESENT" == "true" ]]; then
     echo "  • Managed quarterly aging crontab line ($RECALL_AGE_CRON_MARKER)"
   fi
   echo "  • bun unlink (removes recall/recall-mcp from PATH)"

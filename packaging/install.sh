@@ -137,6 +137,11 @@ do_install() {
       "Platforms:  $_plist" \
       "Backup:     $_backup_short" \
       "Steps:      $STEP_TOTAL total"
+    if [[ "${SKIP_AGE_CRON:-}" == "true" ]]; then
+      recall_print_age_cron_plan remove
+    else
+      recall_print_age_cron_plan install
+    fi
     echo ""
 
     if ! _confirm "Continue with installation?" "Y"; then

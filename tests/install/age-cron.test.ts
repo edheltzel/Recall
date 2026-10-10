@@ -70,6 +70,56 @@ function runLib(
 }
 
 describe('quarterly age cron', () => {
+  test('plan reports each lifecycle action, schedule, and command without writing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-plan-'));
+    try {
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      const userLine = '15 2 * * * /usr/bin/true # user\n';
+      const managedLine = `0 3 1 1,4,7,10 * /bin/true ${MARKER}\n`;
+      mkdirSync(home, { recursive: true });
+      cronStub(bin, cronFile);
+
+      const cases = [
+        { mode: 'install', cron: userLine, action: 'add' },
+        { mode: 'install', cron: userLine + managedLine, action: 'refresh' },
+        { mode: 'refresh', cron: userLine + managedLine, action: 'refresh' },
+        { mode: 'remove', cron: userLine + managedLine, action: 'remove' },
+        { mode: 'refresh', cron: userLine, action: 'not scheduled' },
+      ];
+      for (const plan of cases) {
+        writeFileSync(cronFile, plan.cron);
+        const result = runLib(
+          home,
+          join(home, '.agents', 'Recall'),
+          bin,
+          `recall_print_age_cron_plan ${plan.mode}`,
+        );
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(`Quarterly aging cron: ${plan.action}`);
+        expect(result.stdout).toContain('Schedule: 0 3 1 1,4,7,10 * | Command: recall age --execute');
+        expect(readFileSync(cronFile, 'utf-8')).toBe(plan.cron);
+      }
+
+      writeFileSync(
+        join(bin, 'crontab'),
+        '#!/bin/sh\necho "permission denied" >&2\nexit 2\n',
+        { mode: 0o755 },
+      );
+      const kept = runLib(
+        home,
+        join(home, '.agents', 'Recall'),
+        bin,
+        'recall_print_age_cron_plan install',
+      );
+      expect(kept.status).toBe(0);
+      expect(kept.stdout).toContain('Quarterly aging cron: keep');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('install adds one managed line, keeps others, and does not duplicate', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-age-cron-'));
     try {

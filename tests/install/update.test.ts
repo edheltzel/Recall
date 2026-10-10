@@ -105,6 +105,46 @@ describe('update.sh', () => {
     expect(r.status).toBe(0);
   });
 
+  test('confirmation discloses the planned quarterly cron refresh', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-cron-confirm-'));
+    try {
+      const cronFile = join(tempRoot, 'cron');
+      const cronBin = join(tempRoot, 'crontab');
+      writeFileSync(cronFile, '0 3 1 1,4,7,10 * /bin/true # recall-memory: quarterly age\n');
+      writeFileSync(
+        cronBin,
+        `#!/bin/sh
+if [ "\${1:-}" = "-l" ]; then
+  cat ${JSON.stringify(cronFile)}
+fi
+`,
+        { mode: 0o755 },
+      );
+      const harness = `
+        source ${JSON.stringify(UPDATE)}
+        NO_CONFIRM=false
+        DRY_RUN=false
+        _confirm() { return 1; }
+        step_confirm
+      `;
+      const result = spawnSync('bash', ['-c', harness], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env: {
+          ...process.env,
+          HOME: tempRoot,
+          RECALL_CRONTAB_BIN: cronBin,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Quarterly aging cron: refresh');
+      expect(result.stdout).toContain('Schedule: 0 3 1 1,4,7,10 * | Command: recall age --execute');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('failed verification does not refresh the quarterly cron', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-update-cron-order-'));
     try {
