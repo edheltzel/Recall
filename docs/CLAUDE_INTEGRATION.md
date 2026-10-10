@@ -34,6 +34,8 @@ recall install
 
 With the plugin active, `recall install` / `./packaging/update.sh` keep the Claude hooks, skip duplicate skill symlinks, and reconcile the user-scope `recall-memory` MCP entry under the database-path rules below. Running only the plugin gives skills and MCP, not automatic capture.
 
+Plugin-state detection fails closed. A missing `~/.claude/plugins/installed_plugins.json` confirms that the plugin is absent. An unreadable or invalid installed-plugin file, or an unreadable or invalid `settings.json` after an installation is detected, makes ownership unknown. In that state, install and update return an error before changing ownership-dependent skill links or MCP configuration. Restore read access or valid JSONC, then rerun the command.
+
 ## What MCP covers
 
 MCP is the primary cross-host seam.
@@ -86,7 +88,7 @@ claude mcp list                                  # confirm plugin:recall:recall-
 claude mcp remove recall-memory -s user          # then drop the duplicate
 ```
 
-`recall doctor` reports the state under **Claude native plugin**: `PASS` when the plugin is the sole owner, `WARN` when duplicates exist or plugin ownership cannot be parsed, and `INFO` when the plugin is absent or disabled. `doctor --fix` does not apply ownership-dependent skill or MCP repairs while ownership is unknown.
+`recall doctor` reports the state under **Claude native plugin**: `PASS` when the plugin is the sole owner, `WARN` when duplicates exist or plugin ownership cannot be read or parsed, and `INFO` when the plugin is absent or disabled. `doctor --fix` does not apply ownership-dependent skill or MCP repairs while ownership is unknown.
 
 Uninstalling is a separate, user-owned action — `uninstall.sh` does not remove the plugin:
 

@@ -164,6 +164,7 @@ export function readJsoncObject(file: string, emptyIfMissingOrBlank = false): Js
   return value;
 }
 
+/** Missing files are absent; every other stat, read, parse, or shape failure is unknown. */
 export function readJsoncObjectState(file: string): Record<string, unknown> | null | undefined {
   try {
     statSync(file);
