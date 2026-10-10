@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseJsonc, validateClaudeConfigShape, writeJsonAtomic, writeJsonAtomicOrRemoveEmpty } from '../../lib/jsonc-mcp.ts';
+import { parseJsonc, stageFileAtomic, validateClaudeConfigShape, writeJsonAtomic, writeJsonAtomicOrRemoveEmpty } from '../../lib/jsonc-mcp.ts';
 
 let dir: string;
 
@@ -47,6 +47,27 @@ describe('jsonc settings helpers', () => {
     expect(readFileSync(real, 'utf8')).toContain('"ok": true');
     expect(readFileSync(link, 'utf8')).toContain('"ok": true');
     expect(statSync(real).mode & 0o777).toBe(0o600);
+  });
+
+  test('two staged writes use distinct temps and neither cleanup deletes the other', () => {
+    dir = mkdtempSync(join(tmpdir(), 'recall-jsonc-'));
+    const file = join(dir, 'settings.json');
+    writeFileSync(file, '{"old":true}\n');
+    chmodSync(file, 0o640);
+    const planted = `${file}.tmp`;
+    mkdirSync(planted);
+    chmodSync(planted, 0o751);
+
+    const first = stageFileAtomic(file, '{"n":1}\n');
+    const second = stageFileAtomic(file, '{"n":2}\n');
+    first.cleanup();
+    second.commit();
+    second.cleanup();
+
+    expect(readFileSync(file, 'utf8')).toBe('{"n":2}\n');
+    expect(statSync(file).mode & 0o777).toBe(0o640);
+    expect(lstatSync(planted).isDirectory()).toBe(true);
+    expect(statSync(planted).mode & 0o777).toBe(0o751);
   });
 
   test('atomic writers fail closed on a dangling symlink', () => {

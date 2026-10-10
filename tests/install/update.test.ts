@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -366,8 +366,8 @@ describe('update.sh', () => {
 
   test('Claude MCP reconciliation reports a failed second owner write as partial', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'recall-mcp-partial-write-'));
+    const claudeDir = join(tempRoot, '.claude');
     try {
-      const claudeDir = join(tempRoot, '.claude');
       const legacyFile = join(tempRoot, '.claude.json');
       const settingsFile = join(claudeDir, 'settings.json');
       const backupDir = join(tempRoot, 'backups');
@@ -380,7 +380,7 @@ describe('update.sh', () => {
       });
       writeFileSync(legacyFile, legacyOriginal);
       writeFileSync(settingsFile, settingsOriginal);
-      mkdirSync(`${settingsFile}.tmp`);
+      chmodSync(claudeDir, 0o555);
 
       const driver = [
         'set -e',
@@ -403,10 +403,11 @@ describe('update.sh', () => {
       expect(readFileSync(join(backupDir, '.claude.json'), 'utf-8')).toBe(legacyOriginal);
       expect(readFileSync(join(backupDir, 'settings.json'), 'utf-8')).toBe(settingsOriginal);
       const output = `${result.stdout}${result.stderr}`;
-      expect(output).toContain('refusing to replace non-file temporary path');
+      expect(output).toContain('EACCES');
       expect(output).toContain('config may be partially updated');
       expect(output).toContain(`Restore the Claude config backups from ${backupDir}, then rerun the command`);
     } finally {
+      chmodSync(claudeDir, 0o755);
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
