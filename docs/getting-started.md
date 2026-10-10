@@ -12,28 +12,11 @@ Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP
 
 Recall requires [Bun](https://bun.sh) (`bun:sqlite` and Bun-native hooks). Put Bun on `PATH` first.
 
-Recall is not published to npm (#312). Complete the canonical [source-checkout install](installation.md#source-checkout), or use the [local-tarball procedure](installation.md#local-tarball) when you need a packaged global binary. Return here after Recall is installed.
-
-Then attach each harness with its **native plugin or extension** when it has one. The installer script is not the preferred path for Claude Code, Codex, Pi, or omp. Commands and ownership are in the README Quick Start table and the per-host guides: [Claude](CLAUDE_INTEGRATION.md), [Codex](CODEX_INTEGRATION.md), [Pi](PI_INTEGRATION.md), [omp](OMP_INTEGRATION.md).
-
-| Harness | Preferred attach |
-| --- | --- |
-| Claude Code | `claude plugin marketplace add /absolute/path/to/Recall`, `claude plugin install recall@recall-marketplace`, then `recall install` for hooks and user-scope reconciliation. Attach the plugin before `./packaging/install.sh`. |
-| Codex | `codex plugin marketplace add /absolute/path/to/Recall` then `codex plugin add recall@recall-marketplace`. |
-| Pi | `pi install /absolute/path/to/Recall`, then MCP adapter/config (`recall install --yes` coordinates that). |
-| omp | Pack and link the native capture extension via [omp Integration](OMP_INTEGRATION.md); `recall install` separately links `do-recall-*` skills. |
-| Grok | `recall install` / `./packaging/install.sh` only — no plugin path. See [Grok Integration](GROK_INTEGRATION.md). |
-| Cursor | Merge `templates/cursor/` snippets. No marketplace plugin. |
-
-`recall install` (or `./packaging/install.sh` from source) still runs installer-owned setup for Claude hooks, Grok, OpenCode, omp skill links, and Pi's MCP adapter.
-
-For a source checkout, follow the [canonical source-checkout sequence](installation.md#source-checkout). It builds from the working tree after any native host attach that must precede installer-owned setup.
-
-Do not clone into `/tmp` — `bun link` points back at the checkout.
+Complete the canonical [Installation guide](installation.md#install-recall), which owns the supported bootstrap paths and their ordering. Then follow the applicable host guide: [Claude](CLAUDE_INTEGRATION.md), [Codex](CODEX_INTEGRATION.md), [Pi](PI_INTEGRATION.md), [omp](OMP_INTEGRATION.md), or [Grok](GROK_INTEGRATION.md).
 
 After any attach, **restart each configured agent** so it loads the plugin, extension, or snippets.
 
-Which command when (source checkout vs local tarball, re-install, custom DB path) lives in [Managing Recall](lifecycle.md).
+Which command to run for re-install, update, custom database paths, and recovery lives in [Managing Recall](lifecycle.md).
 
 ---
 
