@@ -129,23 +129,27 @@ Recall has one install root: `~/.agents/Recall`. The runtime tree is not
 relocatable. `RECALL_DB_PATH`, `recall install --db-path`, and `./packaging/install.sh --db-path` may place the SQLite
 database elsewhere; they do not move the install root.
 
-Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312). Canonical install:
+Recall is not on the npm registry yet; the `recall-memory` package there is an unrelated project (see #312). Use a [source checkout](#source-checkout) for the canonical install, or a [local tarball](#local-tarball) when you need a packaged global binary.
+
+### Local tarball
+
+Start with the permanent checkout described under [Source checkout](#source-checkout), but stop before attaching a host or running `./packaging/install.sh`. Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
 
 ```bash
-git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
-```
-
-That script runs `bun install`, the build, and links `recall` / `recall-mcp`, then installer-owned setup. Updates: `recall update` (git checkout pulls). Claude Code should follow [Source checkout](#source-checkout) and attach the plugin before `./packaging/install.sh`.
-
-Global binary from a local tarball (from the checkout):
-
-```bash
-bun run build && npm pack --pack-destination <dir>
-bun install -g <dir>/recall-memory-<version>.tgz
+cd /absolute/path/to/Recall
+git fetch --tags origin
+git switch main
+git pull --ff-only origin main
+bun install
+bun run build
+package_dir=/absolute/path/to/package-output
+mkdir -p "$package_dir"
+archive="$(npm pack --pack-destination "$package_dir")"
+bun install -g "$package_dir/$archive"
 recall init
 ```
 
-Then `recall install`. Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged (tarball) mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
+Next attach the host's native plugin or extension from the [README Quick Start](../README.md#quick-start). For Claude Code, install the plugin before running `recall install` for lifecycle hooks so the installer reconciles duplicate MCP and skill surfaces. Grok and detected hosts without a native attach use `recall install` directly. In packaged (tarball) mode it runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, `bun install`, build, and link.
 
 ### Source checkout
 
@@ -168,6 +172,8 @@ Other hosts skip those two Claude-only commands. Then run the installer:
 ```bash
 ./packaging/install.sh
 ```
+
+The script runs `bun install`, builds Recall, links `recall` / `recall-mcp`, and performs installer-owned setup. Later updates use `recall update`, which refreshes the checkout before rebuilding.
 
 > **Note:** Do not clone to a temporary directory. `bun link` creates symlinks back to the clone location — if the directory is removed (e.g. on reboot), `recall` commands will break.
 
