@@ -62,9 +62,14 @@ function deriveMeta(extracted: string): { topics: string[]; summary: string } {
 
 let dbPath: string;
 let savedKey: string | undefined;
+let savedHome: string | undefined;
+let jevHome: string;
 let savedFetch: typeof fetch;
 
 beforeEach(() => {
+  savedHome = process.env.HOME;
+  jevHome = mkdtempSync(join(tmpdir(), 'recall-no-jev-env-'));
+  process.env.HOME = jevHome;
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
   delete process.env.JEV_RECALL_KEY;
@@ -78,6 +83,9 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+  rmSync(jevHome, { recursive: true, force: true });
   teardownTestDb();
 });
 

@@ -1,11 +1,11 @@
-import { scoreCandidate } from '../providers/jev.js';
+import { resolveJevKey, scoreCandidate } from '../providers/jev.js';
 
 export const JEV_KEY_URL = 'https://console.typesafe.ai/keys';
 
 const KEY_HELP = [
   'JEV_RECALL_KEY is not set.',
   `Get a TypeSafe API key: ${JEV_KEY_URL}`,
-  'Export it into this process. Recall does not read ~/.env.',
+  'Set it in the environment or in ~/.env. A non-blank environment value wins.',
 ].join('\n');
 
 export interface RunJevInput {
@@ -27,11 +27,6 @@ export interface RunJevIo {
 function present(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function keyFrom(env: NodeJS.ProcessEnv): string | undefined {
-  const raw = env.JEV_RECALL_KEY;
-  return typeof raw === 'string' ? present(raw) : undefined;
 }
 
 async function readHiddenKey(): Promise<string> {
@@ -82,7 +77,7 @@ export async function runJev(input: RunJevInput, io: RunJevIo = {}): Promise<voi
     return;
   }
 
-  let apiKey = keyFrom(env);
+  let apiKey = resolveJevKey(env, env.HOME ?? env.USERPROFILE);
   if (!apiKey) {
     writeErr(KEY_HELP);
     if (!isTTY) {

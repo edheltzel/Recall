@@ -24,7 +24,7 @@ Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.c
 
 All coding agents forget when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session, across every agent you use.
 
-Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. Retrieval does not phone home. Optional Jev is off unless `JEV_RECALL_KEY` is exported into the process that runs the hook or CLI. When it is exported, Jev sends scrubbed extracted candidates to TypeSafe. A key that sits only in `~/.env` does nothing until that process sources the file. No vendor lock-in. Optional `~/.agents/Recall/config.json` can point query, extraction, or cluster at a harness. Recall starts Claude, Pi, and Codex. OpenCode, Grok, JCode, omp, and Cursor fail that step until a stdin contract is proven. Anything else is a command you write. A missing file keeps today's local search and extractors. Install never writes the file.
+Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. Retrieval does not phone home. Optional Jev is off unless `JEV_RECALL_KEY` is set in the process environment or in `~/.env`. A non-blank environment value wins. When the key is present, Jev sends scrubbed extracted candidates to TypeSafe. No vendor lock-in. Optional `~/.agents/Recall/config.json` can point query, extraction, or cluster at a harness. Recall starts Claude, Pi, and Codex. OpenCode, Grok, JCode, omp, and Cursor fail that step until a stdin contract is proven. Anything else is a command you write. A missing file keeps today's local search and extractors. Install never writes the file.
 
 > Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/). [Codex CLI](https://github.com/openai/codex) has native MCP, skills, automatic capture, and session-start injection. [Grok Build CLI](docs/GROK_INTEGRATION.md) has automatic capture but no automatic injection. [omp](docs/OMP_INTEGRATION.md) has native main-session capture with skills and MCP kept separate. [JCode](docs/JCODE_INTEGRATION.md) remains MCP and skills only after a bounded live probe. See [Roadmap](#roadmap).
 
@@ -58,7 +58,7 @@ Install once, then forget about it. Recall runs silently in the background:
 
 Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
 
-- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server. Keyword and hybrid retrieval need no API key and do not phone home. Optional Ollama for embeddings stays local. Optional Jev is the exception: with `JEV_RECALL_KEY` exported, scrubbed extracted candidates go to TypeSafe. Unset, Jev is off and those rows are written unchanged. Recall does not load `~/.env` by itself.
+- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server. Keyword and hybrid retrieval need no API key and do not phone home. Optional Ollama for embeddings stays local. Optional Jev is the exception: with `JEV_RECALL_KEY` in the environment or `~/.env`, scrubbed extracted candidates go to TypeSafe. A non-blank environment value wins. Missing from both, Jev is off and those rows are written unchanged.
 - **Multi-agent native.** One memory layer across the agents you actually use. Claude Code, Pi, OpenCode, Codex, Grok, JCode, and omp share the same database through their supported MCP, skill, and lifecycle surfaces. Automatic capture and injection depend on each host's supported lifecycle surfaces; see the capability matrix below.
 - **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and **Library of Alexandria** entries (Automatic-capture LoA and Curated LoA) — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
 - **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
@@ -265,7 +265,7 @@ flowchart TD
   end
 ```
 
-Set the key in the process that runs the hook or CLI. Recall does not read `~/.env` on its own. Walk through that once in [Score one memory item with Jev](docs/score-a-memory-with-jev.md).
+Set `JEV_RECALL_KEY` in the environment or in `~/.env`. A non-blank environment value wins. Walk through that once in [Score one memory item with Jev](docs/score-a-memory-with-jev.md).
 
 
 ### Claude Code Session Lifecycle
@@ -400,7 +400,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
 | [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |
-| [Score one memory item with Jev](docs/score-a-memory-with-jev.md) | Export `JEV_RECALL_KEY` and prove one keep, demote, or drop score |
+| [Score one memory item with Jev](docs/score-a-memory-with-jev.md) | Set `JEV_RECALL_KEY` and prove one keep, demote, or drop score |
 | [Harness API](docs/api.md) | Thin `recall-memory/api` surface so a new harness can hook start/drop/capture/inject without forking core |
 | [Capture Adapter](docs/CAPTURE_ADAPTER.md) | Public `recall capture` door: raw ambient text in, no SDK |
 | [Installation](docs/installation.md)       | Prerequisites, install, verify, session extraction                        |

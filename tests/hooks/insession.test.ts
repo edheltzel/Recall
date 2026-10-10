@@ -6,6 +6,9 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   readInSessionConfig,
@@ -62,12 +65,20 @@ function line(role: 'user' | 'assistant', body: string): string {
 }
 
 let dbPath: string;
+let savedHome: string | undefined;
+let jevHome: string;
 
 beforeEach(() => {
+  savedHome = process.env.HOME;
+  jevHome = mkdtempSync(join(tmpdir(), 'recall-no-jev-env-'));
+  process.env.HOME = jevHome;
   dbPath = setupTestDb();
 });
 
 afterEach(() => {
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+  rmSync(jevHome, { recursive: true, force: true });
   teardownTestDb();
 });
 

@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 // Canonical Jev scorer. Hooks consume this file; src/providers/jev.ts re-exports it.
 // Never import from src/.
 
@@ -120,11 +123,54 @@ function decisionFromAnswer(answer: unknown): JevDecision {
   };
 }
 
-function requiredKey(env: NodeJS.ProcessEnv): string {
-  const key = env[JEV_KEY_ENV];
-  if (typeof key !== 'string' || key.trim() === '') {
-    throw new Error(`${JEV_KEY_ENV} is not set`);
+const ENV_ASSIGN = new RegExp(`^(?:export\\s+)?${JEV_KEY_ENV}\\s*=\\s*(.*)$`);
+
+export function resolveJevKey(env: NodeJS.ProcessEnv, home?: string): string | undefined {
+  return presentKey(env[JEV_KEY_ENV]) ?? keyFromHome(home ?? env.HOME ?? env.USERPROFILE);
+}
+
+function presentKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const key = value.trim();
+  return key === '' ? undefined : key;
+}
+
+function keyFromHome(home: string | undefined): string | undefined {
+  if (!home?.trim()) return undefined;
+  try {
+    return keyFromEnvText(readFileSync(join(home, '.env'), 'utf8'));
+  } catch {
+    return undefined;
   }
+}
+
+function keyFromEnvText(text: string): string | undefined {
+  let found: string | undefined;
+  let seen = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = ENV_ASSIGN.exec(trimmed);
+    if (!match) continue;
+    found = unquote(match[1]);
+    seen = true;
+  }
+  return seen ? presentKey(found) : undefined;
+}
+
+function unquote(raw: string): string {
+  const quote = raw[0];
+  if ((quote === '"' || quote === "'") && raw.includes(quote, 1)) {
+    return raw.slice(1, raw.indexOf(quote, 1));
+  }
+  const comment = raw.search(/ #/);
+  return (comment === -1 ? raw : raw.slice(0, comment)).trim();
+}
+
+function requiredKey(env: NodeJS.ProcessEnv): string {
+  const key = resolveJevKey(env);
+  if (!key) throw new Error(`${JEV_KEY_ENV} is not set`);
   return key;
 }
 
@@ -142,42 +188,43 @@ export async function scoreCandidate(
 ): Promise<JevDecision> {
   const apiKey = options.apiKey ?? requiredKey(options.env ?? process.env);
   const call = options.fetch ?? fetch;
-  const response = await call(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      state: stateFor(candidate),
-      model: MODEL,
-      questions: {
-        [QUESTION_ID]: {
-          type: 'choice',
-          instructions: INSTRUCTIONS,
-          criteria: CRITERIA,
-        },
+  try {
+    const response = await call(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
-    }),
-  });
+      body: JSON.stringify({
+        state: stateFor(candidate),
+        model: MODEL,
+        questions: {
+          [QUESTION_ID]: {
+            type: 'choice',
+            instructions: INSTRUCTIONS,
+            criteria: CRITERIA,
+          },
+        },
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Jev request failed: HTTP ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Jev request failed: HTTP ${response.status}`);
+    }
+
+    const body = await response.json() as { answers?: Record<string, unknown> };
+    return decisionFromAnswer(body.answers?.[QUESTION_ID]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const redacted = redact(message, apiKey);
+    if (redacted !== message) throw new Error(redacted);
+    throw error;
   }
-
-  const body = await response.json() as { answers?: Record<string, unknown> };
-  return decisionFromAnswer(body.answers?.[QUESTION_ID]);
-}
-
-function presentKey(value: string): string | undefined {
-  const key = value.trim();
-  return key === '' ? undefined : key;
 }
 
 function batchKey(options: ScoreCandidatesOptions): string | undefined {
   if (options.apiKey !== undefined) return presentKey(options.apiKey);
-  const raw = (options.env ?? process.env)[JEV_KEY_ENV];
-  return typeof raw === 'string' ? presentKey(raw) : undefined;
+  return resolveJevKey(options.env ?? process.env);
 }
 
 function candidateIdError(candidates: readonly JevBatchCandidate[]): string | undefined {

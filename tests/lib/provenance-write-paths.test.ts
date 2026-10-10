@@ -33,11 +33,16 @@ const SECRET = 'sk-ant-FAKEKEYFORTESTINGONLY0000000000000000';
 
 let dbPath: string;
 let savedKey: string | undefined;
+let savedHome: string | undefined;
+let jevHome: string;
 let savedFetch: typeof fetch;
 let jevCalls: string[];
 const originalLog = console.log;
 
 beforeEach(() => {
+  savedHome = process.env.HOME;
+  jevHome = mkdtempSync(join(tmpdir(), 'recall-no-jev-env-'));
+  process.env.HOME = jevHome;
   dbPath = setupTestDb();
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
@@ -54,6 +59,9 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
+  rmSync(jevHome, { recursive: true, force: true });
   console.log = originalLog;
   teardownTestDb();
 });

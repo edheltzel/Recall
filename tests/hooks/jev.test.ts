@@ -1,6 +1,11 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   JEV_KEY_ENV,
+  resolveJevKey,
+  scoreCandidate,
   scoreCandidates,
   type JevBatchCandidate,
 } from '../../hooks/lib/jev';
@@ -179,5 +184,94 @@ describe('hook scoreCandidates', () => {
       env: {},
     });
     expect(missing).toEqual({ status: 'error', error: 'Jev response missing an answer for l0' });
+  });
+});
+
+const homes: string[] = [];
+
+function disposableHome(body?: string): string {
+  const home = mkdtempSync(join(tmpdir(), 'recall-jev-env-'));
+  homes.push(home);
+  if (body !== undefined) writeFileSync(join(home, '.env'), body);
+  return home;
+}
+
+describe('resolveJevKey', () => {
+  afterEach(() => {
+    for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+  });
+
+  test('a non-blank environment value wins and a blank one falls back to the file', async () => {
+    const secret = 'file-only-secret';
+    const home = disposableHome(`JEV_RECALL_KEY=${secret}\n`);
+    expect(resolveJevKey({ JEV_RECALL_KEY: 'env-wins', HOME: home })).toBe('env-wins');
+    expect(resolveJevKey({ JEV_RECALL_KEY: '   ', HOME: home })).toBe(secret);
+
+    const fromEnv = recordedFetch(() => choiceResponse({ d0: scoredAnswers.d0 }));
+    await scoreCandidates([candidates[0]], {
+      fetch: fromEnv.fetch,
+      env: { JEV_RECALL_KEY: 'env-wins', HOME: home },
+    });
+    expect(new Headers(fromEnv.calls[0].headers).get('authorization')).toBe('Bearer env-wins');
+    expect(fromEnv.calls[0].body).not.toContain(secret);
+
+    const fromFile = recordedFetch(() => choiceResponse({ d0: scoredAnswers.d0 }));
+    const scored = await scoreCandidates([candidates[0]], {
+      fetch: fromFile.fetch,
+      env: { JEV_RECALL_KEY: '  ', HOME: home },
+    });
+    expect(scored.status).toBe('scored');
+    expect(new Headers(fromFile.calls[0].headers).get('authorization')).toBe(`Bearer ${secret}`);
+  });
+
+  test('parses export, quotes, comments, and CRLF, and ignores a commented line', () => {
+    const secret = 'quoted-secret';
+    expect(resolveJevKey({}, disposableHome('export JEV_RECALL_KEY=exported\n'))).toBe('exported');
+    expect(resolveJevKey({}, disposableHome('JEV_RECALL_KEY="double"\n'))).toBe('double');
+    expect(resolveJevKey({}, disposableHome("JEV_RECALL_KEY='single'\n"))).toBe('single');
+    expect(resolveJevKey({}, disposableHome('JEV_RECALL_KEY=raw # trailing\n'))).toBe('raw');
+    expect(resolveJevKey({}, disposableHome('JEV_RECALL_KEY="keep # this" # drop\n'))).toBe('keep # this');
+    expect(resolveJevKey({}, disposableHome(`export JEV_RECALL_KEY=${secret}\r\n`))).toBe(secret);
+    expect(resolveJevKey({}, disposableHome(`# JEV_RECALL_KEY=${secret}\n# export JEV_RECALL_KEY=${secret}\n`))).toBeUndefined();
+    expect(resolveJevKey({}, disposableHome('JEV_RECALL_KEY=old\nJEV_RECALL_KEY=new\n'))).toBe('new');
+    expect(resolveJevKey({}, disposableHome(`JEV_RECALL_KEY_EXTRA=${secret}\nOTHER=nope\n`))).toBeUndefined();
+  });
+
+  test('a missing or unreadable file skips, and thrown errors omit the key', async () => {
+    const secret = 'never-print-this';
+    const empty = disposableHome();
+    expect(resolveJevKey({ JEV_RECALL_KEY: '' }, empty)).toBeUndefined();
+    const skipped = await scoreCandidates([candidates[0]], {
+      fetch: recordedFetch(() => choiceResponse(scoredAnswers)).fetch,
+      env: { HOME: empty, JEV_RECALL_KEY: '' },
+    });
+    expect(skipped).toEqual({ status: 'skipped', ids: ['d0'] });
+
+    const broken = disposableHome();
+    mkdirSync(join(broken, '.env'));
+    expect(resolveJevKey({}, broken)).toBeUndefined();
+
+    const home = disposableHome(`JEV_RECALL_KEY='${secret}'\n`);
+    const thrown = recordedFetch(() => {
+      throw new Error(`socket failed for ${secret}`);
+    });
+    let message = '';
+    try {
+      await scoreCandidate({ text: 'hi' }, {
+        fetch: thrown.fetch,
+        env: { HOME: home, JEV_RECALL_KEY: '   ' },
+      });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBe('Jev request failed');
+    expect(message).not.toContain(secret);
+
+    const batch = await scoreCandidates([candidates[0]], {
+      fetch: thrown.fetch,
+      env: { HOME: home },
+    });
+    expect(batch).toEqual({ status: 'error', error: 'Jev request failed' });
+    expect(JSON.stringify(batch)).not.toContain(secret);
   });
 });
