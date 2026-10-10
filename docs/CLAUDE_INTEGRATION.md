@@ -6,11 +6,11 @@
 
 Claude lifecycle hooks are **not** in the plugin. Plugin hooks *merge* with `settings.json` rather than replacing them, so shipping `Stop` / `SessionStart` / `PreCompact` in the bundle would double-capture for anyone who also ran `recall install`. Auto-capture, tiered L0/L1 injection, and pre-compaction flushing stay installer-owned.
 
-The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plugin bundle is `hosts/plugins/recall-claude/`. Source in this repository does not mean the plugin is installed on a given machine — run the commands below to enable it.
+The checked-in marketplace catalog is `.claude-plugin/marketplace.json`. The plugin bundle is `hosts/plugins/recall-claude/`. Source in this repository does not mean the plugin is installed on a given machine.
 
 ## Install (preferred)
 
-Install Recall so `recall-mcp` is on `PATH` and the database exists. Recall is not published to npm (#312). Use the canonical [source-checkout](installation.md#source-checkout) or [local-tarball](installation.md#local-tarball) procedure. The source-checkout procedure attaches the plugin below before running `./packaging/install.sh`; the tarball procedure installs the binary first, then attaches the plugin before `recall install`.
+Start with the canonical [Installation guide](installation.md#install-recall). It owns the current source-checkout and local-tarball bootstrap and the warning about the unrelated npm package.
 
 Then add this repository as a marketplace and install its plugin:
 
@@ -23,12 +23,7 @@ The local repository path is required for the current checked-in marketplace. A 
 
 ### Hooks and the installer (required for automatic capture)
 
-Finish the path you chose:
-
-```bash
-./packaging/install.sh  # source checkout
-recall install          # local tarball
-```
+Finish the selected bootstrap path in the [Installation guide](installation.md#install-recall); it specifies the matching installer command.
 
 With the plugin active, `./packaging/install.sh`, `recall install`, and `./packaging/update.sh` keep the Claude hooks, skip duplicate skill symlinks, and reconcile the user-scope `recall-memory` MCP entry under the database-path rules below. Running only the plugin gives skills and MCP, not automatic capture.
 

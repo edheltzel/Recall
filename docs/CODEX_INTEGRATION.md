@@ -14,7 +14,7 @@ The plugin owns three distinct surfaces:
 
 ## Install (preferred)
 
-Install Recall first so `recall`, `recall-mcp`, and the SQLite schema are available. Recall is not published to npm (#312). Follow the canonical [source-checkout](installation.md#source-checkout) or [local-tarball](installation.md#local-tarball) procedure.
+Install Recall first so `recall`, `recall-mcp`, and the SQLite schema are available. The canonical [Installation guide](installation.md#install-recall) owns the supported bootstrap paths and npm package warning.
 
 Then add this repository as a Codex marketplace and install its plugin:
 
