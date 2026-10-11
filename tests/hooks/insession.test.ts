@@ -6,7 +6,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import {
   readInSessionConfig,
   shouldRun,
@@ -62,12 +62,15 @@ function line(role: 'user' | 'assistant', body: string): string {
 }
 
 let dbPath: string;
+let restoreHome: () => void;
 
 beforeEach(() => {
+  restoreHome = isolateTestHome();
   dbPath = setupTestDb();
 });
 
 afterEach(() => {
+  restoreHome();
   teardownTestDb();
 });
 

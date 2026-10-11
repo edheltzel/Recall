@@ -7,6 +7,18 @@ import { __resetAvailabilityCache } from '../../src/lib/availability-cache';
 
 let tempDir: string;
 
+export function isolateTestHome(): () => void {
+  const previousHome = process.env.HOME;
+  const home = mkdtempSync(join(tmpdir(), 'recall-test-home-'));
+  process.env.HOME = home;
+
+  return () => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  };
+}
+
 export function setupTestDb(): string {
   tempDir = mkdtempSync(join(tmpdir(), 'recall-test-'));
   const dbPath = join(tempDir, 'test.db');
