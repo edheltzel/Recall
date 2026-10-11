@@ -12,7 +12,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { setupTestDb, teardownTestDb } from '../helpers/setup';
+import { isolateTestHome, setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runExtractCore, type ExtractCoreContext } from '../../hooks/lib/extract-core';
 
 // A clearly-fake Anthropic key that matches P0's `anthropic-key` pattern
@@ -62,9 +62,11 @@ function deriveMeta(extracted: string): { topics: string[]; summary: string } {
 
 let dbPath: string;
 let savedKey: string | undefined;
+let restoreHome: () => void;
 let savedFetch: typeof fetch;
 
 beforeEach(() => {
+  restoreHome = isolateTestHome();
   savedKey = process.env.JEV_RECALL_KEY;
   savedFetch = globalThis.fetch;
   delete process.env.JEV_RECALL_KEY;
@@ -78,6 +80,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   if (savedKey === undefined) delete process.env.JEV_RECALL_KEY;
   else process.env.JEV_RECALL_KEY = savedKey;
+  restoreHome();
   teardownTestDb();
 });
 

@@ -32,7 +32,7 @@ export interface StructuredExtractionResult {
   breadcrumbs: number;
   errors: number;
   loa: number;
-  /** Disposition counts for scored rows. `skipped` is a missing or blank key. A request error leaves every counter at 0. */
+  /** Disposition counts for scored rows. `skipped` means no key resolved from the environment or `$HOME/.env`. A request error leaves every counter at 0. */
   jev: { kept: number; demoted: number; dropped: number; skipped: number };
   failures: Record<string, string>;
 }

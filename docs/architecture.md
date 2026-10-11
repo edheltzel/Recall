@@ -272,7 +272,7 @@ A named step is `{ "id": "pi", "model": "sonnet" }` with no `argv`. Supported id
 
 A blank `claude` model uses `haiku`. Other named ids need a model or that step fails. A query step sends the question alone. Extraction sends the prompt that path already builds. Cluster sends the synthesis prompt. A missing cluster key keeps the existing dated Claude call. A present list that fails does not call Claude afterward.
 
-The file must not contain an API key. Install never writes this file. Recall does not read `~/.env`.
+The file must not contain an API key. Install never writes this file. Extractor config does not read `~/.env`.
 
 ```json
 {
