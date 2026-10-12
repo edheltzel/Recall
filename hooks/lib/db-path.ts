@@ -10,7 +10,7 @@
 
 import { join } from 'path';
 
-/** Expand only the current user's leading `~` or `~/`, like the installer. */
+/** Preserve the suffix: normalizing symlink/.. paths can select a different database. */
 export function expandDbPathTilde(raw: string, home: string): string {
   if (raw === '~') return home;
   if (raw.startsWith('~/')) return home + raw.slice(1);

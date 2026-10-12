@@ -62,7 +62,6 @@ function applyConnectionPragmas(database: Database): void {
 //   1. RECALL_DB_PATH (primary)
 //   2. MEM_DB_PATH    (legacy fallback)
 //   3. DEFAULT_DB_PATH
-// A leading `~` expands to HOME, matching hooks and the installer (#323).
 export function getDbPath(): string {
   const raw = process.env.RECALL_DB_PATH || process.env.MEM_DB_PATH;
   return raw ? expandDbPathTilde(raw, process.env.HOME || homedir()) : DEFAULT_DB_PATH;
