@@ -12,6 +12,7 @@
 // - -t/--table scopes to one table; bad flags fail cleanly without writing
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runAge } from '../../src/commands/age';
 import { runLoaQuote } from '../../src/commands/loa';
@@ -456,5 +457,35 @@ describe('age cutoff happy-path (#M3)', () => {
 
     runAge({ execute: true, ageCutoff: '90d' });
     expect(importanceOf('decisions', d)).toBe(1); // demoted under the near cutoff
+  });
+});
+
+describe('age --execute holds the write lock from plan through apply (#317)', () => {
+  test('execute holds the write lock from plan through apply', () => {
+    const id = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'locked across plan and apply' });
+    const peer = new Database(process.env.RECALL_DB_PATH!);
+    peer.exec('PRAGMA busy_timeout = 0');
+    let pinError = '';
+    const log = console.log;
+    console.log = (...args: unknown[]) => {
+      const line = args.join(' ');
+      logged.push(line);
+      if (line.includes('record(s) to age')) {
+        try {
+          peer.prepare('UPDATE messages SET importance = 10 WHERE id = ?').run(id);
+        } catch (error) {
+          pinError = error instanceof Error ? error.message : String(error);
+        }
+      }
+    };
+    try {
+      runAge({ execute: true, table: 'messages' });
+    } finally {
+      console.log = log;
+      peer.close();
+    }
+
+    expect(pinError).toBe('database is locked');
+    expect(rowExists('messages', id)).toBe(false);
   });
 });

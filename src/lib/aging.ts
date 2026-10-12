@@ -190,56 +190,62 @@ export interface AgeApplyResult {
 }
 
 /**
- * Apply a plan in one transaction; failures roll back everything. Deletes
- * messages (and their embeddings), expires breadcrumbs via expires_at, and
- * demotes durable records' importance to their floor. Importance only ever
- * changes through the clamped value computed in planAge.
+ * Apply a plan; failures roll back everything. Deletes messages (and their
+ * embeddings), expires breadcrumbs via expires_at, and demotes durable
+ * records' importance to their floor. Importance only ever changes through
+ * the clamped value computed in planAge.
+ *
+ * When the caller already holds a transaction (recall age --execute plans and
+ * applies under one BEGIN IMMEDIATE), the body runs in that transaction.
+ * Otherwise this opens its own.
  */
 export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
+  if (db.inTransaction) return applyAgePlanBody(db, plan);
+  return db.transaction(() => applyAgePlanBody(db, plan))();
+}
+
+function applyAgePlanBody(db: Database, plan: AgePlan): AgeApplyResult {
   const result: AgeApplyResult = { deleted: 0, expired: 0, demoted: 0 };
 
-  const apply = db.transaction(() => {
-    for (const report of plan.tables) {
-      const ids = report.eligible.map(c => c.id);
-      if (ids.length === 0) continue;
+  for (const report of plan.tables) {
+    const ids = report.eligible.map(c => c.id);
+    if (ids.length === 0) continue;
 
-      if (report.action === 'delete') {
-        for (const chunk of chunked(ids)) {
-          const placeholders = chunk.map(() => '?').join(', ');
-          deleteRecordEmbeddingsByIdsInTransaction(db, report.table, chunk);
-          db.prepare(`DELETE FROM ${report.table} WHERE id IN (${placeholders})`).run(...chunk);
-          if (report.table === 'messages') {
-            db.prepare(`
-              UPDATE host_ingest_generation_messages SET content = NULL
-              WHERE message_id IN (${placeholders})
-            `).run(...chunk);
-          }
+    if (report.action === 'delete') {
+      for (const chunk of chunked(ids)) {
+        const placeholders = chunk.map(() => '?').join(', ');
+        deleteRecordEmbeddingsByIdsInTransaction(db, report.table, chunk);
+        db.prepare(`DELETE FROM ${report.table} WHERE id IN (${placeholders})`).run(...chunk);
+        if (report.table === 'messages') {
+          db.prepare(`
+            UPDATE host_ingest_generation_messages SET content = NULL
+            WHERE message_id IN (${placeholders})
+          `).run(...chunk);
         }
-        result.deleted += ids.length;
-      } else if (report.action === 'expire') {
-        for (const chunk of chunked(ids)) {
-          const placeholders = chunk.map(() => '?').join(', ');
-          db.prepare(
-            `UPDATE ${report.table} SET expires_at = datetime('now') WHERE id IN (${placeholders})`
-          ).run(...chunk);
-        }
-        result.expired += ids.length;
-      } else {
-        // demote — newImportance is the per-type clampImportance floor computed
-        // in planAge; it is a constant across every eligible row in a table, so
-        // one bound value drives every chunked UPDATE.
-        const floor = report.eligible[0].newImportance!;
-        for (const chunk of chunked(ids)) {
-          const placeholders = chunk.map(() => '?').join(', ');
-          db.prepare(
-            `UPDATE ${report.table} SET importance = ? WHERE id IN (${placeholders})`
-          ).run(floor, ...chunk);
-        }
-        result.demoted += ids.length;
       }
+      result.deleted += ids.length;
+    } else if (report.action === 'expire') {
+      for (const chunk of chunked(ids)) {
+        const placeholders = chunk.map(() => '?').join(', ');
+        db.prepare(
+          `UPDATE ${report.table} SET expires_at = datetime('now') WHERE id IN (${placeholders})`
+        ).run(...chunk);
+      }
+      result.expired += ids.length;
+    } else {
+      // demote — newImportance is the per-type clampImportance floor computed
+      // in planAge; it is a constant across every eligible row in a table, so
+      // one bound value drives every chunked UPDATE.
+      const floor = report.eligible[0].newImportance!;
+      for (const chunk of chunked(ids)) {
+        const placeholders = chunk.map(() => '?').join(', ');
+        db.prepare(
+          `UPDATE ${report.table} SET importance = ? WHERE id IN (${placeholders})`
+        ).run(floor, ...chunk);
+      }
+      result.demoted += ids.length;
     }
-  });
-  apply();
+  }
 
   return result;
 }
