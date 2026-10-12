@@ -118,7 +118,7 @@ release and the exact command to run. From a shell:
 ./packaging/update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
-Installed from a local tarball? `recall update` has no git checkout to pull. Re-pack into the same directory: [local tarball](docs/installation.md#local-tarball).
+Installed from a local tarball? `recall update` has no git checkout to pull. Re-pack to the fixed `recall-memory.tgz` path, remove the global dependency, then reinstall: [local tarball](docs/installation.md#local-tarball).
 
 ### Uninstalling
 
@@ -128,7 +128,7 @@ Installed from a local tarball? `recall update` has no git checkout to pull. Re-
 ./packaging/uninstall.sh --purge     # destroy runtime + DBs; preserve identity/distilled snapshots (confirmed)
 ```
 
-Installed from a local tarball? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
+Installed from a local tarball? Run `recall uninstall` (or `--purge`), then `bun remove -g recall-memory`: [tarball cleanup](docs/installation.md#uninstalling). For a preview, run only `recall uninstall --dry-run`.
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
 

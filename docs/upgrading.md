@@ -46,7 +46,7 @@ cd /path/to/Recall
 ./packaging/update.sh
 ```
 
-A local-tarball install has no git checkout for `update.sh` to pull. Re-pack into the same directory: [Local tarball](installation.md#local-tarball).
+A local-tarball install has no git checkout for `update.sh` to pull. Re-pack to the fixed `recall-memory.tgz` path, remove the global dependency, then reinstall: [Local tarball](installation.md#local-tarball).
 
 ### First update from an older updater
 

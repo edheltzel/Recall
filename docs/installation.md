@@ -133,9 +133,9 @@ Recall itself is not published to npm; the `recall-memory` package there is an u
 
 ### Local tarball
 
-Retain the permanent checkout described under [Source checkout](#source-checkout). Pack into `~/.agents/Recall/packages` and keep that directory for as long as Recall is installed globally. Re-pack into the same directory when upgrading. To change the path, run `bun remove -g recall-memory` first. Installing again from a different path without that leaves a duplicate `recall-memory` key in `bun.lock` (bun 1.4.x warns; bun 1.3.x aborts with DependencyLoop).
+Retain the permanent checkout described under [Source checkout](#source-checkout). Keep the tarball at `~/.agents/Recall/packages/recall-memory.tgz` for as long as Recall is installed globally. For upgrades, replace that file, remove the existing global dependency, then reinstall. Installing again without removal can leave the old version at the same path or duplicate dependency keys at a different path.
 
-Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
+Before the first pack and every later update, refresh that checkout so the tarball contains the intended release. On the first install, skip `bun remove -g recall-memory`:
 
 ```bash
 cd /absolute/path/to/Recall
@@ -147,11 +147,13 @@ bun run build
 package_dir="$HOME/.agents/Recall/packages"
 mkdir -p "$package_dir"
 archive="$(npm pack --pack-destination "$package_dir")"
-bun install -g "$package_dir/$archive"
+mv "$package_dir/$archive" "$package_dir/recall-memory.tgz"
+bun remove -g recall-memory
+bun install -g "$package_dir/recall-memory.tgz"
 recall init
 ```
 
-`bun install -g` records that absolute tarball path, and `bun update -g` re-extracts it. If the file is gone, `bun update -g` fails for every global package with `ENOENT extracting tarball from recall-memory`. Fix: `bun remove -g recall-memory`, re-pack into the fixed directory, then `bun install -g` that tarball.
+`bun install -g` records that absolute tarball path, and `bun update -g` re-extracts it. If the file is gone, `bun update -g` fails for every global package with `ENOENT extracting tarball from recall-memory`. Recover by following the upgrade recipe above, including removal before reinstalling.
 
 Continue with the applicable integration guide: [Claude Code](CLAUDE_INTEGRATION.md#install-preferred), [Codex](CODEX_INTEGRATION.md#install-preferred), [Pi](PI_INTEGRATION.md#install-preferred), [omp](OMP_INTEGRATION.md#install-from-this-checkout), or [Grok](GROK_INTEGRATION.md). Each guide owns its host's attach commands and whether it also needs `recall install`. In packaged (tarball) mode, `recall install` runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, dependency installation, build, and link.
 
@@ -329,6 +331,15 @@ cd /path/to/Recall
 ./packaging/uninstall.sh                  # remove integration; preserve ~/.agents/Recall/ (DB + backups)
 ./packaging/uninstall.sh --purge          # also destroy ~/.agents/Recall/ tree (confirmed)
 ```
+
+For a local-tarball install, run lifecycle cleanup while the CLI is available, then remove Bun's global dependency:
+
+```bash
+recall uninstall
+bun remove -g recall-memory
+```
+
+Use `recall uninstall --purge` for a purge, then run the same `bun remove -g recall-memory`. Purge deletes the retained tarball; `bun unlink` alone leaves the global tarball dependency behind. For a preview, run only `recall uninstall --dry-run`.
 
 ### What gets removed (default)
 
