@@ -13,7 +13,7 @@ import { join } from 'path';
 /** Expand only the current user's leading `~` or `~/`, like the installer. */
 export function expandDbPathTilde(raw: string, home: string): string {
   if (raw === '~') return home;
-  if (raw.startsWith('~/')) return join(home, raw.slice(2));
+  if (raw.startsWith('~/')) return home + raw.slice(1);
   return raw;
 }
 
