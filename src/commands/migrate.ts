@@ -21,8 +21,8 @@
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync } from 'fs';
-import { dirname, isAbsolute, join, resolve } from 'path';
+import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync, realpathSync } from 'fs';
+import { basename, dirname, isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
@@ -42,9 +42,14 @@ export interface MigrateOptions {
 }
 
 function expandHome(p: string, home: string): string {
-  if (p.startsWith('~/')) return join(home, p.slice(2));
+  if (p.startsWith('~/')) return `${home}/${p.slice(2)}`;
   if (p === '~') return home;
   return p;
+}
+
+function fileIdentity(p: string): string {
+  const parent = dirname(p);
+  return existsSync(parent) ? `${realpathSync(parent)}/${basename(p)}` : p;
 }
 
 function isOpen(path: string): boolean {
@@ -183,7 +188,8 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   // Literal, not resolve(): collapsing `link/..` lexically can name a different file (#324).
   const configured = getDbPath();
   const src = isAbsolute(configured) ? configured : `${process.cwd()}/${configured}`;
-  const dest = resolve(expandHome(opts.to, home));
+  const destination = expandHome(opts.to, home);
+  const dest = isAbsolute(destination) ? destination : `${process.cwd()}/${destination}`;
 
   console.log(`recall migrate${dryRun ? ' (dry-run)' : ''}`);
   console.log(`  source:      ${src}`);
@@ -196,7 +202,7 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     return;
   }
 
-  if (src === dest) {
+  if (fileIdentity(src) === fileIdentity(dest)) {
     console.log('Source and destination are identical — nothing to do.');
     return;
   }

@@ -112,6 +112,31 @@ describe('recall migrate', () => {
     expect(readFileSync(join(tempDir, 'recall.db'), 'utf-8')).toBe('decoy');
   });
 
+  test('does nothing when --to equals the symlink/.. source path (#324)', () => {
+    mkdirSync(join(tempDir, 'store', 'leaf'), { recursive: true });
+    symlinkSync(join(tempDir, 'store', 'leaf'), join(tempDir, 'link'));
+    const dbPath = `${tempDir}/link/../recall.db`;
+    writeFileSync(join(tempDir, 'store', 'recall.db'), 'intended');
+    writeFileSync(join(tempDir, 'store', 'recall.db-wal'), 'wal');
+    writeFileSync(join(tempDir, 'store', 'recall.db-shm'), 'shm');
+    process.env.RECALL_DB_PATH = dbPath;
+    const configPath = join(tempDir, '.claude.json');
+    const config = JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: dbPath } } },
+    });
+    writeFileSync(configPath, config);
+
+    expect(() => withExitThrow(() => runMigrate({ to: dbPath }, tempDir))).not.toThrow();
+
+    expect(captured.join('\n')).toContain('Source and destination are identical');
+    expect(readFileSync(dbPath, 'utf-8')).toBe('intended');
+    expect(readFileSync(dbPath + '-wal', 'utf-8')).toBe('wal');
+    expect(readFileSync(dbPath + '-shm', 'utf-8')).toBe('shm');
+    expect(existsSync(join(tempDir, 'recall.db'))).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(config);
+    expect(existsSync(join(tempDir, '.agents'))).toBe(false);
+  });
+
   test('patches Claude, OpenCode, and Pi JSONC registrations', () => {
     const configs = [
       {
