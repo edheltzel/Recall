@@ -22,7 +22,7 @@
 
 import { closeDb, getDbPath } from '../db/connection.js';
 import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
@@ -180,7 +180,9 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   }
 
   const dryRun = !!opts.dryRun;
-  const src = resolve(getDbPath());
+  // Literal, not resolve(): collapsing `link/..` lexically can name a different file (#324).
+  const configured = getDbPath();
+  const src = isAbsolute(configured) ? configured : `${process.cwd()}/${configured}`;
   const dest = resolve(expandHome(opts.to, home));
 
   console.log(`recall migrate${dryRun ? ' (dry-run)' : ''}`);

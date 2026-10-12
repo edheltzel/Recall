@@ -99,6 +99,19 @@ describe('recall migrate', () => {
     expect(captured.join('\n')).toContain('Moved DB');
   });
 
+  test('moves the database a symlink/.. source path names, not its lexical twin (#324)', () => {
+    mkdirSync(join(tempDir, 'store', 'leaf'), { recursive: true });
+    symlinkSync(join(tempDir, 'store', 'leaf'), join(tempDir, 'link'));
+    writeFileSync(join(tempDir, 'store', 'recall.db'), 'intended');
+    writeFileSync(join(tempDir, 'recall.db'), 'decoy');
+    process.env.RECALL_DB_PATH = `${tempDir}/link/../recall.db`;
+
+    runMigrate({ to: destDb }, tempDir);
+
+    expect(readFileSync(destDb, 'utf-8')).toBe('intended');
+    expect(readFileSync(join(tempDir, 'recall.db'), 'utf-8')).toBe('decoy');
+  });
+
   test('patches Claude, OpenCode, and Pi JSONC registrations', () => {
     const configs = [
       {
