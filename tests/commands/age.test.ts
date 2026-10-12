@@ -12,7 +12,7 @@
 // - -t/--table scopes to one table; bad flags fail cleanly without writing
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { dirname } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { runAge } from '../../src/commands/age';
 import { runLoaQuote } from '../../src/commands/loa';
@@ -463,29 +463,44 @@ describe('age cutoff happy-path (#M3)', () => {
 describe('age --execute holds the write lock from plan through apply (#317)', () => {
   test('execute holds the write lock from plan through apply', () => {
     const id = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'locked across plan and apply' });
-    const peer = new Database(process.env.RECALL_DB_PATH!);
-    peer.exec('PRAGMA busy_timeout = 0');
-    let pinError = '';
+    let peer: ReturnType<typeof Bun.spawnSync> | undefined;
     const log = console.log;
     console.log = (...args: unknown[]) => {
       const line = args.join(' ');
       logged.push(line);
       if (line.includes('record(s) to age')) {
-        try {
-          peer.prepare('UPDATE messages SET importance = 10 WHERE id = ?').run(id);
-        } catch (error) {
-          pinError = error instanceof Error ? error.message : String(error);
-        }
+        peer = Bun.spawnSync([process.execPath, '--eval', `
+          import { Database } from 'bun:sqlite';
+          const db = new Database(process.env.RECALL_DB_PATH);
+          db.exec('PRAGMA busy_timeout = 0');
+          try {
+            const result = db.prepare('UPDATE messages SET importance = 10 WHERE id = ?').run(${id});
+            console.log(JSON.stringify({ changes: result.changes, error: null }));
+          } catch (error) {
+            console.log(JSON.stringify({ changes: 0, error: error instanceof Error ? error.message : String(error) }));
+          } finally {
+            db.close();
+          }
+        `], {
+          env: {
+            ...process.env,
+            RECALL_DB_PATH: process.env.RECALL_DB_PATH!,
+            RECALL_HOME: dirname(process.env.RECALL_DB_PATH!),
+          },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
       }
     };
     try {
       runAge({ execute: true, table: 'messages' });
     } finally {
       console.log = log;
-      peer.close();
     }
 
-    expect(pinError).toBe('database is locked');
+    expect(peer?.exitCode).toBe(0);
+    expect(peer!.stderr.toString()).toBe('');
+    expect(JSON.parse(peer!.stdout.toString())).toEqual({ changes: 0, error: 'database is locked' });
     expect(rowExists('messages', id)).toBe(false);
   });
 });

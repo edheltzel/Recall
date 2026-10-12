@@ -70,3 +70,47 @@ describe('demote target routes through clampImportance to the per-type floor', (
     expect((getDb().prepare('SELECT importance AS i FROM loa_entries WHERE id = ?').get(loa) as { i: number }).i).toBe(5); // floor 5
   });
 });
+
+describe('applyAgePlan rolls back every action on failure', () => {
+  for (const nested of [false, true]) {
+    test(`failed apply is atomic ${nested ? 'inside an existing transaction' : 'on its own'}`, () => {
+      const db = getDb();
+      createSession({ session_id: 's1', started_at: OLD });
+      const loa = createLoaEntry({ title: 'sum', fabric_extract: 'x', session_id: 's1', importance: 6 });
+      const message = addMessage({ session_id: 's1', timestamp: OLD, role: 'user', content: 'old msg' });
+      const decision = addDecision({ decision: 'low decision', status: 'active', importance: 4 });
+      const learning = addLearning({ problem: 'low learning', importance: 3 });
+      const breadcrumb = addBreadcrumb({ content: 'old crumb', importance: 4 });
+      db.prepare(`
+        INSERT INTO embeddings (source_table, source_id, embedding, model, dimensions)
+        VALUES ('messages', ?, ?, 'test', 1)
+      `).run(message, Buffer.from(new Float32Array([1]).buffer));
+      ageAll();
+      const plan = planAge(db, { importanceThreshold: 7 });
+      db.exec(`
+        CREATE TRIGGER reject_age BEFORE UPDATE OF importance ON loa_entries
+        BEGIN SELECT RAISE(ABORT, 'reject aging'); END
+      `);
+
+      const apply = () => expect(() => applyAgePlan(db, plan)).toThrow('reject aging');
+      if (nested) {
+        db.transaction(() => {
+          createSession({ session_id: 'outer', started_at: OLD });
+          apply();
+        }).immediate();
+        expect(db.prepare("SELECT 1 FROM sessions WHERE session_id = 'outer'").get()).toBeTruthy();
+      } else {
+        apply();
+      }
+
+      expect(db.prepare('SELECT content FROM messages WHERE id = ?').get(message)).toEqual({ content: 'old msg' });
+      expect(db.prepare("SELECT 1 FROM embeddings WHERE source_table = 'messages' AND source_id = ?").get(message)).toBeTruthy();
+      expect(db.prepare('SELECT expires_at FROM breadcrumbs WHERE id = ?').get(breadcrumb)).toEqual({ expires_at: null });
+      for (const [table, id, importance] of [
+        ['decisions', decision, 4], ['learnings', learning, 3], ['loa_entries', loa, 6],
+      ] as const) {
+        expect(db.prepare(`SELECT importance FROM ${table} WHERE id = ?`).get(id)).toEqual({ importance });
+      }
+    });
+  }
+});
