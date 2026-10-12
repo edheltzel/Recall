@@ -1,6 +1,7 @@
 // Shared DB-path resolver for hooks.
-// Self-contained — no imports from src/. Mirrors the resolution logic in
-// src/db/connection.ts so hooks and CLI agree on which file to open.
+// Self-contained — no imports from src/. src/db/connection.ts reuses
+// expandDbPathTilde so hooks, CLI, and lib/install-lib.sh
+// (recall_resolve_db_path) agree on which file to open.
 //
 // Precedence:
 //   1. RECALL_DB_PATH (primary)
@@ -9,10 +10,15 @@
 
 import { join } from 'path';
 
+/** Expand only the current user's leading `~` or `~/`, like the installer. */
+export function expandDbPathTilde(raw: string, home: string): string {
+  if (raw === '~') return home;
+  if (raw.startsWith('~/')) return join(home, raw.slice(2));
+  return raw;
+}
+
 export function resolveDbPath(): string {
-  return (
-    process.env.RECALL_DB_PATH ||
-    process.env.MEM_DB_PATH ||
-    join(process.env.HOME || process.env.USERPROFILE || '', '.agents', 'Recall', 'recall.db')
-  );
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const raw = process.env.RECALL_DB_PATH || process.env.MEM_DB_PATH;
+  return raw ? expandDbPathTilde(raw, home) : join(home, '.agents', 'Recall', 'recall.db');
 }

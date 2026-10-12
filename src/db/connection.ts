@@ -19,6 +19,7 @@ import { applyMigrations } from './migrations.js';
 // requires (it is process-global). See src/db/vec.ts.
 import { loadVecExtension, isVecAvailable, createVecTable } from './vec.js';
 import { repairLifecycleSearchIndex } from '../lib/lifecycle-search.js';
+import { expandDbPathTilde } from '../../hooks/lib/db-path.js';
 
 const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 
@@ -61,12 +62,10 @@ function applyConnectionPragmas(database: Database): void {
 //   1. RECALL_DB_PATH (primary)
 //   2. MEM_DB_PATH    (legacy fallback)
 //   3. DEFAULT_DB_PATH
+// A leading `~` expands to HOME, matching hooks and the installer (#323).
 export function getDbPath(): string {
-  return (
-    process.env.RECALL_DB_PATH ||
-    process.env.MEM_DB_PATH ||
-    DEFAULT_DB_PATH
-  );
+  const raw = process.env.RECALL_DB_PATH || process.env.MEM_DB_PATH;
+  return raw ? expandDbPathTilde(raw, process.env.HOME || homedir()) : DEFAULT_DB_PATH;
 }
 
 export function getDb(): Database {

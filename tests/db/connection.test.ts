@@ -85,6 +85,19 @@ describe('connection', () => {
         }
       }
     });
+
+    test('expands a leading tilde the same way the installer does (#323)', () => {
+      const originalRecall = process.env.RECALL_DB_PATH;
+      try {
+        process.env.RECALL_DB_PATH = '~/data/recall.db';
+        expect(getDbPath()).toBe(join(process.env.HOME!, 'data', 'recall.db'));
+        process.env.RECALL_DB_PATH = '~other/recall.db';
+        expect(getDbPath()).toBe('~other/recall.db');
+      } finally {
+        if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
+        else delete process.env.RECALL_DB_PATH;
+      }
+    });
   });
 
   describe('initDb', () => {
