@@ -354,7 +354,7 @@ Use `recall uninstall --purge` for a purge, then run the same `bun remove -g rec
 - OpenCode MCP entry + plugins + the shared plugin helpers Recall installs under `plugins/lib/` + agent + guide (unless `--skip-opencode`). `plugins/lib/` itself is removed only when Recall emptied it, so your own files there survive. An `opencode.json` that Recall cannot parse is reported and left untouched; the plugins, agent, and guide are still removed and the rest of the uninstall continues
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
-- `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
+- The source-checkout global link via `bun unlink`
 
 If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, it does not rewrite that file, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
 

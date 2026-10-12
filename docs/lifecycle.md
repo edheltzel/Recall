@@ -65,7 +65,7 @@ Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--for
 Two situations the original scripts didn't spell out:
 
 - **You're on a feature branch or have local commits.** `recall update` does `git pull --ff-only origin main` plus a GitHub-release version check, so it will refuse to fast-forward (or report "already current") rather than clobber your work. That's expected. To rebuild from your **working tree** instead, run `./packaging/install.sh`.
-- **You installed from a local tarball.** A packed install has no git checkout, so `recall update` has nothing to pull. Re-pack to the fixed `recall-memory.tgz` path, remove the global dependency, then reinstall: [Local tarball](installation.md#local-tarball).
+- **You installed from a local tarball.** Follow the [tarball upgrade procedure](installation.md#local-tarball).
 
 ---
 
@@ -75,7 +75,7 @@ Two situations the original scripts didn't spell out:
 
 Run `recall uninstall --help` for the canonical forwarded flag list. The exact removal, preservation, purge, and per-host skip behavior is documented in [Installation → Uninstalling](installation.md#uninstalling).
 
-For local-tarball installs, finish lifecycle cleanup (normal or `--purge`) before running `bun remove -g recall-memory`. A `--dry-run` preview does not include that removal.
+Local-tarball installs also need [global package cleanup](installation.md#uninstalling).
 
 ---
 
