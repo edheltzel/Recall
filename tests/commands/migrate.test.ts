@@ -45,6 +45,13 @@ function withExitThrow(run: () => void): void {
   }
 }
 
+function runMigrateCli(to: string): string {
+  return execFileSync(process.execPath, [join(import.meta.dir, '../../src/index.ts'), 'migrate', '--to', to], {
+    env: { ...process.env, HOME: tempDir, RECALL_HOME: join(tempDir, '.agents', 'Recall') },
+    encoding: 'utf-8',
+  });
+}
+
 beforeEach(() => {
   migrateTestHooks.failCommitPath = '';
   migrateTestHooks.commitProbeExecutable = '';
@@ -112,7 +119,7 @@ describe('recall migrate', () => {
     expect(readFileSync(join(tempDir, 'recall.db'), 'utf-8')).toBe('decoy');
   });
 
-  test('does nothing when --to equals the symlink/.. source path (#324)', () => {
+  test.each(['literal path', 'physical alias'])('does nothing when --to names the symlink/.. source via %s (#324)', (form) => {
     mkdirSync(join(tempDir, 'store', 'leaf'), { recursive: true });
     symlinkSync(join(tempDir, 'store', 'leaf'), join(tempDir, 'link'));
     const dbPath = `${tempDir}/link/../recall.db`;
@@ -125,16 +132,46 @@ describe('recall migrate', () => {
       mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: dbPath } } },
     });
     writeFileSync(configPath, config);
+    const inodes = ['', '-wal', '-shm'].map(ext => statSync(dbPath + ext).ino);
 
-    expect(() => withExitThrow(() => runMigrate({ to: dbPath }, tempDir))).not.toThrow();
+    const output = runMigrateCli(form === 'literal path' ? dbPath : join(tempDir, 'store', 'recall.db'));
 
-    expect(captured.join('\n')).toContain('Source and destination are identical');
+    expect(output).toContain('Source and destination are identical');
     expect(readFileSync(dbPath, 'utf-8')).toBe('intended');
     expect(readFileSync(dbPath + '-wal', 'utf-8')).toBe('wal');
     expect(readFileSync(dbPath + '-shm', 'utf-8')).toBe('shm');
+    expect(['', '-wal', '-shm'].map(ext => statSync(dbPath + ext).ino)).toEqual(inodes);
     expect(existsSync(join(tempDir, 'recall.db'))).toBe(false);
     expect(readFileSync(configPath, 'utf-8')).toBe(config);
     expect(existsSync(join(tempDir, '.agents'))).toBe(false);
+  });
+
+  test('migrates between distinct symlink/.. paths with existing parents (#324)', () => {
+    for (const name of ['source', 'destination']) {
+      mkdirSync(join(tempDir, `${name}  store`, 'leaf'), { recursive: true });
+      symlinkSync(join(tempDir, `${name}  store`, 'leaf'), join(tempDir, `${name}  link`));
+    }
+    const source = `${tempDir}/source  link/../recall.db`;
+    const destination = `${tempDir}/destination  link/../recall.db`;
+    const physicalDestination = join(tempDir, 'destination  store', 'recall.db');
+    const contents = [['', 'intended'], ['-wal', 'wal'], ['-shm', 'shm']];
+    for (const [ext, content] of contents) writeFileSync(source + ext, content);
+    const inodes = contents.map(([ext]) => statSync(source + ext).ino);
+    process.env.RECALL_DB_PATH = source;
+    const configPath = join(tempDir, '.claude.json');
+    writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'recall-memory': { env: { RECALL_DB_PATH: source } } },
+    }));
+
+    expect(runMigrateCli(destination)).toContain('Migration complete');
+
+    for (const [ext, content] of contents) {
+      expect(existsSync(source + ext)).toBe(false);
+      expect(readFileSync(physicalDestination + ext, 'utf-8')).toBe(content);
+    }
+    expect(contents.map(([ext]) => statSync(physicalDestination + ext).ino)).toEqual(inodes);
+    expect(existsSync(join(tempDir, 'recall.db'))).toBe(false);
+    expect(JSON.parse(readFileSync(configPath, 'utf-8')).mcpServers['recall-memory'].env.RECALL_DB_PATH).toBe(destination);
   });
 
   test('patches Claude, OpenCode, and Pi JSONC registrations', () => {

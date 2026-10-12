@@ -21,7 +21,7 @@
 //   - --dry-run prints the plan without touching anything.
 
 import { closeDb, getDbPath } from '../db/connection.js';
-import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync, realpathSync } from 'fs';
+import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync } from 'fs';
 import { basename, dirname, isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
@@ -49,7 +49,9 @@ function expandHome(p: string, home: string): string {
 
 function fileIdentity(p: string): string {
   const parent = dirname(p);
-  return existsSync(parent) ? `${realpathSync(parent)}/${basename(p)}` : p;
+  if (!existsSync(parent)) return p;
+  const { dev, ino } = statSync(parent, { bigint: true });
+  return `${dev}:${ino}/${basename(p)}`;
 }
 
 function isOpen(path: string): boolean {
