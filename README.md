@@ -118,7 +118,7 @@ release and the exact command to run. From a shell:
 ./packaging/update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
-Installed from a local tarball? `recall update` has no git checkout to pull. Follow the [local-tarball update procedure](docs/installation.md#local-tarball).
+Installed from a local tarball? `recall update` has no git checkout to pull. Re-pack into the same directory: [local tarball](docs/installation.md#local-tarball).
 
 ### Uninstalling
 

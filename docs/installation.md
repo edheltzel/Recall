@@ -133,7 +133,9 @@ Recall itself is not published to npm; the `recall-memory` package there is an u
 
 ### Local tarball
 
-Retain the permanent checkout described under [Source checkout](#source-checkout). Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
+Retain the permanent checkout described under [Source checkout](#source-checkout). Pack into `~/.agents/Recall/packages` and keep that directory for as long as Recall is installed globally. Re-pack into the same directory when upgrading. To change the path, run `bun remove -g recall-memory` first. Installing again from a different path without that leaves a duplicate `recall-memory` key in `bun.lock` (bun 1.4.x warns; bun 1.3.x aborts with DependencyLoop).
+
+Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
 
 ```bash
 cd /absolute/path/to/Recall
@@ -142,12 +144,14 @@ git switch main
 git pull --ff-only origin main
 bun install
 bun run build
-package_dir=/absolute/path/to/package-output
+package_dir="$HOME/.agents/Recall/packages"
 mkdir -p "$package_dir"
 archive="$(npm pack --pack-destination "$package_dir")"
 bun install -g "$package_dir/$archive"
 recall init
 ```
+
+`bun install -g` records that absolute tarball path, and `bun update -g` re-extracts it. If the file is gone, `bun update -g` fails for every global package with `ENOENT extracting tarball from recall-memory`. Fix: `bun remove -g recall-memory`, re-pack into the fixed directory, then `bun install -g` that tarball.
 
 Continue with the applicable integration guide: [Claude Code](CLAUDE_INTEGRATION.md#install-preferred), [Codex](CODEX_INTEGRATION.md#install-preferred), [Pi](PI_INTEGRATION.md#install-preferred), [omp](OMP_INTEGRATION.md#install-from-this-checkout), or [Grok](GROK_INTEGRATION.md). Each guide owns its host's attach commands and whether it also needs `recall install`. In packaged (tarball) mode, `recall install` runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, dependency installation, build, and link.
 

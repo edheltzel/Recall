@@ -65,7 +65,7 @@ Common flags (forwarded verbatim to `update.sh`): `--check`, `--dry-run`, `--for
 Two situations the original scripts didn't spell out:
 
 - **You're on a feature branch or have local commits.** `recall update` does `git pull --ff-only origin main` plus a GitHub-release version check, so it will refuse to fast-forward (or report "already current") rather than clobber your work. That's expected. To rebuild from your **working tree** instead, run `./packaging/install.sh`.
-- **You installed from a local tarball.** A packed install has no git checkout, so `recall update` has nothing to pull. Follow the [local-tarball update procedure](installation.md#local-tarball), which refreshes the retained checkout before packing.
+- **You installed from a local tarball.** A packed install has no git checkout, so `recall update` has nothing to pull. Re-pack into the same directory: [Local tarball](installation.md#local-tarball).
 
 ---
 

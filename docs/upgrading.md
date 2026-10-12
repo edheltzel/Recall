@@ -46,6 +46,8 @@ cd /path/to/Recall
 ./packaging/update.sh
 ```
 
+A local-tarball install has no git checkout for `update.sh` to pull. Re-pack into the same directory: [Local tarball](installation.md#local-tarball).
+
 ### First update from an older updater
 
 If your installed release predates Claude MCP reconciliation, its already-running updater cannot use lifecycle functions that arrive during its own pull. Complete that first update with:
