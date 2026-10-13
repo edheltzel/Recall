@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 const REPO = process.cwd();
 const LIB = join(REPO, 'lib', 'install-lib.sh');
 const INSTALL = join(REPO, 'packaging', 'install.sh');
+const UPDATE = join(REPO, 'packaging', 'update.sh');
 const MARKER = '# recall-memory: quarterly age';
 
 function bunStub(binDir: string): void {
@@ -211,6 +212,56 @@ describe('quarterly age cron', () => {
         '15 2 * * * /usr/bin/true # user',
         '',
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('install, refresh, and preview keep commented marked jobs disabled', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-disabled-'));
+    try {
+      const home = join(root, 'home');
+      const recallDir = join(home, '.agents', 'Recall');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      const pkg = durablePackage(root, home);
+      const stored = '#!/bin/sh\nexport RECALL_DB_PATH=\'/stored\'\n';
+      const notice = 'Quarterly aging: disabled by user, kept';
+      const userLines = 'CRON_TZ=UTC\n15 2 * * * /usr/bin/true # user\n';
+      mkdirSync(dirname(wrapper(recallDir)), { recursive: true });
+      cronStub(bin, cronFile);
+
+      for (const mode of ['install', 'refresh']) {
+        for (const prefix of ['', '  ', '\t']) {
+          for (const hasWrapper of [true, false]) {
+            const original = `${userLines}${prefix}# ${fixedLine(recallDir)}\n${prefix}# ${fixedLine(recallDir)}\n`;
+            writeFileSync(cronFile, original);
+            rmSync(`${cronFile}.written`, { force: true });
+            if (hasWrapper) writeFileSync(wrapper(recallDir), stored, { mode: 0o700 });
+            const env = { RECALL_REPO_DIR: pkg.repo };
+            const preview = runLib(home, recallDir, bin, `recall_print_age_cron_plan ${mode}`, env);
+            expect(preview.status).toBe(0);
+            expect(preview.stdout).toContain(notice);
+            expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+
+            const body = mode === 'install'
+              ? 'recall_install_age_cron\nrecall_print_age_cron_notice'
+              : `source ${quote(UPDATE)}\nNO_CONFIRM=true\nstep_refresh_age_cron`;
+            const applied = runLib(home, recallDir, bin, body, env);
+            expect(applied.status).toBe(0);
+            expect(applied.stdout).toContain(notice);
+            expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+            expect(existsSync(`${cronFile}.written`)).toBe(false);
+            expect(existsSync(wrapper(recallDir))).toBe(hasWrapper);
+            if (hasWrapper) expect(readFileSync(wrapper(recallDir), 'utf-8')).toBe(stored);
+
+            const removed = runLib(home, recallDir, bin, 'recall_remove_age_cron', env);
+            expect(removed.status).toBe(0);
+            expect(readFileSync(cronFile, 'utf-8')).toBe(userLines);
+            expect(existsSync(wrapper(recallDir))).toBe(false);
+          }
+        }
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -678,7 +729,8 @@ describe('quarterly age cron', () => {
       const pkg = durablePackage(root, home);
       mkdirSync(join(recallDir, 'shared'), { recursive: true });
       writeFileSync(wrapper(recallDir), '#!/bin/sh\nexport RECALL_DB_PATH=\'/stored\'\n', { mode: 0o700 });
-      writeFileSync(cronFile, `15 2 * * * /usr/bin/true # user\n0 3 1 1,4,7,10 * /bin/true ${MARKER}\n`);
+      const original = `15 2 * * * /usr/bin/true # user\n  # 0 3 1 1,4,7,10 * /bin/true ${MARKER}\n`;
+      writeFileSync(cronFile, original);
       cronStub(bin, cronFile);
       const trap = join(root, 'trap.sh');
       writeFileSync(
@@ -696,6 +748,17 @@ describe('quarterly age cron', () => {
         PATH: `${bin}:/usr/bin:/bin`,
         SKIP_AGE_CRON: '',
       };
+      const disabled = spawnSync('bash', [INSTALL, '--yes'], {
+        encoding: 'utf-8',
+        cwd: REPO,
+        env,
+      });
+      expect(disabled.status).toBe(0);
+      expect(disabled.stdout).toContain('Quarterly aging: disabled by user, kept');
+      expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+      expect(readFileSync(wrapper(recallDir), 'utf-8')).toBe('#!/bin/sh\nexport RECALL_DB_PATH=\'/stored\'\n');
+      expect(existsSync(`${cronFile}.written`)).toBe(false);
+
       const flagged = spawnSync('bash', [INSTALL, '--skip-age-cron', '--yes'], {
         encoding: 'utf-8',
         cwd: REPO,

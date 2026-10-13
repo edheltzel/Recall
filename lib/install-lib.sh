@@ -3298,6 +3298,7 @@ _recall_age_cron_read_state() {
   _RECALL_AGE_CRON_BIN=""
   _RECALL_AGE_CRON_EXISTING=""
   _RECALL_AGE_CRON_PRESENT=false
+  _RECALL_AGE_CRON_DISABLED=false
 
   if _recall_age_cron_blocked; then
     _RECALL_AGE_CRON_READ_STATUS=sandbox
@@ -3322,6 +3323,9 @@ _recall_age_cron_read_state() {
   while IFS= read -r candidate || [[ -n "$candidate" ]]; do
     if [[ "$candidate" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
       _RECALL_AGE_CRON_PRESENT=true
+      if [[ "$candidate" =~ ^[[:space:]]*# ]]; then
+        _RECALL_AGE_CRON_DISABLED=true
+      fi
     fi
   done <<< "$_RECALL_AGE_CRON_EXISTING"
 }
@@ -3367,6 +3371,11 @@ _recall_age_cron_decide() {
       _RECALL_AGE_CRON_REASON="no managed schedule was present"
       _RECALL_AGE_CRON_STATUS=absent
     fi
+    return 0
+  fi
+  if [[ "$_RECALL_AGE_CRON_DISABLED" == true ]]; then
+    _RECALL_AGE_CRON_ACTION=keep
+    _RECALL_AGE_CRON_STATUS=disabled
     return 0
   fi
   if [[ "$mode" == refresh && "$_RECALL_AGE_CRON_PRESENT" != true ]]; then
@@ -3550,7 +3559,7 @@ _recall_age_cron_apply() {
       log_warn "Quarterly aging was NOT scheduled: ${_RECALL_AGE_CRON_REASON}"
       return 0
       ;;
-    absent)
+    absent|disabled)
       return 0
       ;;
   esac
@@ -3585,6 +3594,10 @@ recall_print_age_cron_plan() {
     build_planned=true
   fi
   _recall_age_cron_decide "$mode" "$build_planned"
+  if [[ "$_RECALL_AGE_CRON_STATUS" == disabled ]]; then
+    recall_print_age_cron_notice
+    return 0
+  fi
   echo "Quarterly aging cron: ${_RECALL_AGE_CRON_ACTION}"
   if [[ -n "${_RECALL_AGE_CRON_REASON:-}" ]]; then
     echo "  Reason: ${_RECALL_AGE_CRON_REASON}"
@@ -3597,7 +3610,9 @@ recall_print_age_cron_plan() {
 
 recall_print_age_cron_notice() {
   local status="${_RECALL_AGE_CRON_STATUS:-}" reason="${_RECALL_AGE_CRON_REASON:-}"
-  if [[ "$status" == removed ]]; then
+  if [[ "$status" == disabled ]]; then
+    echo "Quarterly aging: disabled by user, kept"
+  elif [[ "$status" == removed ]]; then
     echo "Quarterly aging: disabled; removed the existing managed schedule and wrapper script."
   elif [[ "$status" == absent ]]; then
     echo "Quarterly aging: disabled; no managed schedule was present."

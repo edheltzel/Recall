@@ -327,6 +327,7 @@ step_link_global() {
 step_refresh_age_cron() {
   log_info "Refreshing quarterly age cron if it is already scheduled..."
   recall_refresh_age_cron
+  recall_print_age_cron_notice
 }
 
 step_migrate() {
