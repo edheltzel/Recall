@@ -46,6 +46,8 @@ cd /path/to/Recall
 ./packaging/update.sh
 ```
 
+For local-tarball upgrades, follow [Installation → Local tarball](installation.md#local-tarball).
+
 ### First update from an older updater
 
 If your installed release predates Claude MCP reconciliation, its already-running updater cannot use lifecycle functions that arrive during its own pull. Complete that first update with:

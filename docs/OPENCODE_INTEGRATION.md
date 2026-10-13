@@ -116,7 +116,7 @@ The installer writes this to `~/.config/opencode/opencode.json`:
 **Key decisions:**
 - Uses `recall-mcp` symlink (created via `bun link`) — consistent with Recall codebase and works across users
 - Uses `bun run` to execute the symlinked binary
-- `RECALL_DB_PATH` uses **absolute path** resolved at install time (not `~` — tilde doesn't expand in env vars)
+- The installer pins `RECALL_DB_PATH` using the shared resolver; see [database environment variables](installation.md#environment-variables).
 - Same binary, same tools — zero platform-specific MCP code
 
 ### 2. Session Extraction Plugin (`opencode/RecallExtract.ts`)
@@ -273,18 +273,8 @@ detect_claude_code() {
   fi
 }
 
-# Registration for OpenCode — JSONC-safe config merge
-register_opencode_mcp() {
-  local config="$OPENCODE_CONFIG_DIR/opencode.json"
-  local resolved_db_path
-  resolved_db_path="$(eval echo "$RECALL_DB_PATH_DEFAULT")"  # Resolve ~ to absolute
-
-  # Use the bundled dependency-free JSONC helper for a surgical merge.
-  local mem_mcp_path
-  mem_mcp_path="$(which recall-mcp 2>/dev/null || echo "$HOME/.bun/bin/recall-mcp")"
-
-  recall_configure_opencode_mcp
-}
+# MCP registration and database-path selection use the shared installer helper.
+recall_configure_opencode_mcp
 
 # Plugin installation for OpenCode
 install_opencode_plugin() {
@@ -348,14 +338,7 @@ The extraction prompt already handles markdown input — it processes conversati
 
 ## DB Location Strategy
 
-| Scenario | DB Path | How |
-|----------|---------|-----|
-| Claude Code only (current) | `~/.agents/Recall/recall.db` | Default |
-| OpenCode only | `~/.local/share/recall/recall.db` | `RECALL_DB_PATH` env var (legacy `MEM_DB_PATH` also honored) |
-| Both platforms | `~/.agents/Recall/recall.db` | Shared, WAL mode handles concurrency |
-| Custom | Any path | `RECALL_DB_PATH` env var (legacy `MEM_DB_PATH` also honored) |
-
-All paths are **resolved to absolute** at install time. No tilde in stored config.
+OpenCode shares the CLI and hooks' database. Defaults, overrides, and path resolution are defined in [Installation: Environment Variables](installation.md#environment-variables).
 
 ## Tool Name Mapping
 
@@ -404,7 +387,7 @@ nine with their parameters and return shapes.
 | In-memory Set dedup | HIGH | Persistent JSON file at `.extracted.json` |
 | `session.idle` wrong property name | MEDIUM-HIGH | Current `event` hook reads `properties.sessionID`; legacy spellings remain defensive fallbacks |
 | Compacting return type fabricated | MEDIUM | Corrected to `output.context.push()` |
-| Tilde in RECALL_DB_PATH | MEDIUM | Absolute path resolved at install |
+| Tilde in RECALL_DB_PATH | MEDIUM | Shared resolver; see [database environment variables](installation.md#environment-variables) |
 | `recall import --source` doesn't exist | LOW-MEDIUM | Eliminated — uses drop dir + RecallBatchExtract |
 | Bun not guaranteed | LOW-MEDIUM | Documented as requirement (same as Claude Code) |
 | JSONC parsing | LOW | Bundled dependency-free parser performs surgical merge/removal, preserves comments, and refuses malformed writes |

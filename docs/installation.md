@@ -133,7 +133,9 @@ Recall itself is not published to npm; the `recall-memory` package there is an u
 
 ### Local tarball
 
-Retain the permanent checkout described under [Source checkout](#source-checkout). Before the first pack and every later update, refresh that checkout so the tarball contains the intended release:
+Retain the permanent checkout described under [Source checkout](#source-checkout). Keep the tarball at `~/.agents/Recall/packages/recall-memory.tgz` for as long as Recall is installed globally. For upgrades, replace that file, remove the existing global dependency, then reinstall. Installing again without removal can leave the old version at the same path or duplicate dependency keys at a different path.
+
+Before the first pack and every later update, refresh that checkout so the tarball contains the intended release. On the first install, skip `bun remove -g recall-memory`:
 
 ```bash
 cd /absolute/path/to/Recall
@@ -142,12 +144,16 @@ git switch main
 git pull --ff-only origin main
 bun install
 bun run build
-package_dir=/absolute/path/to/package-output
+package_dir="$HOME/.agents/Recall/packages"
 mkdir -p "$package_dir"
 archive="$(npm pack --pack-destination "$package_dir")"
-bun install -g "$package_dir/$archive"
+mv "$package_dir/$archive" "$package_dir/recall-memory.tgz"
+bun remove -g recall-memory
+bun install -g "$package_dir/recall-memory.tgz"
 recall init
 ```
+
+`bun install -g` records that absolute tarball path, and `bun update -g` re-extracts it. If the file is gone, `bun update -g` fails for every global package with `ENOENT extracting tarball from recall-memory`. Recover by following the upgrade recipe above, including removal before reinstalling.
 
 Continue with the applicable integration guide: [Claude Code](CLAUDE_INTEGRATION.md#install-preferred), [Codex](CODEX_INTEGRATION.md#install-preferred), [Pi](PI_INTEGRATION.md#install-preferred), [omp](OMP_INTEGRATION.md#install-from-this-checkout), or [Grok](GROK_INTEGRATION.md). Each guide owns its host's attach commands and whether it also needs `recall install`. In packaged (tarball) mode, `recall install` runs `packaging/install.sh` with `RECALL_PACKAGED=1`, skipping clone, dependency installation, build, and link.
 
@@ -178,7 +184,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
-| 5. Init DB | Initializes the SQLite database at `~/.agents/Recall/recall.db` and creates `~/.claude/MEMORY/` |
+| 5. Init DB | Initializes the [configured SQLite database](#environment-variables) and creates `~/.claude/MEMORY/` |
 | 6. Configure MCP | With an active Claude plugin, preserves a stored custom pin unless an explicit `--db-path` or inherited `RECALL_DB_PATH`/`MEM_DB_PATH` replaces it; if the selected path is the default, removes the user registration so the plugin serves that database. When the plugin is confirmed absent or disabled, registers `recall-memory` in `~/.claude/settings.json` at user scope |
 | 7. Setup hooks | Copies the installer-owned Claude hooks and shared hook libraries to their canonical runtime paths, links them into `~/.claude/hooks/`, and registers the current Claude lifecycle events through the shared hook installer |
 | 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, while a confirmed absent or disabled plugin makes the installer link them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
@@ -282,7 +288,7 @@ crontab -e
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `RECALL_DB_PATH` | `~/.agents/Recall/recall.db` | SQLite database file location (primary) |
-| `MEM_DB_PATH` | _(unset)_ | SQLite database file location — **deprecated**, honored as a fallback when `RECALL_DB_PATH` is not set. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
+| `MEM_DB_PATH` | _(unset)_ | SQLite database file location - **deprecated**, honored as a fallback when `RECALL_DB_PATH` is unset or empty. Existing installs continue to work; new installs should use `RECALL_DB_PATH`. |
 | `RECALL_IDENTITY_PATH` | — | Override the L0 identity file path. First in the shared resolver used by both `RecallStart` (read) and `recall onboard` (write); see [Identity & Onboarding](cli-reference.md#identity--onboarding). |
 | `OLLAMA_URL` | `http://localhost:11434` | Shared Ollama server URL (embeddings and automatic `ollama` Extractor) |
 | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Ollama model used for embeddings (1024-dim) |
@@ -295,6 +301,8 @@ crontab -e
 | `NO_COLOR` | — | Standard; set to `1` to disable ANSI colors across all installer scripts. |
 
 Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`) if you need non-default values. The `RECALL_DB_PATH` variable is the most commonly changed — useful if you want to keep the database outside `~/.agents/Recall/`. You can also pass `--db-path /custom/path/recall.db` to `./packaging/install.sh` for non-interactive overrides.
+
+When resolving `RECALL_DB_PATH` or its legacy fallback, the CLI, MCP server, hooks, and installer replace `~` with `HOME` and `~/rest` with `HOME` plus `/rest`. The remaining text stays literal, including repeated spaces and `..` segments; resolution does not normalize the path, evaluate shell syntax, or expand `~other`. For example, `export RECALL_DB_PATH='~/data/two  spaces/recall.db'` preserves both spaces. If both variables are unset or empty, Recall uses the default database path.
 
 ---
 
@@ -326,6 +334,15 @@ cd /path/to/Recall
 ./packaging/uninstall.sh --purge          # also destroy ~/.agents/Recall/ tree (confirmed)
 ```
 
+For a local-tarball install, run lifecycle cleanup while the CLI is available, then remove Bun's global dependency:
+
+```bash
+recall uninstall
+bun remove -g recall-memory
+```
+
+Use `recall uninstall --purge` for a purge, then run the same `bun remove -g recall-memory`. Purge deletes the retained tarball; `bun unlink` alone leaves the global tarball dependency behind. For a preview, run only `recall uninstall --dry-run`.
+
 ### What gets removed (default)
 
 - Recall-managed slash-command symlinks under `~/.claude/commands/Recall/` and legacy `~/.claude/commands/recall/`; either directory is removed only when empty
@@ -339,7 +356,7 @@ cd /path/to/Recall
 - OpenCode MCP entry + plugins + the shared plugin helpers Recall installs under `plugins/lib/` + agent + guide (unless `--skip-opencode`). `plugins/lib/` itself is removed only when Recall emptied it, so your own files there survive. An `opencode.json` that Recall cannot parse is reported and left untouched; the plugins, agent, and guide are still removed and the rest of the uninstall continues
 - Recall's native Pi package registration, owned Pi MCP entry, guide link, and Recall-generated `AGENTS.md` MEMORY section (current marker or normalized exact legacy Pi body); legacy Recall extension/skill links are removed, while unrelated Pi packages and `pi-mcp-adapter` remain (unless `--skip-pi`)
 - The managed Grok lifecycle symlink at `~/.grok/hooks/RecallLifecycle.json`; a foreign file at that path is preserved (unless `--skip-grok`)
-- `bun unlink` (removes `recall` and `recall-mcp` from your PATH)
+- The source-checkout global link via `bun unlink`
 
 If direct cleanup cannot safely parse an owned Claude, OpenCode, or Pi config, it does not rewrite that file, completes the other safe cleanup, and exits nonzero with `Uninstall Incomplete`.
 

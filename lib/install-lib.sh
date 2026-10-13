@@ -1082,7 +1082,6 @@ recall_create_install_root() {
 #   1. RECALL_DB_PATH
 #   2. MEM_DB_PATH (deprecated; still honored)
 #   3. $RECALL_DIR/recall.db (default)
-# Uses `eval echo` so tildes embedded in env vars expand to absolute paths.
 recall_resolve_db_path() {
   local raw
   if [[ -n "${RECALL_DB_PATH:-}" ]]; then
@@ -1092,7 +1091,11 @@ recall_resolve_db_path() {
   else
     raw="$RECALL_DIR/recall.db"
   fi
-  eval echo "$raw"
+  case "$raw" in
+    '~') raw="$HOME" ;;
+    '~/'*) raw="$HOME/${raw:2}" ;;
+  esac
+  printf '%s\n' "$raw"
 }
 
 # Copy a file from the repo into its canonical location under $RECALL_DIR.

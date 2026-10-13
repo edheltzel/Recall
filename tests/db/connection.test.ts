@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -13,6 +14,14 @@ import {
   ensurePublishedMessageViews,
 } from '../../src/db/connection';
 import { MIGRATIONS, applyMigrations } from '../../src/db/migrations';
+import { resolveDbPath } from '../../hooks/lib/db-path';
+
+function installerDbPath(env: NodeJS.ProcessEnv): string {
+  return execFileSync('bash', [
+    '-c', 'source "$1"; recall_resolve_db_path', 'bash',
+    join(import.meta.dir, '..', '..', 'lib', 'install-lib.sh'),
+  ], { env, encoding: 'utf8' }).trimEnd();
+}
 
 describe('connection', () => {
   let testDbPath: string;
@@ -85,9 +94,82 @@ describe('connection', () => {
         }
       }
     });
+
+    test.each(['RECALL_DB_PATH', 'MEM_DB_PATH'] as const)('preserves literal tilde paths across CLI, hooks, and installer via %s (#323)', overrideName => {
+      const originalRecall = process.env.RECALL_DB_PATH;
+      const originalMem = process.env.MEM_DB_PATH;
+      try {
+        process.env.RECALL_DB_PATH = '';
+        delete process.env.MEM_DB_PATH;
+        for (const [raw, expected] of [
+          ['~', process.env.HOME!],
+          ['~/data/recall.db', `${process.env.HOME}/data/recall.db`],
+          ['~/db-link/../recall.db', `${process.env.HOME}/db-link/../recall.db`],
+          ['~/data/two  spaces/recall.db', `${process.env.HOME}/data/two  spaces/recall.db`],
+          ['~other/recall.db', '~other/recall.db'],
+          ['/data/two  spaces/../recall.db', '/data/two  spaces/../recall.db'],
+        ]) {
+          process.env[overrideName] = raw;
+          expect(getDbPath()).toBe(expected);
+          expect(resolveDbPath()).toBe(expected);
+          expect(installerDbPath(process.env)).toBe(expected);
+        }
+      } finally {
+        if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
+        else delete process.env.RECALL_DB_PATH;
+        if (originalMem !== undefined) process.env.MEM_DB_PATH = originalMem;
+        else delete process.env.MEM_DB_PATH;
+      }
+    });
   });
 
   describe('initDb', () => {
+    test.each(['RECALL_DB_PATH', 'MEM_DB_PATH'] as const)('CLI initializes the installer database through symlinks and double spaces via %s', overrideName => {
+      const productionPath = join(homedir(), '.agents', 'Recall', 'recall.db');
+      const productionSnapshot = () => [productionPath, `${productionPath}-wal`, `${productionPath}-shm`]
+        .map(path => existsSync(path) ? statSync(path) : null);
+      const productionBefore = productionSnapshot();
+      const taskRoot = mkdtempSync(join(tmpdir(), 'recall-test-tilde-'));
+      const taskHome = join(taskRoot, 'home');
+      const leaf = join(taskRoot, 'store', 'leaf');
+      mkdirSync(join(taskHome, 'data', 'two  spaces'), { recursive: true });
+      mkdirSync(leaf, { recursive: true });
+      symlinkSync(leaf, join(taskHome, 'db-link'));
+
+      try {
+        for (const [raw, physicalPath] of [
+          ['~/db-link/../recall.db', join(taskRoot, 'store', 'recall.db')],
+          ['~/data/two  spaces/recall.db', join(taskHome, 'data', 'two  spaces', 'recall.db')],
+        ]) {
+          const env = {
+            ...process.env,
+            HOME: taskHome,
+            RECALL_HOME: join(taskRoot, 'state'),
+            RECALL_DB_PATH: '',
+            MEM_DB_PATH: '',
+            [overrideName]: raw,
+          };
+          const configuredPath = installerDbPath(env);
+          const output = execFileSync(process.execPath, [
+            join(import.meta.dir, '..', '..', 'src', 'index.ts'), 'init',
+          ], { env, encoding: 'utf8' });
+          expect(output).toContain(`Created database at ${configuredPath}`);
+          expect(existsSync(physicalPath)).toBe(true);
+          expect(existsSync(join(taskHome, 'recall.db'))).toBe(false);
+          const configuredDb = new Database(configuredPath, { readonly: true });
+          try {
+            expect(configuredDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get())
+              .toEqual({ name: 'messages' });
+          } finally {
+            configuredDb.close();
+          }
+        }
+        expect(productionSnapshot()).toEqual(productionBefore);
+      } finally {
+        rmSync(taskRoot, { recursive: true, force: true });
+      }
+    });
+
     test('creates database file and returns { created: true }', () => {
       // Temporarily point RECALL_DB_PATH at a brand-new location so we can
       // exercise the "first-time creation" code path without touching the
