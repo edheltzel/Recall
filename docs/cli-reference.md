@@ -487,6 +487,8 @@ recall start                            # Render L0/L1 session-start memory (see
 
 `recall init` creates the database schema if it does not exist, and applies any pending migrations. It is safe to run on an existing database.
 
+`recall init` and `recall migrate` preserve literal `..` segments and repeated spaces in database paths. The filesystem resolves these paths, including `link/..` through a symlink's target, when creating directories or opening and moving files.
+
 `recall doctor` checks the database connection, schema integrity, FTS5 index health, MCP server registration, Ollama availability, and the per-platform symlinks under `~/.agents/Recall/`. Run this first when troubleshooting. Pass `--fix` to repair drift: missing symlinks are re-created, stale `recall-memory` database paths are updated, and user-modified files at symlink targets are backed up under `~/.agents/Recall/backups/<TIMESTAMP>/doctor-fix/` before being replaced. Data and index maintenance is the explicit job of [`recall repair`](#repair), which doctor recommends when an FTS index is out of sync.
 
 Claude configuration files accept JSONC, but when `recall install`, `recall update`, `recall uninstall`, or `recall doctor --fix` writes one back, it is serialized as strict JSON and loses comments and trailing commas. Adding the first Recall MCP or hook entry during install or update also normalizes the file. `recall migrate` applies the same normalization to every detected host configuration it rewrites.
@@ -497,7 +499,11 @@ Recall's direct config editors reject malformed configuration, duplicate keys, a
 
 `recall path` prints the resolved DB path, the install root, the active env var (`RECALL_DB_PATH` / `MEM_DB_PATH` / default), and the per-platform symlink targets with their current state (OK / drift / missing). Pass `--json` for machine-readable output.
 
-`recall migrate` moves the database to a new path and rewrites MCP configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file. It refuses to overwrite a non-empty destination or proceed when any destination `-wal`, `-shm`, or `-journal` sidecar already exists. It snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. If an existing target config is invalid, cannot be staged for an atomic write, or cannot safely accept the staged replacement, migration stops before moving the database. If a later database sidecar move or config commit fails, migration attempts to move the database and any moved sidecars back and restore configs that were already committed. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
+`recall migrate` moves the database to a new path and rewrites MCP configs across all detected platforms (`~/.claude.json`, `~/.claude/settings.json`, `~/.config/opencode/opencode.json`, `~/.pi/agent/mcp.json`) so the spawned `recall-mcp` process keeps reading from the right file.
+
+It expands `~` and the `~/` prefix in `--to` and makes relative source and destination paths absolute by prefixing the current working directory. Rewritten MCP configs retain that destination spelling. If source and destination have the same filename and their existing parent directories resolve to the same physical directory, migration exits successfully without snapshots, file moves, or config changes.
+
+For a different destination, it refuses to overwrite a non-empty file or proceed when any destination `-wal`, `-shm`, or `-journal` sidecar already exists. It snapshots the source DB + sidecars + configs, including their original comments, to `~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/` before any mutation. If an existing target config is invalid, cannot be staged for an atomic write, or cannot safely accept the staged replacement, migration stops before moving the database. If a later database sidecar move or config commit fails, migration attempts to move the database and any moved sidecars back and restore configs that were already committed. Restart Claude Code / OpenCode / Pi after running so their MCP servers reload.
 
 ### Onboard
 

@@ -2,7 +2,7 @@
 
 import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { existsSync, mkdirSync, statSync, chmodSync } from 'fs';
 import {
   CREATE_TABLES,
@@ -245,7 +245,7 @@ function ensureSchema(database: Database): void {
 
 export function initDb(): { created: boolean; path: string } {
   const dbPath = getDbPath();
-  const dbDir = join(dbPath, '..');
+  const dbDir = dirname(dbPath); // not join(dbPath, '..'): keeps symlink/.. physical (#324)
 
   // Ensure directory exists
   if (!existsSync(dbDir)) {
