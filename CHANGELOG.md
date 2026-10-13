@@ -12,6 +12,8 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-13
+
 The 0.10.0 section below was never tagged or published. This release ships its changes too, as v0.10.1, the first release after v0.9.4.
 
 ### Added
