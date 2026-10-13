@@ -76,13 +76,50 @@ export function runAge(options: AgeOptions = {}): AgeRunResult | undefined {
   }
 
   const db = getDb();
-  const plan = planAge(db, {
+  const planOptions = {
     tables: target === 'all' ? undefined : [target as ProvenanceTable],
     ageCutoffDays,
     breadcrumbHorizonDays,
     importanceThreshold,
-  });
+  };
 
+  if (!execute) {
+    const plan = planAge(db, planOptions);
+    const totalPlanned = reportAgePlan(plan, false, ageCutoffDays, breadcrumbHorizonDays, importanceThreshold);
+    console.log(totalPlanned > 0
+      ? '\nRe-run with --execute to apply the plan.'
+      : '\nNothing to age.');
+    return { plan, applied: null };
+  }
+
+  // One write lock from plan through apply: a pin or other guard added by
+  // another connection cannot land between the two steps.
+  const { plan, applied } = db.transaction(() => {
+    const plan = planAge(db, planOptions);
+    const totalPlanned = reportAgePlan(plan, true, ageCutoffDays, breadcrumbHorizonDays, importanceThreshold);
+    if (totalPlanned === 0) return { plan, applied: null as AgeApplyResult | null };
+    return { plan, applied: applyAgePlan(db, plan) };
+  }).immediate();
+
+  if (!applied) {
+    console.log('\nNothing to age.');
+    return { plan, applied: null };
+  }
+  console.log(
+    `\nAged: deleted ${applied.deleted.toLocaleString()} message(s), ` +
+    `expired ${applied.expired.toLocaleString()} breadcrumb(s), ` +
+    `demoted ${applied.demoted.toLocaleString()} durable record(s).`
+  );
+  return { plan, applied };
+}
+
+function reportAgePlan(
+  plan: AgePlan,
+  execute: boolean,
+  ageCutoffDays: number,
+  breadcrumbHorizonDays: number,
+  importanceThreshold: number,
+): number {
   console.log(execute ? '[EXECUTE — aging records]\n' : '[DRY RUN — no changes written]\n');
   if (execute) {
     console.log("Recommended: run 'recall export --backup' before applying aging.\n");
@@ -109,24 +146,5 @@ export function runAge(options: AgeOptions = {}): AgeRunResult | undefined {
   }
 
   console.log(`\nTotal: ${totalPlanned.toLocaleString()} record(s) to age`);
-
-  if (!execute) {
-    console.log(totalPlanned > 0
-      ? '\nRe-run with --execute to apply the plan.'
-      : '\nNothing to age.');
-    return { plan, applied: null };
-  }
-
-  if (totalPlanned === 0) {
-    console.log('\nNothing to age.');
-    return { plan, applied: null };
-  }
-
-  const applied = applyAgePlan(db, plan);
-  console.log(
-    `\nAged: deleted ${applied.deleted.toLocaleString()} message(s), ` +
-    `expired ${applied.expired.toLocaleString()} breadcrumb(s), ` +
-    `demoted ${applied.demoted.toLocaleString()} durable record(s).`
-  );
-  return { plan, applied };
+  return totalPlanned;
 }
