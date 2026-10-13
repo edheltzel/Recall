@@ -183,6 +183,8 @@ When the user requests a durable behavior change, record it here or in the relev
 - **Ponytail simplification** (Ed, 2026-09-16): apply concrete, verified code simplifications. Do not commit Ponytail benchmark reports or scoreboard artifacts, or treat published benchmark percentages as targets for this repo. Existing Recall benchmarks are separate and stay untouched unless requested.
 - **Jev is optional** (Ed, 2026-09-23). Core install, hooks, and ingest must work with no Jev key and no TypeSafe account. When `JEV_RECALL_KEY` is missing or blank in the process environment and absent from `~/.env`, ingest skips scoring and writes candidates unchanged; skipping Jev does not fail ingestion. A non-blank environment value always wins; otherwise Recall reads `JEV_RECALL_KEY` from `$HOME/.env` (Ed, 2026-10-10). Never print or copy the key. (Recall decision #4571.)
 
+- **Auto-merge low-risk PRs** (Ed, 2026-10-11). When Ed calls a PR low risk, or the no-mistakes review rates it low risk, and CI is green, it is not a draft, and nothing blocks it, the agent merges it without asking. Medium or high risk, drafts, and blocked PRs wait for Ed. (Recall decision #4620.)
+
 ## Child DOX Index
 
 Child AGENTS.md files own domain-specific local rules. Read the applicable one before editing inside its subtree.
