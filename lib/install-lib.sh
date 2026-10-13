@@ -3472,6 +3472,7 @@ _recall_age_crontab_write() {
 
 _recall_age_script_install() {
   local content="$1" dest="$RECALL_DIR/shared/age-quarterly.sh" tmp=""
+  [[ ! -d "$dest" ]] || return 1
   mkdir -p "$RECALL_DIR/shared" "$RECALL_DIR/logs" || return 1
   tmp="$(mktemp "$RECALL_DIR/shared/.age-quarterly.XXXXXX")" || return 1
   if ! printf '%s\n' "$content" > "$tmp"; then

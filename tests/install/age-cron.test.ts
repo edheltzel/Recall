@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -407,6 +407,46 @@ describe('quarterly age cron', () => {
         }
       } finally {
         rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('wrapper directory collision preserves crontab and reports failure', () => {
+    for (const mode of ['install', 'refresh']) {
+      for (const linked of [false, true]) {
+        const root = mkdtempSync(join(tmpdir(), 'recall-age-wrapper-directory-'));
+        try {
+          const home = join(root, 'home');
+          const recallDir = join(home, '.agents', 'Recall');
+          const bin = join(root, 'bin');
+          const cronFile = join(root, 'cron');
+          const pkg = durablePackage(root, home);
+          const directory = linked ? join(root, 'existing-directory') : wrapper(recallDir);
+          mkdirSync(dirname(wrapper(recallDir)), { recursive: true });
+          mkdirSync(directory);
+          writeFileSync(join(directory, 'keep'), 'user data');
+          if (linked) symlinkSync(directory, wrapper(recallDir));
+          const original = '15 2 * * * /usr/bin/true # user\n'
+            + (mode === 'refresh' ? `0 3 1 1,4,7,10 * /bin/true ${MARKER}\n` : '');
+          writeFileSync(cronFile, original);
+          cronStub(bin, cronFile);
+
+          const result = runLib(
+            home, recallDir, bin,
+            `recall_${mode}_age_cron\nrecall_print_age_cron_notice`,
+            { RECALL_REPO_DIR: pkg.repo, RECALL_DB_PATH: join(root, 'recall.db') },
+          );
+          expect(result.status).toBe(0);
+          expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+          expect(result.stdout).toContain('Could not write the quarterly aging wrapper');
+          expect(result.stdout).toContain('Schedule unchanged');
+          expect(result.stdout).not.toContain('Quarterly aging: scheduled.');
+          expect(statSync(wrapper(recallDir)).isDirectory()).toBe(true);
+          expect(readdirSync(directory)).toEqual(['keep']);
+          expect(readFileSync(join(directory, 'keep'), 'utf-8')).toBe('user data');
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
       }
     }
   });
