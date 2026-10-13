@@ -12,6 +12,9 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+### Added
+- **Quarterly aging cron**: install schedules `recall age --execute` at 03:00 on Jan/Apr/Jul/Oct 1 through `~/.agents/Recall/shared/age-quarterly.sh`, which holds the runner, the database path and the log. The crontab line stays fixed; update rewrites only the wrapper, and `recall migrate` rewrites its database path. A commented-out managed line is kept as disabled. `--skip-age-cron` and uninstall remove the line and the wrapper. Jobs are only scheduled when Recall is installed somewhere durable. Details: [Quarterly aging](docs/installation.md#quarterly-aging-cron).
+
 ## [0.10.1] - 2026-10-13
 
 The 0.10.0 section below was never tagged or published. This release ships its changes too, as v0.10.1, the first release after v0.9.4.
