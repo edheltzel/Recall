@@ -3067,11 +3067,9 @@ recall_provision_embedding_model() {
   return 0
 }
 
-# Quarterly `recall age --execute`. The crontab line is fixed text that runs
-# $RECALL_DIR/shared/age-quarterly.sh via /bin/sh, so a user SHELL override
-# does not change how the job starts. The wrapper holds the database, bun, and
-# runner paths. A marked line is replaced in place so a CRON_TZ above it still
-# applies. Append only when no marked line exists.
+# Use /bin/sh explicitly so a user SHELL override cannot change wrapper startup.
+# Replace active entries in place to retain preceding CRON_TZ settings.
+# Scheduling policy: docs/installation.md#quarterly-aging-cron.
 RECALL_AGE_CRON_MARKER='# recall-memory: quarterly age'
 RECALL_AGE_CRON_SCHEDULE='0 3 1 1,4,7,10 *'
 

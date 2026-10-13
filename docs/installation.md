@@ -300,15 +300,17 @@ Install schedules `recall age --execute` at `0 3 1 1,4,7,10 *` (03:00 on the 1st
 0 3 1 1,4,7,10 * /bin/sh '/Users/you/.agents/Recall/shared/age-quarterly.sh' # recall-memory: quarterly age
 ```
 
-`/bin/sh` runs the absolute wrapper path `~/.agents/Recall/shared/age-quarterly.sh` (mode 0700). Install replaces an existing marked line in place, so a `CRON_TZ` line above it still applies, and appends only when no marked line exists. `update.sh` rewrites the wrapper and refreshes that line only when the marked line is already present, and only after verification succeeds. Deleting the line keeps it deleted.
+`/bin/sh` runs the absolute wrapper path `~/.agents/Recall/shared/age-quarterly.sh` (mode 0700). Install replaces the first active marked line in place and removes duplicate active entries, so a `CRON_TZ` line above it still applies. It appends only when no marked line exists. `update.sh` rewrites the wrapper and refreshes active marked entries only after verification succeeds. Deleting all marked lines prevents update from adding the job again; a later install can add it.
 
-Interactive install and update confirmations show the planned crontab action, schedule, and command, plus the selected database for an add or refresh. Previews for source installs and updates account for the planned build; applying the schedule requires the built runner to exist.
+Install and update preserve every marked line whose first non-space character is `#`. When all marked lines are commented, preview and completion report `Quarterly aging: disabled by user, kept` and leave the wrapper unchanged. When active and commented marked lines coexist, active entries are refreshed and reported as scheduled, while commented lines remain unchanged.
+
+Interactive install and update confirmations show the planned crontab action. An add or refresh preview also shows the schedule, command, and selected database. Preview and apply use the same classification. Previews for source installs and updates account for the planned build; applying the schedule requires the built runner to exist.
 
 The wrapper exports `RECALL_DB_PATH` and execs the installing package's `dist/index.js` through `bun`, appending to `~/.agents/Recall/logs/age.log`. Install and update prefer an explicit `RECALL_DB_PATH` override, then `MEM_DB_PATH`, then the database stored in an existing wrapper. Without those, they use Claude MCP database selection, which falls back to the default when no custom pin exists. Relative overrides are stored as absolute paths; stored wrapper and MCP paths must already be absolute. For database relocation, use [`recall migrate`](cli-reference.md#admin).
 
 Paths inside the wrapper may contain spaces, quotes, and `%`. A newline in a path is rejected. If the install root contains `%`, `'`, or a control character, scheduling is rejected. Install and update report the reason without changing an existing schedule. An unsupported runner keeps an existing job; when no job exists, they print `NOT scheduled` and tell you to run `recall install` after making it durable. If `crontab` cannot be read or updated, the existing schedule is left unchanged. If writing the wrapper fails after updating crontab, Recall attempts to restore the previous crontab; a failed restoration is reported explicitly with a `crontab -e` recovery instruction.
 
-[`--skip-age-cron`](#install-flags) removes the marked line and the wrapper. `uninstall.sh` removes both when it can read and update the user crontab. If the line is removed but wrapper deletion fails, aging is disabled and the leftover wrapper is reported. Other crontab lines are left alone. For aging behavior and safeguards, see [Age](cli-reference.md#age).
+[`--skip-age-cron`](#install-flags) and `uninstall.sh` remove all active and commented marked lines and the wrapper when they can read and update the user crontab. If the lines are removed but wrapper deletion fails, aging is disabled and the leftover wrapper is reported. Other crontab lines are left alone. For aging behavior and safeguards, see [Age](cli-reference.md#age).
 
 ---
 
