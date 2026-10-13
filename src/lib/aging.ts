@@ -190,15 +190,15 @@ export interface AgeApplyResult {
 }
 
 /**
- * Apply a plan in one transaction; failures roll back everything. Deletes
- * messages (and their embeddings), expires breadcrumbs via expires_at, and
- * demotes durable records' importance to their floor. Importance only ever
- * changes through the clamped value computed in planAge.
+ * Apply a plan; failures roll back everything. Deletes messages (and their
+ * embeddings), expires breadcrumbs via expires_at, and demotes durable
+ * records' importance to their floor. Importance only ever changes through
+ * the clamped value computed in planAge.
  */
 export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
-  const result: AgeApplyResult = { deleted: 0, expired: 0, demoted: 0 };
+  return db.transaction(() => {
+    const result: AgeApplyResult = { deleted: 0, expired: 0, demoted: 0 };
 
-  const apply = db.transaction(() => {
     for (const report of plan.tables) {
       const ids = report.eligible.map(c => c.id);
       if (ids.length === 0) continue;
@@ -238,8 +238,7 @@ export function applyAgePlan(db: Database, plan: AgePlan): AgeApplyResult {
         result.demoted += ids.length;
       }
     }
-  });
-  apply();
 
-  return result;
+    return result;
+  })();
 }
