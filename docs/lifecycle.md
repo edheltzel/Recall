@@ -43,6 +43,8 @@ Follow [Installation → Install Recall](installation.md#install-recall) for the
 
 After any attach, **restart your agent** so it loads the plugin, extension, or snippets.
 
+For the managed quarterly aging job and its lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).
+
 ### `install.sh` vs. `recall install`
 
 Both run the same canonical steps and are **idempotent** — re-running repairs symlinks and registrations, so there is no separate "re-install" command. They differ only in the bootstrap:
@@ -82,7 +84,7 @@ Local-tarball installs also need [global package cleanup](installation.md#uninst
 ## Custom database location
 
 - **At install time:** `./packaging/install.sh --db-path /path/to/recall.db`, or set `RECALL_DB_PATH` (see [Installation → Environment Variables](installation.md#environment-variables)).
-- **Relocate an existing DB:** `recall migrate --to /new/path/recall.db` moves the database **and** rewrites the MCP config to point at it. Add `--dry-run` to preview. Details in the [CLI Reference → Admin](cli-reference.md#admin).
+- **Relocate an existing DB:** `recall migrate --to /new/path/recall.db`. Add `--dry-run` to preview; see [CLI Reference → Admin](cli-reference.md#admin) for affected files and rollback behavior.
 - **Check the current location:** `recall path` prints the resolved DB path, install root, and per-platform symlink state.
 
 ---
