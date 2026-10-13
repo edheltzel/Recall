@@ -3298,7 +3298,7 @@ _recall_age_cron_read_state() {
   _RECALL_AGE_CRON_BIN=""
   _RECALL_AGE_CRON_EXISTING=""
   _RECALL_AGE_CRON_PRESENT=false
-  _RECALL_AGE_CRON_DISABLED=false
+  _RECALL_AGE_CRON_ACTIVE=false
 
   if _recall_age_cron_blocked; then
     _RECALL_AGE_CRON_READ_STATUS=sandbox
@@ -3323,8 +3323,8 @@ _recall_age_cron_read_state() {
   while IFS= read -r candidate || [[ -n "$candidate" ]]; do
     if [[ "$candidate" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
       _RECALL_AGE_CRON_PRESENT=true
-      if [[ "$candidate" =~ ^[[:space:]]*# ]]; then
-        _RECALL_AGE_CRON_DISABLED=true
+      if [[ ! "$candidate" =~ ^[[:space:]]*# ]]; then
+        _RECALL_AGE_CRON_ACTIVE=true
       fi
     fi
   done <<< "$_RECALL_AGE_CRON_EXISTING"
@@ -3373,7 +3373,7 @@ _recall_age_cron_decide() {
     fi
     return 0
   fi
-  if [[ "$_RECALL_AGE_CRON_DISABLED" == true ]]; then
+  if [[ "$_RECALL_AGE_CRON_PRESENT" == true && "$_RECALL_AGE_CRON_ACTIVE" != true ]]; then
     _RECALL_AGE_CRON_ACTION=keep
     _RECALL_AGE_CRON_STATUS=disabled
     return 0
@@ -3441,7 +3441,7 @@ _recall_age_cron_render() {
   if [[ -n "$existing" ]]; then
     existing="${existing%$'\n'}"
     while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == *"$RECALL_AGE_CRON_MARKER"* ]]; then
+      if [[ "$line" == *"$RECALL_AGE_CRON_MARKER"* && ( "$remove_only" == true || ! "$line" =~ ^[[:space:]]*# ) ]]; then
         if [[ "$remove_only" == true ]]; then
           continue
         fi

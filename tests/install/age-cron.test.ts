@@ -267,6 +267,47 @@ describe('quarterly age cron', () => {
     }
   });
 
+  test('mixed marked jobs refresh active entries and preserve commented entries', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-age-mixed-'));
+    try {
+      const home = join(root, 'home');
+      const recallDir = join(home, '.agents', 'Recall');
+      const bin = join(root, 'bin');
+      const cronFile = join(root, 'cron');
+      const pkg = durablePackage(root, home);
+      const firstComment = `  # 0 3 1 1,4,7,10 * /bin/old ${MARKER}  \n`;
+      const lastComment = `\t# 0 3 1 1,4,7,10 * /bin/backup ${MARKER}\t\n`;
+      const active = `0 3 1 1,4,7,10 * /bin/old ${MARKER}\n`;
+      const userLine = '15 2 * * * /usr/bin/true # user\n';
+      const original = `CRON_TZ=UTC\n${firstComment}${active}${userLine}${active}${lastComment}`;
+      cronStub(bin, cronFile);
+      const env = { RECALL_REPO_DIR: pkg.repo };
+
+      for (const mode of ['install', 'refresh']) {
+        writeFileSync(cronFile, original);
+        const preview = runLib(home, recallDir, bin, `recall_print_age_cron_plan ${mode}`, env);
+        expect(preview.status).toBe(0);
+        expect(planAction(preview.stdout)).toBe('refresh');
+        expect(preview.stdout).not.toContain('disabled by user, kept');
+        expect(readFileSync(cronFile, 'utf-8')).toBe(original);
+
+        const body = mode === 'install'
+          ? 'recall_install_age_cron\nrecall_print_age_cron_notice'
+          : `source ${quote(UPDATE)}\nNO_CONFIRM=true\nstep_refresh_age_cron`;
+        const applied = runLib(home, recallDir, bin, body, env);
+        expect(applied.status).toBe(0);
+        expect(applied.stdout).toContain('Quarterly aging: scheduled.');
+        expect(applied.stdout).not.toContain('disabled by user, kept');
+        expect(readFileSync(cronFile, 'utf-8')).toBe(`CRON_TZ=UTC\n${firstComment}${fixedLine(recallDir)}\n${userLine}${lastComment}`);
+        expect(readFileSync(wrapper(recallDir), 'utf-8')).toBe(expectedScript(
+          join(recallDir, 'recall.db'), join(bin, 'bun'), pkg.runner, join(recallDir, 'logs', 'age.log'),
+        ));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('preview matches apply for every action', () => {
     const cases = [
       { name: 'add', mode: 'install', cron: '15 2 * * * /usr/bin/true # user\n', durable: true, action: 'add' },
