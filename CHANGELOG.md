@@ -12,6 +12,8 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-13
+
 ### Added
 - **Quarterly aging cron**: install manages a quarterly `recall age --execute` job. Scheduling, opt-out, database selection, and lifecycle behavior are documented in [Quarterly aging](docs/installation.md#quarterly-aging-cron).
 
