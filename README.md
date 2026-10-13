@@ -118,7 +118,7 @@ release and the exact command to run. From a shell:
 ./packaging/update.sh           # full update: pull, build, migrate, re-register hooks
 ```
 
-Installed from a local tarball? `recall update` has no git checkout to pull. Follow the [local-tarball update procedure](docs/installation.md#local-tarball).
+Installed from a local tarball? Follow the [tarball upgrade procedure](docs/installation.md#local-tarball).
 
 ### Uninstalling
 
@@ -128,7 +128,7 @@ Installed from a local tarball? `recall update` has no git checkout to pull. Fol
 ./packaging/uninstall.sh --purge     # destroy runtime + DBs; preserve identity/distilled snapshots (confirmed)
 ```
 
-Installed from a local tarball? Use `recall uninstall` (same flags, e.g. `--dry-run` / `--purge`).
+Installed from a local tarball? Follow the [tarball cleanup procedure](docs/installation.md#uninstalling) for removal, purge, or a preview.
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
 
