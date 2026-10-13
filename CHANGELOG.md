@@ -12,11 +12,12 @@ note in the 0.9.0 entry.
 
 ## [Unreleased]
 
+The 0.10.0 section below was never tagged or published. This release ships its changes too, as v0.10.1, the first release after v0.9.4.
+
 ### Added
 - **Named harness config**: optional `query`, `extraction`, and `cluster` keys in `~/.agents/Recall/config.json` can point those jobs at Claude, Pi, OpenCode, Codex, Grok, JCode, omp, or Cursor. Anything else is a command argv. A missing file keeps today's local search and extractors. An unproven call fails that step. Install never writes the file.
+- **Jev scoring at ingest**: structured extraction candidates are scored by Jev before they are written. The key comes from `JEV_RECALL_KEY` in the environment, falling back to `$HOME/.env`. Jev is optional: with no key, ingest skips scoring and writes candidates unchanged.
 - **`recall jev` missing-key prompt**: a terminal prints `https://console.typesafe.ai/keys` and asks for a key for that run. The paste is not saved or printed. A non-interactive run prints the URL and exits 1. Ingest still skips scoring when the key is missing.
-
-- **Release commands**: `npm run release:major`, `release:minor`, and `release:patch` synchronize root/plugin versions and changelog, validate the release, atomically publish its commit and annotated tag, and create the matching GitHub release. `--dry-run` performs preflight without publishing.
 
 - **Native omp capture** through the root package's `omp.extensions` manifest. Main-session `session_stop` snapshots use the shared scrubbed, deduplicated lifecycle ingest path, including active-branch reconciliation and existing-database migration. Skills/MCP stay separate. Verified with omp 18.2.0; setup and limits in [omp Integration](docs/OMP_INTEGRATION.md).
   The native E2E check uses the packed CLI throughout, compares exact resumed message contents and stable identities, and requires a completed post-uninstall turn before accepting unchanged capture history.
