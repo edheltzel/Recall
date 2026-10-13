@@ -54,6 +54,7 @@ function runMigrateCli(to: string): string {
 
 beforeEach(() => {
   migrateTestHooks.failCommitPath = '';
+  migrateTestHooks.failAfterCommitPath = '';
   migrateTestHooks.commitProbeExecutable = '';
   tempDir = mkdtempSync(join(tmpdir(), 'recall-migrate-test-'));
   srcDb = join(tempDir, 'src', 'recall.db');
@@ -445,5 +446,70 @@ describe('recall migrate', () => {
     runMigrate({ to: destDb }, tempDir);
     expect(captured.join('\n')).toContain('does not exist');
     expect(existsSync(destDb)).toBe(false);
+  });
+
+  test('rewrites the age wrapper database and restores it when a later commit fails', () => {
+    const script = join(tempDir, '.agents', 'Recall', 'shared', 'age-quarterly.sh');
+    const quotedDest = join(tempDir, "dest's data", 'recall%.db');
+    mkdirSync(dirname(script), { recursive: true });
+    const original = `#!/bin/sh\nexport RECALL_DB_PATH='${srcDb}'\nexec '/bun' '/runner' age --execute >> '/log' 2>&1\n`;
+    writeFileSync(script, original, { mode: 0o700 });
+
+    runMigrate({ to: quotedDest }, tempDir);
+
+    const rewritten = readFileSync(script, 'utf-8');
+    expect(rewritten).toBe(
+      `#!/bin/sh\nexport RECALL_DB_PATH='${quotedDest.replaceAll("'", "'\\''")}'\nexec '/bun' '/runner' age --execute >> '/log' 2>&1\n`,
+    );
+    expect(statSync(script).mode & 0o777).toBe(0o700);
+    expect(existsSync(quotedDest)).toBe(true);
+    expect(existsSync(srcDb)).toBe(false);
+
+    rmSync(quotedDest, { force: true });
+    rmSync(quotedDest + '-wal', { force: true });
+    rmSync(quotedDest + '-shm', { force: true });
+    writeFileSync(script, original, { mode: 0o700 });
+    writeFileSync(srcDb, 'fake-sqlite-bytes');
+    migrateTestHooks.failAfterCommitPath = script;
+    expect(() => withExitThrow(() => runMigrate({ to: quotedDest }, tempDir))).toThrow('exit:1');
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(quotedDest)).toBe(false);
+    expect(readFileSync(script, 'utf-8')).toBe(original);
+    expect(statSync(script).mode & 0o777).toBe(0o700);
+  });
+
+  test.each(['export RECALL_DB_PATH=not-quoted', "RECALL_DB_PATH='/stored.db'"])(
+    'does not move the database with an unsupported age wrapper assignment: %s',
+    (assignment) => {
+      const script = join(tempDir, '.agents', 'Recall', 'shared', 'age-quarterly.sh');
+      mkdirSync(dirname(script), { recursive: true });
+      const original = `#!/bin/sh\n${assignment}\n`;
+      writeFileSync(script, original, { mode: 0o700 });
+
+      expect(() => withExitThrow(() => runMigrate({ to: destDb }, tempDir))).toThrow('exit:1');
+      expect(existsSync(srcDb)).toBe(true);
+      expect(existsSync(destDb)).toBe(false);
+      expect(readFileSync(script, 'utf-8')).toBe(original);
+      expect(capturedErr.join('\n')).toContain('cannot patch');
+    },
+  );
+
+  test('dry-run plans an age wrapper rewrite without writing it', () => {
+    const script = join(tempDir, '.agents', 'Recall', 'shared', 'age-quarterly.sh');
+    mkdirSync(dirname(script), { recursive: true });
+    const original = `#!/bin/sh\nexport RECALL_DB_PATH='${srcDb}'\nexec '/bun' '/runner' age --execute >> '/log' 2>&1\n`;
+    writeFileSync(script, original, { mode: 0o700 });
+
+    runMigrate({ to: destDb, dryRun: true }, tempDir);
+
+    expect(captured.join('\n')).toContain(`patch RECALL_DB_PATH in ${script}`);
+    expect(readFileSync(script, 'utf-8')).toBe(original);
+    expect(existsSync(srcDb)).toBe(true);
+    expect(existsSync(destDb)).toBe(false);
+  });
+
+  test('does not create an age wrapper when none is installed', () => {
+    runMigrate({ to: destDb }, tempDir);
+    expect(existsSync(join(tempDir, '.agents', 'Recall', 'shared', 'age-quarterly.sh'))).toBe(false);
   });
 });

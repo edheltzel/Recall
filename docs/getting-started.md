@@ -135,7 +135,7 @@ Other hosts:
 
 - **Codex** — `Stop`, `PreCompact`, `PostCompact`, and `SessionEnd` call `recall capture`. `SessionStart` stays hidden `recall host-hook codex` for L0/L1 injection only. See [Capture adapter](CAPTURE_ADAPTER.md).
 - **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` runs `grok/hooks/capture.ts`, which calls `recall capture`. Capture only; no session-start injection.
-- **OpenCode** — markdown drop for `RecallBatchExtract.ts`. Not on `recall capture` yet (next after v1). Optional cron is printed at install; nothing is auto-scheduled.
+- **OpenCode** — markdown drop for `RecallBatchExtract.ts`. Not on `recall capture` yet (next after v1). See [optional batch extraction](installation.md#optional-batch-extraction-cron) for scheduling.
 - **Pi** — shutdown calls `recall capture` and still drops markdown under `MEMORY/pi-sessions/` for batch extract. See [Pi Integration](PI_INTEGRATION.md).
 - **omp** — awaited `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
 - **Cursor** — merge `templates/cursor/hooks.json`. Command stays `recall start --format cursor`. Cursor is a catalog, not a `recall capture` or `host-hook` host.

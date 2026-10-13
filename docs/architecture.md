@@ -294,7 +294,7 @@ Terms: [CONTEXT.md](../CONTEXT.md). Extractor is the model backend that produces
 - **WAL mode** for concurrent reads (no locking during MCP queries)
 - **FTS5** full-text search with automatic sync triggers
 - **Foreign key constraints** enforced
-- **File permissions** set to 0600 (owner read/write only)
+- **Database and WAL/SHM file permissions** set to 0600 (owner read/write only)
 - **Chunked extraction** for sessions >120K characters with meta-extraction merging
 - **Quality gate** rejects extractions missing required sections
 - **Persistence check** marks a quality-passing extraction failed rather than extracted when its SQLite dual-write fails (for example an unwritable or locked database), so a session is never recorded as complete when some of its records did not land

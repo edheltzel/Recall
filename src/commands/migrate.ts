@@ -1,24 +1,6 @@
-// recall migrate — relocate the SQLite database to a new path and rewrite the
-// MCP / hook configs across detected platforms so everything keeps pointing
-// at the same file.
-//
-// Usage:
-//   recall migrate --to /new/path/recall.db
-//   recall migrate --to /new/path/recall.db --dry-run
-//
-// Behavior:
-//   - Refuses to overwrite a non-empty file at the destination, or any
-//     destination sidecar (-wal, -shm, -journal) of any type or size.
-//   - Refuses to migrate while a process has the source DB open (lsof check).
-//   - Snapshots source DB + sidecars + configs under
-//     ~/.agents/Recall/backups/<TIMESTAMP>/pre-migrate/ before any mutation.
-//   - Moves <src>.db, <src>.db-wal, <src>.db-shm to the new path. A sidecar
-//     move that still fails moves the database back. Config commits that
-//     already landed are restored from the bytes taken before commit().
-//   - Updates env.RECALL_DB_PATH in each config we detect:
-//       ~/.claude.json, ~/.claude/settings.json,
-//       ~/.config/opencode/opencode.json, ~/.pi/agent/mcp.json
-//   - --dry-run prints the plan without touching anything.
+// Stage consumer updates before moving the database, and retain pre-commit
+// bytes and modes so a later failure can roll back every committed file.
+// User-facing migration behavior: docs/cli-reference.md#admin.
 
 import { closeDb, getDbPath } from '../db/connection.js';
 import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync } from 'fs';
@@ -34,7 +16,7 @@ import {
   type StagedFileWrite,
 } from '../../lib/jsonc-mcp.js';
 
-export const migrateTestHooks = { failCommitPath: '', commitProbeExecutable: '' };
+export const migrateTestHooks = { failCommitPath: '', failAfterCommitPath: '', commitProbeExecutable: '' };
 
 export interface MigrateOptions {
   to: string;
@@ -125,10 +107,62 @@ type PreparedConfigPatch = {
   result: ConfigPatchResult;
 };
 
-type StagedConfigPatch = {
-  target: McpConfigTarget;
+type StagedWrite = {
+  path: string;
   write: StagedFileWrite;
 };
+
+type AgeScriptRewrite =
+  | { kind: 'absent' }
+  | { kind: 'unchanged' }
+  | { kind: 'changed'; text: string }
+  | { kind: 'error'; reason: string };
+
+function parseAgeDbAssignment(line: string): string | undefined {
+  const quoted = line.slice('export RECALL_DB_PATH='.length);
+  if (!quoted.startsWith("'")) return undefined;
+  let index = 1;
+  let value = '';
+  while (index < quoted.length) {
+    if (quoted.startsWith("'\\''", index)) {
+      value += "'";
+      index += 4;
+      continue;
+    }
+    const char = quoted[index];
+    if (char === undefined) return undefined;
+    if (char === "'") {
+      if (index !== quoted.length - 1) return undefined;
+      return value;
+    }
+    if (char === '\n' || char === '\0') return undefined;
+    value += char;
+    index += 1;
+  }
+  return undefined;
+}
+
+function rewriteAgeScript(text: string, dbPath: string): AgeScriptRewrite {
+  if (dbPath.includes('\n') || dbPath.includes('\0')) {
+    return { kind: 'error', reason: 'database path contains a newline or NUL' };
+  }
+  const endsWithNewline = text.endsWith('\n');
+  const lines = (endsWithNewline ? text.slice(0, -1) : text).split('\n');
+  let found = -1;
+  let parsed: string | undefined;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (!line.startsWith('export RECALL_DB_PATH=')) continue;
+    if (found !== -1) return { kind: 'error', reason: 'wrapper has more than one RECALL_DB_PATH assignment' };
+    parsed = parseAgeDbAssignment(line);
+    if (parsed === undefined) return { kind: 'error', reason: 'wrapper RECALL_DB_PATH assignment cannot be read' };
+    found = i;
+  }
+  if (parsed === undefined || found < 0) return { kind: 'error', reason: 'wrapper has no RECALL_DB_PATH assignment' };
+  if (parsed === dbPath) return { kind: 'unchanged' };
+  lines[found] = `export RECALL_DB_PATH='${dbPath.replaceAll("'", "'\\''")}'`;
+  return { kind: 'changed', text: `${lines.join('\n')}${endsWithNewline ? '\n' : ''}` };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -239,6 +273,24 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     }
   }
 
+  const ageScript = join(home, '.agents', 'Recall', 'shared', 'age-quarterly.sh');
+  let ageRewrite: AgeScriptRewrite = { kind: 'absent' };
+  if (existsSync(ageScript)) {
+    let raw: string;
+    try {
+      raw = readFileSync(ageScript, 'utf-8');
+    } catch (error) {
+      console.error(`Error: cannot read ${ageScript} (${error instanceof Error ? error.message : String(error)})`);
+      process.exit(1);
+    }
+    ageRewrite = rewriteAgeScript(raw, dest);
+    if (ageRewrite.kind === 'error') {
+      console.error(`Error: cannot patch ${ageScript} (${ageRewrite.reason})`);
+      process.exit(1);
+    }
+  }
+
+
   // Build the pre-migrate snapshot path under the install root.
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_').replace(/-/g, '');
   const snapshotDir = join(home, '.agents', 'Recall', 'backups', stamp, 'pre-migrate');
@@ -253,6 +305,9 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   for (const t of targets) {
     if (!existsSync(t.path)) continue;
     console.log(`  ${configIdx++}. patch RECALL_DB_PATH in ${t.path}`);
+  }
+  if (ageRewrite.kind === 'changed') {
+    console.log(`  ${configIdx++}. patch RECALL_DB_PATH in ${ageScript}`);
   }
   console.log('');
 
@@ -278,17 +333,29 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
   }
   console.log(`✓ Snapshot: ${snapshotDir}`);
 
-  const staged: StagedConfigPatch[] = [];
+  const staged: StagedWrite[] = [];
   for (const patch of patches) {
     if (patch.result.status !== 'changed') continue;
     try {
       staged.push({
-        target: patch.target,
+        path: patch.target.path,
         write: stageJsonAtomic(patch.target.path, patch.result.config),
       });
     } catch (error) {
       for (const item of staged) item.write.cleanup();
       console.error(`Error: cannot stage ${patch.target.path} (${error instanceof Error ? error.message : String(error)})`);
+      process.exit(1);
+    }
+  }
+  if (ageRewrite.kind === 'changed') {
+    try {
+      staged.push({
+        path: ageScript,
+        write: stageFileAtomic(ageScript, ageRewrite.text),
+      });
+    } catch (error) {
+      for (const item of staged) item.write.cleanup();
+      console.error(`Error: cannot stage ${ageScript} (${error instanceof Error ? error.message : String(error)})`);
       process.exit(1);
     }
   }
@@ -301,7 +368,7 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     } catch (error) {
       for (const item of staged) item.write.cleanup();
       const reason = error instanceof Error ? error.message : String(error);
-      console.error(`Error: cannot commit ${patch.target.path} (${reason})`);
+      console.error(`Error: cannot commit ${patch.path} (${reason})`);
       process.exit(1);
     }
   }
@@ -322,14 +389,15 @@ export function runMigrate(opts: MigrateOptions, home = homedir()): void {
     }
     console.log(`✓ Moved DB: ${dest}`);
 
-    // 3. Patch configs. Record pre-commit bytes so a later commit can be undone.
+    // 3. Patch configs, then the age wrapper. Record pre-commit bytes so a later commit can be undone.
     for (const patch of staged) {
       const path = patch.write.target;
       const prior = { path, bytes: readFileSync(path), mode: statSync(path).mode };
-      if (migrateTestHooks.failCommitPath === patch.target.path) throw new Error('injected commit failure');
+      if (migrateTestHooks.failCommitPath === patch.path) throw new Error('injected commit failure');
       patch.write.commit();
       committedConfigs.push(prior);
       console.log(`✓ Patched ${path}`);
+      if (migrateTestHooks.failAfterCommitPath === patch.path) throw new Error('injected commit failure');
     }
   } catch (error) {
     const problems = [error instanceof Error ? error.message : String(error)];
