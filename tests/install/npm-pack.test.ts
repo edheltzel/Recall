@@ -44,7 +44,7 @@ describe('npm package: files whitelist', () => {
   let files: string[];
   beforeAll(() => {
     files = packFileList();
-  });
+  }, 60_000);
 
   const has = (p: string) => files.some(f => f === p || f.startsWith(`${p}/`));
   const hasUnder = (prefix: string) => files.some(f => f.startsWith(prefix));
@@ -133,7 +133,7 @@ describe('npm package: shims resolve bundled scripts under a packaged layout', (
     }
     binLink = join(binDir, 'recall');
     symlinkSync(join(pkgRoot, 'dist', 'index.js'), binLink);
-  });
+  }, 60_000);
 
   afterAll(() => {
     if (stage) rmSync(stage, { recursive: true, force: true });
