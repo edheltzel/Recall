@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -108,6 +108,25 @@ describe('connection', () => {
         process.env.RECALL_DB_PATH = originalPath;
         rmSync(freshDir, { recursive: true, force: true });
         // Restore the shared test DB connection for subsequent tests
+        initDb();
+      }
+    });
+
+    test('creates a missing parent through a symlink/.. path physically (#324)', () => {
+      closeDb();
+      const freshDir = mkdtempSync(join(tmpdir(), 'recall-test-dotdot-'));
+      const originalPath = process.env.RECALL_DB_PATH;
+      try {
+        mkdirSync(join(freshDir, 'store', 'leaf'), { recursive: true });
+        symlinkSync(join(freshDir, 'store', 'leaf'), join(freshDir, 'link'));
+        process.env.RECALL_DB_PATH = `${freshDir}/link/../new/recall.db`;
+        expect(initDb().created).toBe(true);
+        expect(existsSync(join(freshDir, 'store', 'new', 'recall.db'))).toBe(true);
+        expect(existsSync(join(freshDir, 'new'))).toBe(false);
+      } finally {
+        closeDb();
+        process.env.RECALL_DB_PATH = originalPath;
+        rmSync(freshDir, { recursive: true, force: true });
         initDb();
       }
     });
