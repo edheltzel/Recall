@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Persistent SQLite memory, retrieval tools, and automatic lifecycle capture for Codex",
   "author": {
     "name": "edheltzel",
@@ -9,7 +9,12 @@
   "homepage": "https://github.com/edheltzel/Recall#readme",
   "repository": "https://github.com/edheltzel/Recall",
   "license": "MIT",
-  "keywords": ["memory", "sqlite", "mcp", "coding-agents"],
+  "keywords": [
+    "memory",
+    "sqlite",
+    "mcp",
+    "coding-agents"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Recall",
@@ -17,7 +22,10 @@
     "longDescription": "Search and add durable memory through Recall's MCP tools and shared workflow skills, with automatic Codex transcript capture and session-start context.",
     "developerName": "edheltzel",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "websiteURL": "https://github.com/edheltzel/Recall",
     "defaultPrompt": [
       "Search Recall before asking me to repeat project context.",
