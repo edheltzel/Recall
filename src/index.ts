@@ -473,13 +473,15 @@ program
   .option('-t, --tags <tags>', 'Comma-separated tags')
   .option('-n, --limit <n>', 'Max messages to process')
   .option('--skip-fabric', 'Skip the fabric Extractor and write a basic summary')
+  .option('--stdin', 'Read the session as contract 1 JSON from stdin (host extensions, e.g. omp recall_dump)')
   .action(async (title, options) => {
     await runDump(title, {
       project: options.project,
       continues: options.continues ? parseInt(options.continues, 10) : undefined,
       tags: options.tags,
       limit: options.limit ? parseInt(options.limit, 10) : undefined,
-      skipFabric: options.skipFabric
+      skipFabric: options.skipFabric,
+      stdin: options.stdin,
     });
     closeDb();
   });

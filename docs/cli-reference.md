@@ -78,7 +78,7 @@ Prove a write with `recall search "<unique phrase>" -t messages`.
 recall dump "Session Title"             # Import session + capture LoA entry
 ```
 
-Combines `recall import` and Curated LoA capture in one step. Run this at the end of every session to persist the conversation and run the `fabric` Extractor. The title should describe what was accomplished in the session. `--skip-fabric` writes a basic summary instead.
+Combines `recall import` and Curated LoA capture in one step. Run this at the end of every session to persist the conversation and run the `fabric` Extractor. The title should describe what was accomplished in the session. `--skip-fabric` writes a basic summary instead. `--stdin` reads the session as contract 1 JSON (`harness`, `session_id`, optional `cwd`/`project`, `messages` of user/assistant `role`/`content`/`timestamp`) for host extensions that hold the live transcript; inside omp, use the [`recall_dump` tool](OMP_INTEGRATION.md#explicit-dump-recall_dump-tool) instead of the shell command.
 
 ### Library of Alexandria (LoA)
 

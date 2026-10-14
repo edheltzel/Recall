@@ -17,6 +17,7 @@ import {
   registeredSessionSources,
   runStart,
 } from '../src/api';
+import { withEnv } from './helpers/env';
 
 const REPO = join(import.meta.dir, '..');
 
@@ -94,7 +95,7 @@ describe('recall-memory/api harness seams', () => {
     };
     disposers.push(registerSessionSource({ id: 'acme', discover: () => session }));
     expect(registeredSessionSources().map(adapter => adapter.id)).toEqual(['acme']);
-    expect(discoverCurrentSession(registeredSessionSources())?.sessionId).toBe('ses-acme');
+    expect(withEnv('OMPCODE', undefined, () => discoverCurrentSession(registeredSessionSources()))?.sessionId).toBe('ses-acme');
     const dumpSource = readFileSync(join(REPO, 'src', 'hosts', 'session-sources.ts'), 'utf-8');
     expect(dumpSource).toContain('registeredSessionSources()');
   });

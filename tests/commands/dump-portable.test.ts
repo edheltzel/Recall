@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { coreDump } from '../../src/commands/dump';
+import { coreDump, parseDumpSessionJson } from '../../src/commands/dump';
+import { dumpOmpSession } from '../../hosts/omp/recall';
+import { withEnv } from '../helpers/env';
 import { getDb } from '../../src/db/connection';
 import { createLoaEntry, getLoaMessages } from '../../src/lib/memory';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
@@ -334,5 +336,53 @@ describe('portable explicit session dump', () => {
       `SELECT fabric_extract FROM loa_entries WHERE session_id = ?`,
     ).all(sessionId) as Array<{ fabric_extract: string }>;
     expect(loa).toEqual([]);
+  });
+
+  test('omp recall_dump payload stores the live branch under omp, not a discovered transcript', async () => {
+    let stdin = '';
+    let args: readonly string[] = [];
+    const reply = await dumpOmpSession({ title: 'omp live branch', skip_fabric: true }, {
+      cwd: '/work/Recall',
+      hasUI: true,
+      ui: { notify: () => {}, confirm: async () => true },
+      sessionManager: {
+        getSessionId: () => 'omp-live-session',
+        getBranch: () => [
+          { type: 'message', id: 'u1', timestamp: '2026-10-14T12:00:00.000Z', message: { role: 'user', content: 'dump this omp question' } },
+          { type: 'message', id: 't1', message: { role: 'toolResult', content: [{ type: 'text', text: 'tool noise' }] } },
+          { type: 'message', id: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'omp answer' }] } },
+        ],
+      },
+    }, undefined, async (_file, childArgs, childStdin, _signal, onOutput) => {
+      args = childArgs;
+      stdin = childStdin;
+      onOutput?.('✓ LoA #7 captured');
+      return 0;
+    });
+    expect(args.slice(1)).toEqual(['dump', 'omp live branch', '--stdin', '--skip-fabric']);
+    expect(reply.content[0].text).toBe('✓ LoA #7 captured');
+
+    const result = await coreDump('omp live branch', { skipFabric: true, skipEmbed: true, session: parseDumpSessionJson(stdin) });
+    expect(result).toMatchObject({ success: true, source: 'omp', sessionId: 'omp-live-session', messageCount: 2 });
+    const rows = getDb().prepare('SELECT role, content, project FROM messages WHERE session_id = ? ORDER BY id')
+      .all('omp-live-session');
+    expect(rows).toEqual([
+      { role: 'user', content: 'dump this omp question', project: 'Recall' },
+      { role: 'assistant', content: 'omp answer', project: 'Recall' },
+    ]);
+  });
+
+  test('inside omp, dump without a supplied session refuses and points at recall_dump', async () => {
+    const result = await withEnv('OMPCODE', '1', () => coreDump('no omp input', { skipFabric: true, skipEmbed: true }));
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('recall_dump');
+  });
+
+  test('dump --stdin rejects malformed sessions whole', () => {
+    const base = { contract: 1, harness: 'omp', session_id: 's' };
+    expect(() => parseDumpSessionJson('not json')).toThrow('contract 1');
+    expect(() => parseDumpSessionJson(JSON.stringify({ ...base, contract: 2, messages: [] }))).toThrow('contract 1');
+    expect(() => parseDumpSessionJson(JSON.stringify({ ...base, harness: 'Bad Id', messages: [] }))).toThrow('harness');
+    expect(() => parseDumpSessionJson(JSON.stringify({ ...base, messages: [{ role: 'system', content: 'x' }] }))).toThrow('user/assistant');
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   captureOmpSessionStop,
+  dumpOmpSession,
   MAX_OMP_STDIN_BYTES,
   runBoundedChild,
   type OmpExtensionContext,
@@ -204,5 +205,17 @@ describe('omp native extension', () => {
       },
     );
     expect(messages).toEqual(['Recall omp capture cancelled']);
+  });
+
+  test('recall_dump writes nothing unless the user confirms in the UI', async () => {
+    let spawned = 0;
+    const child = async () => { spawned++; return 0; };
+    const declined = await dumpOmpSession({ title: 't' }, uiCtx(() => {}, {
+      ui: { notify: () => {}, confirm: async () => false },
+    }), undefined, child);
+    const headless = await dumpOmpSession({ title: 't' }, uiCtx(() => {}, { hasUI: false }), undefined, child);
+    expect(spawned).toBe(0);
+    expect(declined.content[0].text).toContain('declined');
+    expect(headless.content[0].text).toContain('nothing was saved');
   });
 });

@@ -18,6 +18,8 @@ import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract, ExtractorConfigError } from '../lib/extraction.js';
 import { discoverCurrentSession } from '../hosts/session-sources.js';
 import type { ParsedSession, SessionSource } from '../hosts/session-source.js';
+import { HARNESS_ID, readStdin } from './capture.js';
+import { basename } from 'path';
 
 export type { ParsedSession, SessionSource } from '../hosts/session-source.js';
 export { parseMarkdownDrop } from '../hosts/markdown-session-source.js';
@@ -28,6 +30,8 @@ interface DumpOptions {
   tags?: string;
   limit?: number;
   skipFabric?: boolean;
+  /** Read a host-supplied session (contract 1 JSON) from stdin instead of discovering one. */
+  stdin?: boolean;
   /** Test/internal seam; normal CLI and MCP behavior still attempts LoA embedding. */
   skipEmbed?: boolean;
   /** Test/internal seam; production uses runFabricExtract. */
@@ -42,6 +46,51 @@ interface DumpMessageRow {
   role: 'user' | 'assistant' | 'system';
   timestamp: string;
   project: string | null;
+}
+
+/**
+ * Host-supplied session (contract 1) for hosts whose live transcript only their own
+ * extension can read, e.g. omp's `recall_dump` tool. Malformed input is rejected whole.
+ */
+export function parseDumpSessionJson(raw: string): ParsedSession {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error('dump --stdin expects contract 1 JSON');
+  }
+  const payload = value as Record<string, unknown> | null;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.contract !== 1) {
+    throw new Error('dump --stdin expects contract 1 JSON');
+  }
+  const { harness, session_id: sessionId, messages, cwd, project } = payload;
+  if (typeof harness !== 'string' || !HARNESS_ID.test(harness)) throw new Error('invalid harness');
+  if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 512 || /[\u0000-\u001f\u007f]/.test(sessionId)) {
+    throw new Error('invalid session_id');
+  }
+  if (!Array.isArray(messages)) throw new Error('messages must be an array');
+  const sessionProject = typeof project === 'string' && project
+    ? project
+    : typeof cwd === 'string' && cwd ? basename(cwd) : harness;
+  return {
+    source: harness,
+    sessionId,
+    project: sessionProject,
+    filePath: '',
+    messages: messages.map(message => {
+      const row = message as Record<string, unknown> | null;
+      if (!row || (row.role !== 'user' && row.role !== 'assistant') || typeof row.content !== 'string' || !row.content.trim()) {
+        throw new Error('messages must be user/assistant rows with text content');
+      }
+      return {
+        session_id: sessionId,
+        timestamp: typeof row.timestamp === 'string' && row.timestamp ? row.timestamp : new Date().toISOString(),
+        role: row.role,
+        content: row.content,
+        project: sessionProject,
+      };
+    }),
+  };
 }
 
 // ============ Internal Helpers ============
@@ -197,7 +246,10 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   const session = options.session || discoverCurrentSession();
 
   if (!session) {
-    return { success: false, sessionId: '', messageCount: 0, source: 'mcp', error: 'No session input or supported host session files found' };
+    const error = process.env.OMPCODE === '1'
+      ? 'Inside omp, use the recall_dump tool: the omp extension supplies the live session'
+      : 'No session input or supported host session files found';
+    return { success: false, sessionId: '', messageCount: 0, source: 'mcp', error };
   }
 
   if (options.project) {
@@ -369,7 +421,14 @@ export async function runDump(title: string, options: DumpOptions): Promise<void
   console.log('Memory Dump');
   console.log('===========\n');
 
-  const result = await coreDump(title, options);
+  let session: ParsedSession | undefined;
+  try {
+    session = options.stdin ? parseDumpSessionJson(await readStdin()) : undefined;
+  } catch (error) {
+    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+  const result = await coreDump(title, { ...options, session });
 
   if (!result.success) {
     console.error(`Error: ${result.error}`);

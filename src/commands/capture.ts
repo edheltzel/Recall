@@ -58,7 +58,7 @@ function usingFlagForm(options: CaptureCliOptions): boolean {
   ].some(value => value !== undefined);
 }
 
-async function readStdin(maxBytes = MAX_CAPTURE_BYTES): Promise<string> {
+export async function readStdin(maxBytes = MAX_CAPTURE_BYTES): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of process.stdin) {
