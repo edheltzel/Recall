@@ -21,7 +21,7 @@ export interface OmpExtensionContext {
   hasUI?: boolean;
   ui?: {
     notify: (message: string, type?: 'info' | 'warning' | 'error') => void;
-    confirm?: (title: string, message: string) => Promise<boolean>;
+    confirm?: (title: string, message: string, options?: { signal?: AbortSignal }) => Promise<boolean>;
   };
   sessionManager: {
     getSessionId: () => string;
@@ -100,6 +100,8 @@ export function runBoundedChild(
   signal: AbortSignal,
   onOutput?: (chunk: string) => void,
 ): Promise<number | null> {
+  if (signal.aborted) return Promise.resolve(null);
+
   const { promise, resolve, reject } = Promise.withResolvers<number | null>();
   let settled = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -142,8 +144,7 @@ export function runBoundedChild(
   });
   child.stdin?.end(stdin, 'utf8');
 
-  if (signal.aborted) onAbort();
-  else signal.addEventListener('abort', onAbort, { once: true });
+  signal.addEventListener('abort', onAbort, { once: true });
 
   return promise;
 }
@@ -275,6 +276,8 @@ async function runCli(
   timeoutMs: number,
   onOutput?: (chunk: string) => void,
 ): Promise<{ code: number | null; aborted: boolean }> {
+  if (outer?.aborted) return { code: null, aborted: true };
+
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), timeoutMs);
   timer.unref();
@@ -304,10 +307,12 @@ export async function dumpOmpSession(
 ): Promise<OmpToolResult> {
   const reply = (text: string): OmpToolResult => ({ content: [{ type: 'text', text }] });
   try {
+    if (signal?.aborted) return reply('Recall dump cancelled');
     // Dumping is always the user's call (agent-skills/AGENTS.md): the model can request
     // it, but nothing is written without a yes in the omp UI. Headless sessions refuse.
     if (!ctx.hasUI || !ctx.ui?.confirm) return reply('Recall dump needs the interactive omp UI to confirm; nothing was saved');
-    const approved = await ctx.ui.confirm('Save this conversation to Recall?', `recall dump "${params.title}"`);
+    const approved = await ctx.ui.confirm('Save this conversation to Recall?', `recall dump "${params.title}"`, { signal });
+    if (signal?.aborted) return reply('Recall dump cancelled');
     if (!approved) return reply('Recall dump declined; nothing was saved');
     const sessionId = ctx.sessionManager.getSessionId();
     if (!sessionId) return reply('Recall dump failed: omp did not report a session id');
@@ -332,6 +337,7 @@ export async function dumpOmpSession(
     if (aborted) return reply('Recall dump cancelled');
     return reply(`Recall dump failed (exit ${code})${output.trim() ? `\n${output.trim()}` : ''}`);
   } catch (error) {
+    if (signal?.aborted) return reply('Recall dump cancelled');
     return reply(`Recall dump failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

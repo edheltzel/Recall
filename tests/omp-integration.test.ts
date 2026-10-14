@@ -218,4 +218,98 @@ describe('omp native extension', () => {
     expect(declined.content[0].text).toContain('declined');
     expect(headless.content[0].text).toContain('nothing was saved');
   });
+
+  test('already cancelled dump skips confirmation and child dispatch', async () => {
+    let confirmed = false;
+    let spawned = false;
+    const result = await dumpOmpSession({ title: 't' }, uiCtx(() => {}, {
+      ui: { notify: () => {}, confirm: async () => { confirmed = true; return true; } },
+    }), AbortSignal.abort(), async () => { spawned = true; return 0; });
+    expect(confirmed).toBe(false);
+    expect(spawned).toBe(false);
+    expect(result.content[0].text).toBe('Recall dump cancelled');
+  });
+
+  test('abort dismisses pending confirmation and finishes the dump without spawning', async () => {
+    const ac = new AbortController();
+    const confirmation = Promise.withResolvers<boolean>();
+    let dialogOpen = false;
+    let spawned = false;
+    const pending = dumpOmpSession({ title: 't' }, uiCtx(() => {}, {
+      ui: {
+        notify: () => {},
+        confirm: (_title, _message, options) => {
+          dialogOpen = true;
+          options?.signal?.addEventListener('abort', () => {
+            dialogOpen = false;
+            confirmation.resolve(false);
+          }, { once: true });
+          return confirmation.promise;
+        },
+      },
+    }), ac.signal, async () => { spawned = true; return 0; });
+    try {
+      expect(dialogOpen).toBe(true);
+      ac.abort();
+      expect(dialogOpen).toBe(false);
+      const result = await pending;
+      expect(spawned).toBe(false);
+      expect(result.content[0].text).toBe('Recall dump cancelled');
+    } finally {
+      ac.abort();
+      confirmation.resolve(false);
+      await pending;
+    }
+  });
+
+  test.each(['approve', 'reject'] as const)('cancellation takes precedence when confirmation settles with %s', async outcome => {
+    const ac = new AbortController();
+    let spawned = false;
+    const result = await dumpOmpSession({ title: 't' }, uiCtx(() => {}, {
+      ui: {
+        notify: () => {},
+        confirm: async () => {
+          ac.abort();
+          if (outcome === 'reject') throw ac.signal.reason;
+          return true;
+        },
+      },
+    }), ac.signal, async () => { spawned = true; return 0; });
+    expect(spawned).toBe(false);
+    expect(result.content[0].text).toBe('Recall dump cancelled');
+  });
+
+  test.each(['capture', 'dump'] as const)('%s skips child dispatch when branch reading aborts the signal', async action => {
+    const ac = new AbortController();
+    const messages: string[] = [];
+    let spawned = false;
+    const ctx = uiCtx(message => messages.push(message), {
+      ui: { notify: message => messages.push(message), confirm: async () => true },
+      sessionManager: {
+        getSessionId: () => 'sess-cancelled',
+        getBranch: () => {
+          ac.abort();
+          return [{ type: 'message', id: 'u1', message: { role: 'user', content: 'hi' } }];
+        },
+      },
+    });
+    const child = async () => { spawned = true; return 0; };
+    if (action === 'capture') {
+      await captureOmpSessionStop({ signal: ac.signal }, ctx, undefined, child);
+      expect(messages).toEqual(['Recall omp capture cancelled']);
+    } else {
+      const result = await dumpOmpSession({ title: 't' }, ctx, ac.signal, child);
+      expect(result.content[0].text).toBe('Recall dump cancelled');
+    }
+    expect(spawned).toBe(false);
+  });
+
+  test('already cancelled bounded child never attempts to execute a missing command', async () => {
+    await expect(runBoundedChild(
+      `${import.meta.dir}/missing-omp-child`,
+      [],
+      '',
+      AbortSignal.abort(),
+    )).resolves.toBeNull();
+  });
 });
