@@ -15,7 +15,7 @@ Dump the current conversation session into the Recall SQLite database, making al
 
 Run this at the end of every session or when you want to persist the current conversation mid-session.
 
-**In omp:** call the `recall_dump` tool with the title instead of running `recall dump`; omp asks the user to confirm before anything is written. Inside omp the shell command refuses, because transcript files on disk belong to other conversations.
+**In omp:** call `recall_dump` with the title. See the [omp dump contract](https://github.com/edheltzel/Recall/blob/main/docs/OMP_INTEGRATION.md#explicit-dump-recall_dump-tool) for confirmation and session-source rules.
 
 ## Usage
 

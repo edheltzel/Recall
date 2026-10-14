@@ -40,6 +40,8 @@ Capture sends only user and assistant text, at most 25 MiB per payload, and boun
 
 The extension also registers a `recall_dump` tool (title, optional project, tags, `continues`, `skip_fabric`). It reads the live branch and session id from omp, so it dumps this conversation on any profile or branch, and sends it to the package-local `dist/index.js dump --stdin`. The tool asks you to confirm in the omp UI before writing anything and refuses in headless sessions. `recall dump` run from a shell inside omp (`OMPCODE=1`) refuses and points to the tool: transcript files on disk belong to other conversations.
 
+Dump payloads are limited to 25 MiB, and the CLI child has a five-minute timeout. `skip_fabric` defaults to false; set it to true for a basic summary. Shared message scrubbing and default project attribution follow the [Session Dump contract](cli-reference.md#session-dump).
+
 ## Skills and MCP remain separate
 
 `recall install` still links the nine canonical `do-recall-*` skills into `~/.omp/agent/skills/` when omp is detected. It does not activate this extension. The native package does not duplicate those skills, register MCP, or inject session-start memory; `recall_dump` is its only tool. Existing manual MCP configuration remains untouched.
