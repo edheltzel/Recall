@@ -71,7 +71,7 @@ RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${BACKUP_BASE:=$RECALL_DIR/backups}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
 
-# Newest timestamped full backups to keep, besides the one named by latest.
+# Newest full backups to retain; latest is also protected if older.
 RECALL_BACKUP_KEEP=2
 
 # Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
