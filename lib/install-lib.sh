@@ -903,12 +903,11 @@ recall_create_backup() {
 # Drop old full backups under $BACKUP_BASE. A full backup is a direct child
 # directory that contains manifest.txt (the file recall_create_backup writes).
 # Keeps the newest $RECALL_BACKUP_KEEP of those, plus the directory named by
-# latest, plus an optional extra name (the backup a restore is reading).
+# latest.
 # Loose files, dirs without a manifest (pre-migrate, doctor-fix, pre_restore),
 # symlinks, and anything outside $BACKUP_BASE are left alone.
 # Failures warn and never fail install/update.
 recall_prune_backups() {
-  local also_keep="${1:-}"
   local base="${BACKUP_BASE:-}"
   [[ -n "$base" && -d "$base" && ! -L "$base" ]] || return 0
 
@@ -919,10 +918,6 @@ recall_prune_backups() {
   case "$latest" in
     */*) latest="" ;;
   esac
-  case "$also_keep" in
-    */*) also_keep="" ;;
-  esac
-
   local names="" dir name
   for dir in "$base"/*/; do
     [[ -d "$dir" ]] || continue
@@ -955,10 +950,6 @@ recall_prune_backups() {
   if [[ -n "$latest" ]]; then
     keepers="${keepers}${latest}"$'\n'
   fi
-  if [[ -n "$also_keep" ]]; then
-    keepers="${keepers}${also_keep}"$'\n'
-  fi
-
   local target
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
@@ -1057,9 +1048,6 @@ recall_do_restore() {
   else
     log_warn "No current files to backup"
   fi
-
-  # Rotate after the pre-restore copy. Keep the backup being restored.
-  recall_prune_backups "$target_backup" || log_warn "Backup rotation failed; left older backups in place"
 
   local restored=0
   shopt -s dotglob
