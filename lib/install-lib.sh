@@ -901,10 +901,11 @@ recall_create_backup() {
 }
 
 # Drop old full backups under $BACKUP_BASE. A full backup is a direct child
-# directory that contains manifest.txt (the file recall_create_backup writes).
-# Keeps the newest $RECALL_BACKUP_KEEP of those, plus the directory named by
-# latest.
-# Loose files, dirs without a manifest (pre-migrate, doctor-fix, pre_restore),
+# directory with manifest.txt (written by recall_create_backup) and a non-empty
+# recall.db or memory.db. Config-only runs (no DB to copy) never count, so they
+# cannot rotate away the older DB snapshots. Keeps the newest
+# $RECALL_BACKUP_KEEP full backups plus the directory named by latest.
+# Loose files, DB-less dirs (pre-migrate, doctor-fix, pre_restore, config-only),
 # symlinks, and anything outside $BACKUP_BASE are left alone.
 # Failures warn and never fail install/update.
 recall_prune_backups() {
@@ -929,6 +930,7 @@ recall_prune_backups() {
       continue
     fi
     [[ -f "$base/$name/manifest.txt" ]] || continue
+    [[ -s "$base/$name/recall.db" || -s "$base/$name/memory.db" ]] || continue
     names="${names}${name}"$'\n'
   done
   [[ -n "$names" ]] || return 0

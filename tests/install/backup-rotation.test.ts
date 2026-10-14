@@ -12,7 +12,7 @@ describe('backup rotation', () => {
   let backupBase: string;
 
   function sh(snippet: string, extraEnv: Record<string, string> = {}) {
-    return spawnSync('bash', ['-c', `set -uo pipefail\nsource "$REPO/lib/install-lib.sh" >/dev/null 2>&1\nFILES_TO_BACKUP=("$CLAUDE_DIR/settings.json")\n${snippet}`], {
+    return spawnSync('bash', ['-c', `set -uo pipefail\nsource "$REPO/lib/install-lib.sh" >/dev/null 2>&1\nFILES_TO_BACKUP=("$CLAUDE_DIR/settings.json" "$RECALL_DIR/recall.db")\n${snippet}`], {
       encoding: 'utf-8',
       env: {
         ...process.env,
@@ -34,6 +34,7 @@ describe('backup rotation', () => {
     mkdirSync(dir);
     writeFileSync(join(dir, 'manifest.txt'), `Timestamp: ${stamp}\n`);
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ snapshot: stamp }));
+    writeFileSync(join(dir, 'recall.db'), `db ${stamp}`);
   }
 
   beforeEach(() => {
@@ -108,6 +109,8 @@ describe('backup rotation', () => {
     for (const stamp of STAMPS.slice(0, 3)) seedBackup(stamp);
     const current = '{"current":true}';
     writeFileSync(join(root, '.claude', 'settings.json'), current);
+    mkdirSync(join(root, '.agents', 'Recall'), { recursive: true });
+    writeFileSync(join(root, '.agents', 'Recall', 'recall.db'), 'live db');
 
     const result = sh('git() { return 1; }\nrecall_create_backup', {
       TIMESTAMP: STAMPS[3],
@@ -118,5 +121,16 @@ describe('backup rotation', () => {
     expect(readdirSync(backupBase).sort()).toEqual([STAMPS[2], STAMPS[3], 'latest']);
     expect(readFileSync(join(backupBase, STAMPS[3], 'settings.json'), 'utf-8')).toBe(current);
     expect(readFileSync(join(backupBase, 'latest'), 'utf-8')).toBe(`${STAMPS[3]}\n`);
+  });
+
+  test('backups that copied no database never rotate away older database snapshots', () => {
+    for (const stamp of STAMPS.slice(0, 2)) seedBackup(stamp);
+    writeFileSync(join(root, '.claude', 'settings.json'), '{}');
+    for (const stamp of ['20261014_000001', '20261014_000002', '20261014_000003']) {
+      const result = sh('git() { return 1; }\nrecall_create_backup', { TIMESTAMP: stamp, BACKUP_DIR: join(backupBase, stamp) });
+      expect(result.status).toBe(0);
+    }
+    expect(readFileSync(join(backupBase, STAMPS[0], 'recall.db'), 'utf-8')).toBe(`db ${STAMPS[0]}`);
+    expect(readFileSync(join(backupBase, STAMPS[1], 'recall.db'), 'utf-8')).toBe(`db ${STAMPS[1]}`);
   });
 });

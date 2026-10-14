@@ -341,7 +341,7 @@ When resolving `RECALL_DB_PATH` or its legacy fallback, the CLI, MCP server, hoo
 
 Install and update automatically create a timestamped backup before making changes, stored at `~/.agents/Recall/backups/`. After creating a full backup, rotation keeps the newest 2 full backups and also protects the backup named by `latest` if it is older.
 
-Rotation considers only direct child directories containing `manifest.txt`. It leaves directory symlinks, loose files (including `recall export --backup` dumps), and directories without a manifest untouched. Restore saves the current files in `pre_restore_<TIMESTAMP>/` without rotating existing backups. Rotation failures warn without failing install or update.
+Rotation considers only direct child directories containing `manifest.txt` and a copied `recall.db` or `memory.db`, so a run that found no database to copy never pushes out older database snapshots. It leaves directory symlinks, loose files (including `recall export --backup` dumps), and database-less directories untouched. Restore saves the current files in `pre_restore_<TIMESTAMP>/` without rotating existing backups. Rotation failures warn without failing install or update.
 
 Automatic snapshots cover the existing files listed in [`FILES_TO_BACKUP`](../lib/install-lib.sh). They do not include directories such as `~/.claude/MEMORY/`; back up those separately.
 
