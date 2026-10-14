@@ -339,7 +339,7 @@ When resolving `RECALL_DB_PATH` or its legacy fallback, the CLI, MCP server, hoo
 
 ## Backup and Restore
 
-The installer automatically creates a timestamped backup before making any changes. Backups are stored at `~/.agents/Recall/backups/`.
+The installer automatically creates a timestamped backup before making any changes. Backups are stored at `~/.agents/Recall/backups/`. Rotation keeps the newest 2 full backups, plus the backup named by `latest`.
 
 ```bash
 ./packaging/install.sh list              # List available backups

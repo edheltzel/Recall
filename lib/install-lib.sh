@@ -71,6 +71,9 @@ RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${BACKUP_BASE:=$RECALL_DIR/backups}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
 
+# Newest timestamped full backups to keep, besides the one named by latest.
+RECALL_BACKUP_KEEP=2
+
 # Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
 # output stay clean). Tests can override by exporting RED/GREEN/etc. before
 # sourcing — those overrides win because of the := default operator.
@@ -894,6 +897,84 @@ recall_create_backup() {
   fi
 
   echo "$TIMESTAMP" >"$BACKUP_BASE/latest"
+  recall_prune_backups || log_warn "Backup rotation failed; left older backups in place"
+}
+
+# Drop old full backups under $BACKUP_BASE. A full backup is a direct child
+# directory that contains manifest.txt (the file recall_create_backup writes).
+# Keeps the newest $RECALL_BACKUP_KEEP of those, plus the directory named by
+# latest, plus an optional extra name (the backup a restore is reading).
+# Loose files, dirs without a manifest (pre-migrate, doctor-fix, pre_restore),
+# symlinks, and anything outside $BACKUP_BASE are left alone.
+# Failures warn and never fail install/update.
+recall_prune_backups() {
+  local also_keep="${1:-}"
+  local base="${BACKUP_BASE:-}"
+  [[ -n "$base" && -d "$base" && ! -L "$base" ]] || return 0
+
+  local latest=""
+  if [[ -f "$base/latest" ]]; then
+    latest="$(tr -d '[:space:]' <"$base/latest" 2>/dev/null || true)"
+  fi
+  case "$latest" in
+    */*) latest="" ;;
+  esac
+  case "$also_keep" in
+    */*) also_keep="" ;;
+  esac
+
+  local names="" dir name
+  for dir in "$base"/*/; do
+    [[ -d "$dir" ]] || continue
+    name="$(basename "$dir")"
+    case "$name" in
+      ''|'.'|'..'|*'/'*) continue ;;
+    esac
+    if [[ -L "$base/$name" ]]; then
+      continue
+    fi
+    [[ -f "$base/$name/manifest.txt" ]] || continue
+    names="${names}${name}"$'\n'
+  done
+  [[ -n "$names" ]] || return 0
+
+  local sorted=""
+  sorted="$(printf '%s' "$names" | sort -r)" || {
+    log_warn "Backup rotation failed; left older backups in place"
+    return 0
+  }
+
+  local keepers=$'\n' kept=0 line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    kept=$((kept + 1))
+    if [[ "$kept" -le "${RECALL_BACKUP_KEEP}" ]]; then
+      keepers="${keepers}${line}"$'\n'
+    fi
+  done <<< "$sorted"
+  if [[ -n "$latest" ]]; then
+    keepers="${keepers}${latest}"$'\n'
+  fi
+  if [[ -n "$also_keep" ]]; then
+    keepers="${keepers}${also_keep}"$'\n'
+  fi
+
+  local target
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$keepers" in
+      *$'\n'"$line"$'\n'*) continue ;;
+    esac
+    case "$line" in
+      ''|'.'|'..'|*'/'*) continue ;;
+    esac
+    target="$base/$line"
+    [[ -d "$target" && ! -L "$target" ]] || continue
+    if ! rm -rf -- "$target"; then
+      log_warn "Could not remove old backup: $target"
+    fi
+  done <<< "$sorted"
+  return 0
 }
 
 recall_list_backups() {
@@ -976,6 +1057,9 @@ recall_do_restore() {
   else
     log_warn "No current files to backup"
   fi
+
+  # Rotate after the pre-restore copy. Keep the backup being restored.
+  recall_prune_backups "$target_backup" || log_warn "Backup rotation failed; left older backups in place"
 
   local restored=0
   shopt -s dotglob

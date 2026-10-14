@@ -3,18 +3,14 @@
 // paths + resolved DB path), so we drive it directly against temp config files
 // rather than invoking runDoctor end-to-end.
 //
-// The repair backs the config file up to ~/.agents/Recall/backups/ via
-// homedir() — the same convention probeSymlink's repair uses. We deliberately
-// do NOT mutate process.env.HOME here: bun:test shares one process, and a
-// leaked HOME breaks sibling suites that spawn bash. The backup is a harmless
-// copy of a temp file in Recall's own backup area; we assert on the patched
-// config, not the backup.
+// Repair backs the config up under the probe's home (tempDir here). Do not
+// read or write the real ~/.agents/Recall tree.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { join } from 'path';
-import { probeMcpEnv, resolveProbeResult } from '../../src/commands/doctor';
+import { probeMcpEnv as probeMcpEnvAt, resolveProbeResult } from '../../src/commands/doctor';
 import type { McpConfigTarget } from '../../src/hosts/types';
 
 const RESOLVED = '/custom/recall/recall.db';
@@ -29,19 +25,6 @@ beforeEach(() => {
 
 afterEach(() => {
   if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
-  // repair() backs up under the real home (Bun's homedir() ignores $HOME); the
-  // mangled backup name embeds this test's unique tempDir, so clean ours up.
-  try {
-    if (!existsSync(BACKUPS_ROOT)) return;
-    const mangledDir = tempDir.replace(/[/\\]/g, '_');
-    for (const stamp of readdirSync(BACKUPS_ROOT)) {
-      const dir = join(BACKUPS_ROOT, stamp, 'doctor-fix');
-      if (!existsSync(dir)) continue;
-      for (const f of readdirSync(dir)) {
-        if (f.includes(mangledDir)) rmSync(join(dir, f), { force: true });
-      }
-    }
-  } catch { /* best-effort cleanup */ }
 });
 
 function writeConfig(obj: unknown): void {
@@ -61,6 +44,10 @@ function target(path: string): McpConfigTarget {
   };
 }
 
+function probeMcpEnv(probe: Parameters<typeof probeMcpEnvAt>[0]) {
+  return probeMcpEnvAt({ home: tempDir, ...probe });
+}
+
 function probe() {
   return probeMcpEnv({
     targets: [target(configPath)],
@@ -69,14 +56,12 @@ function probe() {
   });
 }
 
-// repair() backs files up under the real home (Bun's homedir() ignores $HOME),
-// so a backup is located by its mangled-path filename across the stamp dirs.
-const BACKUPS_ROOT = join(homedir(), '.agents', 'Recall', 'backups');
 function backupExistsFor(cfgPath: string): boolean {
-  if (!existsSync(BACKUPS_ROOT)) return false;
+  const backupsRoot = join(tempDir, '.agents', 'Recall', 'backups');
+  if (!existsSync(backupsRoot)) return false;
   const mangled = cfgPath.replace(/[/\\]/g, '_');
-  return readdirSync(BACKUPS_ROOT).some(stamp =>
-    existsSync(join(BACKUPS_ROOT, stamp, 'doctor-fix', mangled))
+  return readdirSync(backupsRoot).some(stamp =>
+    existsSync(join(backupsRoot, stamp, 'doctor-fix', mangled))
   );
 }
 
