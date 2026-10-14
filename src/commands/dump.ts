@@ -19,6 +19,8 @@ import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract, Ex
 import { discoverCurrentSession } from '../hosts/session-sources.js';
 import type { ParsedSession, SessionSource } from '../hosts/session-source.js';
 import { HARNESS_ID, readStdin } from './capture.js';
+import { detectProject } from '../lib/project.js';
+import { scrub } from '../lib/write-safety.js';
 import { basename } from 'path';
 
 export type { ParsedSession, SessionSource } from '../hosts/session-source.js';
@@ -71,7 +73,7 @@ export function parseDumpSessionJson(raw: string): ParsedSession {
   if (!Array.isArray(messages)) throw new Error('messages must be an array');
   const sessionProject = typeof project === 'string' && project
     ? project
-    : typeof cwd === 'string' && cwd ? basename(cwd) : harness;
+    : typeof cwd === 'string' && cwd ? detectProject(cwd) || basename(cwd) : harness;
   return {
     source: harness,
     sessionId,
@@ -243,14 +245,22 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   source: string;
   error?: string;
 }> {
-  const session = options.session || discoverCurrentSession();
+  const inputSession = options.session || discoverCurrentSession();
 
-  if (!session) {
+  if (!inputSession) {
     const error = process.env.OMPCODE === '1'
       ? 'Inside omp, use the recall_dump tool: the omp extension supplies the live session'
       : 'No session input or supported host session files found';
     return { success: false, sessionId: '', messageCount: 0, source: 'mcp', error };
   }
+
+  const session = {
+    ...inputSession,
+    messages: inputSession.messages.flatMap(message => {
+      const content = scrub(message.content).text;
+      return content.trim() ? [{ ...message, content }] : [];
+    }),
+  };
 
   if (options.project) {
     for (const msg of session.messages) {
@@ -303,7 +313,6 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     });
   }
 
-  // Raw conversation capture is verbatim (ADR-0001).
   const messagesToImport = existingSnapshot ? [] : session.messages;
   const importedCount = addMessagesBatch(
     messagesToImport.map(message => ({ ...message, provenance: 'verbatim' as const }))

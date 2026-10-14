@@ -3,7 +3,7 @@ import { coreDump, parseDumpSessionJson } from '../../src/commands/dump';
 import { dumpOmpSession } from '../../hosts/omp/recall';
 import { withEnv } from '../helpers/env';
 import { getDb } from '../../src/db/connection';
-import { createLoaEntry, getLoaMessages } from '../../src/lib/memory';
+import { createLoaEntry, getLoaMessages, search } from '../../src/lib/memory';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import { ExtractorConfigError } from '../../src/lib/extraction';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -49,6 +49,60 @@ describe('portable explicit session dump', () => {
       project: string;
     };
     expect(session).toEqual({ source: 'codex', project: 'recall-test' });
+  });
+
+  test('scrubs dump messages before storage, summaries, extraction, and snapshot matching', async () => {
+    const sessionId = 'omp-scrubbed-dump';
+    const secret = 'abcdefgh' + '12345678';
+    ingestHostTranscript({
+      source: 'omp',
+      sessionId,
+      project: 'recall-test',
+      messages: [{ role: 'user', content: 'Automatic capture stays separate.', sourcePosition: 0 }],
+    });
+    const session = parseDumpSessionJson(JSON.stringify({
+      contract: 1,
+      harness: 'omp',
+      session_id: sessionId,
+      project: 'recall-test',
+      messages: [
+        { role: 'user', content: `api_key=${secret}` },
+        { role: 'assistant', content: ' \u200b\u202e ' },
+        { role: 'assistant', content: 'Safe answer.' },
+      ],
+    }));
+    const options = { session, skipFabric: true, skipEmbed: true };
+    const first = await coreDump('Scrubbed omp dump', options);
+    expect(first).toMatchObject({ success: true, source: 'omp', messageCount: 2 });
+    const db = getDb();
+    expect(db.prepare('SELECT content FROM published_messages WHERE session_id = ? ORDER BY id').all(sessionId))
+      .toEqual([
+        { content: 'Automatic capture stays separate.' },
+        { content: 'api_key=[REDACTED:generic-assignment]' },
+        { content: 'Safe answer.' },
+      ]);
+    expect(search(secret, { table: 'messages' })).toEqual([]);
+    const loa = db.prepare('SELECT fabric_extract, message_count FROM loa_entries WHERE id = ?')
+      .get(first.loaId!) as { fabric_extract: string; message_count: number };
+    expect(loa.message_count).toBe(2);
+    expect(loa.fabric_extract).toContain('api_key=[REDACTED:generic-assignment]');
+    expect(loa.fabric_extract).toContain('Safe answer.');
+    expect(loa.fabric_extract).not.toContain(secret);
+    let extractionInput = '';
+    const second = await coreDump('Scrubbed omp dump', {
+      ...options,
+      skipFabric: false,
+      extract: content => {
+        extractionInput = content;
+        return 'Curated safe extraction.';
+      },
+    });
+    expect(second).toMatchObject({ success: true, messageCount: 0, loaId: first.loaId });
+    expect(extractionInput).toContain('api_key=[REDACTED:generic-assignment]');
+    expect(extractionInput).toContain('Safe answer.');
+    expect(extractionInput).not.toContain(secret);
+    expect(extractionInput).not.toContain('\u200b');
+    expect(session.messages[0].content).toBe(`api_key=${secret}`);
   });
 
   test('re-import preserves automatic lifecycle capture for the same session', async () => {
