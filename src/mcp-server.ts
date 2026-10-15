@@ -858,12 +858,9 @@ server.tool(
 	},
 	async ({ type, content, detail, project, tags, confidence, importance }) => {
 		try {
-			// #156 detection layer — DETECT-AND-SURFACE ONLY (Ed's ruling): it never
-			// mutates or blocks. Scan the content + detail and surface any
-			// injection/exfil or anonymous-high-entropy flags as a non-fatal stderr
-			// log; the record is stored exactly as provided. (Anchored known-prefix
-			// secrets remain scrub()'s job on the scrub paths; memory_add lacks scrub
-			// today — out of scope for #156, tracked for a follow-up.)
+			// Threat detection only reports injection/exfiltration and anonymous
+			// high-entropy flags; it never blocks or changes input. The add helpers
+			// in lib/memory.ts own persistence scrubbing.
 			const threats = [
 				...detectThreats(content),
 				...(detail !== undefined ? detectThreats(detail) : []),

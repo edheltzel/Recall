@@ -127,6 +127,8 @@ recall add learning "Port conflict on 4000" "Kill process or change port" --prev
 
 Captures a problem-solution pair. The first argument is the problem, the second is the solution. The optional `--prevention` flag records how to avoid the issue in the future.
 
+For learning-tag scrubbing and secret-handling requirements shared with `memory_add`, see the [explicit-write reference](mcp-tools.md#memory_add).
+
 ### Breadcrumbs
 
 ```bash
