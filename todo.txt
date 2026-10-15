@@ -55,3 +55,4 @@
 2026-10-09 chore: fresh /ce-worktree worktrees miss node_modules → ~10 MCP-config tests fail spuriously. Worktree flow gone and jsonc-parser dep removed (eebe92d). +recall @close issue:165
 2026-10-09 Non-goals: no HostDescriptor, no adapter→plugin rename, no Cursor marketplace plugin, no Cursor host-hook glue. Reference-only non-goals list; Cursor wires shipped in #282 without them. +recall @close issue:271
 2026-10-09 create npm package for eady install. npm publish and `recall install` shipped in #170. +recall @close issue:1
+2026-10-14 omp host-ingest LoA runs the Automatic-capture Extractor instead of the basic 'Session with N messages' summary +recall issue:286
