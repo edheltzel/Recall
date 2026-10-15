@@ -67,3 +67,43 @@ describe('CLI vector search skips embedding dimension mismatches (#163)', () => 
     expect(errors).toContain('recall embed rebackfill');
   });
 });
+
+describe('semantic search falls back to keyword search when every vector mismatches (#163)', () => {
+  const originalLog = console.log;
+  const originalError = console.error;
+  let output: string;
+  let errors: string;
+  let keywordId: number;
+
+  beforeEach(() => {
+    setupTestDb();
+    output = '';
+    errors = '';
+    console.log = (msg?: unknown) => { output += `${String(msg ?? '')}\n`; };
+    console.error = (msg?: unknown) => { errors += `${String(msg ?? '')}\n`; };
+
+    createSession({ session_id: 'dim-fts', started_at: '2026-01-01T00:00:00Z', project: 'demo' });
+    keywordId = addDecision({
+      session_id: 'dim-fts',
+      decision: 'platypusfallback ledger note',
+      status: 'active',
+    });
+    insertEmbedding(keywordId, new Array(768).fill(0.1));
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    console.error = originalError;
+    teardownTestDb();
+  });
+
+  test('prints the keyword hit in the recall search shape', async () => {
+    await runSemanticSearch('platypusfallback', {});
+
+    expect(output).toContain(`[decisions#${keywordId}]`);
+    expect(output).toContain('platypusfallback ledger note');
+    expect(output).not.toContain('Found 0 embeddings');
+    expect(errors.match(/different dimension/g)?.length).toBe(1);
+    expect(errors).toContain('recall embed rebackfill');
+  });
+});

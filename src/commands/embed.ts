@@ -8,6 +8,7 @@ import { notMarkedDuplicateSql } from '../lib/dedup.js';
 import { embeddingTextFor, EMBED_SOURCES, MIN_EMBED_TEXT_LENGTH } from '../lib/repair.js';
 import { search as ftsSearch, vectorRowContentProvenance } from '../lib/memory.js';
 import { formatProvenanceTag } from './provenance-display.js';
+import { runSearch } from './search.js';
 import { publishedEmbeddingSql, publishedRecordTable } from '../lib/published-records.js';
 import { upsertEmbedding, upsertEmbeddingsInTransaction } from '../lib/embedding-store.js';
 
@@ -350,6 +351,17 @@ export async function runSemanticSearch(query: string, options: { table?: string
   }
 
   const results = scoreAgainstQuery(embeddings, queryEmbedding);
+  if (results.length === 0) {
+    // Every stored vector was a different dimension (#163). Same remediation
+    // warning as a partial skip, then the keyword path recall search already uses.
+    console.error('Falling back to keyword-only search...\n');
+    runSearch(query, {
+      table: options.table === 'loa_entries' ? 'loa' : options.table,
+      limit,
+      showProvenance: options.showProvenance,
+    });
+    return;
+  }
 
   // Sort by similarity (descending)
   results.sort((a, b) => b.similarity - a.similarity);
