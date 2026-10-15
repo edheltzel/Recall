@@ -287,6 +287,36 @@ export function runReindex(): void {
   console.log(`Vector index rebuilt: ${indexed} entries.`);
 }
 
+type StoredEmbeddingRow = { source_table: string; source_id: number; embedding: Buffer };
+
+/** Score stored vectors against the query, skipping a dimension mismatch instead of throwing. */
+function scoreAgainstQuery(
+  rows: StoredEmbeddingRow[],
+  queryEmbedding: number[],
+): Array<{ source_table: string; source_id: number; similarity: number }> {
+  const results: Array<{ source_table: string; source_id: number; similarity: number }> = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const embedding = blobToEmbedding(row.embedding);
+    if (embedding.length !== queryEmbedding.length) {
+      skipped++;
+      continue;
+    }
+    results.push({
+      source_table: row.source_table,
+      source_id: row.source_id,
+      similarity: cosineSimilarity(queryEmbedding, embedding),
+    });
+  }
+  if (skipped > 0) {
+    console.error(
+      `Warning: skipped ${skipped} stored embedding(s) with a different dimension than the query (${queryEmbedding.length}). Run \`recall embed rebackfill\` to repair.`,
+    );
+  }
+  return results;
+}
+
+
 /**
  * Semantic search using embeddings
  */
@@ -319,18 +349,7 @@ export async function runSemanticSearch(query: string, options: { table?: string
     return;
   }
 
-  // Calculate similarities
-  const results: Array<{ source_table: string; source_id: number; similarity: number }> = [];
-
-  for (const row of embeddings) {
-    const embedding = blobToEmbedding(row.embedding);
-    const similarity = cosineSimilarity(queryEmbedding, embedding);
-    results.push({
-      source_table: row.source_table,
-      source_id: row.source_id,
-      similarity
-    });
-  }
+  const results = scoreAgainstQuery(embeddings, queryEmbedding);
 
   // Sort by similarity (descending)
   results.sort((a, b) => b.similarity - a.similarity);
@@ -445,18 +464,7 @@ export async function runHybridSearch(query: string, options: { table?: string; 
     ${embeddingsWhere(db, options.table)}
   `).all() as Array<{ id: number; source_table: string; source_id: number; embedding: Buffer }>;
 
-  // Calculate similarities
-  const semanticResults: Array<{ source_table: string; source_id: number; similarity: number }> = [];
-
-  for (const row of embeddings) {
-    const embedding = blobToEmbedding(row.embedding);
-    const similarity = cosineSimilarity(queryEmbedding, embedding);
-    semanticResults.push({
-      source_table: row.source_table,
-      source_id: row.source_id,
-      similarity
-    });
-  }
+  const semanticResults = scoreAgainstQuery(embeddings, queryEmbedding);
 
   // Sort by similarity (descending)
   semanticResults.sort((a, b) => b.similarity - a.similarity);
