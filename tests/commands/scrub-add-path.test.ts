@@ -104,6 +104,19 @@ describe('memory_add path (addDecision/addLearning/addBreadcrumb)', () => {
     expect(redactions).toContain('bearer-token');
   });
 
+  test('redacts a secret in learning tags (#182)', () => {
+    const redactions: string[] = [];
+    const id = addLearning(
+      { problem: 'label leak', tags: `env ${ANTHROPIC_KEY}`, provenance: 'user_authored' },
+      redactions,
+    );
+
+    const stored = getLearning(id)!;
+    expect(stored.tags).toContain('[REDACTED:anthropic-key]');
+    expect(stored.tags).not.toContain(ANTHROPIC_KEY);
+    expect(redactions).toContain('anthropic-key');
+  });
+
   test('redacts a secret in a breadcrumb (content field)', () => {
     const redactions: string[] = [];
     const id = addBreadcrumb(

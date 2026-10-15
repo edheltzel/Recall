@@ -1,7 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { getDb } from '../../src/db/connection';
-import { MIGRATIONS } from '../../src/db/migrations';
+import { applyMigrations, MIGRATIONS } from '../../src/db/migrations';
+import { CREATE_TABLES } from '../../src/db/schema';
 
 beforeAll(() => {
   setupTestDb();
@@ -175,5 +177,51 @@ describe('schema_meta', () => {
 
     expect(row).not.toBeNull();
     expect(row?.value).toBe(String(MIGRATIONS.length));
+  });
+});
+
+describe('decisions/learnings confidence (#278)', () => {
+  function columns(db: Database, table: string) {
+    return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+      cid: number;
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>).map(({ name, type, notnull, dflt_value, pk }) => ({ name, type, notnull, dflt_value, pk }));
+  }
+
+  test('CREATE_TABLES matches a pre-confidence DB after migration 5→6', () => {
+    const fresh = new Database(':memory:');
+    fresh.exec(CREATE_TABLES);
+
+    const migrated = new Database(':memory:');
+    migrated.exec(CREATE_TABLES.replace(
+      /\n  confidence TEXT DEFAULT 'medium' CHECK \(confidence IN \('high', 'medium', 'low'\)\),/g,
+      '',
+    ));
+    migrated.exec('PRAGMA user_version = 5');
+    applyMigrations(migrated);
+
+    for (const table of ['decisions', 'learnings'] as const) {
+      const freshCols = columns(fresh, table);
+      const migratedCols = columns(migrated, table);
+      const confidence = freshCols.find((c) => c.name === 'confidence');
+      expect(confidence).toEqual({
+        name: 'confidence',
+        type: 'TEXT',
+        notnull: 0,
+        dflt_value: "'medium'",
+        pk: 0,
+      });
+      expect(freshCols).toEqual(migratedCols);
+      expect(() => {
+        fresh.prepare(`INSERT INTO ${table} (${table === 'decisions' ? 'decision' : 'problem'}, confidence) VALUES ('x', 'nope')`).run();
+      }).toThrow();
+    }
+
+    fresh.close();
+    migrated.close();
   });
 });

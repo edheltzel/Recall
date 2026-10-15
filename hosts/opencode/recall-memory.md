@@ -28,10 +28,7 @@ You have access to persistent memory via the recall-memory MCP server.
    - Always pass `messages`. Omit them and Recall falls back to native transcript discovery, which checks Claude Code first and captures the wrong host's session on a machine that has both
    - Messages become immediately searchable from any new session
 
-6. **Never store secrets** — `recall-memory_memory_add` and `recall-memory_memory_dump` persist content verbatim:
-   - Stored records can resurface in future sessions' L0/L1 context
-   - Redact API keys, tokens, passwords before recording (e.g. `[REDACTED:api-key]`)
-   - Confirm with the user before dumping a session that touched credentials
+6. **Never store secrets** — Follow the [secret-handling requirements for memory writes and session dumps](https://github.com/edheltzel/Recall/blob/main/docs/mcp-tools.md#memory_add).
 
 7. **Record corrections** — When the user corrects you, capture it immediately:
    - `recall-memory_memory_add` with type "learning", `confidence: "high"`, elevated importance
