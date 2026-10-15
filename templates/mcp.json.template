@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "recall-memory": {
-      "command": "mem-mcp",
+      "command": "recall-mcp",
       "args": []
     }
   }
