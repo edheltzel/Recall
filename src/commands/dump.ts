@@ -268,6 +268,11 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     }
   }
 
+  // Checked before any write: replacing a session with nothing would clear its messages.
+  if (session.messages.length === 0) {
+    return { success: false, sessionId: session.sessionId, messageCount: 0, source: session.source, error: 'Session has no user or assistant text to dump' };
+  }
+
   const replacingSession = sessionExists(session.sessionId);
   const lifecycleSource = replacingSession
     ? lifecycleSessionSource(session.sessionId)

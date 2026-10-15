@@ -439,4 +439,18 @@ describe('portable explicit session dump', () => {
     expect(() => parseDumpSessionJson(JSON.stringify({ ...base, harness: 'Bad Id', messages: [] }))).toThrow('harness');
     expect(() => parseDumpSessionJson(JSON.stringify({ ...base, messages: [{ role: 'system', content: 'x' }] }))).toThrow('user/assistant');
   });
+
+  test('an empty supplied session is rejected without clearing the existing dump', async () => {
+    const sessionId = 'empty-replacement';
+    const message = { session_id: sessionId, timestamp: '2026-10-14T00:00:00.000Z', role: 'user' as const, content: 'keep me', project: 'p' };
+    const session = { source: 'codex', sessionId, project: 'p', filePath: '', messages: [message] };
+    const first = await coreDump('first', { skipFabric: true, skipEmbed: true, session });
+    expect(first.success).toBe(true);
+
+    const empty = await coreDump('empty', { skipFabric: true, skipEmbed: true, session: parseDumpSessionJson(JSON.stringify({ contract: 1, harness: 'codex', session_id: sessionId, messages: [] })) });
+    expect(empty.success).toBe(false);
+    const rows = getDb().prepare('SELECT content FROM messages WHERE session_id = ?').all(sessionId);
+    expect(rows).toEqual([{ content: 'keep me' }]);
+    expect(getDb().prepare('SELECT COUNT(*) AS n FROM loa_entries WHERE id = ?').get(first.loaId!)).toEqual({ n: 1 });
+  });
 });
