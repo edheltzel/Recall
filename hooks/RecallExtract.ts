@@ -855,10 +855,11 @@ function clearTrackerRow(convPath: string): void {
     if (!existsSync(dbPath)) return;
     const { Database } = require('bun:sqlite');
     const db = new Database(dbPath);
-    db.exec('PRAGMA journal_mode = WAL');
-    // Match getDb()'s busy_timeout so a held lock waits instead of failing
-    // immediately. Value mirrored inline — hooks must not import from src/. (#72/#96)
+    // busy_timeout before WAL recovery (#212). Value mirrored inline (#72/#96).
     db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA journal_mode = WAL');
+    // 64MiB = JOURNAL_SIZE_LIMIT_BYTES in src/db/connection.ts (#192).
+    db.exec('PRAGMA journal_size_limit = 67108864');
     db.prepare('DELETE FROM extraction_tracker WHERE conversation_path = ?').run(convPath);
     db.close();
   } catch {}

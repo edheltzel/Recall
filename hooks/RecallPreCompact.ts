@@ -340,7 +340,10 @@ export function flushConversation(convPath: string, cwd: string): FlushResult {
     // Direct SQLite — self-contained, no src/ imports. We open a writable
     // connection (not readonly) and use a transaction for atomicity.
     const db = new Database(dbPath);
+    // busy_timeout before WAL (#212). 64MiB = JOURNAL_SIZE_LIMIT_BYTES in src/db/connection.ts (#192).
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA journal_size_limit = 67108864');
     db.exec('PRAGMA foreign_keys = ON');
 
     try {

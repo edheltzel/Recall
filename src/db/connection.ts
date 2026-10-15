@@ -26,6 +26,9 @@ const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
 
+/** WAL checkpoint cap in bytes (#192). Hooks inline this; they must not import src/. */
+export const JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
+
 /**
  * Apply the connection-level PRAGMAs every open shares (issue #151).
  *
@@ -45,14 +48,13 @@ let dbInitializing = false; // Lock to prevent race condition
  * - temp_store  = MEMORY → keep transient sort/temp B-trees in RAM.
  */
 function applyConnectionPragmas(database: Database): void {
-  database.exec('PRAGMA journal_mode = WAL');
-  database.exec('PRAGMA foreign_keys = ON');
-  // Concurrent CLI/MCP/hook invocations share this file. Without a busy
-  // timeout, a writer that finds the lock held fails immediately with
-  // 'database is locked'; wait up to 5s for the lock to clear instead.
-  // (#72/#96 — do not regress.)
+  // busy_timeout before journal_mode so WAL recovery waits (#212, #72/#96).
   database.exec('PRAGMA busy_timeout = 5000');
-  // Read-path tuning (#151) — see doc comment above. No durability change.
+  database.exec('PRAGMA journal_mode = WAL');
+  // After WAL: the limit is a no-op until journal_mode is WAL (#192).
+  database.exec(`PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT_BYTES}`);
+  database.exec('PRAGMA foreign_keys = ON');
+  // Read-path tuning (#151). No durability change.
   database.exec('PRAGMA cache_size = -65536');
   database.exec('PRAGMA mmap_size = 2147483648');
   database.exec('PRAGMA temp_store = MEMORY');

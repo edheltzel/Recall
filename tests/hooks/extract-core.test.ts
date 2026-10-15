@@ -167,6 +167,7 @@ describe('runExtractCore — dual-write parity', () => {
     expect(result.dualWrite?.failures._db).toBe('not writable or locked');
   });
 
+  // The writer waits out busy_timeout (5s) before WAL setup gives up (#212).
   test('surfaces an exclusively locked database instead of reporting an empty success', async () => {
     const busyDir = mkdtempSync(join(tmpdir(), 'recall-busy-'));
     const busyPath = join(busyDir, 'busy.db');
@@ -184,7 +185,7 @@ describe('runExtractCore — dual-write parity', () => {
       blocker.close();
       rmSync(busyDir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
 
 describe('runExtractCore — scrub is active on every persisted field', () => {

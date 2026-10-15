@@ -50,10 +50,12 @@ export interface WriteOptions {
 // Regression: tests/hooks/sqlite-writers-concurrency.test.ts.
 function openDb(dbPath: string): Database {
   const db = new Database(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
-  // Concurrent Claude/OpenCode extraction writers must wait for a peer's
-  // short transaction instead of turning a transient lock into record loss.
+  // busy_timeout before WAL recovery (#212). Concurrent writers wait on a held
+  // lock instead of dropping the record. 64MiB = JOURNAL_SIZE_LIMIT_BYTES in
+  // src/db/connection.ts (#192).
   db.exec('PRAGMA busy_timeout = 5000');
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA journal_size_limit = 67108864');
   return db;
 }
 
