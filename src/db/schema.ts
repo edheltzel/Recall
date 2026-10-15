@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   access_count INTEGER DEFAULT 0,
   last_accessed DATETIME,
+  confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low')),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
@@ -239,6 +240,7 @@ CREATE TABLE IF NOT EXISTS learnings (
   provenance TEXT CHECK (provenance IN ('verbatim', 'user_authored', 'extracted', 'derived')),
   access_count INTEGER DEFAULT 0,
   last_accessed DATETIME,
+  confidence TEXT DEFAULT 'medium' CHECK (confidence IN ('high', 'medium', 'low')),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
