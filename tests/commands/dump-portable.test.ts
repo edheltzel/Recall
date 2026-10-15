@@ -120,6 +120,21 @@ describe('portable explicit session dump', () => {
       { session_id: sessionId, timestamp, role: 'assistant', content: ' \u200b\u202e ', project: 'recall-test', provenance: 'verbatim' },
       { session_id: sessionId, timestamp, role: 'assistant', content: 'Old answer.', project: 'recall-test', provenance: 'verbatim' },
     ]);
+    const legacyIds = (getDb()
+      .prepare(`SELECT id FROM messages WHERE session_id = ? AND content NOT LIKE 'Automatic%' ORDER BY id`)
+      .all(sessionId) as Array<{ id: number }>).map(({ id }) => id);
+    const legacyLoa = createLoaEntry({
+      title: 'Legacy snapshot',
+      description: 'Explicit memory dump.',
+      fabric_extract: `Summary mentioning api_key=${secret}`,
+      message_range_start: legacyIds[0],
+      message_range_end: legacyIds[2],
+      session_id: sessionId,
+      project: 'recall-test',
+      message_count: 3,
+      source_ids: JSON.stringify(legacyIds.map(id => ({ table: 'messages', id }))),
+      provenance: 'extracted',
+    });
     const session = parseDumpSessionJson(JSON.stringify({
       contract: 1,
       harness: 'omp',
@@ -132,8 +147,12 @@ describe('portable explicit session dump', () => {
       ],
     }));
     const options = { session, skipFabric: true, skipEmbed: true };
-    expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0 });
-    expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0 });
+    expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0, loaId: legacyLoa });
+    expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0, loaId: legacyLoa });
+    const loas = getDb().prepare('SELECT fabric_extract FROM loa_entries WHERE session_id = ?')
+      .all(sessionId) as Array<{ fabric_extract: string }>;
+    expect(loas).toHaveLength(1);
+    expect(loas[0].fabric_extract).not.toContain(secret);
     expect(getDb()
       .prepare(`SELECT content FROM published_messages WHERE session_id = ? AND trim(content) != '' ORDER BY id`)
       .all(sessionId)).toEqual([

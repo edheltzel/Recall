@@ -198,7 +198,8 @@ function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 
 /**
  * Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched span in place.
  * Rows that scrub to blank are dropped from incoming dumps, so they are skipped when matching
- * but kept on disk (rewritten) so the span's ids stay contiguous for the next re-dump.
+ * but kept on disk (rewritten) and returned, so the span's ids stay contiguous for the next
+ * re-dump and the existing LoA's source_ids still match (its extract is then regenerated).
  */
 function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
   const db = getDb();
@@ -242,7 +243,7 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
           deleteRecordEmbeddingsByIdsInTransaction(db, 'messages', stale.map(({ row }) => row.id));
         })();
       }
-      return snapshot.map(({ row, content }) => ({ ...row, content }));
+      return span.map(({ row, content }) => ({ ...row, content }));
     }
   }
 
