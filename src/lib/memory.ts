@@ -23,7 +23,7 @@ export { LIFECYCLE_SEARCH_RETRYABLE } from './lifecycle-search.js';
 // (MCP) both route through addDecision/addLearning/addBreadcrumb below, so
 // scrubbing here covers both surfaces (and any future caller) in one place.
 // Only free-text fields are scrubbed; structured/enum fields (category, status,
-// confidence, tags, importance, provenance) are never secret carriers and are
+// confidence, importance, provenance) are never secret carriers and are
 // left untouched. Distinct redacted kinds are returned so the caller can
 // surface them to the user. Mirrors the session-extract precedent in
 // hooks/lib/extract-core.ts.
@@ -257,7 +257,7 @@ export function addLearning(
   redactionsOut?: string[]
 ): number {
   const db = getDb();
-  const { record, redactions } = scrubFreeText(learning, ['problem', 'solution', 'prevention']);
+  const { record, redactions } = scrubFreeText(learning, ['problem', 'solution', 'prevention', 'tags']);
   if (redactionsOut) redactionsOut.push(...redactions);
   const stmt = db.prepare(`
     INSERT INTO learnings (session_id, category, project, problem, solution, prevention, tags, confidence, importance, provenance)
