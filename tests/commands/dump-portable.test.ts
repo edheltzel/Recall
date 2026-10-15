@@ -115,11 +115,17 @@ describe('portable explicit session dump', () => {
       messages: [{ role: 'user', content: 'Automatic capture.', sourcePosition: 0 }],
     });
     const timestamp = '2026-10-14T00:00:00.000Z';
-    addMessagesBatch([
-      { session_id: sessionId, timestamp, role: 'user', content: `api_key=${secret}`, project: 'recall-test', provenance: 'verbatim' },
-      { session_id: sessionId, timestamp, role: 'assistant', content: ' \u200b\u202e ', project: 'recall-test', provenance: 'verbatim' },
-      { session_id: sessionId, timestamp, role: 'assistant', content: 'Old answer.', project: 'recall-test', provenance: 'verbatim' },
-    ]);
+    // Blank-after-scrub rows at the start, middle, and end of the legacy batch.
+    const legacy = [
+      { role: 'user' as const, content: '\u200b' },
+      { role: 'user' as const, content: `api_key=${secret}` },
+      { role: 'assistant' as const, content: ' \u200b\u202e ' },
+      { role: 'assistant' as const, content: 'Old answer.' },
+      { role: 'assistant' as const, content: '\u202e' },
+    ];
+    addMessagesBatch(legacy.map(message => ({
+      ...message, session_id: sessionId, timestamp, project: 'recall-test', provenance: 'verbatim' as const,
+    })));
     const legacyIds = (getDb()
       .prepare(`SELECT id FROM messages WHERE session_id = ? AND content NOT LIKE 'Automatic%' ORDER BY id`)
       .all(sessionId) as Array<{ id: number }>).map(({ id }) => id);
@@ -128,10 +134,10 @@ describe('portable explicit session dump', () => {
       description: 'Explicit memory dump.',
       fabric_extract: `Summary mentioning api_key=${secret}`,
       message_range_start: legacyIds[0],
-      message_range_end: legacyIds[2],
+      message_range_end: legacyIds[legacyIds.length - 1],
       session_id: sessionId,
       project: 'recall-test',
-      message_count: 3,
+      message_count: legacyIds.length,
       source_ids: JSON.stringify(legacyIds.map(id => ({ table: 'messages', id }))),
       provenance: 'extracted',
     });
@@ -140,11 +146,7 @@ describe('portable explicit session dump', () => {
       harness: 'omp',
       session_id: sessionId,
       project: 'recall-test',
-      messages: [
-        { role: 'user', content: `api_key=${secret}` },
-        { role: 'assistant', content: ' \u200b\u202e ' },
-        { role: 'assistant', content: 'Old answer.' },
-      ],
+      messages: legacy,
     }));
     const options = { session, skipFabric: true, skipEmbed: true };
     expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0, loaId: legacyLoa });

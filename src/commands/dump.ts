@@ -227,7 +227,13 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
 
   for (let start = kept.length - expectedKeys.length; start >= 0; start--) {
     const snapshot = kept.slice(start, start + expectedKeys.length);
-    const span = rows.slice(snapshot[0].index, snapshot[snapshot.length - 1].index + 1);
+    // Leading/trailing blank rows of the same batch belong to this snapshot too.
+    // ponytail: greedy, so a directly adjacent legacy dump that starts blank loses that row to us.
+    let first = snapshot[0].index;
+    let last = snapshot[snapshot.length - 1].index;
+    while (first > 0 && !rows[first - 1].content.trim() && rows[first - 1].row.id + 1 === rows[first].row.id) first--;
+    while (last < rows.length - 1 && !rows[last + 1].content.trim() && rows[last + 1].row.id === rows[last].row.id + 1) last++;
+    const span = rows.slice(first, last + 1);
     const contiguous = span.every(({ row }, index) =>
       index === 0 || row.id === span[index - 1].row.id + 1
     );
