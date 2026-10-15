@@ -178,6 +178,8 @@ describe('import-legacy guard (#157)', () => {
     }
   });
 });
+// Root ignores mode bits, so chmod cannot force EACCES. skipIf reports skipped, not a false pass.
+const rootIgnoresMode = process.getuid?.() === 0;
 
 describe('scrub-archive — hostile filesystem', () => {
   test('a dangling symlink under sessions/ does not abort the sweep; other surfaces still scrubbed', () => {
@@ -200,7 +202,7 @@ describe('scrub-archive — hostile filesystem', () => {
     expect(logs.join('\n')).toMatch(/\[SKIP\] sessions\/2026-01-02/);
   });
 
-  test('an unreadable (mode 000) surface does not abort the sweep; other surfaces still scrubbed', () => {
+  test.skipIf(rootIgnoresMode)('an unreadable (mode 000) surface does not abort the sweep; other surfaces still scrubbed', () => {
     const distilled = join(memoryDir, 'DISTILLED.md');
     writeFileSync(distilled, `leaked ${AWS} key\n`, 'utf-8');
 
@@ -220,7 +222,7 @@ describe('scrub-archive — hostile filesystem', () => {
     }
   });
 
-  test('an unwritable (mode 444) surface does not block a later surface from being scrubbed', () => {
+  test.skipIf(rootIgnoresMode)('an unwritable (mode 444) surface does not block a later surface from being scrubbed', () => {
     // DISTILLED.md is processed before REJECTIONS.log (surface order). Make the
     // earlier one read-only so its in-place write throws EACCES.
     const distilled = join(memoryDir, 'DISTILLED.md');
