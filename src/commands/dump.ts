@@ -195,8 +195,10 @@ function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 
   return JSON.stringify([message.role, message.content, message.project]);
 }
 
+/** Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched rows in place. */
 function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
-  const rows = getDb()
+  const db = getDb();
+  const rows = (db
     .prepare(`
       SELECT m.id, m.content, m.role, m.timestamp, m.project
       FROM published_messages m
@@ -206,7 +208,8 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
         )
       ORDER BY m.id
     `)
-    .all(session.sessionId) as DumpMessageRow[];
+    .all(session.sessionId) as DumpMessageRow[])
+    .map(row => ({ row, content: scrub(row.content).text }));
   const expectedKeys = session.messages.map(message =>
     explicitSnapshotKey({
       role: message.role,
@@ -217,14 +220,22 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
 
   for (let start = rows.length - expectedKeys.length; start >= 0; start--) {
     const snapshot = rows.slice(start, start + expectedKeys.length);
-    const contiguous = snapshot.every((message, index) =>
-      index === 0 || message.id === snapshot[index - 1].id + 1
+    const contiguous = snapshot.every(({ row }, index) =>
+      index === 0 || row.id === snapshot[index - 1].row.id + 1
     );
     if (
       contiguous &&
-      snapshot.every((message, index) => explicitSnapshotKey(message) === expectedKeys[index])
+      snapshot.every(({ row, content }, index) => explicitSnapshotKey({ ...row, content }) === expectedKeys[index])
     ) {
-      return snapshot;
+      const stale = snapshot.filter(({ row, content }) => row.content !== content);
+      if (stale.length > 0) {
+        const rewrite = db.prepare('UPDATE messages SET content = ? WHERE id = ?');
+        db.transaction(() => {
+          for (const { row, content } of stale) rewrite.run(content, row.id);
+          deleteRecordEmbeddingsByIdsInTransaction(db, 'messages', stale.map(({ row }) => row.id));
+        })();
+      }
+      return snapshot.map(({ row, content }) => ({ ...row, content }));
     }
   }
 

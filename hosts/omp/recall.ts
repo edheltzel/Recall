@@ -323,11 +323,13 @@ export async function dumpOmpSession(
       return reply('Recall dump skipped: conversation text exceeds 25MiB');
     }
 
-    const args = ['dump', params.title, '--stdin'];
+    const args = ['dump', '--stdin'];
     if (params.project) args.push('-p', params.project);
     if (params.tags) args.push('-t', params.tags);
     if (params.continues !== undefined) args.push('-c', String(params.continues));
     if (params.skip_fabric) args.push('--skip-fabric');
+    // `--` keeps a title like `--help` from being parsed as an option.
+    args.push('--', params.title);
 
     let output = '';
     const { code, aborted } = await runCli(runChild, args, payload, signal, DUMP_TIMEOUT_MS, chunk => {

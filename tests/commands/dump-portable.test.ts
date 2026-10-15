@@ -3,7 +3,7 @@ import { coreDump, parseDumpSessionJson } from '../../src/commands/dump';
 import { dumpOmpSession } from '../../hosts/omp/recall';
 import { withEnv } from '../helpers/env';
 import { getDb } from '../../src/db/connection';
-import { createLoaEntry, getLoaMessages, search } from '../../src/lib/memory';
+import { addMessagesBatch, createLoaEntry, getLoaMessages, search } from '../../src/lib/memory';
 import { ingestHostTranscript } from '../../src/lib/host-ingest';
 import { ExtractorConfigError } from '../../src/lib/extraction';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
@@ -103,6 +103,41 @@ describe('portable explicit session dump', () => {
     expect(extractionInput).not.toContain(secret);
     expect(extractionInput).not.toContain('\u200b');
     expect(session.messages[0].content).toBe(`api_key=${secret}`);
+  });
+
+  test('re-dump matches and scrubs an explicit snapshot stored before scrubbing', async () => {
+    const sessionId = 'omp-unscrubbed-snapshot';
+    const secret = 'abcdefgh' + '87654321';
+    ingestHostTranscript({
+      source: 'omp',
+      sessionId,
+      project: 'recall-test',
+      messages: [{ role: 'user', content: 'Automatic capture.', sourcePosition: 0 }],
+    });
+    const timestamp = '2026-10-14T00:00:00.000Z';
+    addMessagesBatch([
+      { session_id: sessionId, timestamp, role: 'user', content: `api_key=${secret}`, project: 'recall-test', provenance: 'verbatim' },
+      { session_id: sessionId, timestamp, role: 'assistant', content: 'Old answer.', project: 'recall-test', provenance: 'verbatim' },
+    ]);
+    const session = parseDumpSessionJson(JSON.stringify({
+      contract: 1,
+      harness: 'omp',
+      session_id: sessionId,
+      project: 'recall-test',
+      messages: [
+        { role: 'user', content: `api_key=${secret}` },
+        { role: 'assistant', content: 'Old answer.' },
+      ],
+    }));
+    const result = await coreDump('Legacy snapshot', { session, skipFabric: true, skipEmbed: true });
+    expect(result).toMatchObject({ success: true, messageCount: 0 });
+    expect(getDb().prepare('SELECT content FROM published_messages WHERE session_id = ? ORDER BY id').all(sessionId))
+      .toEqual([
+        { content: 'Automatic capture.' },
+        { content: 'api_key=[REDACTED:generic-assignment]' },
+        { content: 'Old answer.' },
+      ]);
+    expect(search(secret, { table: 'messages' })).toEqual([]);
   });
 
   test('re-import preserves automatic lifecycle capture for the same session', async () => {
@@ -395,7 +430,7 @@ describe('portable explicit session dump', () => {
   test('omp recall_dump payload stores the live branch under omp, not a discovered transcript', async () => {
     let stdin = '';
     let args: readonly string[] = [];
-    const reply = await dumpOmpSession({ title: 'omp live branch', skip_fabric: true }, {
+    const reply = await dumpOmpSession({ title: '--help', skip_fabric: true }, {
       cwd: '/work/Recall',
       hasUI: true,
       ui: { notify: () => {}, confirm: async () => true },
@@ -413,7 +448,7 @@ describe('portable explicit session dump', () => {
       onOutput?.('✓ LoA #7 captured');
       return 0;
     });
-    expect(args.slice(1)).toEqual(['dump', 'omp live branch', '--stdin', '--skip-fabric']);
+    expect(args.slice(1)).toEqual(['dump', '--stdin', '--skip-fabric', '--', '--help']);
     expect(reply.content[0].text).toBe('✓ LoA #7 captured');
 
     const result = await coreDump('omp live branch', { skipFabric: true, skipEmbed: true, session: parseDumpSessionJson(stdin) });
