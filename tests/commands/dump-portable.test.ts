@@ -115,7 +115,32 @@ describe('portable explicit session dump', () => {
       messages: [{ role: 'user', content: 'Automatic capture.', sourcePosition: 0 }],
     });
     const timestamp = '2026-10-14T00:00:00.000Z';
-    // Blank-after-scrub rows at the start, middle, and end of the legacy batch.
+    const seedLegacyDump = (messages: Array<{ role: 'user' | 'assistant'; content: string }>, extract: string) => {
+      const maxRow = getDb().prepare('SELECT COALESCE(MAX(id), 0) AS id FROM messages').get() as { id: number };
+      const before = maxRow.id;
+      addMessagesBatch(messages.map(message => ({
+        ...message, session_id: sessionId, timestamp, project: 'recall-test', provenance: 'verbatim' as const,
+      })));
+      const ids = (getDb().prepare('SELECT id FROM messages WHERE session_id = ? AND id > ? ORDER BY id')
+        .all(sessionId, before) as Array<{ id: number }>).map(({ id }) => id);
+      return createLoaEntry({
+        title: 'Legacy snapshot',
+        description: 'Explicit memory dump.',
+        fabric_extract: extract,
+        message_range_start: ids[0],
+        message_range_end: ids[ids.length - 1],
+        session_id: sessionId,
+        project: 'recall-test',
+        message_count: ids.length,
+        source_ids: JSON.stringify(ids.map(id => ({ table: 'messages', id }))),
+        provenance: 'extracted',
+      });
+    };
+    // An adjacent older dump that ends blank, then the target with blanks at start, middle, and end.
+    const earlierLoa = seedLegacyDump(
+      [{ role: 'user', content: 'Earlier question.' }, { role: 'assistant', content: '\u200b' }],
+      'Earlier summary.',
+    );
     const legacy = [
       { role: 'user' as const, content: '\u200b' },
       { role: 'user' as const, content: `api_key=${secret}` },
@@ -123,24 +148,7 @@ describe('portable explicit session dump', () => {
       { role: 'assistant' as const, content: 'Old answer.' },
       { role: 'assistant' as const, content: '\u202e' },
     ];
-    addMessagesBatch(legacy.map(message => ({
-      ...message, session_id: sessionId, timestamp, project: 'recall-test', provenance: 'verbatim' as const,
-    })));
-    const legacyIds = (getDb()
-      .prepare(`SELECT id FROM messages WHERE session_id = ? AND content NOT LIKE 'Automatic%' ORDER BY id`)
-      .all(sessionId) as Array<{ id: number }>).map(({ id }) => id);
-    const legacyLoa = createLoaEntry({
-      title: 'Legacy snapshot',
-      description: 'Explicit memory dump.',
-      fabric_extract: `Summary mentioning api_key=${secret}`,
-      message_range_start: legacyIds[0],
-      message_range_end: legacyIds[legacyIds.length - 1],
-      session_id: sessionId,
-      project: 'recall-test',
-      message_count: legacyIds.length,
-      source_ids: JSON.stringify(legacyIds.map(id => ({ table: 'messages', id }))),
-      provenance: 'extracted',
-    });
+    const legacyLoa = seedLegacyDump(legacy, `Summary mentioning api_key=${secret}`);
     const session = parseDumpSessionJson(JSON.stringify({
       contract: 1,
       harness: 'omp',
@@ -151,14 +159,16 @@ describe('portable explicit session dump', () => {
     const options = { session, skipFabric: true, skipEmbed: true };
     expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0, loaId: legacyLoa });
     expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0, loaId: legacyLoa });
-    const loas = getDb().prepare('SELECT fabric_extract FROM loa_entries WHERE session_id = ?')
-      .all(sessionId) as Array<{ fabric_extract: string }>;
-    expect(loas).toHaveLength(1);
-    expect(loas[0].fabric_extract).not.toContain(secret);
+    expect(getDb().prepare('SELECT id, fabric_extract, message_count FROM loa_entries WHERE session_id = ? ORDER BY id')
+      .all(sessionId)).toEqual([
+      { id: earlierLoa, fabric_extract: 'Earlier summary.', message_count: 2 },
+      { id: legacyLoa, fabric_extract: expect.not.stringContaining(secret), message_count: 2 },
+    ]);
     expect(getDb()
       .prepare(`SELECT content FROM published_messages WHERE session_id = ? AND trim(content) != '' ORDER BY id`)
       .all(sessionId)).toEqual([
       { content: 'Automatic capture.' },
+      { content: 'Earlier question.' },
       { content: 'api_key=[REDACTED:generic-assignment]' },
       { content: 'Old answer.' },
     ]);

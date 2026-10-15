@@ -195,13 +195,15 @@ function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 
   return JSON.stringify([message.role, message.content, message.project]);
 }
 
-/**
- * Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched span in place.
- * Rows that scrub to blank are dropped from incoming dumps, so they are skipped when matching
- * but kept on disk (rewritten) and returned, so the span's ids stay contiguous for the next
- * re-dump and the existing LoA's source_ids still match (its extract is then regenerated).
- */
-function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
+interface ExplicitSnapshot {
+  /** Matched rows, scrubbed, without rows that scrub to blank (incoming dumps drop those). */
+  messages: DumpMessageRow[];
+  /** Session rows that scrub to blank; legacy LoA source_ids may still list them. */
+  blankIds: Set<number>;
+}
+
+/** Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched span in place. */
+function findExplicitSnapshot(session: ParsedSession): ExplicitSnapshot | undefined {
   const db = getDb();
   const rows = (db
     .prepare(`
@@ -216,6 +218,7 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
     .all(session.sessionId) as DumpMessageRow[])
     .map((row, index) => ({ row, index, content: scrub(row.content).text }));
   const kept = rows.filter(({ content }) => content.trim());
+  const blankIds = new Set(rows.filter(({ content }) => !content.trim()).map(({ row }) => row.id));
   const expectedKeys = session.messages.map(message =>
     explicitSnapshotKey({
       role: message.role,
@@ -227,13 +230,8 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
 
   for (let start = kept.length - expectedKeys.length; start >= 0; start--) {
     const snapshot = kept.slice(start, start + expectedKeys.length);
-    // Leading/trailing blank rows of the same batch belong to this snapshot too.
-    // ponytail: greedy, so a directly adjacent legacy dump that starts blank loses that row to us.
-    let first = snapshot[0].index;
-    let last = snapshot[snapshot.length - 1].index;
-    while (first > 0 && !rows[first - 1].content.trim() && rows[first - 1].row.id + 1 === rows[first].row.id) first--;
-    while (last < rows.length - 1 && !rows[last + 1].content.trim() && rows[last + 1].row.id === rows[last].row.id + 1) last++;
-    const span = rows.slice(first, last + 1);
+    // Blank rows between matched rows stay on disk, so ids stay contiguous across re-dumps.
+    const span = rows.slice(snapshot[0].index, snapshot[snapshot.length - 1].index + 1);
     const contiguous = span.every(({ row }, index) =>
       index === 0 || row.id === span[index - 1].row.id + 1
     );
@@ -241,7 +239,10 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
       contiguous &&
       snapshot.every(({ row, content }, index) => explicitSnapshotKey({ ...row, content }) === expectedKeys[index])
     ) {
-      const stale = span.filter(({ row, content }) => row.content !== content);
+      // Matched span plus every row that scrubs to blank (hidden bidi/zero-width only, owner irrelevant).
+      const stale = rows.filter(({ row, content, index }) => row.content !== content && (
+        !content.trim() || (index >= snapshot[0].index && index <= snapshot[snapshot.length - 1].index)
+      ));
       if (stale.length > 0) {
         const rewrite = db.prepare('UPDATE messages SET content = ? WHERE id = ?');
         db.transaction(() => {
@@ -249,7 +250,7 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
           deleteRecordEmbeddingsByIdsInTransaction(db, 'messages', stale.map(({ row }) => row.id));
         })();
       }
-      return span.map(({ row, content }) => ({ ...row, content }));
+      return { messages: snapshot.map(({ row, content }) => ({ ...row, content })), blankIds };
     }
   }
 
@@ -349,8 +350,9 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   );
 
   const db = getDb();
+  const snapshot = lifecycleOwned ? existingSnapshot ?? findExplicitSnapshot(session) : undefined;
   const snapshotMessages = lifecycleOwned
-    ? (existingSnapshot ?? findExplicitSnapshot(session) ?? [])
+    ? snapshot?.messages ?? []
     : db.prepare(`
         SELECT id, content, role, timestamp, project
         FROM published_messages
@@ -393,13 +395,26 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   const sourceIds = JSON.stringify(
     importedMessages.map(message => ({ table: 'messages', id: message.id }))
   );
+  // Legacy LoAs may also list rows that now scrub to blank; ignore those when matching identity.
+  const importedKey = importedMessages.map(message => message.id).join(',');
   const existingLoa = lifecycleOwned
-    ? db.prepare(`
-        SELECT id, title, fabric_extract FROM loa_entries
-        WHERE session_id = ? AND description = ? AND source_ids = ?
-        ORDER BY id DESC LIMIT 1
-      `).get(session.sessionId, EXPLICIT_DUMP_DESCRIPTION, sourceIds) as
-        { id: number; title: string; fabric_extract: string } | undefined
+    ? (db.prepare(`
+        SELECT l.id, l.title, l.fabric_extract, (
+          SELECT group_concat(json_extract(s.value, '$.id'))
+          FROM json_each(CASE WHEN json_valid(l.source_ids) THEN
+            CASE WHEN json_type(l.source_ids) = 'array' THEN l.source_ids ELSE '[]' END
+          ELSE '[]' END) s
+          WHERE CASE WHEN s.type = 'object' THEN json_extract(s.value, '$.table') END = 'messages'
+        ) AS message_ids
+        FROM loa_entries l
+        WHERE l.session_id = ? AND l.description = ?
+        ORDER BY l.id DESC
+      `).all(session.sessionId, EXPLICIT_DUMP_DESCRIPTION) as
+        Array<{ id: number; title: string; fabric_extract: string; message_ids: string | null }>)
+      .find(loa => (loa.message_ids ?? '')
+        .split(',')
+        .filter(id => id && !snapshot?.blankIds.has(Number(id)))
+        .join(',') === importedKey)
     : undefined;
   let loaId: number;
   if (existingLoa) {
@@ -407,7 +422,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
       db.prepare(`
         UPDATE loa_entries SET
           title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
-          snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?,
+          snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?, source_ids = ?,
           created_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(
@@ -419,6 +434,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
         options.project || session.project,
         options.tags ?? null,
         importedMessages.length,
+        sourceIds,
         existingLoa.id
       );
       if (existingLoa.title !== title || existingLoa.fabric_extract !== fabricExtract) {
