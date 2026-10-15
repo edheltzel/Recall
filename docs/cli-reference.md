@@ -13,7 +13,7 @@ New to Recall? Start with the [Getting Started](getting-started.md) first-run tu
 ```bash
 recall "query"                          # Hybrid search (keyword + semantic, default)
 recall "query" -k                       # Keyword only (FTS5)
-recall "query" -v                       # Vector only (semantic, requires Ollama)
+recall "query" -v                       # Semantic search (requires Ollama)
 recall search "query"                   # FTS5 search with options
 recall search "query" -t decisions      # Hard-filter to decisions only
 recall search "query" --bias-type decisions # Prefer decisions, still show other matching tables
@@ -24,7 +24,9 @@ recall semantic "query"                 # Semantic search (explicit)
 recall hybrid "query"                   # Hybrid search (explicit)
 ```
 
-The default search mode is hybrid: it runs FTS5 keyword matching and vector similarity in parallel, then merges results by relevance score. Use `-k` when you want exact phrase or operator matching without semantic expansion. Use `-v` when you want conceptually related results even if the exact words differ. `-k`, `-v`, and `recall search` stay local even when `~/.agents/Recall/config.json` names a query harness. `recall hybrid` and an unqualified `recall "query"` use that harness when the `query` key is present. A missing key stays hybrid. See [architecture](architecture.md#harness-steps).
+The default search mode is hybrid: it combines FTS5 keyword matching with vector similarity, then merges results by relevance score. Use `-k` when you want exact phrase or operator matching without semantic expansion. Use `-v` when you want conceptually related results even if the exact words differ. `-k`, `-v`, and `recall search` stay local even when `~/.agents/Recall/config.json` names a query harness. `recall hybrid` and an unqualified `recall "query"` use that harness when the `query` key is present. A missing key stays hybrid. See [architecture](architecture.md#harness-steps).
+
+Local semantic and hybrid search skip stored vectors whose length differs from the query embedding and print one warning with the skipped count. Compatible vectors still contribute to ranking. If every stored vector is incompatible, semantic search falls back to keyword search, while hybrid search returns its keyword matches. The warning recommends [`recall embed rebackfill`](#embeddings) to regenerate incompatible embeddings.
 
 For keyword search, `-t/--table` and `--bias-type` solve different problems:
 
@@ -195,14 +197,17 @@ recall telos show G7                    # Show a specific TELOS entry by ID
 ## Embeddings
 
 ```bash
-recall embed stats                      # Check embedding service status and coverage
+recall embed stats                      # Show stored embedding counts and storage size
 recall embed backfill -t loa            # Generate missing embeddings for LoA entries
 recall embed backfill -t decisions      # Generate missing embeddings for decisions
+recall embed rebackfill                 # Regenerate existing embeddings with the current model
 ```
 
-Embeddings are generated via Ollama and stored in the database for vector similarity search. `recall embed stats` shows how many records have embeddings versus how many are eligible. Run `recall embed backfill` after importing a large batch of records to ensure full semantic search coverage.
+Embeddings are generated via Ollama and stored in the database for vector similarity search. `recall embed stats` groups stored embedding counts by source table and model and reports their total storage size. Run `recall embed backfill` after importing a large batch of records to generate missing embeddings.
 
-Supported tables for backfill: `loa`, `decisions`, `learnings`, `breadcrumbs`, `sessions`, `docs`.
+Supported tables for backfill: `loa`, `decisions`, `learnings`, `messages` (assistant messages only). Each run processes up to `--limit` records (default: 100).
+
+`recall embed rebackfill` regenerates existing embeddings with the current model before replacing them in one transaction, then rebuilds the vector index when available. If embedding generation fails, the stored embeddings remain unchanged. Embeddings whose source is no longer available or whose text is too short are removed during replacement.
 
 ---
 
