@@ -98,6 +98,10 @@ context_for_agent({ agent_task: "Refactor the auth middleware", project: "my-app
 
 Add structured records during a session. Use this to capture decisions, learnings, and work-in-progress breadcrumbs as they happen.
 
+For `memory_add` and `recall add`, learning tags pass through the same scrubber as record text before insertion into SQLite: recognized secrets become `[REDACTED:<kind>]`, and invisible or bidirectional Unicode controls are stripped. The tool response or CLI output reports the kinds redacted. The scrubber recognizes specific credential patterns; it cannot guarantee removal of every secret.
+
+Never submit API keys, tokens, passwords, or credential-bearing snippets to memory writes or session dumps. Redact them before recording (for example, `[REDACTED:api-key]`), because stored records can resurface in future sessions' L0/L1 context. Before dumping a session that touched credentials, say so and confirm with the user.
+
 **Parameters**
 
 | Name | Type | Required | Default | Description |
