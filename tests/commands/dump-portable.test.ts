@@ -117,6 +117,7 @@ describe('portable explicit session dump', () => {
     const timestamp = '2026-10-14T00:00:00.000Z';
     addMessagesBatch([
       { session_id: sessionId, timestamp, role: 'user', content: `api_key=${secret}`, project: 'recall-test', provenance: 'verbatim' },
+      { session_id: sessionId, timestamp, role: 'assistant', content: ' \u200b\u202e ', project: 'recall-test', provenance: 'verbatim' },
       { session_id: sessionId, timestamp, role: 'assistant', content: 'Old answer.', project: 'recall-test', provenance: 'verbatim' },
     ]);
     const session = parseDumpSessionJson(JSON.stringify({
@@ -126,17 +127,20 @@ describe('portable explicit session dump', () => {
       project: 'recall-test',
       messages: [
         { role: 'user', content: `api_key=${secret}` },
+        { role: 'assistant', content: ' \u200b\u202e ' },
         { role: 'assistant', content: 'Old answer.' },
       ],
     }));
-    const result = await coreDump('Legacy snapshot', { session, skipFabric: true, skipEmbed: true });
-    expect(result).toMatchObject({ success: true, messageCount: 0 });
-    expect(getDb().prepare('SELECT content FROM published_messages WHERE session_id = ? ORDER BY id').all(sessionId))
-      .toEqual([
-        { content: 'Automatic capture.' },
-        { content: 'api_key=[REDACTED:generic-assignment]' },
-        { content: 'Old answer.' },
-      ]);
+    const options = { session, skipFabric: true, skipEmbed: true };
+    expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0 });
+    expect(await coreDump('Legacy snapshot', options)).toMatchObject({ success: true, messageCount: 0 });
+    expect(getDb()
+      .prepare(`SELECT content FROM published_messages WHERE session_id = ? AND trim(content) != '' ORDER BY id`)
+      .all(sessionId)).toEqual([
+      { content: 'Automatic capture.' },
+      { content: 'api_key=[REDACTED:generic-assignment]' },
+      { content: 'Old answer.' },
+    ]);
     expect(search(secret, { table: 'messages' })).toEqual([]);
   });
 

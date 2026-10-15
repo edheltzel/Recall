@@ -195,7 +195,11 @@ function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 
   return JSON.stringify([message.role, message.content, message.project]);
 }
 
-/** Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched rows in place. */
+/**
+ * Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched span in place.
+ * Rows that scrub to blank are dropped from incoming dumps, so they are skipped when matching
+ * but kept on disk (rewritten) so the span's ids stay contiguous for the next re-dump.
+ */
 function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
   const db = getDb();
   const rows = (db
@@ -209,7 +213,8 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
       ORDER BY m.id
     `)
     .all(session.sessionId) as DumpMessageRow[])
-    .map(row => ({ row, content: scrub(row.content).text }));
+    .map((row, index) => ({ row, index, content: scrub(row.content).text }));
+  const kept = rows.filter(({ content }) => content.trim());
   const expectedKeys = session.messages.map(message =>
     explicitSnapshotKey({
       role: message.role,
@@ -217,17 +222,19 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
       project: message.project ?? session.project ?? null,
     })
   );
+  if (expectedKeys.length === 0) return undefined;
 
-  for (let start = rows.length - expectedKeys.length; start >= 0; start--) {
-    const snapshot = rows.slice(start, start + expectedKeys.length);
-    const contiguous = snapshot.every(({ row }, index) =>
-      index === 0 || row.id === snapshot[index - 1].row.id + 1
+  for (let start = kept.length - expectedKeys.length; start >= 0; start--) {
+    const snapshot = kept.slice(start, start + expectedKeys.length);
+    const span = rows.slice(snapshot[0].index, snapshot[snapshot.length - 1].index + 1);
+    const contiguous = span.every(({ row }, index) =>
+      index === 0 || row.id === span[index - 1].row.id + 1
     );
     if (
       contiguous &&
       snapshot.every(({ row, content }, index) => explicitSnapshotKey({ ...row, content }) === expectedKeys[index])
     ) {
-      const stale = snapshot.filter(({ row, content }) => row.content !== content);
+      const stale = span.filter(({ row, content }) => row.content !== content);
       if (stale.length > 0) {
         const rewrite = db.prepare('UPDATE messages SET content = ? WHERE id = ?');
         db.transaction(() => {
