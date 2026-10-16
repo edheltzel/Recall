@@ -34,7 +34,7 @@ Do not install the npm package named `recall-memory`; that name is an unrelated 
 
 This is turn-completion capture, not crash recovery. An interrupted turn before `session_stop` is not guaranteed captured. Shutdown and pre-compaction hooks are not installed. The complete active branch is retried on the next stop after a failure.
 
-Capture sends only user and assistant text, at most 25 MiB per payload, and bounds its child process to 30 seconds. Tool output, images, and other non-message entries are not sent and do not count toward the limit. Oversize, malformed, cancelled, or failed captures warn without blocking the agent or publishing a partial branch.
+Capture sends only user and assistant text, at most 25 MiB per payload, and bounds its child process to 30 seconds. Tool output, images, and other non-message entries are not sent and do not count toward the limit. Conversation text that would exceed 25 MiB is trimmed to the first 60% and last 40% of that payload budget, with a truncation marker between the kept spans, and a warning reports the dropped byte count. Malformed, cancelled, or failed captures warn without blocking the agent or publishing a partial branch.
 
 ## Explicit dump: `recall_dump` tool
 
@@ -62,7 +62,7 @@ This verifies the packed local-link integration in headless text mode. It does n
 
 Restart omp after uninstalling. Saved Recall memory remains. `recall uninstall` removes installer-owned skills, not the separately managed omp plugin; uninstall the plugin through omp before removing Recall's runtime.
 
-If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. An omp process started before the extension was refreshed keeps the old code until it restarts: older versions measured the whole raw branch and warned `payload exceeds 25MiB` on long tool-heavy sessions. If the filtered user/assistant payload still exceeds the capture limit, start a new session. The limit counts serialized JSON bytes, including escaping and metadata.
+If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. An omp process started before the extension was refreshed keeps the old code until it restarts: older versions measured the whole raw branch and warned `payload exceeds 25MiB` on long tool-heavy sessions. A branch whose user and assistant text exceeds 25 MiB is still captured, truncated to the head and tail of the payload budget. The limit counts serialized JSON bytes, including escaping and metadata.
 
 ## Native documentation
 

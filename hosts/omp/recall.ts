@@ -12,6 +12,96 @@ const CHILD_TIMEOUT_MS = 30_000;
 
 export const MAX_OMP_STDIN_BYTES = 25 * 1024 * 1024;
 
+/** Head fraction borrowed from oh-my-pi snapcompact TRUNCATE_HEAD_RATIO (MIT). */
+const TRUNCATE_HEAD_RATIO = 0.6;
+const TRUNCATION_MARKER = '\n\n[Recall omp capture truncated]\n\n';
+
+function captureStdin(text: string, sessionId: string, cwd: string): string {
+  return JSON.stringify({
+    contract: 1,
+    harness: 'omp',
+    event: 'turn_end',
+    text,
+    session_id: sessionId,
+    cwd,
+  });
+}
+
+function codePointBytes(text: string, index: number): { bytes: number; next: number } {
+  const lead = text.charCodeAt(index);
+  if (lead >= 0xd800 && lead <= 0xdbff && index + 1 < text.length) {
+    const tail = text.charCodeAt(index + 1);
+    if (tail >= 0xdc00 && tail <= 0xdfff) return { bytes: 4, next: index + 2 };
+  }
+  if (lead <= 0x7f) return { bytes: 1, next: index + 1 };
+  if (lead <= 0x7ff) return { bytes: 2, next: index + 1 };
+  return { bytes: 3, next: index + 1 };
+}
+
+function headEnd(text: string, maxBytes: number): number {
+  let bytes = 0;
+  let index = 0;
+  while (index < text.length) {
+    const step = codePointBytes(text, index);
+    if (bytes + step.bytes > maxBytes) break;
+    bytes += step.bytes;
+    index = step.next;
+  }
+  return index;
+}
+
+function tailStart(text: string, maxBytes: number): number {
+  let bytes = 0;
+  let index = text.length;
+  while (index > 0) {
+    let start = index - 1;
+    const unit = text.charCodeAt(start);
+    if (unit >= 0xdc00 && unit <= 0xdfff && start > 0) {
+      const lead = text.charCodeAt(start - 1);
+      if (lead >= 0xd800 && lead <= 0xdbff) start -= 1;
+    }
+    const step = codePointBytes(text, start);
+    if (bytes + step.bytes > maxBytes) break;
+    bytes += step.bytes;
+    index = start;
+  }
+  return index;
+}
+
+/** Keep head 60% / tail 40% of the stdin budget. Shrink until the measured JSON fits. */
+function trimCaptureText(
+  text: string,
+  sessionId: string,
+  cwd: string,
+): { text: string; dropped: number } | undefined {
+  if (Buffer.byteLength(captureStdin(text, sessionId, cwd), 'utf8') <= MAX_OMP_STDIN_BYTES) {
+    return undefined;
+  }
+  const empty = Buffer.byteLength(captureStdin('', sessionId, cwd), 'utf8');
+  const markerExtra = Buffer.byteLength(JSON.stringify(TRUNCATION_MARKER), 'utf8') - 2;
+  let room = MAX_OMP_STDIN_BYTES - empty - markerExtra;
+  const original = Buffer.byteLength(text, 'utf8');
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const budget = Math.max(0, room);
+    const headBudget = Math.floor(budget * TRUNCATE_HEAD_RATIO);
+    const tailBudget = budget - headBudget;
+    const end = headEnd(text, headBudget);
+    const start = Math.max(tailStart(text, tailBudget), end);
+    const head = text.slice(0, end);
+    const tail = text.slice(start);
+    const fitted = `${head}${TRUNCATION_MARKER}${tail}`;
+    const payload = captureStdin(fitted, sessionId, cwd);
+    if (Buffer.byteLength(payload, 'utf8') <= MAX_OMP_STDIN_BYTES) {
+      return {
+        text: fitted,
+        dropped: original - Buffer.byteLength(head, 'utf8') - Buffer.byteLength(tail, 'utf8'),
+      };
+    }
+    room -= Math.max(Buffer.byteLength(payload, 'utf8') - MAX_OMP_STDIN_BYTES, 1);
+  }
+  return { text: TRUNCATION_MARKER, dropped: original };
+}
+
 export interface OmpSessionStopEvent {
   signal?: AbortSignal;
 }
@@ -243,21 +333,16 @@ export async function captureOmpSessionStop(
       return;
     }
 
-    const text = ompBranchMessages(entries).map(message => message.content).join('\n\n');
+    let text = ompBranchMessages(entries).map(message => message.content).join('\n\n');
     if (!text.trim()) return;
 
-    const payload = JSON.stringify({
-      contract: 1,
-      harness: 'omp',
-      event: 'turn_end',
-      text,
-      session_id: sessionId,
-      cwd: ctx.cwd,
-    });
-    if (Buffer.byteLength(payload, 'utf8') > MAX_OMP_STDIN_BYTES) {
-      warn(ctx, pi, 'Recall omp capture skipped: payload exceeds 25MiB');
-      return;
+    const trimmed = trimCaptureText(text, sessionId, ctx.cwd);
+    if (trimmed) {
+      text = trimmed.text;
+      warn(ctx, pi, `Recall omp capture truncated: ${trimmed.dropped} bytes dropped`);
     }
+
+    const payload = captureStdin(text, sessionId, ctx.cwd);
 
     const { code, aborted } = await runCli(runChild, ['capture'], payload, event.signal, CHILD_TIMEOUT_MS);
     if (code === 0) return;

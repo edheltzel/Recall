@@ -52,27 +52,41 @@ describe('omp native extension', () => {
     expect(JSON.parse(stdin).text).toBe('keep this question');
   });
 
-  test('oversize conversation text warns and does not spawn', async () => {
+  test('oversize conversation text is trimmed and still captured', async () => {
     const messages: string[] = [];
     let spawned = false;
+    let stdin = '';
+    const head = 'HEAD_KEEP_omp_capture';
+    const tail = 'TAIL_KEEP_omp_capture';
     await captureOmpSessionStop(
       {},
       uiCtx((message) => messages.push(message), {
         sessionManager: {
           getSessionId: () => 'sess-big',
           getBranch: () => [
-            { type: 'message', id: 'u1', message: { role: 'user', content: 'x'.repeat(MAX_OMP_STDIN_BYTES) } },
+            {
+              type: 'message',
+              id: 'u1',
+              message: { role: 'user', content: `${head}${'x'.repeat(MAX_OMP_STDIN_BYTES)}${tail}` },
+            },
           ],
         },
       }),
       undefined,
-      async () => {
+      async (_file, _args, childStdin) => {
         spawned = true;
+        stdin = childStdin;
         return 0;
       },
     );
-    expect(spawned).toBe(false);
-    expect(messages).toEqual(['Recall omp capture skipped: payload exceeds 25MiB']);
+    expect(spawned).toBe(true);
+    expect(Buffer.byteLength(stdin, 'utf8')).toBeLessThanOrEqual(MAX_OMP_STDIN_BYTES);
+    const payload = JSON.parse(stdin);
+    expect(payload.text.startsWith(head)).toBe(true);
+    expect(payload.text.endsWith(tail)).toBe(true);
+    expect(payload.text).toContain('[Recall omp capture truncated]');
+    expect(messages[0]).toMatch(/^Recall omp capture truncated: \d+ bytes dropped$/);
+    expect(Number(messages[0].match(/(\d+)/)?.[1])).toBeGreaterThan(0);
   });
 
   test('session_stop sends ordered branch text through recall capture', async () => {
