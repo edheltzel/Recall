@@ -906,67 +906,118 @@ recall_create_backup() {
 # cannot rotate away the older DB snapshots. Keeps the newest
 # $RECALL_BACKUP_KEEP full backups plus the directory named by latest.
 # Loose files, DB-less dirs (pre-migrate, doctor-fix, pre_restore, config-only),
-# symlinks, and anything outside $BACKUP_BASE are left alone.
+# symlinks, dot-directories, and anything outside $BACKUP_BASE are left alone.
 # Failures warn and never fail install/update.
 recall_prune_backups() {
   local base="${BACKUP_BASE:-}"
-  [[ -n "$base" && -d "$base" && ! -L "$base" ]] || return 0
+  # Trailing slashes must not change the scan root. dirname of a
+  # slash-terminated path is its parent, so never derive the root from
+  # basename/dirname of BACKUP_DIR — that deletes BACKUP_DIR or its parent.
+  while [[ "$base" == */ && "$base" != "/" ]]; do
+    base="${base%/}"
+  done
+  [[ -n "$base" && "$base" != "/" && "$base" != "." && "$base" != ".." && -d "$base" && ! -L "$base" ]] || return 0
+  local parent="${base%/*}"
+  [[ -n "$parent" ]] || parent="/"
+
+  local snap="${BACKUP_DIR:-}"
+  while [[ "$snap" == */ && "$snap" != "/" ]]; do
+    snap="${snap%/}"
+  done
+  local snap_parent="${snap%/*}"
+  [[ -n "$snap" && -z "$snap_parent" ]] && snap_parent="/"
 
   local latest=""
-  if [[ -f "$base/latest" ]]; then
+  if [[ -f "$base/latest" && ! -L "$base/latest" ]]; then
     latest="$(tr -d '[:space:]' <"$base/latest" 2>/dev/null || true)"
   fi
   case "$latest" in
-    */*) latest="" ;;
+    ''|'.'|'..'|*'/'*) latest="" ;;
   esac
-  local names="" dir name
-  for dir in "$base"/*/; do
-    [[ -d "$dir" ]] || continue
-    name="$(basename "$dir")"
-    case "$name" in
-      ''|'.'|'..'|*'/'*) continue ;;
-    esac
-    if [[ -L "$base/$name" ]]; then
-      continue
-    fi
-    [[ -f "$base/$name/manifest.txt" ]] || continue
-    [[ -s "$base/$name/recall.db" || -s "$base/$name/memory.db" ]] || continue
-    names="${names}${name}"$'\n'
-  done
-  [[ -n "$names" ]] || return 0
 
-  local sorted=""
-  sorted="$(printf '%s' "$names" | sort -r)" || {
+  local -a names=()
+  local dir name
+  # Direct children only. NUL records so a space or newline in the name stays one entry.
+  while IFS= read -r -d '' dir; do
+    while [[ "$dir" == */ && "$dir" != "/" ]]; do
+      dir="${dir%/}"
+    done
+    [[ "$dir" == "$base/"* ]] || continue
+    # ${var##*/}, not $(basename): $() drops a trailing newline, and basename
+    # of a slash-terminated path can be the parent component.
+    name="${dir##*/}"
+    case "$name" in
+      ''|'.'|'..'|*'/'*|.*) continue ;;
+    esac
+    [[ "$dir" == "$base/$name" ]] || continue
+    [[ -L "$dir" ]] && continue
+    [[ -f "$dir/manifest.txt" ]] || continue
+    [[ -s "$dir/recall.db" || -s "$dir/memory.db" ]] || continue
+    names+=("$name")
+  done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  [[ ${#names[@]} -gt 0 ]] || return 0
+
+  local tmp=""
+  tmp="$(mktemp)" || {
     log_warn "Backup rotation failed; left older backups in place"
     return 0
   }
+  if ! printf '%s\0' "${names[@]}" | sort -zr >"$tmp"; then
+    rm -f -- "$tmp"
+    log_warn "Backup rotation failed; left older backups in place"
+    return 0
+  fi
 
-  local keepers=$'\n' kept=0 line
-  while IFS= read -r line; do
+  local -a sorted=()
+  local line
+  while IFS= read -r -d '' line; do
     [[ -n "$line" ]] || continue
+    sorted+=("$line")
+  done <"$tmp"
+  rm -f -- "$tmp"
+  [[ ${#sorted[@]} -gt 0 ]] || return 0
+
+  local -a keepers=()
+  local kept=0
+  for line in "${sorted[@]}"; do
     kept=$((kept + 1))
     if [[ "$kept" -le "${RECALL_BACKUP_KEEP}" ]]; then
-      keepers="${keepers}${line}"$'\n'
+      keepers+=("$line")
     fi
-  done <<< "$sorted"
+  done
   if [[ -n "$latest" ]]; then
-    keepers="${keepers}${latest}"$'\n'
+    keepers+=("$latest")
   fi
-  local target
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    case "$keepers" in
-      *$'\n'"$line"$'\n'*) continue ;;
-    esac
+
+  local target skip keep
+  for line in "${sorted[@]}"; do
+    skip=0
+    if [[ ${#keepers[@]} -gt 0 ]]; then
+      for keep in "${keepers[@]}"; do
+        if [[ "$line" == "$keep" ]]; then
+          skip=1
+          break
+        fi
+      done
+    fi
+    [[ "$skip" -eq 1 ]] && continue
     case "$line" in
-      ''|'.'|'..'|*'/'*) continue ;;
+      ''|'.'|'..'|*'/'*|.*) continue ;;
     esac
     target="$base/$line"
+    [[ "${target%/*}" == "$base" ]] || continue
+    [[ "$target" == "$base" || "$target" == "$parent" ]] && continue
+    if [[ -n "$snap" && "$target" == "$snap" ]]; then
+      continue
+    fi
+    if [[ -n "$snap" && "$target" == "$snap_parent" ]]; then
+      continue
+    fi
     [[ -d "$target" && ! -L "$target" ]] || continue
     if ! rm -rf -- "$target"; then
       log_warn "Could not remove old backup: $target"
     fi
-  done <<< "$sorted"
+  done
   return 0
 }
 

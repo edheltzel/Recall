@@ -133,4 +133,38 @@ describe('backup rotation', () => {
     expect(readFileSync(join(backupBase, STAMPS[0], 'recall.db'), 'utf-8')).toBe(`db ${STAMPS[0]}`);
     expect(readFileSync(join(backupBase, STAMPS[1], 'recall.db'), 'utf-8')).toBe(`db ${STAMPS[1]}`);
   });
+  test('rotates space and newline names inside the backup root only', () => {
+    const kept = ['yy keep', 'yx keep'];
+    const removedSpace = 'old space';
+    const removedNewline = 'mid\nline';
+    for (const stamp of [...kept, removedSpace, removedNewline]) seedBackup(stamp);
+
+    const outsideNewline = join(root, removedNewline);
+    const outsideSpace = join(root, removedSpace);
+    mkdirSync(outsideNewline);
+    writeFileSync(join(outsideNewline, 'manifest.txt'), 'outside\n');
+    writeFileSync(join(outsideNewline, 'recall.db'), 'outside db');
+    mkdirSync(outsideSpace);
+    writeFileSync(join(outsideSpace, 'manifest.txt'), 'outside\n');
+    writeFileSync(join(outsideSpace, 'recall.db'), 'outside db');
+    writeFileSync(join(root, 'sentinel.txt'), 'keep\n');
+    writeFileSync(join(backupBase, 'latest'), 'yy keep\n');
+
+    const result = sh('recall_prune_backups', {
+      BACKUP_BASE: `${backupBase}/`,
+      BACKUP_DIR: `${backupBase}/`,
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(backupBase)).toBe(true);
+    expect(existsSync(join(backupBase, 'yy keep', 'recall.db'))).toBe(true);
+    expect(existsSync(join(backupBase, 'yx keep', 'recall.db'))).toBe(true);
+    expect(existsSync(join(backupBase, removedSpace))).toBe(false);
+    expect(existsSync(join(backupBase, removedNewline))).toBe(false);
+    expect(existsSync(join(outsideNewline, 'recall.db'))).toBe(true);
+    expect(existsSync(join(outsideSpace, 'recall.db'))).toBe(true);
+    expect(readFileSync(join(root, 'sentinel.txt'), 'utf-8')).toBe('keep\n');
+    expect(readFileSync(join(backupBase, 'latest'), 'utf-8')).toBe('yy keep\n');
+  });
+
 });
