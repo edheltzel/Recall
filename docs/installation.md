@@ -339,11 +339,15 @@ When resolving `RECALL_DB_PATH` or its legacy fallback, the CLI, MCP server, hoo
 
 ## Backup and Restore
 
-Install and update automatically create a timestamped backup before making changes, stored at `~/.agents/Recall/backups/`. After creating a full backup, rotation keeps the newest 2 full backups and also protects the backup named by `latest` if it is older.
+Install and update automatically create a timestamped backup before making changes, stored at `~/.agents/Recall/backups/`. After each snapshot is created, rotation keeps the newest 2 full backups and also protects the backup named by `latest` if it is older.
 
-Rotation considers only direct child directories containing `manifest.txt` and a copied `recall.db` or `memory.db`, so a run that found no database to copy never pushes out older database snapshots. It leaves directory symlinks, loose files (including `recall export --backup` dumps), and database-less directories untouched. Restore saves the current files in `pre_restore_<TIMESTAMP>/` without rotating existing backups. Rotation failures warn without failing install or update.
+Full backups eligible for rotation are non-hidden direct child directories containing `manifest.txt` and a non-empty `recall.db` or `memory.db`. Backups with no database or only an empty database do not count toward the retention limit. Rotation leaves directory symlinks, loose files (including `recall export --backup` dumps), and other directories untouched. A symlinked backup root is not pruned.
+
+Restore saves the current files in `pre_restore_<TIMESTAMP>/` without rotating existing backups. Rotation failures warn without failing install or update.
 
 Automatic snapshots cover the existing files listed in [`FILES_TO_BACKUP`](../lib/install-lib.sh). They do not include directories such as `~/.claude/MEMORY/`; back up those separately.
+
+CLI backup locations used by `recall export --backup`, `recall scrub-archive`, `recall doctor --fix`, and `recall migrate` use the current `HOME` value, falling back to the operating system's home directory when it is unset or empty.
 
 ```bash
 ./packaging/install.sh list              # List available backups

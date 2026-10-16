@@ -905,7 +905,7 @@ recall_create_backup() {
 # recall.db or memory.db. Config-only runs (no DB to copy) never count, so they
 # cannot rotate away the older DB snapshots. Keeps the newest
 # $RECALL_BACKUP_KEEP full backups plus the directory named by latest.
-# Loose files, DB-less dirs (pre-migrate, doctor-fix, pre_restore, config-only),
+# Loose files, non-full dirs (pre-migrate, doctor-fix, pre_restore, config-only),
 # symlinks, dot-directories, and anything outside $BACKUP_BASE are left alone.
 # Failures warn and never fail install/update.
 recall_prune_backups() {
