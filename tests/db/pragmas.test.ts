@@ -6,7 +6,7 @@ beforeAll(() => setupTestDb());
 afterAll(() => teardownTestDb());
 
 describe('writer connection pragmas', () => {
-  test('a writer connection waits on locks, uses WAL, and caps the WAL file', () => {
+  test('a writer connection waits on locks, uses WAL, and sets journal_size_limit', () => {
     const db = getDb();
     expect(db.query('PRAGMA busy_timeout').get()).toEqual({ timeout: 5000 });
     expect(db.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });

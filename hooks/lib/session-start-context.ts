@@ -87,7 +87,7 @@ function sweepExpiredBreadcrumbs(): void {
     if (!existsSync(dbPath)) return;
     const db = new Database(dbPath);
     try {
-      // busy_timeout before WAL (#212). 64MiB = JOURNAL_SIZE_LIMIT_BYTES in src/db/connection.ts (#192).
+      // busy_timeout before WAL (#212). 64MiB = JOURNAL_SIZE_LIMIT_BYTES in src/db/connection.ts. WAL truncates back to this after a checkpoint resets it (#192); not a hard bound while a reader pins the WAL.
       db.exec('PRAGMA busy_timeout = 5000');
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA journal_size_limit = 67108864');

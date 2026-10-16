@@ -26,7 +26,7 @@ const DEFAULT_DB_PATH = join(homedir(), '.agents', 'Recall', 'recall.db');
 let db: Database | null = null;
 let dbInitializing = false; // Lock to prevent race condition
 
-/** WAL checkpoint cap in bytes (#192). Hooks inline this; they must not import src/. */
+/** WAL is truncated back to this size after a checkpoint resets it (#192); not a hard bound while a reader pins the WAL. Hooks inline this; they must not import src/. */
 export const JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
 
 /**
