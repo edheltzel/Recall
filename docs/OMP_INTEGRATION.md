@@ -38,7 +38,7 @@ Capture sends only user and assistant text, at most 25 MiB per payload, and boun
 
 ## Explicit dump: `recall_dump` tool
 
-The extension also registers a `recall_dump` tool (title, optional project, tags, `continues`, `skip_fabric`). It reads the live branch and session id from omp, so it dumps this conversation on any profile or branch, and sends it to the package-local `dist/index.js dump --stdin`. The tool asks you to confirm in the omp UI before writing anything and refuses in headless sessions. `recall dump` run from a shell inside omp (`OMPCODE=1`) refuses and points to the tool: transcript files on disk belong to other conversations.
+The extension also registers a `recall_dump` tool (title, optional project, tags, `continues`, `skip_fabric`). It reads the live branch and session id from omp, so it dumps this conversation on any profile or branch, and sends it to the package-local `dist/index.js dump --stdin`. The tool asks you to confirm in the omp UI before writing anything and refuses in headless sessions. Without `--stdin`, `recall dump` run from a shell inside omp (`OMPCODE=1`) refuses and points to the tool: native transcript discovery cannot identify the live omp conversation.
 
 Dump payloads are limited to 25 MiB, and the CLI child has a five-minute timeout. `skip_fabric` defaults to false; set it to true for a basic summary. Shared message scrubbing and default project attribution follow the [Session Dump contract](cli-reference.md#session-dump).
 
@@ -62,7 +62,7 @@ This verifies the packed local-link integration in headless text mode. It does n
 
 Restart omp after uninstalling. Saved Recall memory remains. `recall uninstall` removes installer-owned skills, not the separately managed omp plugin; uninstall the plugin through omp before removing Recall's runtime.
 
-If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. An omp process started before the extension was refreshed keeps the old code until it restarts: older versions measured the whole raw branch and warned `payload exceeds 25MiB` on long tool-heavy sessions. Only a branch whose user and assistant text alone exceeds 25 MiB needs a new session.
+If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. An omp process started before the extension was refreshed keeps the old code until it restarts: older versions measured the whole raw branch and warned `payload exceeds 25MiB` on long tool-heavy sessions. If the filtered user/assistant payload still exceeds the capture limit, start a new session. The limit counts serialized JSON bytes, including escaping and metadata.
 
 ## Native documentation
 
