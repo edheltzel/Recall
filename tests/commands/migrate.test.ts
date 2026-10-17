@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 // inside the test before invoking runMigrate (the resolver doesn't open
 // handles from other processes during these tests).
 
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, statSync, lstatSync, symlinkSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, writeFileSync, statSync, lstatSync, symlinkSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -511,5 +511,15 @@ describe('recall migrate', () => {
   test('does not create an age wrapper when none is installed', () => {
     runMigrate({ to: destDb }, tempDir);
     expect(existsSync(join(tempDir, '.agents', 'Recall', 'shared', 'age-quarterly.sh'))).toBe(false);
+  });
+
+  test('CLI migrate writes pre-migrate under HOME', () => {
+    runMigrateCli(destDb);
+    const backups = join(tempDir, '.agents', 'Recall', 'backups');
+    const stamps = readdirSync(backups).filter(name =>
+      existsSync(join(backups, name, 'pre-migrate', 'source.db')),
+    );
+    expect(stamps).toHaveLength(1);
+    expect(readFileSync(join(backups, stamps[0], 'pre-migrate', 'source.db'), 'utf-8')).toBe('fake-sqlite-bytes');
   });
 });

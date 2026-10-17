@@ -11,7 +11,7 @@ import { getLifecycleSearchReadiness } from '../lib/lifecycle-search.js';
 import { VERSION } from '../version.js';
 import { CLAUDE_PLUGIN_ID, claudeMcpConfigTargets, claudePaths, claudePluginState, inspectClaudeCli, type ClaudePluginState } from '../hosts/claude.js';
 import type { McpConfigTarget } from '../hosts/types.js';
-import { getRecallHome } from '../lib/runtime-paths.js';
+import { getRecallHome, recallUserHome } from '../lib/runtime-paths.js';
 import {
   configuredMcpDbPath,
   parseJsonc,
@@ -676,6 +676,11 @@ export function resolveProbeResult(check: ProbeCheck, fix: boolean): CheckResult
   return check.result;
 }
 
+function doctorFixBackupDir(home = recallUserHome()): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
+  return join(home, '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+}
+
 // Exported for unit tests. The probe is pure (state lives entirely in the
 // filesystem args, not in module globals); doctor's main loop iterates the
 // build-time list and accumulates results.
@@ -730,8 +735,7 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
     return {
       result: { label, status: 'WARN', message: `Foreign symlink: ${target} → ${current}` },
       repair: () => {
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
-        const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+        const backupDir = doctorFixBackupDir();
         mkdirSync(backupDir, { recursive: true });
         copyFileSync(target, join(backupDir, target.replace(/[/\\]/g, '_')));
         unlinkSync(target);
@@ -757,8 +761,7 @@ export function probeSymlink(probe: SymlinkProbe): ProbeCheck {
   return {
     result: { label, status: 'WARN', message: `Drifted file (user-modified): ${target}` },
     repair: () => {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
-      const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+      const backupDir = doctorFixBackupDir();
       mkdirSync(backupDir, { recursive: true });
       copyFileSync(target, join(backupDir, target.replace(/[/\\]/g, '_')));
       unlinkSync(target);
@@ -783,6 +786,7 @@ export interface McpEnvProbe {
   targets: McpConfigTarget[];
   resolvedDbPath: string;
   runtimeDbPathOverride?: string;
+  home?: string;
 }
 
 interface McpEntry {
@@ -952,8 +956,7 @@ export function probeMcpEnv(probe: McpEnvProbe): ProbeCheck {
   return {
     result,
     repair: () => {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace(/-/g, '');
-      const backupDir = join(homedir(), '.agents', 'Recall', 'backups', stamp, 'doctor-fix');
+      const backupDir = doctorFixBackupDir(probe.home);
       const patched: string[] = [];
       const failed: string[] = [];
       for (const owner of repairableStale) {

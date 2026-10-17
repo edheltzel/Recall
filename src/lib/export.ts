@@ -19,7 +19,7 @@
 
 import { Database } from 'bun:sqlite';
 import { existsSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
+import { recallUserHome } from './runtime-paths.js';
 import { join, extname, dirname, basename } from 'path';
 import { SQLITE_SAFE_CHUNK_SIZE } from './chunk.js';
 import { getMigrationVersion } from '../db/migrations.js';
@@ -71,7 +71,7 @@ export interface ExportManifest {
 
 /** Default disaster-recovery backup directory (install layout, AGENTS.md). */
 export function defaultBackupDir(): string {
-  return join(homedir(), '.agents', 'Recall', 'backups');
+  return join(recallUserHome(), '.agents', 'Recall', 'backups');
 }
 
 /** UTC timestamp slug for export artifact filenames (YYYYMMDD-HHMMSS). */

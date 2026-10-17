@@ -5,7 +5,7 @@
 import { closeDb, getDbPath } from '../db/connection.js';
 import { existsSync, mkdirSync, statSync, lstatSync, copyFileSync, renameSync, readFileSync } from 'fs';
 import { basename, dirname, isAbsolute, join } from 'path';
-import { homedir } from 'os';
+import { recallUserHome } from '../lib/runtime-paths.js';
 import { execFileSync } from 'child_process';
 import { configurableHosts, type McpConfigTarget } from '../hosts/index.js';
 import {
@@ -214,7 +214,7 @@ function prepareConfigPatch(target: McpConfigTarget, newDbPath: string): ConfigP
   return { status: 'changed', config: parsed };
 }
 
-export function runMigrate(opts: MigrateOptions, home = homedir()): void {
+export function runMigrate(opts: MigrateOptions, home = recallUserHome()): void {
   if (!opts.to || opts.to.trim() === '') {
     console.error('Error: --to <path> is required');
     process.exit(2);

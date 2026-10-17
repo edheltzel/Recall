@@ -326,29 +326,4 @@ graph TD
 
 ## Backup and Restore
 
-### Automatic Backups
-
-The installer automatically backs up existing files before making any changes. Backups are stored at `~/.agents/Recall/backups/`.
-
-### Managing Backups
-
-```bash
-./packaging/install.sh list              # List available backups
-./packaging/install.sh restore           # Restore most recent backup
-./packaging/install.sh restore 20260219  # Restore specific backup
-```
-
-### Manual Backup
-
-```bash
-cp ~/.agents/Recall/recall.db ~/.agents/Recall/recall.db.backup
-```
-
-### What Gets Backed Up
-
-| File | Description |
-|------|-------------|
-| `recall.db` | The SQLite database |
-| `settings.json` | Claude Code configuration (MCP + hooks) |
-| `CLAUDE.md` | Global Claude instructions |
-| `~/.claude/MEMORY/` | Memory files |
+See [Installation → Backup and Restore](installation.md#backup-and-restore) for snapshot coverage, retention, listing and restoration, and manual database backups.
