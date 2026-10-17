@@ -11,7 +11,6 @@ import {
   CREATE_FTS_TRIGGERS,
   CREATE_VECTOR_TABLES,
   REBUILD_HOST_INGEST_GENERATION_FTS,
-  PUBLISHED_MESSAGES_SCHEMA,
 } from './schema.js';
 import { applyMigrations } from './migrations.js';
 // Importing vec sets up bun:sqlite's custom (extension-capable) SQLite on macOS
@@ -224,7 +223,6 @@ function ensureSchema(database: Database): void {
   database.exec(CREATE_TABLES);
   const migration = applyMigrations(database);
   database.exec(CREATE_INDEXES);
-  database.exec(PUBLISHED_MESSAGES_SCHEMA);
   database.exec(CREATE_FTS);
   database.exec(CREATE_FTS_TRIGGERS);
   if (!generationFtsExists) database.exec(REBUILD_HOST_INGEST_GENERATION_FTS);
