@@ -929,7 +929,10 @@ recall_prune_backups() {
 
   local latest=""
   if [[ -f "$base/latest" && ! -L "$base/latest" ]]; then
-    latest="$(tr -d '[:space:]' <"$base/latest" 2>/dev/null || true)"
+    # One record. Do not tr -d '[:space:]': that turns "old backup" into
+    # "oldbackup" and rotation deletes the real latest once it leaves the top two.
+    IFS= read -r latest <"$base/latest" || true
+    latest="${latest%$'\r'}"
   fi
   case "$latest" in
     ''|'.'|'..'|*'/'*) latest="" ;;

@@ -167,4 +167,19 @@ describe('backup rotation', () => {
     expect(readFileSync(join(backupBase, 'latest'), 'utf-8')).toBe('yy keep\n');
   });
 
+  test('a spaced name in latest survives after it falls outside the newest two', () => {
+    const latestName = 'old backup';
+    for (const stamp of ['zz new', 'zy new', latestName, 'aa gone']) seedBackup(stamp);
+    writeFileSync(join(backupBase, 'latest'), `${latestName}\n`);
+
+    const result = sh('recall_prune_backups');
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(backupBase, 'zz new', 'recall.db'))).toBe(true);
+    expect(existsSync(join(backupBase, 'zy new', 'recall.db'))).toBe(true);
+    expect(existsSync(join(backupBase, latestName, 'recall.db'))).toBe(true);
+    expect(existsSync(join(backupBase, 'aa gone'))).toBe(false);
+    expect(readFileSync(join(backupBase, 'latest'), 'utf-8')).toBe(`${latestName}\n`);
+  });
+
 });
