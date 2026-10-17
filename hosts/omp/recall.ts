@@ -28,85 +28,132 @@ function captureStdin(text: string, sessionId: string, cwd: string): string {
   });
 }
 
-function codePointBytes(text: string, index: number): { bytes: number; next: number } {
+function escapedStep(text: string, index: number): { next: number; utf8: number; escaped: number } {
   const lead = text.charCodeAt(index);
   if (lead >= 0xd800 && lead <= 0xdbff && index + 1 < text.length) {
     const tail = text.charCodeAt(index + 1);
-    if (tail >= 0xdc00 && tail <= 0xdfff) return { bytes: 4, next: index + 2 };
+    if (tail >= 0xdc00 && tail <= 0xdfff) return { next: index + 2, utf8: 4, escaped: 4 };
   }
-  if (lead <= 0x7f) return { bytes: 1, next: index + 1 };
-  if (lead <= 0x7ff) return { bytes: 2, next: index + 1 };
-  return { bytes: 3, next: index + 1 };
+  if (lead <= 0x1f) {
+    const short = lead === 0x08 || lead === 0x09 || lead === 0x0a || lead === 0x0c || lead === 0x0d;
+    return { next: index + 1, utf8: 1, escaped: short ? 2 : 6 };
+  }
+  if (lead === 0x22 || lead === 0x5c) return { next: index + 1, utf8: 1, escaped: 2 };
+  if (lead >= 0xd800 && lead <= 0xdfff) return { next: index + 1, utf8: 3, escaped: 6 };
+  if (lead <= 0x7f) return { next: index + 1, utf8: 1, escaped: 1 };
+  if (lead <= 0x7ff) return { next: index + 1, utf8: 2, escaped: 2 };
+  return { next: index + 1, utf8: 3, escaped: 3 };
 }
 
-function headEnd(text: string, maxBytes: number): number {
-  let bytes = 0;
-  let index = 0;
-  while (index < text.length) {
-    const step = codePointBytes(text, index);
-    if (bytes + step.bytes > maxBytes) break;
-    bytes += step.bytes;
+function escapedLength(text: string): number {
+  let total = 0;
+  for (let index = 0; index < text.length;) {
+    const step = escapedStep(text, index);
+    total += step.escaped;
     index = step.next;
   }
-  return index;
+  return total;
 }
 
-function tailStart(text: string, maxBytes: number): number {
-  let bytes = 0;
-  let index = text.length;
-  while (index > 0) {
-    let start = index - 1;
-    const unit = text.charCodeAt(start);
-    if (unit >= 0xdc00 && unit <= 0xdfff && start > 0) {
-      const lead = text.charCodeAt(start - 1);
-      if (lead >= 0xd800 && lead <= 0xdbff) start -= 1;
+/** UTF-8 and JSON-escaped prefix sums. Interior surrogate indexes repeat the previous boundary. */
+function capturePrefixes(text: string): { utf8: Uint32Array; json: Uint32Array } {
+  const utf8 = new Uint32Array(text.length + 1);
+  const json = new Uint32Array(text.length + 1);
+  let utf8Bytes = 0;
+  let escaped = 0;
+  for (let index = 0; index < text.length;) {
+    const step = escapedStep(text, index);
+    utf8Bytes += step.utf8;
+    escaped += step.escaped;
+    for (let fill = index + 1; fill < step.next; fill++) {
+      utf8[fill] = utf8[index];
+      json[fill] = json[index];
     }
-    const step = codePointBytes(text, start);
-    if (bytes + step.bytes > maxBytes) break;
-    bytes += step.bytes;
-    index = start;
+    utf8[step.next] = utf8Bytes;
+    json[step.next] = escaped;
+    index = step.next;
+  }
+  return { utf8, json };
+}
+
+function alignDown(text: string, index: number): number {
+  if (index > 0 && index < text.length
+    && text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff
+    && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff) {
+    return index - 1;
   }
   return index;
 }
 
+function alignUp(text: string, index: number): number {
+  if (index > 0 && index < text.length
+    && text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff
+    && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff) {
+    return index + 1;
+  }
+  return index;
+}
 
+function prefixEnd(text: string, prefix: Uint32Array, max: number): number {
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (prefix[mid] <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  return alignDown(text, lo);
+}
 
-/** Keep head 60% / tail 40%. Largest text budget whose measured JSON fits. */
+function suffixStart(text: string, prefix: Uint32Array, max: number): number {
+  const total = prefix[text.length];
+  const floor = total - max;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (prefix[mid] >= floor) hi = mid;
+    else lo = mid + 1;
+  }
+  return alignUp(text, lo);
+}
+
+function cutForBudget(
+  text: string,
+  json: Uint32Array,
+  keptEscaped: number,
+): { head: string; tail: string } {
+  const headBudget = Math.floor(keptEscaped * TRUNCATE_HEAD_RATIO);
+  const tailBudget = keptEscaped - headBudget;
+  const end = prefixEnd(text, json, headBudget);
+  const start = Math.max(suffixStart(text, json, tailBudget), end);
+  return { head: text.slice(0, end), tail: text.slice(start) };
+}
+
+/** Keep head 60% / tail 40% of the escaped payload budget. One scan, one serialize. */
 function trimCaptureText(
   text: string,
   sessionId: string,
   cwd: string,
 ): { text: string; dropped: number } | undefined {
-  if (Buffer.byteLength(captureStdin(text, sessionId, cwd), 'utf8') <= MAX_OMP_STDIN_BYTES) {
-    return undefined;
-  }
-  const original = Buffer.byteLength(text, 'utf8');
-  let lo = 0;
-  let hi = original;
-  let head = '';
-  let tail = '';
-  let fitted = TRUNCATION_MARKER;
-  while (lo <= hi) {
-    const budget = lo + Math.floor((hi - lo) / 2);
-    const headBudget = Math.floor(budget * TRUNCATE_HEAD_RATIO);
-    const tailBudget = budget - headBudget;
-    const end = headEnd(text, headBudget);
-    const start = Math.max(tailStart(text, tailBudget), end);
-    const nextHead = text.slice(0, end);
-    const nextTail = text.slice(start);
-    const next = `${nextHead}${TRUNCATION_MARKER}${nextTail}`;
-    if (Buffer.byteLength(captureStdin(next, sessionId, cwd), 'utf8') <= MAX_OMP_STDIN_BYTES) {
-      head = nextHead;
-      tail = nextTail;
-      fitted = next;
-      lo = budget + 1;
-    } else {
-      hi = budget - 1;
-    }
+  const { utf8, json } = capturePrefixes(text);
+  const empty = Buffer.byteLength(captureStdin('', sessionId, cwd), 'utf8');
+  const markerEscaped = escapedLength(TRUNCATION_MARKER);
+  if (empty + json[text.length] <= MAX_OMP_STDIN_BYTES) return undefined;
+
+  let keptEscaped = Math.max(0, MAX_OMP_STDIN_BYTES - empty - markerEscaped);
+  let cut = cutForBudget(text, json, keptEscaped);
+  let fitted = `${cut.head}${TRUNCATION_MARKER}${cut.tail}`;
+  let payload = captureStdin(fitted, sessionId, cwd);
+  if (Buffer.byteLength(payload, 'utf8') > MAX_OMP_STDIN_BYTES) {
+    keptEscaped = Math.max(0, keptEscaped - (Buffer.byteLength(payload, 'utf8') - MAX_OMP_STDIN_BYTES));
+    cut = cutForBudget(text, json, keptEscaped);
+    fitted = `${cut.head}${TRUNCATION_MARKER}${cut.tail}`;
+    payload = captureStdin(fitted, sessionId, cwd);
   }
   return {
     text: fitted,
-    dropped: original - Buffer.byteLength(head, 'utf8') - Buffer.byteLength(tail, 'utf8'),
+    dropped: utf8[text.length] - Buffer.byteLength(cut.head, 'utf8') - Buffer.byteLength(cut.tail, 'utf8'),
   };
 }
 
