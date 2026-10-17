@@ -68,7 +68,7 @@ function tailStart(text: string, maxBytes: number): number {
   return index;
 }
 
-/** Keep head 60% / tail 40% of the stdin budget. Shrink until the measured JSON fits. */
+/** Keep head 60% / tail 40%. Largest text budget whose measured JSON fits. */
 function trimCaptureText(
   text: string,
   sessionId: string,
@@ -77,29 +77,34 @@ function trimCaptureText(
   if (Buffer.byteLength(captureStdin(text, sessionId, cwd), 'utf8') <= MAX_OMP_STDIN_BYTES) {
     return undefined;
   }
-  const empty = Buffer.byteLength(captureStdin('', sessionId, cwd), 'utf8');
-  const markerExtra = Buffer.byteLength(JSON.stringify(TRUNCATION_MARKER), 'utf8') - 2;
-  let room = MAX_OMP_STDIN_BYTES - empty - markerExtra;
   const original = Buffer.byteLength(text, 'utf8');
-  for (let attempt = 0; attempt < 16; attempt++) {
-    const budget = Math.max(0, room);
+  let lo = 0;
+  let hi = original;
+  let head = '';
+  let tail = '';
+  let fitted = TRUNCATION_MARKER;
+  while (lo <= hi) {
+    const budget = lo + Math.floor((hi - lo) / 2);
     const headBudget = Math.floor(budget * TRUNCATE_HEAD_RATIO);
     const tailBudget = budget - headBudget;
     const end = headEnd(text, headBudget);
     const start = Math.max(tailStart(text, tailBudget), end);
-    const head = text.slice(0, end);
-    const tail = text.slice(start);
-    const fitted = `${head}${TRUNCATION_MARKER}${tail}`;
-    const payload = captureStdin(fitted, sessionId, cwd);
-    if (Buffer.byteLength(payload, 'utf8') <= MAX_OMP_STDIN_BYTES) {
-      return {
-        text: fitted,
-        dropped: original - Buffer.byteLength(head, 'utf8') - Buffer.byteLength(tail, 'utf8'),
-      };
+    const nextHead = text.slice(0, end);
+    const nextTail = text.slice(start);
+    const next = `${nextHead}${TRUNCATION_MARKER}${nextTail}`;
+    if (Buffer.byteLength(captureStdin(next, sessionId, cwd), 'utf8') <= MAX_OMP_STDIN_BYTES) {
+      head = nextHead;
+      tail = nextTail;
+      fitted = next;
+      lo = budget + 1;
+    } else {
+      hi = budget - 1;
     }
-    room -= Math.max(Buffer.byteLength(payload, 'utf8') - MAX_OMP_STDIN_BYTES, 1);
   }
-  return { text: TRUNCATION_MARKER, dropped: original };
+  return {
+    text: fitted,
+    dropped: original - Buffer.byteLength(head, 'utf8') - Buffer.byteLength(tail, 'utf8'),
+  };
 }
 
 export interface OmpSessionStopEvent {

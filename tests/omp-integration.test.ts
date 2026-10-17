@@ -89,6 +89,37 @@ describe('omp native extension', () => {
     expect(Number(messages[0].match(/(\d+)/)?.[1])).toBeGreaterThan(0);
   });
 
+  test('escaped oversize text keeps head and tail, not only the marker', async () => {
+    let stdin = '';
+    const head = 'HEAD_ESC_omp';
+    const tail = 'TAIL_ESC_omp';
+    // Quote and backslash expand 2x in JSON. A plain char every third keeps a correct fit above half the limit.
+    const unit = '"\\a';
+    const content = `${head}${unit.repeat(Math.ceil(MAX_OMP_STDIN_BYTES * 0.7 / unit.length))}${tail}`;
+    await captureOmpSessionStop(
+      {},
+      uiCtx(() => {}, {
+        sessionManager: {
+          getSessionId: () => 'sess-esc',
+          getBranch: () => [
+            { type: 'message', id: 'u1', message: { role: 'user', content } },
+          ],
+        },
+      }),
+      undefined,
+      async (_file, _args, childStdin) => {
+        stdin = childStdin;
+        return 0;
+      },
+    );
+    expect(Buffer.byteLength(stdin, 'utf8')).toBeLessThanOrEqual(MAX_OMP_STDIN_BYTES);
+    const payload = JSON.parse(stdin);
+    expect(payload.text.startsWith(head)).toBe(true);
+    expect(payload.text.endsWith(tail)).toBe(true);
+    expect(payload.text).toContain('[Recall omp capture truncated]');
+    expect(payload.text.length).toBeGreaterThan(MAX_OMP_STDIN_BYTES / 2);
+  });
+
   test('session_stop sends ordered branch text through recall capture', async () => {
     let args: readonly string[] = [];
     let stdin = '';
