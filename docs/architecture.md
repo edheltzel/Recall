@@ -291,7 +291,9 @@ Terms: [CONTEXT.md](../CONTEXT.md). Extractor is the model backend that produces
 - **Breadcrumb sweep** — at session start, the `RecallStart` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
 - **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window and breadcrumbs below an importance threshold, with transactional embedding cleanup for deleted sources. Legacy orphan embeddings are handled by `recall repair --execute`. Prune is always dry-run by default; pass `--execute` to commit changes.
 
-- **WAL mode** for concurrent reads (no locking during MCP queries)
+- **WAL mode** allows concurrent reads and writes, though recovery and exclusive locks can still block queries
+- **Lock waiting** — CLI/MCP connections and hook WAL connections set `busy_timeout = 5000` before WAL setup so transient recovery locks can clear; persistent contention can still fail
+- **WAL retention** — writable WAL connections set `journal_size_limit` to 64 MiB. SQLite [truncates retained WAL space when the log resets after checkpointing](https://www.sqlite.org/pragma.html#pragma_journal_size_limit). This is not a hard cap on an active WAL: large transactions or readers that prevent reset can keep it above the limit. Read-only hook connections leave the limit unchanged
 - **FTS5** full-text search with automatic sync triggers
 - **Foreign key constraints** enforced
 - **Database and WAL/SHM file permissions** set to 0600 (owner read/write only)
