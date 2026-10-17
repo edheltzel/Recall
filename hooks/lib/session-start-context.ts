@@ -70,6 +70,8 @@ export function queryDb(sql: string, params: SqlParam[] = []): Record<string, un
     const dbPath = getDbPath();
     if (!existsSync(dbPath)) return [];
     const db = new Database(dbPath, { readonly: true });
+    // Reader: busy_timeout before WAL recovery (#212). No journal_size_limit.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA journal_mode = WAL');
     const rows = db.prepare(sql).all(...params);
     db.close();
@@ -85,8 +87,10 @@ function sweepExpiredBreadcrumbs(): void {
     if (!existsSync(dbPath)) return;
     const db = new Database(dbPath);
     try {
-      db.prepare('PRAGMA journal_mode = WAL').run();
-      db.prepare('PRAGMA busy_timeout = 5000').run();
+      // busy_timeout before WAL (#212). 64MiB = JOURNAL_SIZE_LIMIT_BYTES in src/db/connection.ts. WAL truncates back to this after a checkpoint resets it (#192); not a hard bound while a reader pins the WAL.
+      db.exec('PRAGMA busy_timeout = 5000');
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA journal_size_limit = 67108864');
       const sweep = db.transaction(() => {
         const expiredWhere = `expires_at IS NOT NULL AND expires_at < datetime('now')`;
         const tables = new Set(
