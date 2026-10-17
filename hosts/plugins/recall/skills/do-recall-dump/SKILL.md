@@ -15,6 +15,8 @@ Dump the current conversation session into the Recall SQLite database, making al
 
 Run this at the end of every session or when you want to persist the current conversation mid-session.
 
+**In omp:** call `recall_dump` with the title. See the [omp dump contract](https://github.com/edheltzel/Recall/blob/main/docs/OMP_INTEGRATION.md#explicit-dump-recall_dump-tool) for confirmation and session-source rules.
+
 ## Usage
 
 ```bash
