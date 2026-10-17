@@ -71,6 +71,9 @@ RECALL_OPENCODE_PLUGIN_HELPERS=(session-export.ts)
 : "${BACKUP_BASE:=$RECALL_DIR/backups}"
 : "${BACKUP_DIR:=$BACKUP_BASE/$TIMESTAMP}"
 
+# Newest full backups to retain; latest is also protected if older.
+RECALL_BACKUP_KEEP=2
+
 # Colors — defined only when stdout is a TTY (so curl|bash, CI, and piped
 # output stay clean). Tests can override by exporting RED/GREEN/etc. before
 # sourcing — those overrides win because of the := default operator.
@@ -894,6 +897,131 @@ recall_create_backup() {
   fi
 
   echo "$TIMESTAMP" >"$BACKUP_BASE/latest"
+  recall_prune_backups || log_warn "Backup rotation failed; left older backups in place"
+}
+
+# Drop old full backups under $BACKUP_BASE. A full backup is a direct child
+# directory with manifest.txt (written by recall_create_backup) and a non-empty
+# recall.db or memory.db. Config-only runs (no DB to copy) never count, so they
+# cannot rotate away the older DB snapshots. Keeps the newest
+# $RECALL_BACKUP_KEEP full backups plus the directory named by latest.
+# Loose files, non-full dirs (pre-migrate, doctor-fix, pre_restore, config-only),
+# symlinks, dot-directories, and anything outside $BACKUP_BASE are left alone.
+# Failures warn and never fail install/update.
+recall_prune_backups() {
+  local base="${BACKUP_BASE:-}"
+  # Trailing slashes must not change the scan root. dirname of a
+  # slash-terminated path is its parent, so never derive the root from
+  # basename/dirname of BACKUP_DIR — that deletes BACKUP_DIR or its parent.
+  while [[ "$base" == */ && "$base" != "/" ]]; do
+    base="${base%/}"
+  done
+  [[ -n "$base" && "$base" != "/" && "$base" != "." && "$base" != ".." && -d "$base" && ! -L "$base" ]] || return 0
+  local parent="${base%/*}"
+  [[ -n "$parent" ]] || parent="/"
+
+  local snap="${BACKUP_DIR:-}"
+  while [[ "$snap" == */ && "$snap" != "/" ]]; do
+    snap="${snap%/}"
+  done
+  local snap_parent="${snap%/*}"
+  [[ -n "$snap" && -z "$snap_parent" ]] && snap_parent="/"
+
+  local latest=""
+  if [[ -f "$base/latest" && ! -L "$base/latest" ]]; then
+    # One record. Do not tr -d '[:space:]': that turns "old backup" into
+    # "oldbackup" and rotation deletes the real latest once it leaves the top two.
+    IFS= read -r latest <"$base/latest" || true
+    latest="${latest%$'\r'}"
+  fi
+  case "$latest" in
+    ''|'.'|'..'|*'/'*) latest="" ;;
+  esac
+
+  local -a names=()
+  local dir name
+  # Direct children only. NUL records so a space or newline in the name stays one entry.
+  while IFS= read -r -d '' dir; do
+    while [[ "$dir" == */ && "$dir" != "/" ]]; do
+      dir="${dir%/}"
+    done
+    [[ "$dir" == "$base/"* ]] || continue
+    # ${var##*/}, not $(basename): $() drops a trailing newline, and basename
+    # of a slash-terminated path can be the parent component.
+    name="${dir##*/}"
+    case "$name" in
+      ''|'.'|'..'|*'/'*|.*) continue ;;
+    esac
+    [[ "$dir" == "$base/$name" ]] || continue
+    [[ -L "$dir" ]] && continue
+    [[ -f "$dir/manifest.txt" ]] || continue
+    [[ -s "$dir/recall.db" || -s "$dir/memory.db" ]] || continue
+    names+=("$name")
+  done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  [[ ${#names[@]} -gt 0 ]] || return 0
+
+  local tmp=""
+  tmp="$(mktemp)" || {
+    log_warn "Backup rotation failed; left older backups in place"
+    return 0
+  }
+  if ! printf '%s\0' "${names[@]}" | sort -zr >"$tmp"; then
+    rm -f -- "$tmp"
+    log_warn "Backup rotation failed; left older backups in place"
+    return 0
+  fi
+
+  local -a sorted=()
+  local line
+  while IFS= read -r -d '' line; do
+    [[ -n "$line" ]] || continue
+    sorted+=("$line")
+  done <"$tmp"
+  rm -f -- "$tmp"
+  [[ ${#sorted[@]} -gt 0 ]] || return 0
+
+  local -a keepers=()
+  local kept=0
+  for line in "${sorted[@]}"; do
+    kept=$((kept + 1))
+    if [[ "$kept" -le "${RECALL_BACKUP_KEEP}" ]]; then
+      keepers+=("$line")
+    fi
+  done
+  if [[ -n "$latest" ]]; then
+    keepers+=("$latest")
+  fi
+
+  local target skip keep
+  for line in "${sorted[@]}"; do
+    skip=0
+    if [[ ${#keepers[@]} -gt 0 ]]; then
+      for keep in "${keepers[@]}"; do
+        if [[ "$line" == "$keep" ]]; then
+          skip=1
+          break
+        fi
+      done
+    fi
+    [[ "$skip" -eq 1 ]] && continue
+    case "$line" in
+      ''|'.'|'..'|*'/'*|.*) continue ;;
+    esac
+    target="$base/$line"
+    [[ "${target%/*}" == "$base" ]] || continue
+    [[ "$target" == "$base" || "$target" == "$parent" ]] && continue
+    if [[ -n "$snap" && "$target" == "$snap" ]]; then
+      continue
+    fi
+    if [[ -n "$snap" && "$target" == "$snap_parent" ]]; then
+      continue
+    fi
+    [[ -d "$target" && ! -L "$target" ]] || continue
+    if ! rm -rf -- "$target"; then
+      log_warn "Could not remove old backup: $target"
+    fi
+  done
+  return 0
 }
 
 recall_list_backups() {
