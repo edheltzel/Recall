@@ -114,17 +114,10 @@ function trimCaptureText(
   const markerEscaped = measure(TRUNCATION_MARKER).escaped;
   if (empty + measured.escaped <= MAX_OMP_STDIN_BYTES) return undefined;
 
-  let keptEscaped = Math.max(0, MAX_OMP_STDIN_BYTES - empty - markerEscaped);
-  let cut = cutForBudget(text, keptEscaped);
-  let fitted = `${cut.head}${TRUNCATION_MARKER}${cut.tail}`;
-  const payload = captureStdin(fitted, sessionId, cwd);
-  if (Buffer.byteLength(payload, 'utf8') > MAX_OMP_STDIN_BYTES) {
-    keptEscaped = Math.max(0, keptEscaped - (Buffer.byteLength(payload, 'utf8') - MAX_OMP_STDIN_BYTES));
-    cut = cutForBudget(text, keptEscaped);
-    fitted = `${cut.head}${TRUNCATION_MARKER}${cut.tail}`;
-  }
+  const keptEscaped = Math.max(0, MAX_OMP_STDIN_BYTES - empty - markerEscaped);
+  const cut = cutForBudget(text, keptEscaped);
   return {
-    text: fitted,
+    text: `${cut.head}${TRUNCATION_MARKER}${cut.tail}`,
     dropped: measured.utf8 - cut.keptUtf8,
   };
 }
@@ -370,7 +363,10 @@ export async function captureOmpSessionStop(
     }
 
     const payload = captureStdin(text, sessionId, ctx.cwd);
-
+    if (Buffer.byteLength(payload, 'utf8') > MAX_OMP_STDIN_BYTES) {
+      warn(ctx, pi, 'Recall omp capture skipped: payload exceeds 25MiB');
+      return;
+    }
     const { code, aborted } = await runCli(runChild, ['capture'], payload, event.signal, CHILD_TIMEOUT_MS);
     if (code === 0) return;
     warn(ctx, pi, aborted ? 'Recall omp capture cancelled' : 'Recall omp capture failed');
