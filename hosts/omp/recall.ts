@@ -5,12 +5,122 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
+import { scrub } from '../../hooks/lib/write-safety';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLI_PATH = join(PACKAGE_ROOT, 'dist', 'index.js');
 const CHILD_TIMEOUT_MS = 30_000;
 
 export const MAX_OMP_STDIN_BYTES = 25 * 1024 * 1024;
+
+/** Head fraction borrowed from oh-my-pi snapcompact TRUNCATE_HEAD_RATIO (MIT). */
+const TRUNCATE_HEAD_RATIO = 0.6;
+const TRUNCATION_MARKER = '\n\n[Recall omp capture truncated]\n\n';
+
+function captureStdin(text: string, sessionId: string, cwd: string): string {
+  return JSON.stringify({
+    contract: 1,
+    harness: 'omp',
+    event: 'turn_end',
+    text,
+    session_id: sessionId,
+    cwd,
+  });
+}
+
+function escapedStep(text: string, index: number): { next: number; utf8: number; escaped: number } {
+  const lead = text.charCodeAt(index);
+  if (lead >= 0xd800 && lead <= 0xdbff && index + 1 < text.length) {
+    const tail = text.charCodeAt(index + 1);
+    if (tail >= 0xdc00 && tail <= 0xdfff) return { next: index + 2, utf8: 4, escaped: 4 };
+  }
+  if (lead <= 0x1f) {
+    const short = lead === 0x08 || lead === 0x09 || lead === 0x0a || lead === 0x0c || lead === 0x0d;
+    return { next: index + 1, utf8: 1, escaped: short ? 2 : 6 };
+  }
+  if (lead === 0x22 || lead === 0x5c) return { next: index + 1, utf8: 1, escaped: 2 };
+  if (lead >= 0xd800 && lead <= 0xdfff) return { next: index + 1, utf8: 3, escaped: 6 };
+  if (lead <= 0x7f) return { next: index + 1, utf8: 1, escaped: 1 };
+  if (lead <= 0x7ff) return { next: index + 1, utf8: 2, escaped: 2 };
+  return { next: index + 1, utf8: 3, escaped: 3 };
+}
+
+function measure(text: string): { utf8: number; escaped: number } {
+  let utf8 = 0;
+  let escaped = 0;
+  for (let index = 0; index < text.length;) {
+    const step = escapedStep(text, index);
+    utf8 += step.utf8;
+    escaped += step.escaped;
+    index = step.next;
+  }
+  return { utf8, escaped };
+}
+
+function takeHead(text: string, budget: number): { end: number; utf8: number } {
+  let escaped = 0;
+  let utf8 = 0;
+  let index = 0;
+  while (index < text.length) {
+    const step = escapedStep(text, index);
+    if (escaped + step.escaped > budget) break;
+    escaped += step.escaped;
+    utf8 += step.utf8;
+    index = step.next;
+  }
+  return { end: index, utf8 };
+}
+
+function takeTail(text: string, budget: number, minStart: number): { start: number; utf8: number } {
+  let escaped = 0;
+  let utf8 = 0;
+  let index = text.length;
+  while (index > minStart) {
+    let start = index - 1;
+    const unit = text.charCodeAt(start);
+    if (unit >= 0xdc00 && unit <= 0xdfff && start > minStart) {
+      const lead = text.charCodeAt(start - 1);
+      if (lead >= 0xd800 && lead <= 0xdbff) start -= 1;
+    }
+    if (start < minStart) break;
+    const step = escapedStep(text, start);
+    if (step.next !== index || escaped + step.escaped > budget) break;
+    escaped += step.escaped;
+    utf8 += step.utf8;
+    index = start;
+  }
+  return { start: index, utf8 };
+}
+
+function cutForBudget(text: string, keptEscaped: number): { head: string; tail: string; keptUtf8: number } {
+  const headBudget = Math.floor(keptEscaped * TRUNCATE_HEAD_RATIO);
+  const head = takeHead(text, headBudget);
+  const tail = takeTail(text, keptEscaped - headBudget, head.end);
+  return {
+    head: text.slice(0, head.end),
+    tail: text.slice(tail.start),
+    keptUtf8: head.utf8 + tail.utf8,
+  };
+}
+
+/** Keep head 60% / tail 40% of the escaped payload budget. Two streaming scans, one serialize. */
+function trimCaptureText(
+  text: string,
+  sessionId: string,
+  cwd: string,
+): { text: string; dropped: number } | undefined {
+  const measured = measure(text);
+  const empty = Buffer.byteLength(captureStdin('', sessionId, cwd), 'utf8');
+  const markerEscaped = measure(TRUNCATION_MARKER).escaped;
+  if (empty + measured.escaped <= MAX_OMP_STDIN_BYTES) return undefined;
+
+  const keptEscaped = Math.max(0, MAX_OMP_STDIN_BYTES - empty - markerEscaped);
+  const cut = cutForBudget(text, keptEscaped);
+  return {
+    text: `${cut.head}${TRUNCATION_MARKER}${cut.tail}`,
+    dropped: measured.utf8 - cut.keptUtf8,
+  };
+}
 
 export interface OmpSessionStopEvent {
   signal?: AbortSignal;
@@ -243,22 +353,20 @@ export async function captureOmpSessionStop(
       return;
     }
 
-    const text = ompBranchMessages(entries).map(message => message.content).join('\n\n');
+    let text = scrub(ompBranchMessages(entries).map(message => message.content).join('\n\n')).text;
     if (!text.trim()) return;
 
-    const payload = JSON.stringify({
-      contract: 1,
-      harness: 'omp',
-      event: 'turn_end',
-      text,
-      session_id: sessionId,
-      cwd: ctx.cwd,
-    });
+    const trimmed = trimCaptureText(text, sessionId, ctx.cwd);
+    if (trimmed) {
+      text = trimmed.text;
+      warn(ctx, pi, `Recall omp capture truncated: ${trimmed.dropped} bytes dropped`);
+    }
+
+    const payload = captureStdin(text, sessionId, ctx.cwd);
     if (Buffer.byteLength(payload, 'utf8') > MAX_OMP_STDIN_BYTES) {
       warn(ctx, pi, 'Recall omp capture skipped: payload exceeds 25MiB');
       return;
     }
-
     const { code, aborted } = await runCli(runChild, ['capture'], payload, event.signal, CHILD_TIMEOUT_MS);
     if (code === 0) return;
     warn(ctx, pi, aborted ? 'Recall omp capture cancelled' : 'Recall omp capture failed');

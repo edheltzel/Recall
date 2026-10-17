@@ -29,12 +29,12 @@ Do not install the npm package named `recall-memory`; that name is an unrelated 
 - The awaited `session_stop` event runs after the main agent and its background work settle. omp does not emit it for task/subagent sessions.
 - The extension reads `ctx.sessionManager.getBranch()` and sends ordered user/assistant text to its package-local `dist/index.js capture` (stdin JSON, contract 1, harness `omp`, event `turn_end`). No global `recall` executable is required. Door: [Capture adapter](CAPTURE_ADAPTER.md).
 - Tool calls/results, thinking, images, developer/system instructions, and custom/summary entries are excluded before that call.
-- Core scrubs secrets, tags the row `automatic-capture,omp`, and stores it at importance 6. This is not a model-backed extraction or a curated `fabric` call.
+- The extension scrubs secrets before sizing and trimming. Core scrubs again, tags the row `automatic-capture,omp`, and stores it at importance 6. This is not a model-backed extraction or a curated `fabric` call.
 - The database defaults to `~/.agents/Recall/recall.db`; `RECALL_DB_PATH` retains its existing override.
 
-This is turn-completion capture, not crash recovery. An interrupted turn before `session_stop` is not guaranteed captured. Shutdown and pre-compaction hooks are not installed. The complete active branch is retried on the next stop after a failure.
+This is turn-completion capture, not crash recovery. An interrupted turn before `session_stop` is not guaranteed captured. Shutdown and pre-compaction hooks are not installed. The active branch is read again on the next stop after a failure.
 
-Capture sends only user and assistant text, at most 25 MiB per payload, and bounds its child process to 30 seconds. Tool output, images, and other non-message entries are not sent and do not count toward the limit. Oversize, malformed, cancelled, or failed captures warn without blocking the agent or publishing a partial branch.
+Capture bounds its CLI child to 30 seconds and its serialized JSON payload to 25 MiB, including metadata, escaping, and the truncation marker. Excluded content does not count toward this limit. When the scrubbed text would exceed the limit, capture allocates 60% of the remaining JSON-escaped byte budget to the beginning and 40% to the end of the text, separated by `[Recall omp capture truncated]`; a warning reports the UTF-8 bytes dropped from the scrubbed text. Malformed branches are rejected before starting the child; malformed branches, cancellations, and child failures warn without stopping omp.
 
 ## Explicit dump: `recall_dump` tool
 
@@ -62,7 +62,7 @@ This verifies the packed local-link integration in headless text mode. It does n
 
 Restart omp after uninstalling. Saved Recall memory remains. `recall uninstall` removes installer-owned skills, not the separately managed omp plugin; uninstall the plugin through omp before removing Recall's runtime.
 
-If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. An omp process started before the extension was refreshed keeps the old code until it restarts: older versions measured the whole raw branch and warned `payload exceeds 25MiB` on long tool-heavy sessions. If the filtered user/assistant payload still exceeds the capture limit, start a new session. The limit counts serialized JSON bytes, including escaping and metadata.
+If capture warns, check `bun` is available to omp, run `bun dist/index.js init` from the linked checkout, and check `RECALL_DB_PATH` permissions. An omp process started before the extension was refreshed keeps the old code until it restarts: older versions measured the whole raw branch and warned `payload exceeds 25MiB` on long tool-heavy sessions. See the [capture contract](#capture-contract) for current payload limits and trimming behavior.
 
 ## Native documentation
 
