@@ -120,6 +120,38 @@ describe('omp native extension', () => {
     expect(payload.text.length).toBeGreaterThan(MAX_OMP_STDIN_BYTES / 2);
   });
 
+  test('trim does not keep a secret fragment split off its password= key', async () => {
+    let stdin = '';
+    const secret = `k9Qx7mP2vL8nR4wT6yU0zA1bC3dE5fH7${'m'.repeat(180)}`;
+    const cut = Math.floor(MAX_OMP_STDIN_BYTES * 0.6);
+    const content = `${'x'.repeat(cut - 200)} password=${secret} ${'y'.repeat(MAX_OMP_STDIN_BYTES)}`;
+    await captureOmpSessionStop(
+      {},
+      uiCtx(() => {}, {
+        sessionManager: {
+          getSessionId: () => 'sess-secret',
+          getBranch: () => [{
+            type: 'message',
+            id: 'u1',
+            message: { role: 'user', content },
+          }],
+        },
+      }),
+      undefined,
+      async (_file, _args, childStdin) => {
+        stdin = childStdin;
+        return 0;
+      },
+    );
+    expect(Buffer.byteLength(stdin, 'utf8')).toBeLessThanOrEqual(MAX_OMP_STDIN_BYTES);
+    const text = JSON.parse(stdin).text as string;
+    expect(text).toContain('[Recall omp capture truncated]');
+    expect(text).toContain('[REDACTED:generic-assignment]');
+    for (let index = 0; index + 12 <= secret.length; index++) {
+      expect(text).not.toContain(secret.slice(index, index + 12));
+    }
+  }, 60_000);
+
   test('session_stop sends ordered branch text through recall capture', async () => {
     let args: readonly string[] = [];
     let stdin = '';

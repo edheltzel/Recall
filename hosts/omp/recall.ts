@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
+import { scrub } from '../../hooks/lib/write-safety';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLI_PATH = join(PACKAGE_ROOT, 'dist', 'index.js');
@@ -67,6 +68,8 @@ function tailStart(text: string, maxBytes: number): number {
   }
   return index;
 }
+
+
 
 /** Keep head 60% / tail 40%. Largest text budget whose measured JSON fits. */
 function trimCaptureText(
@@ -338,7 +341,7 @@ export async function captureOmpSessionStop(
       return;
     }
 
-    let text = ompBranchMessages(entries).map(message => message.content).join('\n\n');
+    let text = scrub(ompBranchMessages(entries).map(message => message.content).join('\n\n')).text;
     if (!text.trim()) return;
 
     const trimmed = trimCaptureText(text, sessionId, ctx.cwd);
