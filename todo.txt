@@ -4,8 +4,8 @@
 2026-10-09 Recall Telos interview slash (copy PAI process, not the stack). Parked per spec; no wiring. +recall @outstanding issue:281
 2026-10-09 Slash-export windowed learnings to a user-chosen Obsidian folder. Parked; learnings-only export. +recall @outstanding issue:280
 2026-10-09 Learn prefs into global AGENTS.md (and CLAUDE.md) below a Recall marker. Not started. +recall @outstanding issue:279
-2026-10-09 CREATE_TABLES lags migrations: decisions/learnings missing confidence. Confirmed on main: decisions/learnings CREATE TABLE lack confidence. +recall @outstanding issue:278
-2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277
+x 2026-10-17 2026-10-09 CREATE_TABLES lags migrations: decisions/learnings missing confidence. Confirmed on main: decisions/learnings CREATE TABLE lack confidence. +recall @outstanding issue:278 pr:https://github.com/edheltzel/Recall/pull/332
+2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277 @waiting gate parked
 2026-10-09 Collapse host identity lists toward SESSION_SOURCES. #282 added cursor to SESSION_SOURCES only; lists not collapsed. +recall @outstanding issue:269
 2026-10-09 P2: Bun-free runtime spike (do not crowd Cursor/Grok). P2 spike; parked. +recall @outstanding issue:266
 2026-10-09 Eval déjà vu ssh-sync vs Turso/libSQL epic #102. Eval only; ties to #102. +recall @outstanding issue:265
@@ -20,15 +20,15 @@
 2026-10-09 Test debt from #217: at-scale ordering parity, real-chain self-heal integration, consolidated coverage gaps. Test debt from #217. +recall @outstanding issue:227
 2026-10-09 Harden vec index: zero-vector guard, index-format version stamp, doctor/stats vec observability. Vec hardening; no fix found. +recall @outstanding issue:226
 2026-10-09 create a website and web ui dashboard. Website and dashboard idea. +recall @outstanding issue:221
-2026-10-09 harden: applyConnectionPragmas sets journal_mode=WAL before busy_timeout — WAL-recovery not covered by timeout. Confirmed on main: WAL pragma still runs before busy_timeout. +recall @outstanding issue:212
+x 2026-10-17 2026-10-09 harden: applyConnectionPragmas sets journal_mode=WAL before busy_timeout — WAL-recovery not covered by timeout. Confirmed on main: WAL pragma still runs before busy_timeout. +recall @outstanding issue:212 pr:https://github.com/edheltzel/Recall/pull/335
 2026-10-09 harden: real interleaved concurrency test for getDb migrate-on-open + read-path latency note. Concurrency test gap. +recall @outstanding issue:211
 2026-10-09 harden: add email/phone/path redaction patterns to scrub; gate name-redaction as anchored opt-in. Scrub patterns not added. +recall @outstanding issue:194
 2026-10-09 feat: frecency-in-ranking evidence/benchmark behind a default-off flag (informs #155). Default-off frecency flag; informs #155. +recall @outstanding issue:193
-2026-10-09 harden: bound WAL growth — centralize journal_size_limit across all Recall DB writers. No journal_size_limit on main. +recall @outstanding issue:192
-2026-10-09 harden: scrub() learnings.tags on the explicit add paths (un-redacted secret persist, LOW). Scrub learnings.tags on add paths. +recall @outstanding issue:182
-2026-10-09 chore: scrub-archive hostile-fs tests no-op-pass under root (add uid skip-guard). Root uid skip-guard for tests. +recall @outstanding issue:178
+x 2026-10-17 2026-10-09 harden: bound WAL growth — centralize journal_size_limit across all Recall DB writers. No journal_size_limit on main. +recall @outstanding issue:192 pr:https://github.com/edheltzel/Recall/pull/335
+x 2026-10-17 2026-10-09 harden: scrub() learnings.tags on the explicit add paths (un-redacted secret persist, LOW). Scrub learnings.tags on add paths. +recall @outstanding issue:182 pr:https://github.com/edheltzel/Recall/pull/333
+2026-10-09 chore: scrub-archive hostile-fs tests no-op-pass under root (add uid skip-guard). Root uid skip-guard for tests. +recall @outstanding issue:178 @waiting gate parked
 2026-10-09 docs: stale backup path ~/.claude/backups/recall in installation.md + upgrading.md. Confirmed on main: docs still say ~/.claude/backups/recall (also architecture.md). +recall @outstanding issue:174
-2026-10-09 harden: recall hybrid/semantic CLI crash on embedding dim mismatch. CLI cosineSimilarity calls still unguarded in embed.ts. +recall @outstanding issue:163
+x 2026-10-17 2026-10-09 harden: recall hybrid/semantic CLI crash on embedding dim mismatch. CLI cosineSimilarity calls still unguarded in embed.ts. +recall @outstanding issue:163 pr:https://github.com/edheltzel/Recall/pull/334
 2026-10-09 B3: Blend frecency into ranking (importance #101 + L1 recall #100 + search order). needs - human; ranking change waits on Ed. +recall @outstanding issue:155
 2026-10-09 spike: evaluate oMLX as a local embedding backend to replace Ollama. oMLX spike; coupled with embedding choice. +recall @outstanding issue:106
 2026-10-09 Phase 4 (epic): Recall Beyond Coding Agents (pending go/no-go). Epic waiting on go/no-go. +recall @outstanding issue:103
@@ -45,14 +45,24 @@
 2026-10-09 harden: uninstall wipes user-authored files — ownership inferred by name/dir while install is per-file (#230 audit). Commit a3357cb on branch fix/install-slice1-remainder, no PR yet. #294/#297 did part. +recall @inprogress issue:236
 2026-10-09 Installer hardening (borrowed from mnemon review): JSON5-tolerant settings parsing, $HOME collision guard, remove emptied settings file on uninstall. Commit a3357cb on branch fix/install-slice1-remainder, no PR yet. #294 did JSONC parsing. +recall @inprogress issue:231
 2026-10-09 Branch cursor/omp-session-start-inject-7ee6 ATL-631 (Intern): omp session-start inject. Pushed Oct 3, waiting on Red-Team review, so no PR yet. Overlap with #300 still to check. +recall @inprogress atl:631
-2026-10-09 Cursor capture wire: on-disk parser of state.vscdb + agent-transcripts JSONL. Cursor capture shipped in #282 (merged Sep 2). +recall @close issue:259
-2026-10-09 Cursor inject wire: sessionStart additional_context via hooks.json + MCP + rule. Cursor inject shipped in #282 (merged Sep 2). +recall @close issue:261
-2026-10-09 Shared `recall start` CLI for host inject variants. recall start shipped in #282 (merged Sep 2). +recall @close issue:267
-2026-10-09 Déjà vu-style install snippets (tiny wires, not the product). Install snippets shipped in #282 (merged Sep 2). +recall @close issue:270
-2026-10-09 Extractor config: per-path backends for Automatic-capture and Curated LoA. Extractor config merged in #288 (Sep 16), extended by #298. +recall @close issue:258
-2026-10-09 docs: README still says 768-dim embeddings; code is 1024. README no longer says 768 on main (529400b). +recall @close issue:276
-2026-10-09 10 lifecycle tests fail in any git worktree — the environment AGENTS.md mandates for workers has a permanently red baseline. AGENTS.md now uses GitButler branches, not git worktrees; premise gone. +recall @close issue:243
-2026-10-09 chore: fresh /ce-worktree worktrees miss node_modules → ~10 MCP-config tests fail spuriously. Worktree flow gone and jsonc-parser dep removed (eebe92d). +recall @close issue:165
-2026-10-09 Non-goals: no HostDescriptor, no adapter→plugin rename, no Cursor marketplace plugin, no Cursor host-hook glue. Reference-only non-goals list; Cursor wires shipped in #282 without them. +recall @close issue:271
-2026-10-09 create npm package for eady install. npm publish and `recall install` shipped in #170. +recall @close issue:1
+x 2026-10-17 2026-10-09 Cursor capture wire: on-disk parser of state.vscdb + agent-transcripts JSONL. Cursor capture shipped in #282 (merged Sep 2). +recall @close issue:259 report:github-closed
+x 2026-10-17 2026-10-09 Cursor inject wire: sessionStart additional_context via hooks.json + MCP + rule. Cursor inject shipped in #282 (merged Sep 2). +recall @close issue:261 report:github-closed
+x 2026-10-17 2026-10-09 Shared `recall start` CLI for host inject variants. recall start shipped in #282 (merged Sep 2). +recall @close issue:267 report:github-closed
+x 2026-10-17 2026-10-09 Déjà vu-style install snippets (tiny wires, not the product). Install snippets shipped in #282 (merged Sep 2). +recall @close issue:270 report:github-closed
+x 2026-10-17 2026-10-09 Extractor config: per-path backends for Automatic-capture and Curated LoA. Extractor config merged in #288 (Sep 16), extended by #298. +recall @close issue:258 report:github-closed
+x 2026-10-17 2026-10-09 docs: README still says 768-dim embeddings; code is 1024. README no longer says 768 on main (529400b). +recall @close issue:276 report:github-closed
+x 2026-10-17 2026-10-09 10 lifecycle tests fail in any git worktree — the environment AGENTS.md mandates for workers has a permanently red baseline. AGENTS.md now uses GitButler branches, not git worktrees; premise gone. +recall @close issue:243 report:github-closed
+x 2026-10-17 2026-10-09 chore: fresh /ce-worktree worktrees miss node_modules → ~10 MCP-config tests fail spuriously. Worktree flow gone and jsonc-parser dep removed (eebe92d). +recall @close issue:165 report:github-closed
+x 2026-10-17 2026-10-09 Non-goals: no HostDescriptor, no adapter→plugin rename, no Cursor marketplace plugin, no Cursor host-hook glue. Reference-only non-goals list; Cursor wires shipped in #282 without them. +recall @close issue:271 report:github-closed
+x 2026-10-17 2026-10-09 create npm package for eady install. npm publish and `recall install` shipped in #170. +recall @close issue:1 report:github-closed
 2026-10-14 omp host-ingest LoA runs the Automatic-capture Extractor instead of the basic 'Session with N messages' summary +recall issue:286
+x 2026-10-17 2026-10-16 Decide fate of LoA #1996 (wrong Claude session dump) +recall
+x 2026-10-17 2026-10-16 Trim oversized omp captures with a 60/40 head/tail split instead of skipping, log bytes dropped +recall branch:feat/omp-capture-trim pr:https://github.com/edheltzel/Recall/pull/337
+2026-10-16 Optional: capture a touched-files list (read/modified, max 20) with omp captures +recall
+2026-10-16 Optional: verify ingest de-dup, then consider a session_before_compact capture hook +recall
+x 2026-10-17 2026-10-15 Land #331 fix/omp-dump-source through no-mistakes (legacy snapshot identity fixes) +recall pr:https://github.com/edheltzel/Recall/pull/331
+x 2026-10-17 2026-10-15 Optional: #330 BACKUP_DIR basename + NUL-safe name hardening +recall pr:https://github.com/edheltzel/Recall/pull/330
+x 2026-10-17 2026-10-17 Merge PR #336 .mailmap Cursor/Claude -> Atlas-Key +recall pr:https://github.com/edheltzel/Recall/pull/336
+x 2026-10-17 2026-10-17 Decide no-mistakes axi driving for GitButler branches +recall @outstanding
+x 2026-10-17 2026-10-17 Finish Recall history rewrite: force-push rewritten main/tags, migrate GitButler stacks (staged in ../.recall-rewrite-2026-10-17) +Recall @blocked
+2026-10-17 Trash ../.recall-rewrite-2026-10-17 backups once rewritten Recall history is confirmed fine +Recall
