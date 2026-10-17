@@ -32,7 +32,7 @@ export const JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
  * Apply the connection-level PRAGMAs every open shares (issue #151).
  *
  * Durability is preserved: WAL stays on and `synchronous` is left at its
- * default — NO `synchronous=OFF` (these are read-path tuning only).
+ * default — NO `synchronous=OFF`.
  *
  * Read tuning (kept only because Suite F showed a win):
  * - cache_size  = -65536 → 64 MB page cache per connection (negative = KiB),
@@ -50,7 +50,6 @@ function applyConnectionPragmas(database: Database): void {
   // busy_timeout before journal_mode so WAL recovery waits (#212, #72/#96).
   database.exec('PRAGMA busy_timeout = 5000');
   database.exec('PRAGMA journal_mode = WAL');
-  // After WAL: the limit is a no-op until journal_mode is WAL (#192).
   database.exec(`PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT_BYTES}`);
   database.exec('PRAGMA foreign_keys = ON');
   // Read-path tuning (#151). No durability change.
