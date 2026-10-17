@@ -80,6 +80,12 @@ recall dump "Session Title"             # Import session + capture LoA entry
 
 Combines `recall import` and Curated LoA capture in one step. Run this at the end of every session to persist the conversation and run the `fabric` Extractor. The title should describe what was accomplished in the session. `--skip-fabric` writes a basic summary instead.
 
+Without `--stdin`, Recall discovers native transcripts in Claude Code, OpenCode, then Pi order, followed by registered session sources. For omp's live-session route and discovery restriction, see the [`recall_dump` contract](OMP_INTEGRATION.md#explicit-dump-recall_dump-tool).
+
+`--stdin` reads up to 25 MiB of contract 1 JSON for host extensions that hold the live transcript: `contract: 1`, `harness`, `session_id`, optional `cwd`/`project`, and `messages` with user/assistant `role`, nonblank text `content`, and optional `timestamp`. Malformed input is rejected before writes. `-p` overrides the payload's project; otherwise Recall uses its `project`, then the origin repository name or directory basename from `cwd`, then `harness` if `cwd` is absent.
+
+Both CLI dumps and MCP `memory_dump` scrub each message's content with the shared write-safety guard before snapshot matching, storage, and summary or extraction. Known credential patterns become visible `[REDACTED:<kind>]` markers, invisible/bidi controls are removed, and incoming messages left blank are dropped. This does not detect every secret; follow the [credential-handling rule](mcp-tools.md#memory_add) before dumping sensitive conversations.
+
 ### Library of Alexandria (LoA)
 
 ```bash

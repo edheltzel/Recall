@@ -18,6 +18,10 @@ import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings
 import { formatMessagesForExtraction, generateBasicSummary, runFabricExtract, ExtractorConfigError } from '../lib/extraction.js';
 import { discoverCurrentSession } from '../hosts/session-sources.js';
 import type { ParsedSession, SessionSource } from '../hosts/session-source.js';
+import { HARNESS_ID, readStdin } from './capture.js';
+import { detectProject } from '../lib/project.js';
+import { scrub } from '../lib/write-safety.js';
+import { basename } from 'path';
 
 export type { ParsedSession, SessionSource } from '../hosts/session-source.js';
 export { parseMarkdownDrop } from '../hosts/markdown-session-source.js';
@@ -28,6 +32,8 @@ interface DumpOptions {
   tags?: string;
   limit?: number;
   skipFabric?: boolean;
+  /** Read a host-supplied session (contract 1 JSON) from stdin instead of discovering one. */
+  stdin?: boolean;
   /** Test/internal seam; normal CLI and MCP behavior still attempts LoA embedding. */
   skipEmbed?: boolean;
   /** Test/internal seam; production uses runFabricExtract. */
@@ -42,6 +48,51 @@ interface DumpMessageRow {
   role: 'user' | 'assistant' | 'system';
   timestamp: string;
   project: string | null;
+}
+
+/**
+ * Host-supplied session (contract 1) for hosts whose live transcript only their own
+ * extension can read, e.g. omp's `recall_dump` tool. Malformed input is rejected whole.
+ */
+export function parseDumpSessionJson(raw: string): ParsedSession {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error('dump --stdin expects contract 1 JSON');
+  }
+  const payload = value as Record<string, unknown> | null;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.contract !== 1) {
+    throw new Error('dump --stdin expects contract 1 JSON');
+  }
+  const { harness, session_id: sessionId, messages, cwd, project } = payload;
+  if (typeof harness !== 'string' || !HARNESS_ID.test(harness)) throw new Error('invalid harness');
+  if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 512 || /[\u0000-\u001f\u007f]/.test(sessionId)) {
+    throw new Error('invalid session_id');
+  }
+  if (!Array.isArray(messages)) throw new Error('messages must be an array');
+  const sessionProject = typeof project === 'string' && project
+    ? project
+    : typeof cwd === 'string' && cwd ? detectProject(cwd) || basename(cwd) : harness;
+  return {
+    source: harness,
+    sessionId,
+    project: sessionProject,
+    filePath: '',
+    messages: messages.map(message => {
+      const row = message as Record<string, unknown> | null;
+      if (!row || (row.role !== 'user' && row.role !== 'assistant') || typeof row.content !== 'string' || !row.content.trim()) {
+        throw new Error('messages must be user/assistant rows with text content');
+      }
+      return {
+        session_id: sessionId,
+        timestamp: typeof row.timestamp === 'string' && row.timestamp ? row.timestamp : new Date().toISOString(),
+        role: row.role,
+        content: row.content,
+        project: sessionProject,
+      };
+    }),
+  };
 }
 
 // ============ Internal Helpers ============
@@ -144,8 +195,17 @@ function explicitSnapshotKey(message: Pick<DumpMessageRow, 'role' | 'content' | 
   return JSON.stringify([message.role, message.content, message.project]);
 }
 
-function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefined {
-  const rows = getDb()
+interface ExplicitSnapshot {
+  /** Matched rows, scrubbed, without rows that scrub to blank (incoming dumps drop those). */
+  messages: DumpMessageRow[];
+  /** Session rows that scrub to blank; legacy LoA source_ids may still list them. */
+  blankIds: Set<number>;
+}
+
+/** Old dumps stored unscrubbed text: compare scrubbed, then rewrite the matched span in place. */
+function findExplicitSnapshot(session: ParsedSession): ExplicitSnapshot | undefined {
+  const db = getDb();
+  const rows = (db
     .prepare(`
       SELECT m.id, m.content, m.role, m.timestamp, m.project
       FROM published_messages m
@@ -155,7 +215,10 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
         )
       ORDER BY m.id
     `)
-    .all(session.sessionId) as DumpMessageRow[];
+    .all(session.sessionId) as DumpMessageRow[])
+    .map((row, index) => ({ row, index, content: scrub(row.content).text }));
+  const kept = rows.filter(({ content }) => content.trim());
+  const blankIds = new Set(rows.filter(({ content }) => !content.trim()).map(({ row }) => row.id));
   const expectedKeys = session.messages.map(message =>
     explicitSnapshotKey({
       role: message.role,
@@ -163,17 +226,31 @@ function findExplicitSnapshot(session: ParsedSession): DumpMessageRow[] | undefi
       project: message.project ?? session.project ?? null,
     })
   );
+  if (expectedKeys.length === 0) return undefined;
 
-  for (let start = rows.length - expectedKeys.length; start >= 0; start--) {
-    const snapshot = rows.slice(start, start + expectedKeys.length);
-    const contiguous = snapshot.every((message, index) =>
-      index === 0 || message.id === snapshot[index - 1].id + 1
+  for (let start = kept.length - expectedKeys.length; start >= 0; start--) {
+    const snapshot = kept.slice(start, start + expectedKeys.length);
+    // Blank rows between matched rows stay on disk, so ids stay contiguous across re-dumps.
+    const span = rows.slice(snapshot[0].index, snapshot[snapshot.length - 1].index + 1);
+    const contiguous = span.every(({ row }, index) =>
+      index === 0 || row.id === span[index - 1].row.id + 1
     );
     if (
       contiguous &&
-      snapshot.every((message, index) => explicitSnapshotKey(message) === expectedKeys[index])
+      snapshot.every(({ row, content }, index) => explicitSnapshotKey({ ...row, content }) === expectedKeys[index])
     ) {
-      return snapshot;
+      // Matched span plus every row that scrubs to blank (hidden bidi/zero-width only, owner irrelevant).
+      const stale = rows.filter(({ row, content, index }) => row.content !== content && (
+        !content.trim() || (index >= snapshot[0].index && index <= snapshot[snapshot.length - 1].index)
+      ));
+      if (stale.length > 0) {
+        const rewrite = db.prepare('UPDATE messages SET content = ? WHERE id = ?');
+        db.transaction(() => {
+          for (const { row, content } of stale) rewrite.run(content, row.id);
+          deleteRecordEmbeddingsByIdsInTransaction(db, 'messages', stale.map(({ row }) => row.id));
+        })();
+      }
+      return { messages: snapshot.map(({ row, content }) => ({ ...row, content })), blankIds };
     }
   }
 
@@ -194,16 +271,32 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   source: string;
   error?: string;
 }> {
-  const session = options.session || discoverCurrentSession();
+  const inputSession = options.session || discoverCurrentSession();
 
-  if (!session) {
-    return { success: false, sessionId: '', messageCount: 0, source: 'mcp', error: 'No session input or supported host session files found' };
+  if (!inputSession) {
+    const error = process.env.OMPCODE === '1'
+      ? 'Inside omp, use the recall_dump tool: the omp extension supplies the live session'
+      : 'No session input or supported host session files found';
+    return { success: false, sessionId: '', messageCount: 0, source: 'mcp', error };
   }
+
+  const session = {
+    ...inputSession,
+    messages: inputSession.messages.flatMap(message => {
+      const content = scrub(message.content).text;
+      return content.trim() ? [{ ...message, content }] : [];
+    }),
+  };
 
   if (options.project) {
     for (const msg of session.messages) {
       msg.project = options.project;
     }
+  }
+
+  // Checked before any write: replacing a session with nothing would clear its messages.
+  if (session.messages.length === 0) {
+    return { success: false, sessionId: session.sessionId, messageCount: 0, source: session.source, error: 'Session has no user or assistant text to dump' };
   }
 
   const replacingSession = sessionExists(session.sessionId);
@@ -251,15 +344,15 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
     });
   }
 
-  // Raw conversation capture is verbatim (ADR-0001).
   const messagesToImport = existingSnapshot ? [] : session.messages;
   const importedCount = addMessagesBatch(
     messagesToImport.map(message => ({ ...message, provenance: 'verbatim' as const }))
   );
 
   const db = getDb();
+  const snapshot = lifecycleOwned ? existingSnapshot ?? findExplicitSnapshot(session) : undefined;
   const snapshotMessages = lifecycleOwned
-    ? (existingSnapshot ?? findExplicitSnapshot(session) ?? [])
+    ? snapshot?.messages ?? []
     : db.prepare(`
         SELECT id, content, role, timestamp, project
         FROM published_messages
@@ -302,13 +395,26 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
   const sourceIds = JSON.stringify(
     importedMessages.map(message => ({ table: 'messages', id: message.id }))
   );
+  // Legacy LoAs may also list rows that now scrub to blank; ignore those when matching identity.
+  const importedKey = importedMessages.map(message => message.id).join(',');
   const existingLoa = lifecycleOwned
-    ? db.prepare(`
-        SELECT id, title, fabric_extract FROM loa_entries
-        WHERE session_id = ? AND description = ? AND source_ids = ?
-        ORDER BY id DESC LIMIT 1
-      `).get(session.sessionId, EXPLICIT_DUMP_DESCRIPTION, sourceIds) as
-        { id: number; title: string; fabric_extract: string } | undefined
+    ? (db.prepare(`
+        SELECT l.id, l.title, l.fabric_extract, (
+          SELECT group_concat(json_extract(s.value, '$.id'))
+          FROM json_each(CASE WHEN json_valid(l.source_ids) THEN
+            CASE WHEN json_type(l.source_ids) = 'array' THEN l.source_ids ELSE '[]' END
+          ELSE '[]' END) s
+          WHERE CASE WHEN s.type = 'object' THEN json_extract(s.value, '$.table') END = 'messages'
+        ) AS message_ids
+        FROM loa_entries l
+        WHERE l.session_id = ? AND l.description = ?
+        ORDER BY l.id DESC
+      `).all(session.sessionId, EXPLICIT_DUMP_DESCRIPTION) as
+        Array<{ id: number; title: string; fabric_extract: string; message_ids: string | null }>)
+      .find(loa => (loa.message_ids ?? '')
+        .split(',')
+        .filter(id => id && !snapshot?.blankIds.has(Number(id)))
+        .join(',') === importedKey)
     : undefined;
   let loaId: number;
   if (existingLoa) {
@@ -316,7 +422,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
       db.prepare(`
         UPDATE loa_entries SET
           title = ?, fabric_extract = ?, message_range_start = ?, message_range_end = ?,
-          snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?,
+          snapshot_max_message_id = ?, project = ?, tags = ?, message_count = ?, source_ids = ?,
           created_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(
@@ -328,6 +434,7 @@ export async function coreDump(title: string, options: DumpOptions & { session?:
         options.project || session.project,
         options.tags ?? null,
         importedMessages.length,
+        sourceIds,
         existingLoa.id
       );
       if (existingLoa.title !== title || existingLoa.fabric_extract !== fabricExtract) {
@@ -369,7 +476,14 @@ export async function runDump(title: string, options: DumpOptions): Promise<void
   console.log('Memory Dump');
   console.log('===========\n');
 
-  const result = await coreDump(title, options);
+  let session: ParsedSession | undefined;
+  try {
+    session = options.stdin ? parseDumpSessionJson(await readStdin()) : undefined;
+  } catch (error) {
+    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+  const result = await coreDump(title, { ...options, session });
 
   if (!result.success) {
     console.error(`Error: ${result.error}`);

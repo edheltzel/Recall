@@ -7,6 +7,7 @@ import { claudePaths } from '../../src/hosts/claude';
 import { extractClaudeProjectFromPath } from '../../src/hosts/claude-session-source';
 import { parseMarkdownDrop } from '../../src/hosts/markdown-session-source';
 import { discoverCurrentSession } from '../../src/hosts/session-sources';
+import { withEnv } from '../helpers/env';
 
 describe('native host boundaries', () => {
   test('each verified host owns its MCP config shape', () => {
@@ -23,7 +24,7 @@ describe('native host boundaries', () => {
 
   test('session discovery is adapter ordered and stops at the first supported transcript', () => {
     const calls: string[] = [];
-    const session = discoverCurrentSession([
+    const session = withEnv('OMPCODE', undefined, () => discoverCurrentSession([
       { id: 'claude', discover: () => { calls.push('claude'); return null; } },
       {
         id: 'codex',
@@ -39,7 +40,7 @@ describe('native host boundaries', () => {
         },
       },
       { id: 'pi', discover: () => { calls.push('pi'); return null; } },
-    ]);
+    ]));
     expect(session?.source).toBe('codex');
     expect(calls).toEqual(['claude', 'codex']);
   });
@@ -63,5 +64,11 @@ describe('native host boundaries', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('inside omp, file discovery fails closed instead of returning another host session', () => {
+    const foreign = { id: 'claude', discover: () => ({ source: 'claude', sessionId: 'foreign', project: 'x', filePath: 'x.jsonl', messages: [] }) };
+    expect(withEnv('OMPCODE', '1', () => discoverCurrentSession([foreign]))).toBeNull();
+    expect(withEnv('OMPCODE', undefined, () => discoverCurrentSession([foreign]))?.sessionId).toBe('foreign');
   });
 });

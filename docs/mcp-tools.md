@@ -188,6 +188,8 @@ memory_dump({
 
 `memory_dump` is an explicit operation, not lifecycle auto-capture. MCP has no portable event contract for session stop, session start, or pre-compaction.
 
+Message scrubbing follows the shared [Session Dump contract](cli-reference.md#session-dump). Inside omp, use the native [`recall_dump` tool](OMP_INTEGRATION.md#explicit-dump-recall_dump-tool) for the live branch.
+
 When `session_id` already belongs to lifecycle capture, a dump from the same source is supplemental: Recall preserves lifecycle-owned rows and their automatic summary. A conflicting source is rejected rather than taking over the session.
 
 ---
