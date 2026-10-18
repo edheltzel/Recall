@@ -13,6 +13,7 @@ dist/
 .idea/
 
 # Coding Agents
+mailmap
 .atlas/
 .worktrees/
 .claude/worktrees
