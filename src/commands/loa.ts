@@ -1,16 +1,13 @@
 // recall loa command - Library of Alexandria capture
 
-import { createLoaEntryFromMessages, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages, replaceLoaMessagePins } from '../lib/memory.js';
+import { createLoaEntry, createLoaEntryFromMessages, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages, invalidateRecordEmbedding, replaceLoaMessagePins } from '../lib/memory.js';
 import { detectProject } from '../lib/project.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { getDb } from '../db/connection.js';
 import { formatMessagesForExtraction, runFabricExtract } from '../lib/extraction.js';
-import { getRecallHome } from '../lib/runtime-paths.js';
-import { unlinkSync } from 'fs';
-import { join } from 'path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import type { Message } from '../types/index.js';
+import { exclusiveLoaLock, loadOmpLifecycleMessages, OMP_CURATED_DESCRIPTION, ompCuratedSnapshotBehind, ompSnapshotsMatch, releaseLoaLock } from '../../hosts/omp/loa-protocol.js';
 
 interface LoaOptions {
   continues?: number;
@@ -203,68 +200,39 @@ export function runLoaList(limit: number = 10): void {
   }
 }
 
-const OMP_CURATED_DESCRIPTION = 'Curated fabric extraction from omp session end.';
 const OMP_LOA_ATTEMPTS = 8;
-const OMP_LOA_CLI = join(fileURLToPath(new URL('../..', import.meta.url)), 'dist', 'index.js');
-
-function releaseOmpLoaLock(sessionId: string): void {
-  try {
-    unlinkSync(join(getRecallHome(), `omp-loa-${sessionId}.pid`));
-  } catch {
-    // absent on a hand start
-  }
-}
 
 function requeueOmpLoa(sessionId: string): void {
-  const child = spawn('bun', [OMP_LOA_CLI, 'loa', 'omp-end', sessionId], {
+  const child = spawn('bun', [process.argv[1], 'loa', 'omp-end', sessionId], {
     detached: true,
     stdio: 'ignore',
   });
-  child.once('error', () => releaseOmpLoaLock(sessionId));
+  child.once('error', () => releaseLoaLock(sessionId));
   child.unref();
-}
-
-function loadOmpLifecycleMessages(sessionId: string): Message[] {
-  return getDb().prepare(`
-    SELECT m.id, m.session_id, m.timestamp, m.role, m.content, m.project, m.importance, m.provenance
-    FROM published_messages m
-    WHERE EXISTS (
-      SELECT 1 FROM active_host_ingest_messages h
-      WHERE h.message_id = m.id AND h.source = 'omp' AND h.session_id = ?
-    )
-    ORDER BY m.id
-  `).all(sessionId) as Message[];
-}
-
-function ompLifecycleHighWater(sessionId: string): number | null {
-  const row = getDb().prepare(`
-    SELECT MAX(message_id) AS id FROM active_host_ingest_messages
-    WHERE source = 'omp' AND session_id = ?
-  `).get(sessionId) as { id: number | null };
-  return row.id;
 }
 
 function writeOmpCurated(
   sessionId: string,
   messages: Message[],
   text: string,
-  highWater: number,
 ): boolean {
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
   try {
-    if (ompLifecycleHighWater(sessionId) !== highWater) {
+    if (!ompSnapshotsMatch(loadOmpLifecycleMessages(db, sessionId), messages)) {
       db.exec('ROLLBACK');
       return false;
     }
     const session = db.prepare('SELECT project FROM sessions WHERE session_id = ?')
       .get(sessionId) as { project: string | null } | undefined;
     const existing = db.prepare(`
-      SELECT id FROM loa_entries WHERE session_id = ? AND description = ?
+      SELECT id, fabric_extract FROM loa_entries WHERE session_id = ? AND description = ?
       ORDER BY id DESC LIMIT 1
-    `).get(sessionId, OMP_CURATED_DESCRIPTION) as { id: number } | undefined;
+    `).get(sessionId, OMP_CURATED_DESCRIPTION) as { id: number; fabric_extract: string } | undefined;
+    const highWater = messages.reduce((max, message) => Math.max(max, message.id!), 0);
+    let loaId: number;
     if (!existing) {
-      createLoaEntryFromMessages({
+      loaId = createLoaEntry({
         title: `Omp session ${sessionId}`,
         description: OMP_CURATED_DESCRIPTION,
         fabric_extract: text,
@@ -274,15 +242,17 @@ function writeOmpCurated(
         tags: 'curated,omp',
         message_count: messages.length,
         provenance: 'extracted',
-      }, messages);
+      });
     } else {
+      loaId = existing.id;
       db.prepare(`
         UPDATE loa_entries
         SET fabric_extract = ?, message_count = ?, snapshot_max_message_id = ?
         WHERE id = ?
       `).run(text, messages.length, highWater, existing.id);
-      replaceLoaMessagePins(existing.id, messages, db);
+      if (existing.fabric_extract !== text) invalidateRecordEmbedding(db, 'loa_entries', existing.id);
     }
+    replaceLoaMessagePins(loaId, messages, db);
     db.exec('COMMIT');
     return true;
   } catch (error) {
@@ -291,47 +261,59 @@ function writeOmpCurated(
   }
 }
 
-function loadedHighWater(messages: readonly Message[]): number | null {
-  const id = messages[messages.length - 1]?.id;
-  return Number.isSafeInteger(id) ? id! : null;
-}
-
 export async function runLoaOmpEnd(
   sessionId: string,
   deps: {
     extract?: typeof runFabricExtract;
     afterLoad?: () => void;
     beforeWrite?: () => void;
+    afterWrite?: () => void;
   } = {},
 ): Promise<number> {
   const extract = deps.extract ?? runFabricExtract;
   let handoff = false;
   let hooked = false;
+  let completed = false;
   try {
     for (let attempt = 0; attempt < OMP_LOA_ATTEMPTS; attempt++) {
-      const messages = loadOmpLifecycleMessages(sessionId);
-      if (messages.length === 0) return 0;
+      const messages = loadOmpLifecycleMessages(getDb(), sessionId) as Message[];
+      if (messages.length === 0) {
+        completed = true;
+        return 0;
+      }
       if (attempt === 0) deps.afterLoad?.();
-      const highWater = loadedHighWater(messages);
-      if (highWater == null) return 0;
       let text: string;
       try {
         text = extract(formatMessagesForExtraction(messages));
       } catch {
         return 0;
       }
-      if (ompLifecycleHighWater(sessionId) !== highWater) continue;
+      if (!ompSnapshotsMatch(loadOmpLifecycleMessages(getDb(), sessionId), messages)) continue;
       if (!hooked) {
         hooked = true;
         deps.beforeWrite?.();
-        if (ompLifecycleHighWater(sessionId) !== highWater) continue;
+        if (!ompSnapshotsMatch(loadOmpLifecycleMessages(getDb(), sessionId), messages)) continue;
       }
-      if (writeOmpCurated(sessionId, messages, text, highWater)) return 0;
+      if (writeOmpCurated(sessionId, messages, text)) {
+        completed = true;
+        deps.afterWrite?.();
+        return 0;
+      }
     }
     requeueOmpLoa(sessionId);
     handoff = true;
     return 0;
   } finally {
-    if (!handoff) releaseOmpLoaLock(sessionId);
+    if (!handoff) {
+      releaseLoaLock(sessionId);
+      if (completed && ompCuratedSnapshotBehind(getDb(), sessionId) && exclusiveLoaLock(sessionId)) {
+        try {
+          requeueOmpLoa(sessionId);
+        } catch (error) {
+          releaseLoaLock(sessionId);
+          throw error;
+        }
+      }
+    }
   }
 }

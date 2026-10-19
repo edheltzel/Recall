@@ -2,14 +2,15 @@
 // Self-contained — no src/ imports, no @oh-my-pi runtime import.
 
 import { spawn } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, unlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Database } from 'bun:sqlite';
 import type { z } from 'zod';
 import { resolveDbPath as getDbPath } from '../../hooks/lib/db-path';
 import { scrub } from '../../hooks/lib/write-safety';
+import { exclusiveLoaLock, ompCuratedSnapshotBehind, releaseLoaLock } from './loa-protocol';
+
+export { exclusiveLoaLock } from './loa-protocol';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLI_PATH = join(PACKAGE_ROOT, 'dist', 'index.js');
@@ -338,26 +339,6 @@ export function ompBranchMessages(entries: unknown): OmpMessage[] {
   return messages;
 }
 
-const OMP_CURATED_DESCRIPTION = 'Curated fabric extraction from omp session end.';
-
-function ompLoaLockPath(sessionId: string): string {
-  const dir = process.env.RECALL_HOME || join(homedir(), '.agents', 'Recall');
-  return join(dir, `omp-loa-${sessionId}.pid`);
-}
-
-export function exclusiveLoaLock(sessionId: string): boolean {
-  const path = ompLoaLockPath(sessionId);
-  mkdirSync(dirname(path), { recursive: true });
-  try {
-    closeSync(openSync(path, 'wx'));
-    return true;
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') return false;
-    throw error;
-  }
-}
-
-/** True when the Curated snapshot is missing or behind the lifecycle high-water. Read-only. */
 export function curatedSnapshotBehind(sessionId: string): boolean {
   let db: Database;
   try {
@@ -366,30 +347,11 @@ export function curatedSnapshotBehind(sessionId: string): boolean {
     return false;
   }
   try {
-    const hw = db.query<{ id: number | null }, [string]>(`
-      SELECT MAX(message_id) AS id FROM active_host_ingest_messages
-      WHERE source = 'omp' AND session_id = ?
-    `).get(sessionId);
-    if (!hw?.id) return false;
-    const row = db.query<{ snapshot: number | null }, [string, string]>(`
-      SELECT snapshot_max_message_id AS snapshot FROM loa_entries
-      WHERE session_id = ? AND description = ?
-      ORDER BY id DESC LIMIT 1
-    `).get(sessionId, OMP_CURATED_DESCRIPTION);
-    if (!row) return true;
-    return (row.snapshot ?? -1) < hw.id;
+    return ompCuratedSnapshotBehind(db, sessionId);
   } catch {
     return false;
   } finally {
     db.close();
-  }
-}
-
-function releaseLoaLock(sessionId: string): void {
-  try {
-    unlinkSync(ompLoaLockPath(sessionId));
-  } catch {
-    // lock already gone
   }
 }
 

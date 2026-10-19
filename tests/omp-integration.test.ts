@@ -498,11 +498,19 @@ describe('omp native extension', () => {
     const dbPath = join(dir, 'recall.db');
     const db = new Database(dbPath);
     db.exec(`
-      CREATE TABLE active_host_ingest_messages (source TEXT, session_id TEXT, message_id INTEGER);
+      CREATE TABLE active_host_ingest_messages (source TEXT, session_id TEXT, message_id INTEGER, source_position INTEGER);
+      CREATE TABLE published_messages (
+        id INTEGER, session_id TEXT, timestamp TEXT, role TEXT, content TEXT, project TEXT, importance INTEGER, provenance TEXT
+      );
       CREATE TABLE loa_entries (
         id INTEGER PRIMARY KEY, session_id TEXT, description TEXT, snapshot_max_message_id INTEGER
       );
-      INSERT INTO active_host_ingest_messages (source, session_id, message_id) VALUES ('omp', 'ses-mem', 7);
+      CREATE TABLE loa_message_sources (
+        loa_id INTEGER, ordinal INTEGER, message_id INTEGER, session_id TEXT, timestamp TEXT, role TEXT,
+        content TEXT, project TEXT, importance INTEGER, provenance TEXT
+      );
+      INSERT INTO active_host_ingest_messages VALUES ('omp', 'ses-mem', 7, 0);
+      INSERT INTO published_messages VALUES (7, 'ses-mem', '2026-10-18T00:00:00Z', 'user', 'captured frame', NULL, 5, 'verbatim');
     `);
     db.close();
     const previousRecall = process.env.RECALL_DB_PATH;
@@ -517,6 +525,11 @@ describe('omp native extension', () => {
         INSERT INTO loa_entries (session_id, description, snapshot_max_message_id)
         VALUES (?, 'Curated fabric extraction from omp session end.', 7)
       `).run('ses-mem');
+      marked.exec(`
+        INSERT INTO loa_message_sources
+        SELECT 1, 0, id, session_id, timestamp, role, content, project, importance, provenance
+        FROM published_messages;
+      `);
       marked.close();
       expect(curatedSnapshotBehind('ses-mem')).toBe(false);
     } finally {
