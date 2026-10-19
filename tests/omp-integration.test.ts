@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
+import type { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   captureOmpSessionStop,
   dumpOmpSession,
+  exclusiveLoaLock,
   MAX_OMP_STDIN_BYTES,
   runBoundedChild,
+  spawnLoaOmpEnd,
   type OmpExtensionContext,
 } from '../hosts/omp/recall';
 
@@ -22,6 +28,9 @@ function uiCtx(
     ...extras,
   };
 }
+
+/** Fifth capture arg: Curated snapshot already matches, so do not spawn. */
+const curatedCurrent = () => false;
 
 describe('omp native extension', () => {
   test('nonzero child warns via ui.notify without transcript', async () => {
@@ -48,7 +57,7 @@ describe('omp native extension', () => {
     }), undefined, async (_file, _args, childStdin) => {
       stdin = childStdin;
       return 0;
-    });
+    }, curatedCurrent);
     expect(JSON.parse(stdin).text).toBe('keep this question');
   });
 
@@ -77,8 +86,7 @@ describe('omp native extension', () => {
         spawned = true;
         stdin = childStdin;
         return 0;
-      },
-    );
+      }, curatedCurrent);
     expect(spawned).toBe(true);
     expect(Buffer.byteLength(stdin, 'utf8')).toBeLessThanOrEqual(MAX_OMP_STDIN_BYTES);
     const payload = JSON.parse(stdin);
@@ -110,8 +118,7 @@ describe('omp native extension', () => {
       async (_file, _args, childStdin) => {
         stdin = childStdin;
         return 0;
-      },
-    );
+      }, curatedCurrent);
     expect(Buffer.byteLength(stdin, 'utf8')).toBeLessThanOrEqual(MAX_OMP_STDIN_BYTES);
     const payload = JSON.parse(stdin);
     expect(payload.text.startsWith(head)).toBe(true);
@@ -141,8 +148,7 @@ describe('omp native extension', () => {
       async (_file, _args, childStdin) => {
         stdin = childStdin;
         return 0;
-      },
-    );
+      }, curatedCurrent);
     expect(Buffer.byteLength(stdin, 'utf8')).toBeLessThanOrEqual(MAX_OMP_STDIN_BYTES);
     const text = JSON.parse(stdin).text as string;
     expect(text).toContain('[Recall omp capture truncated]');
@@ -172,7 +178,7 @@ describe('omp native extension', () => {
       args = childArgs;
       stdin = childStdin;
       return 0;
-    });
+    }, curatedCurrent);
     expect(args[0]?.endsWith('/dist/index.js')).toBe(true);
     expect(args[0]).not.toContain('/hosts/dist/');
     expect(args[1]).toBe('capture');
@@ -388,5 +394,68 @@ describe('omp native extension', () => {
       '',
       AbortSignal.abort(),
     )).resolves.toBeNull();
+  });
+
+  test('spawns loa omp-end only when the curated snapshot is behind and unlocked', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'recall-omp-loa-'));
+    const previous = process.env.RECALL_HOME;
+    process.env.RECALL_HOME = home;
+    try {
+      const session = () => ({
+        sessionManager: {
+          getSessionId: () => 'sess-loa',
+          getBranch: () => [{ type: 'message', id: 'u1', message: { role: 'user', content: 'turn' } }],
+        },
+      });
+      const ok = async () => 0;
+      const spawned: string[] = [];
+      const spawn = (sessionId: string) => { spawned.push(sessionId); };
+
+      await captureOmpSessionStop({}, uiCtx(() => {}, session()), undefined, ok, curatedCurrent, () => true, spawn);
+      expect(spawned).toEqual([]);
+
+      writeFileSync(join(home, 'omp-loa-sess-loa.pid'), 'held');
+      await captureOmpSessionStop({}, uiCtx(() => {}, session()), undefined, ok, () => true, exclusiveLoaLock, spawn);
+      expect(spawned).toEqual([]);
+      rmSync(join(home, 'omp-loa-sess-loa.pid'));
+
+      let lockedBeforeSpawn = false;
+      await captureOmpSessionStop({}, uiCtx(() => {}, session()), undefined, ok, () => true, exclusiveLoaLock, (id) => {
+        lockedBeforeSpawn = existsSync(join(home, `omp-loa-${id}.pid`));
+        spawned.push(id);
+      });
+      expect(lockedBeforeSpawn).toBe(true);
+      expect(spawned).toEqual(['sess-loa']);
+
+      await captureOmpSessionStop({}, uiCtx(() => {}, session()), undefined, async () => 1, () => true, () => {
+        throw new Error('lock should not run');
+      }, spawn);
+      expect(spawned).toEqual(['sess-loa']);
+
+      const messages: string[] = [];
+      rmSync(join(home, 'omp-loa-sess-loa.pid'));
+      await captureOmpSessionStop({}, uiCtx(message => messages.push(message), session()), undefined, ok, () => true, exclusiveLoaLock, () => {
+        throw new Error('spawn failed');
+      });
+      expect(messages).toEqual(['Recall omp curated extract failed']);
+      expect(existsSync(join(home, 'omp-loa-sess-loa.pid'))).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.RECALL_HOME;
+      else process.env.RECALL_HOME = previous;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test('detached loa spawn ignores stdio and unrefs', () => {
+    let args: unknown[] = [];
+    let unrefed = false;
+    spawnLoaOmpEnd('sess-x', ((file, argv, opts) => {
+      args = [file, argv, opts];
+      return { unref() { unrefed = true; } };
+    }) as typeof spawn);
+    expect(args[0]).toBe('bun');
+    expect(args[1]).toEqual([expect.stringContaining('dist/index.js'), 'loa', 'omp-end', 'sess-x']);
+    expect(args[2]).toEqual({ detached: true, stdio: 'ignore' });
+    expect(unrefed).toBe(true);
   });
 });

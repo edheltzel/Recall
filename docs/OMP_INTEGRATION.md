@@ -34,6 +34,8 @@ Do not install the npm package named `recall-memory`; that name is an unrelated 
 
 This is turn-completion capture, not crash recovery. An interrupted turn before `session_stop` is not guaranteed captured. Shutdown and pre-compaction hooks are not installed. The active branch is read again on the next stop after a failure.
 
+`session_stop` is still turn completion; after a successful capture the extension detaches `recall loa omp-end` only when that session's Curated snapshot is missing or behind the lifecycle high-water and no child is already running. Fabric failure keeps the basic summary.
+
 Capture bounds its CLI child to 30 seconds and its serialized JSON payload to 25 MiB, including metadata, escaping, and the truncation marker. Excluded content does not count toward this limit. When the scrubbed text would exceed the limit, capture allocates 60% of the remaining JSON-escaped byte budget to the beginning and 40% to the end of the text, separated by `[Recall omp capture truncated]`; a warning reports the UTF-8 bytes dropped from the scrubbed text. Malformed branches are rejected before starting the child; malformed branches, cancellations, and child failures warn without stopping omp.
 
 ## Explicit dump: `recall_dump` tool

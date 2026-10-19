@@ -2,8 +2,11 @@
 // Self-contained — no src/ imports, no @oh-my-pi runtime import.
 
 import { spawn } from 'node:child_process';
+import { closeSync, openSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Database } from 'bun:sqlite';
 import type { z } from 'zod';
 import { scrub } from '../../hooks/lib/write-safety';
 
@@ -334,11 +337,83 @@ export function ompBranchMessages(entries: unknown): OmpMessage[] {
   return messages;
 }
 
+const OMP_CURATED_DESCRIPTION = 'Curated fabric extraction from omp session end.';
+
+function ompLoaLockPath(sessionId: string): string {
+  const dir = process.env.RECALL_HOME || join(homedir(), '.agents', 'Recall');
+  return join(dir, `omp-loa-${sessionId}.pid`);
+}
+
+function recallDbPath(): string {
+  const home = homedir();
+  const raw = process.env.RECALL_DB_PATH;
+  if (!raw) return join(home, '.agents', 'Recall', 'recall.db');
+  if (raw === '~') return home;
+  if (raw.startsWith('~/')) return home + raw.slice(1);
+  return raw;
+}
+
+/** True when the Curated snapshot is missing or behind the lifecycle high-water. Read-only. */
+export function curatedSnapshotBehind(sessionId: string): boolean {
+  let db: Database;
+  try {
+    db = new Database(recallDbPath(), { readonly: true });
+  } catch {
+    return false;
+  }
+  try {
+    const hw = db.query<{ id: number | null }, [string]>(`
+      SELECT MAX(message_id) AS id FROM active_host_ingest_messages
+      WHERE source = 'omp' AND session_id = ?
+    `).get(sessionId);
+    if (!hw?.id) return false;
+    const row = db.query<{ snapshot: number | null }, [string, string]>(`
+      SELECT snapshot_max_message_id AS snapshot FROM loa_entries
+      WHERE session_id = ? AND description = ?
+      ORDER BY id DESC LIMIT 1
+    `).get(sessionId, OMP_CURATED_DESCRIPTION);
+    if (!row) return true;
+    return (row.snapshot ?? -1) < hw.id;
+  } catch {
+    return false;
+  } finally {
+    db.close();
+  }
+}
+
+export function exclusiveLoaLock(sessionId: string): boolean {
+  try {
+    closeSync(openSync(ompLoaLockPath(sessionId), 'wx'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseLoaLock(sessionId: string): void {
+  try {
+    unlinkSync(ompLoaLockPath(sessionId));
+  } catch {
+    // lock already gone
+  }
+}
+
+export function spawnLoaOmpEnd(sessionId: string, launch: typeof spawn = spawn): void {
+  const child = launch('bun', [CLI_PATH, 'loa', 'omp-end', sessionId], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+}
+
 export async function captureOmpSessionStop(
   event: OmpSessionStopEvent,
   ctx: OmpExtensionContext,
   pi?: OmpExtensionAPI,
   runChild: RunBoundedChild = runBoundedChild,
+  curatedAhead: (sessionId: string) => boolean = curatedSnapshotBehind,
+  acquireLock: (sessionId: string) => boolean = exclusiveLoaLock,
+  spawnDetached: (sessionId: string) => void = spawnLoaOmpEnd,
 ): Promise<void> {
   try {
     if (event.signal?.aborted) {
@@ -368,8 +443,21 @@ export async function captureOmpSessionStop(
       return;
     }
     const { code, aborted } = await runCli(runChild, ['capture'], payload, event.signal, CHILD_TIMEOUT_MS);
-    if (code === 0) return;
-    warn(ctx, pi, aborted ? 'Recall omp capture cancelled' : 'Recall omp capture failed');
+    if (code !== 0) {
+      warn(ctx, pi, aborted ? 'Recall omp capture cancelled' : 'Recall omp capture failed');
+      return;
+    }
+    if (aborted) return;
+    let locked = false;
+    try {
+      if (!curatedAhead(sessionId)) return;
+      if (!acquireLock(sessionId)) return;
+      locked = true;
+      spawnDetached(sessionId);
+    } catch {
+      if (locked) releaseLoaLock(sessionId);
+      warn(ctx, pi, 'Recall omp curated extract failed');
+    }
   } catch {
     warn(ctx, pi, 'Recall omp capture failed');
   }
