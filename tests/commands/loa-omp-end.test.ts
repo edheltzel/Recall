@@ -50,6 +50,13 @@ function curatedRows(sessionId: string) {
   }>;
 }
 
+function lifecycleMax(sessionId: string): number {
+  return (getDb().prepare(`
+    SELECT MAX(message_id) AS id FROM active_host_ingest_messages
+    WHERE source = 'omp' AND session_id = ?
+  `).get(sessionId) as { id: number }).id;
+}
+
 function basicExtract(sessionId: string): string {
   return (getDb().prepare(`
     SELECT fabric_extract FROM loa_entries WHERE session_id = ? AND description = ? AND tags = ?
@@ -137,16 +144,24 @@ describe('recall loa omp-end', () => {
     expect(calls).toBe(2);
   });
 
-  test('a high-water move during the retry writes nothing', async () => {
+  test('a capture during extract is included before the worker exits', async () => {
     capture('ses-move', 'first capture', 0);
     let calls = 0;
-    expect(await runLoaOmpEnd('ses-move', { extract: () => {
-      calls += 1;
-      capture('ses-move', `capture ${calls}`, calls);
-      return `extract ${calls}`;
-    } })).toBe(0);
-    expect(curatedRows('ses-move')).toEqual([]);
-    expect(calls).toBe(2);
+    expect(await runLoaOmpEnd('ses-move', {
+      extract: (content) => {
+        calls += 1;
+        if (calls <= 2) {
+          capture('ses-move', `final capture ${calls}`, calls);
+          return `stale ${calls}`;
+        }
+        return content;
+      },
+    })).toBe(0);
+    expect(calls).toBeGreaterThan(2);
+    const rows = curatedRows('ses-move');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fabric_extract).toContain('final capture 2');
+    expect(rows[0].snapshot_max_message_id).toBe(lifecycleMax('ses-move'));
   });
 
   test('no lifecycle rows exits 0', async () => {
@@ -170,23 +185,78 @@ describe('recall loa omp-end', () => {
     const rows = curatedRows('ses-gap');
     expect(rows).toHaveLength(1);
     expect(rows[0].fabric_extract).toBe('extract 2');
-    const max = getDb().prepare(`
-      SELECT MAX(message_id) AS id FROM active_host_ingest_messages
-      WHERE source = 'omp' AND session_id = ?
-    `).get('ses-gap') as { id: number };
-    expect(rows[0].snapshot_max_message_id).toBe(max.id);
+    expect(rows[0].snapshot_max_message_id).toBe(lifecycleMax('ses-gap'));
   });
 
-  test('the write transaction refuses when high-water moved after the extract check', async () => {
+  test('a row committed before the write is extracted in the same worker', async () => {
     capture('ses-commit', 'seen turn', 0);
+    let planted = false;
     expect(await runLoaOmpEnd('ses-commit', {
-      extract: () => 'would cover the old rows',
-      beforeWrite: () => capture('ses-commit', 'unseen turn', 1),
+      extract: (content) => content,
+      beforeWrite: () => {
+        if (planted) return;
+        planted = true;
+        capture('ses-commit', 'unseen turn', 1);
+      },
     })).toBe(0);
-    expect(curatedRows('ses-commit')).toEqual([]);
-    const published = getDb().prepare(`
-      SELECT content FROM published_messages WHERE session_id = ?
-    `).all('ses-commit') as Array<{ content: string }>;
-    expect(published.map(row => row.content)).toContain('unseen turn');
+    const rows = curatedRows('ses-commit');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fabric_extract).toContain('unseen turn');
+    expect(rows[0].snapshot_max_message_id).toBe(lifecycleMax('ses-commit'));
+  });
+
+  test('a capture during the child worker is covered without another parent call', async () => {
+    const sessionId = 'ses-xproc';
+    capture(sessionId, 'first capture', 0);
+    const home = getRecallHome();
+    const pid = join(home, `omp-loa-${sessionId}.pid`);
+    const ready = join(home, 'ready');
+    const go = join(home, 'go');
+    writeFileSync(pid, '1');
+    const modulePath = join(import.meta.dir, '../../src/commands/loa.ts');
+    const child = Bun.spawn(['bun', '-e', `
+      import { existsSync, writeFileSync } from 'fs';
+      import { runLoaOmpEnd } from ${JSON.stringify(modulePath)};
+      let waited = false;
+      const code = await runLoaOmpEnd(process.env.SESSION_ID, {
+        afterLoad() { writeFileSync(process.env.READY, '1'); },
+        extract(content) {
+          if (!waited) {
+            waited = true;
+            const start = Date.now();
+            while (!existsSync(process.env.GO)) {
+              if (Date.now() - start > 5000) {
+                console.error('child timed out waiting to extract');
+                return content;
+              }
+            }
+          }
+          return content;
+        },
+      });
+      process.exit(code);
+    `], {
+      env: { ...process.env, RECALL_HOME: home, SESSION_ID: sessionId, READY: ready, GO: go },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    try {
+      const start = Date.now();
+      while (!existsSync(ready)) {
+        if (child.exitCode !== null || Date.now() - start > 5000) break;
+      }
+      capture(sessionId, 'final capture', 1);
+      writeFileSync(go, '1');
+      const exit = await child.exited;
+      const stderr = await new Response(child.stderr).text();
+      expect(exit, stderr).toBe(0);
+      const rows = curatedRows(sessionId);
+      expect(rows, stderr).toHaveLength(1);
+      expect(rows[0].fabric_extract).toContain('final capture');
+      expect(rows[0].snapshot_max_message_id).toBe(lifecycleMax(sessionId));
+      expect(existsSync(pid)).toBe(false);
+    } finally {
+      child.kill();
+    }
   });
 });

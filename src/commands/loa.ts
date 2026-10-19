@@ -8,6 +8,8 @@ import { formatMessagesForExtraction, runFabricExtract } from '../lib/extraction
 import { getRecallHome } from '../lib/runtime-paths.js';
 import { unlinkSync } from 'fs';
 import { join } from 'path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import type { Message } from '../types/index.js';
 
 interface LoaOptions {
@@ -202,6 +204,8 @@ export function runLoaList(limit: number = 10): void {
 }
 
 const OMP_CURATED_DESCRIPTION = 'Curated fabric extraction from omp session end.';
+const OMP_LOA_ATTEMPTS = 8;
+const OMP_LOA_CLI = join(fileURLToPath(new URL('../..', import.meta.url)), 'dist', 'index.js');
 
 function releaseOmpLoaLock(sessionId: string): void {
   try {
@@ -209,6 +213,15 @@ function releaseOmpLoaLock(sessionId: string): void {
   } catch {
     // absent on a hand start
   }
+}
+
+function requeueOmpLoa(sessionId: string): void {
+  const child = spawn('bun', [OMP_LOA_CLI, 'loa', 'omp-end', sessionId], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.once('error', () => releaseOmpLoaLock(sessionId));
+  child.unref();
 }
 
 function loadOmpLifecycleMessages(sessionId: string): Message[] {
@@ -292,29 +305,33 @@ export async function runLoaOmpEnd(
   } = {},
 ): Promise<number> {
   const extract = deps.extract ?? runFabricExtract;
+  let handoff = false;
+  let hooked = false;
   try {
-    let messages = loadOmpLifecycleMessages(sessionId);
-    if (messages.length === 0) return 0;
-    deps.afterLoad?.();
-    let highWater = loadedHighWater(messages);
-    if (highWater == null) return 0;
-    let text: string;
-    try {
-      text = extract(formatMessagesForExtraction(messages));
-      if (ompLifecycleHighWater(sessionId) !== highWater) {
-        messages = loadOmpLifecycleMessages(sessionId);
-        highWater = loadedHighWater(messages);
-        if (messages.length === 0 || highWater == null) return 0;
+    for (let attempt = 0; attempt < OMP_LOA_ATTEMPTS; attempt++) {
+      const messages = loadOmpLifecycleMessages(sessionId);
+      if (messages.length === 0) return 0;
+      if (attempt === 0) deps.afterLoad?.();
+      const highWater = loadedHighWater(messages);
+      if (highWater == null) return 0;
+      let text: string;
+      try {
         text = extract(formatMessagesForExtraction(messages));
-        if (ompLifecycleHighWater(sessionId) !== highWater) return 0;
+      } catch {
+        return 0;
       }
-    } catch {
-      return 0;
+      if (ompLifecycleHighWater(sessionId) !== highWater) continue;
+      if (!hooked) {
+        hooked = true;
+        deps.beforeWrite?.();
+        if (ompLifecycleHighWater(sessionId) !== highWater) continue;
+      }
+      if (writeOmpCurated(sessionId, messages, text, highWater)) return 0;
     }
-    deps.beforeWrite?.();
-    if (!writeOmpCurated(sessionId, messages, text, highWater)) return 0;
+    requeueOmpLoa(sessionId);
+    handoff = true;
     return 0;
   } finally {
-    releaseOmpLoaLock(sessionId);
+    if (!handoff) releaseOmpLoaLock(sessionId);
   }
 }
