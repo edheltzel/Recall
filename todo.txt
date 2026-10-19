@@ -5,7 +5,7 @@
 2026-10-09 Slash-export windowed learnings to a user-chosen Obsidian folder. Parked; learnings-only export. +recall @outstanding issue:280
 2026-10-09 Learn prefs into global AGENTS.md (and CLAUDE.md) below a Recall marker. Not started. +recall @outstanding issue:279
 x 2026-10-17 2026-10-09 CREATE_TABLES lags migrations: decisions/learnings missing confidence. Confirmed on main: decisions/learnings CREATE TABLE lack confidence. +recall @outstanding issue:278 pr:https://github.com/edheltzel/Recall/pull/332
-2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277 @waiting gate parked
+x 2026-10-19 2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277 @waiting gate parked pr:https://github.com/edheltzel/Recall/pull/338
 2026-10-09 Collapse host identity lists toward SESSION_SOURCES. #282 added cursor to SESSION_SOURCES only; lists not collapsed. +recall @outstanding issue:269
 2026-10-09 P2: Bun-free runtime spike (do not crowd Cursor/Grok). P2 spike; parked. +recall @outstanding issue:266
 2026-10-09 Eval déjà vu ssh-sync vs Turso/libSQL epic #102. Eval only; ties to #102. +recall @outstanding issue:265
@@ -26,7 +26,7 @@ x 2026-10-17 2026-10-09 harden: applyConnectionPragmas sets journal_mode=WAL bef
 2026-10-09 feat: frecency-in-ranking evidence/benchmark behind a default-off flag (informs #155). Default-off frecency flag; informs #155. +recall @outstanding issue:193
 x 2026-10-17 2026-10-09 harden: bound WAL growth — centralize journal_size_limit across all Recall DB writers. No journal_size_limit on main. +recall @outstanding issue:192 pr:https://github.com/edheltzel/Recall/pull/335
 x 2026-10-17 2026-10-09 harden: scrub() learnings.tags on the explicit add paths (un-redacted secret persist, LOW). Scrub learnings.tags on add paths. +recall @outstanding issue:182 pr:https://github.com/edheltzel/Recall/pull/333
-2026-10-09 chore: scrub-archive hostile-fs tests no-op-pass under root (add uid skip-guard). Root uid skip-guard for tests. +recall @outstanding issue:178 @waiting gate parked
+x 2026-10-19 2026-10-09 chore: scrub-archive hostile-fs tests no-op-pass under root (add uid skip-guard). Root uid skip-guard for tests. +recall @outstanding issue:178 @waiting gate parked pr:https://github.com/edheltzel/Recall/pull/339
 2026-10-09 docs: stale backup path ~/.claude/backups/recall in installation.md + upgrading.md. Confirmed on main: docs still say ~/.claude/backups/recall (also architecture.md). +recall @outstanding issue:174
 x 2026-10-17 2026-10-09 harden: recall hybrid/semantic CLI crash on embedding dim mismatch. CLI cosineSimilarity calls still unguarded in embed.ts. +recall @outstanding issue:163 pr:https://github.com/edheltzel/Recall/pull/334
 2026-10-09 B3: Blend frecency into ranking (importance #101 + L1 recall #100 + search order). needs - human; ranking change waits on Ed. +recall @outstanding issue:155
