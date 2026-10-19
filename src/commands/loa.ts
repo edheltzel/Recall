@@ -1,10 +1,14 @@
 // recall loa command - Library of Alexandria capture
 
-import { createLoaEntryFromMessages, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages } from '../lib/memory.js';
+import { createLoaEntryFromMessages, getMessagesSinceLastLoa, getLastLoaEntry, getLoaEntry, getLoaMessages, replaceLoaMessagePins } from '../lib/memory.js';
 import { detectProject } from '../lib/project.js';
 import { embed, embeddingToBlob, checkEmbeddingService } from '../lib/embeddings.js';
 import { getDb } from '../db/connection.js';
 import { formatMessagesForExtraction, runFabricExtract } from '../lib/extraction.js';
+import { getRecallHome } from '../lib/runtime-paths.js';
+import { unlinkSync } from 'fs';
+import { join } from 'path';
+import type { Message } from '../types/index.js';
 
 interface LoaOptions {
   continues?: number;
@@ -194,5 +198,102 @@ export function runLoaList(limit: number = 10): void {
     console.log(`  ${e.title}`);
     console.log(`  ${e.message_count || 0} messages`);
     console.log('');
+  }
+}
+
+const OMP_CURATED_DESCRIPTION = 'Curated fabric extraction from omp session end.';
+
+function releaseOmpLoaLock(sessionId: string): void {
+  try {
+    unlinkSync(join(getRecallHome(), `omp-loa-${sessionId}.pid`));
+  } catch {
+    // absent on a hand start
+  }
+}
+
+function loadOmpLifecycleMessages(sessionId: string): Message[] {
+  return getDb().prepare(`
+    SELECT m.id, m.session_id, m.timestamp, m.role, m.content, m.project, m.importance, m.provenance
+    FROM published_messages m
+    WHERE EXISTS (
+      SELECT 1 FROM active_host_ingest_messages h
+      WHERE h.message_id = m.id AND h.source = 'omp' AND h.session_id = ?
+    )
+    ORDER BY m.id
+  `).all(sessionId) as Message[];
+}
+
+function ompLifecycleHighWater(sessionId: string): number | null {
+  const row = getDb().prepare(`
+    SELECT MAX(message_id) AS id FROM active_host_ingest_messages
+    WHERE source = 'omp' AND session_id = ?
+  `).get(sessionId) as { id: number | null };
+  return row.id;
+}
+
+function writeOmpCurated(
+  sessionId: string,
+  messages: Message[],
+  text: string,
+  highWater: number,
+): void {
+  const db = getDb();
+  const session = db.prepare('SELECT project FROM sessions WHERE session_id = ?')
+    .get(sessionId) as { project: string | null } | undefined;
+  const existing = db.prepare(`
+    SELECT id FROM loa_entries WHERE session_id = ? AND description = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(sessionId, OMP_CURATED_DESCRIPTION) as { id: number } | undefined;
+  if (!existing) {
+    createLoaEntryFromMessages({
+      title: `Omp session ${sessionId}`,
+      description: OMP_CURATED_DESCRIPTION,
+      fabric_extract: text,
+      snapshot_max_message_id: highWater,
+      session_id: sessionId,
+      project: session?.project || undefined,
+      tags: 'curated,omp',
+      message_count: messages.length,
+      provenance: 'extracted',
+    }, messages);
+    return;
+  }
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE loa_entries
+      SET fabric_extract = ?, message_count = ?, snapshot_max_message_id = ?
+      WHERE id = ?
+    `).run(text, messages.length, highWater, existing.id);
+    replaceLoaMessagePins(existing.id, messages, db);
+  })();
+}
+
+export async function runLoaOmpEnd(
+  sessionId: string,
+  deps: { extract?: typeof runFabricExtract } = {},
+): Promise<number> {
+  const extract = deps.extract ?? runFabricExtract;
+  try {
+    let messages = loadOmpLifecycleMessages(sessionId);
+    if (messages.length === 0) return 0;
+    let highWater = ompLifecycleHighWater(sessionId);
+    let text: string;
+    try {
+      text = extract(formatMessagesForExtraction(messages));
+      if (ompLifecycleHighWater(sessionId) !== highWater) {
+        messages = loadOmpLifecycleMessages(sessionId);
+        highWater = ompLifecycleHighWater(sessionId);
+        if (messages.length === 0 || highWater == null) return 0;
+        text = extract(formatMessagesForExtraction(messages));
+        if (ompLifecycleHighWater(sessionId) !== highWater) return 0;
+      }
+    } catch {
+      return 0;
+    }
+    if (highWater == null) return 0;
+    writeOmpCurated(sessionId, messages, text, highWater);
+    return 0;
+  } finally {
+    releaseOmpLoaLock(sessionId);
   }
 }
