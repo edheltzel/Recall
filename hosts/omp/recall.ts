@@ -4,8 +4,13 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Database } from 'bun:sqlite';
 import type { z } from 'zod';
+import { resolveDbPath as getDbPath } from '../../hooks/lib/db-path';
 import { scrub } from '../../hooks/lib/write-safety';
+import { exclusiveLoaLock, ompCuratedSnapshotBehind, releaseLoaLock } from './loa-protocol';
+
+export { exclusiveLoaLock } from './loa-protocol';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLI_PATH = join(PACKAGE_ROOT, 'dist', 'index.js');
@@ -334,11 +339,47 @@ export function ompBranchMessages(entries: unknown): OmpMessage[] {
   return messages;
 }
 
+export function curatedSnapshotBehind(sessionId: string): boolean {
+  let db: Database;
+  try {
+    db = new Database(getDbPath(), { readonly: true });
+  } catch {
+    return false;
+  }
+  try {
+    return ompCuratedSnapshotBehind(db, sessionId);
+  } catch {
+    return false;
+  } finally {
+    db.close();
+  }
+}
+
+export function spawnLoaOmpEnd(
+  sessionId: string,
+  launch: typeof spawn = spawn,
+  onError?: () => void,
+): void {
+  const child = launch('bun', [CLI_PATH, 'loa', 'omp-end', sessionId], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.once('error', () => {
+    releaseLoaLock(sessionId);
+    onError?.();
+  });
+  child.unref();
+}
+
 export async function captureOmpSessionStop(
   event: OmpSessionStopEvent,
   ctx: OmpExtensionContext,
   pi?: OmpExtensionAPI,
   runChild: RunBoundedChild = runBoundedChild,
+  curatedAhead: (sessionId: string) => boolean = curatedSnapshotBehind,
+  acquireLock: (sessionId: string) => boolean = exclusiveLoaLock,
+  spawnDetached: (sessionId: string) => void = spawnLoaOmpEnd,
+  launch: typeof spawn = spawn,
 ): Promise<void> {
   try {
     if (event.signal?.aborted) {
@@ -368,8 +409,24 @@ export async function captureOmpSessionStop(
       return;
     }
     const { code, aborted } = await runCli(runChild, ['capture'], payload, event.signal, CHILD_TIMEOUT_MS);
-    if (code === 0) return;
-    warn(ctx, pi, aborted ? 'Recall omp capture cancelled' : 'Recall omp capture failed');
+    if (code !== 0) {
+      warn(ctx, pi, aborted ? 'Recall omp capture cancelled' : 'Recall omp capture failed');
+      return;
+    }
+    if (aborted) return;
+    const detach = spawnDetached === spawnLoaOmpEnd
+      ? (id: string) => spawnLoaOmpEnd(id, launch, () => warn(ctx, pi, 'Recall omp curated extract failed'))
+      : spawnDetached;
+    let locked = false;
+    try {
+      if (!curatedAhead(sessionId)) return;
+      if (!acquireLock(sessionId)) return;
+      locked = true;
+      detach(sessionId);
+    } catch {
+      if (locked) releaseLoaLock(sessionId);
+      warn(ctx, pi, 'Recall omp curated extract failed');
+    }
   } catch {
     warn(ctx, pi, 'Recall omp capture failed');
   }

@@ -100,6 +100,8 @@ recall loa quote 1                            # View raw source messages for ent
 
 LoA is the primary knowledge capture mechanism. Raw transcripts are high-noise; Curated LoA entries contain `fabric` Extractor output, message lineage, continuation chains, and project context. Chaining (`-c <id>`) links a new entry to a prior one, forming a thread of related sessions. Automatic-capture LoA is written by session extract, not this command. Extractor config: [architecture](architecture.md#extractor-config).
 
+The omp extension invokes `recall loa omp-end <sessionId>` for [background curation](OMP_INTEGRATION.md#capture-contract).
+
 ### Decisions
 
 ```bash

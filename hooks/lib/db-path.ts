@@ -8,6 +8,7 @@
 //   2. MEM_DB_PATH    (legacy fallback)
 //   3. ~/.agents/Recall/recall.db (default)
 
+import { homedir } from 'node:os';
 import { join } from 'path';
 
 /** Preserve the suffix: normalizing symlink/.. paths can select a different database. */
@@ -18,7 +19,7 @@ export function expandDbPathTilde(raw: string, home: string): string {
 }
 
 export function resolveDbPath(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const home = process.env.HOME || process.env.USERPROFILE || homedir();
   const raw = process.env.RECALL_DB_PATH || process.env.MEM_DB_PATH;
   return raw ? expandDbPathTilde(raw, home) : join(home, '.agents', 'Recall', 'recall.db');
 }

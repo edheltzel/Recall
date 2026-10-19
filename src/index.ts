@@ -13,7 +13,7 @@ import { runShow } from './commands/show.js';
 import { runStats } from './commands/stats.js';
 import { runImport } from './commands/import.js';
 import { runImportConversations } from './commands/import-conversations.js';
-import { runLoa, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
+import { runLoa, runLoaOmpEnd, runLoaQuote, runLoaShow, runLoaList } from './commands/loa.js';
 import { runDump } from './commands/dump.js';
 import { runHostHook } from './commands/host-hook.js';
 import { runCapture } from './commands/capture.js';
@@ -374,6 +374,15 @@ loaCmd
   .action((options) => {
     runLoaList(parseInt(options.limit, 10));
     closeDb();
+  });
+
+loaCmd
+  .command('omp-end <sessionId>')
+  .description('Write one Curated LoA for an omp lifecycle session')
+  .action(async (sessionId: string) => {
+    const code = await runLoaOmpEnd(sessionId);
+    closeDb();
+    process.exit(code);
   });
 
 // recall import-legacy - Import DISTILLED.md extracts

@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { homedir } from 'node:os';
+import { join } from 'path';
 import { setupTestDb, teardownTestDb } from '../helpers/setup';
 import { Database } from 'bun:sqlite';
 import {
@@ -11,6 +13,7 @@ import {
   writeLoaEntryFromExtraction,
   writeExtractionErrors,
 } from '../../hooks/lib/sqlite-writers';
+import { resolveDbPath } from '../../hooks/lib/db-path';
 
 let dbPath: string;
 
@@ -44,6 +47,27 @@ describe('getDbPath', () => {
       if (originalRecall !== undefined) process.env.RECALL_DB_PATH = originalRecall;
       if (originalMem !== undefined) process.env.MEM_DB_PATH = originalMem;
       else delete process.env.MEM_DB_PATH;
+    }
+  });
+
+  test('uses homedir when HOME and USERPROFILE are unset', () => {
+    const previous = {
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+      RECALL_DB_PATH: process.env.RECALL_DB_PATH,
+      MEM_DB_PATH: process.env.MEM_DB_PATH,
+    };
+    delete process.env.HOME;
+    delete process.env.USERPROFILE;
+    delete process.env.RECALL_DB_PATH;
+    delete process.env.MEM_DB_PATH;
+    try {
+      expect(resolveDbPath()).toBe(join(homedir(), '.agents', 'Recall', 'recall.db'));
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 });

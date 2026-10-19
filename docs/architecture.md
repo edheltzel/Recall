@@ -111,9 +111,9 @@ MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.
 | host_ingest_generations | Lifecycle generation identity and publication status | No |
 | host_ingest_generation_messages | Scrubbed generation records activated by one checkpoint pointer | Yes |
 | host_ingest_embedding_invalidations | Pending semantic-index cleanup for an activated lifecycle generation | No |
-| loa_message_sources | Retention-aware exact message lineage for automatic terminal summaries | No |
+| loa_message_sources | Retention-aware exact message lineage for terminal summaries and pinned LoA entries | No |
 | messages | Conversation turns (user + assistant content); includes `importance` (1-10) and a nullable internal lifecycle-publication token | Yes |
-| loa_entries | Library of Alexandria entries (Automatic-capture LoA and Curated LoA); extract body in `fabric_extract` (column name, not the writer); includes `importance` (1-10, floor 5) and an immutable snapshot cursor independent of retention-nullable display ranges | Yes |
+| loa_entries | Library of Alexandria entries (Automatic-capture LoA and Curated LoA); extract body in `fabric_extract` (column name, not the writer); includes `importance` (1-10, floor 5) and a snapshot cursor independent of retention-nullable display ranges ([omp update semantics](OMP_INTEGRATION.md#capture-contract)) | Yes |
 | decisions | Architectural decisions with reasoning; includes `status` (active/superseded/reverted), `confidence` (high/medium/low), and `importance` (1-10) columns | Yes |
 | learnings | Problems solved and patterns discovered; includes `confidence` (high/medium/low) and `importance` (1-10) columns | Yes |
 | breadcrumbs | Contextual notes, references, and TODOs (with importance 1-10) | Yes |

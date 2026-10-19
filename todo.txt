@@ -5,7 +5,7 @@
 2026-10-09 Slash-export windowed learnings to a user-chosen Obsidian folder. Parked; learnings-only export. +recall @outstanding issue:280
 2026-10-09 Learn prefs into global AGENTS.md (and CLAUDE.md) below a Recall marker. Not started. +recall @outstanding issue:279
 x 2026-10-17 2026-10-09 CREATE_TABLES lags migrations: decisions/learnings missing confidence. Confirmed on main: decisions/learnings CREATE TABLE lack confidence. +recall @outstanding issue:278 pr:https://github.com/edheltzel/Recall/pull/332
-2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277 @waiting gate parked
+x 2026-10-19 2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277 @waiting gate parked pr:https://github.com/edheltzel/Recall/pull/338
 2026-10-09 Collapse host identity lists toward SESSION_SOURCES. #282 added cursor to SESSION_SOURCES only; lists not collapsed. +recall @outstanding issue:269
 2026-10-09 P2: Bun-free runtime spike (do not crowd Cursor/Grok). P2 spike; parked. +recall @outstanding issue:266
 2026-10-09 Eval déjà vu ssh-sync vs Turso/libSQL epic #102. Eval only; ties to #102. +recall @outstanding issue:265
@@ -26,7 +26,7 @@ x 2026-10-17 2026-10-09 harden: applyConnectionPragmas sets journal_mode=WAL bef
 2026-10-09 feat: frecency-in-ranking evidence/benchmark behind a default-off flag (informs #155). Default-off frecency flag; informs #155. +recall @outstanding issue:193
 x 2026-10-17 2026-10-09 harden: bound WAL growth — centralize journal_size_limit across all Recall DB writers. No journal_size_limit on main. +recall @outstanding issue:192 pr:https://github.com/edheltzel/Recall/pull/335
 x 2026-10-17 2026-10-09 harden: scrub() learnings.tags on the explicit add paths (un-redacted secret persist, LOW). Scrub learnings.tags on add paths. +recall @outstanding issue:182 pr:https://github.com/edheltzel/Recall/pull/333
-2026-10-09 chore: scrub-archive hostile-fs tests no-op-pass under root (add uid skip-guard). Root uid skip-guard for tests. +recall @outstanding issue:178 @waiting gate parked
+x 2026-10-19 2026-10-09 chore: scrub-archive hostile-fs tests no-op-pass under root (add uid skip-guard). Root uid skip-guard for tests. +recall @outstanding issue:178 @waiting gate parked pr:https://github.com/edheltzel/Recall/pull/339
 2026-10-09 docs: stale backup path ~/.claude/backups/recall in installation.md + upgrading.md. Confirmed on main: docs still say ~/.claude/backups/recall (also architecture.md). +recall @outstanding issue:174
 x 2026-10-17 2026-10-09 harden: recall hybrid/semantic CLI crash on embedding dim mismatch. CLI cosineSimilarity calls still unguarded in embed.ts. +recall @outstanding issue:163 pr:https://github.com/edheltzel/Recall/pull/334
 2026-10-09 B3: Blend frecency into ranking (importance #101 + L1 recall #100 + search order). needs - human; ranking change waits on Ed. +recall @outstanding issue:155
@@ -55,7 +55,7 @@ x 2026-10-17 2026-10-09 10 lifecycle tests fail in any git worktree — the envi
 x 2026-10-17 2026-10-09 chore: fresh /ce-worktree worktrees miss node_modules → ~10 MCP-config tests fail spuriously. Worktree flow gone and jsonc-parser dep removed (eebe92d). +recall @close issue:165 report:github-closed
 x 2026-10-17 2026-10-09 Non-goals: no HostDescriptor, no adapter→plugin rename, no Cursor marketplace plugin, no Cursor host-hook glue. Reference-only non-goals list; Cursor wires shipped in #282 without them. +recall @close issue:271 report:github-closed
 x 2026-10-17 2026-10-09 create npm package for eady install. npm publish and `recall install` shipped in #170. +recall @close issue:1 report:github-closed
-2026-10-14 omp host-ingest LoA runs the Automatic-capture Extractor instead of the basic 'Session with N messages' summary +recall issue:286
+2026-10-14 omp session end fabric Curated LoA, detached; basic summary stays on fabric failure +recall issue:286 note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-10-18-omp-curated-loa-plan.md
 x 2026-10-17 2026-10-16 Decide fate of LoA #1996 (wrong Claude session dump) +recall
 x 2026-10-17 2026-10-16 Trim oversized omp captures with a 60/40 head/tail split instead of skipping, log bytes dropped +recall branch:feat/omp-capture-trim pr:https://github.com/edheltzel/Recall/pull/337
 2026-10-16 Optional: capture a touched-files list (read/modified, max 20) with omp captures +recall
@@ -66,3 +66,5 @@ x 2026-10-17 2026-10-17 Merge PR #336 .mailmap Cursor/Claude -> Atlas-Key +recal
 x 2026-10-17 2026-10-17 Decide no-mistakes axi driving for GitButler branches +recall @outstanding
 x 2026-10-17 2026-10-17 Finish Recall history rewrite: force-push rewritten main/tags, migrate GitButler stacks (staged in ../.recall-rewrite-2026-10-17) +Recall @blocked
 2026-10-17 Trash ../.recall-rewrite-2026-10-17 backups once rewritten Recall history is confirmed fine +Recall
+x 2026-10-18 2026-10-18 Leave PR #339 authored by edheltzel; self-review unavailable +recall pr:https://github.com/edheltzel/Recall/pull/339
+2026-10-18 329 stays separate: dump abort must kill its own fabric child +recall issue:329 note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-10-18-omp-curated-loa-plan.md
