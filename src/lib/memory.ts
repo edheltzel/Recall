@@ -868,33 +868,45 @@ export function createLoaEntryFromMessages(
       source_ids: null,
     } : entry);
     if (!pinSources) return loaId;
-
-    const insertSource = db.prepare(`
-      INSERT INTO loa_message_sources (
-        loa_id, ordinal, message_id, session_id, timestamp, role, content,
-        project, importance, provenance
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const [ordinal, message] of messages.entries()) {
-      insertSource.run(
-        loaId,
-        ordinal,
-        message.id!,
-        message.session_id,
-        message.timestamp,
-        message.role,
-        message.content,
-        message.project ?? null,
-        message.importance ?? 5,
-        message.provenance ?? null
-      );
-    }
-    db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?').run(
-      JSON.stringify({ table: 'loa_message_sources', loa_id: loaId }),
-      loaId
-    );
+    replaceLoaMessagePins(loaId, messages, db);
     return loaId;
   })();
+}
+
+/** Replace one LoA's source pins. Caller owns the transaction. */
+export function replaceLoaMessagePins(
+  loaId: number,
+  messages: readonly Message[],
+  db = getDb(),
+): void {
+  db.prepare('DELETE FROM loa_message_sources WHERE loa_id = ?').run(loaId);
+  const insertSource = db.prepare(`
+    INSERT INTO loa_message_sources (
+      loa_id, ordinal, message_id, session_id, timestamp, role, content,
+      project, importance, provenance
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const [ordinal, message] of messages.entries()) {
+    if (!Number.isSafeInteger(message.id) || message.id! < 1) {
+      throw new Error('LoA source messages must have persisted IDs');
+    }
+    insertSource.run(
+      loaId,
+      ordinal,
+      message.id!,
+      message.session_id,
+      message.timestamp,
+      message.role,
+      message.content,
+      message.project ?? null,
+      message.importance ?? 5,
+      message.provenance ?? null
+    );
+  }
+  db.prepare('UPDATE loa_entries SET source_ids = ? WHERE id = ?').run(
+    JSON.stringify({ table: 'loa_message_sources', loa_id: loaId }),
+    loaId
+  );
 }
 
 export function invalidateRecordEmbedding(
