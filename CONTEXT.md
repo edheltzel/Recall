@@ -24,11 +24,11 @@ Recall's core product posture: it captures and curates memory in the background 
 ## LoA
 
 **Automatic-capture LoA**:
-An extracted Library of Alexandria entry created by terminal session capture without an explicit user LoA command.
+A Library of Alexandria entry produced by terminal session capture in the automatic-capture tier, separate from Curated LoA.
 _Avoid_: hook LoA, Stop-hook LoA, Fabric extract (the column name is not the writer)
 
 **Curated LoA**:
-A Library of Alexandria entry created by an explicit user or agent LoA command.
+A Library of Alexandria entry created by a user or agent LoA command, a session dump, or host background curation.
 _Avoid_: manual LoA, Fabric LoA
 
 ## Extractor

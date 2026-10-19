@@ -141,7 +141,7 @@ memory_stats()
 
 ## loa_show
 
-Show a full Library of Alexandria entry. The body is the `fabric_extract` column (name, not the writer). Entries may be Automatic-capture LoA or Curated LoA; only Curated LoA from `recall loa` or `memory_dump` with `skip_fabric: false` is Fabric `extract_wisdom` output.
+Show a full Library of Alexandria entry. The body is the `fabric_extract` column (name, not the writer). For entry types, see [LoA terminology](../CONTEXT.md#loa).
 
 **Parameters**
 
