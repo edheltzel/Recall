@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import type { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { resolveDbPath } from '../hooks/lib/db-path';
 import {
   captureOmpSessionStop,
+  curatedSnapshotBehind,
   dumpOmpSession,
   exclusiveLoaLock,
   MAX_OMP_STDIN_BYTES,
@@ -451,11 +455,104 @@ describe('omp native extension', () => {
     let unrefed = false;
     spawnLoaOmpEnd('sess-x', ((file, argv, opts) => {
       args = [file, argv, opts];
-      return { unref() { unrefed = true; } };
+      return { unref() { unrefed = true; }, once() { return this; } };
     }) as typeof spawn);
     expect(args[0]).toBe('bun');
     expect(args[1]).toEqual([expect.stringContaining('dist/index.js'), 'loa', 'omp-end', 'sess-x']);
     expect(args[2]).toEqual({ detached: true, stdio: 'ignore' });
     expect(unrefed).toBe(true);
+  });
+
+  test('async spawn error releases the lock and warns', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'recall-omp-spawn-err-'));
+    const previous = process.env.RECALL_HOME;
+    process.env.RECALL_HOME = home;
+    try {
+      const messages: string[] = [];
+      const { promise, resolve } = Promise.withResolvers<void>();
+      await captureOmpSessionStop({}, uiCtx(message => {
+        messages.push(message);
+        resolve();
+      }, {
+        sessionManager: {
+          getSessionId: () => 'sess-enoent',
+          getBranch: () => [{ type: 'message', id: 'u1', message: { role: 'user', content: 'turn' } }],
+        },
+      }), undefined, async () => 0, () => true, exclusiveLoaLock, undefined, (() => {
+        const child = new EventEmitter();
+        queueMicrotask(() => child.emit('error', new Error('spawn bun ENOENT')));
+        return Object.assign(child, { unref() {} });
+      }) as typeof spawn);
+      await promise;
+      expect(messages).toEqual(['Recall omp curated extract failed']);
+      expect(existsSync(join(home, 'omp-loa-sess-enoent.pid'))).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.RECALL_HOME;
+      else process.env.RECALL_HOME = previous;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test('MEM_DB_PATH-only curated check reads the database the child would write', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-omp-memdb-'));
+    const dbPath = join(dir, 'recall.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE active_host_ingest_messages (source TEXT, session_id TEXT, message_id INTEGER);
+      CREATE TABLE loa_entries (
+        id INTEGER PRIMARY KEY, session_id TEXT, description TEXT, snapshot_max_message_id INTEGER
+      );
+      INSERT INTO active_host_ingest_messages (source, session_id, message_id) VALUES ('omp', 'ses-mem', 7);
+    `);
+    db.close();
+    const previousRecall = process.env.RECALL_DB_PATH;
+    const previousMem = process.env.MEM_DB_PATH;
+    delete process.env.RECALL_DB_PATH;
+    process.env.MEM_DB_PATH = dbPath;
+    try {
+      expect(resolveDbPath()).toBe(dbPath);
+      expect(curatedSnapshotBehind('ses-mem')).toBe(true);
+      const marked = new Database(dbPath);
+      marked.prepare(`
+        INSERT INTO loa_entries (session_id, description, snapshot_max_message_id)
+        VALUES (?, 'Curated fabric extraction from omp session end.', 7)
+      `).run('ses-mem');
+      marked.close();
+      expect(curatedSnapshotBehind('ses-mem')).toBe(false);
+    } finally {
+      if (previousRecall === undefined) delete process.env.RECALL_DB_PATH;
+      else process.env.RECALL_DB_PATH = previousRecall;
+      if (previousMem === undefined) delete process.env.MEM_DB_PATH;
+      else process.env.MEM_DB_PATH = previousMem;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing lock directory is created; a non-directory parent warns and does not skip quietly', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-omp-lockdir-'));
+    const previous = process.env.RECALL_HOME;
+    process.env.RECALL_HOME = join(root, 'Recall');
+    try {
+      expect(exclusiveLoaLock('ses-new')).toBe(true);
+      expect(existsSync(join(root, 'Recall', 'omp-loa-ses-new.pid'))).toBe(true);
+
+      const blocker = join(root, 'not-a-dir');
+      writeFileSync(blocker, 'x');
+      process.env.RECALL_HOME = join(blocker, 'Recall');
+      const messages: string[] = [];
+      let spawned = false;
+      await captureOmpSessionStop({}, uiCtx(message => messages.push(message), {
+        sessionManager: {
+          getSessionId: () => 'ses-new',
+          getBranch: () => [{ type: 'message', id: 'u1', message: { role: 'user', content: 'turn' } }],
+        },
+      }), undefined, async () => 0, () => true, exclusiveLoaLock, () => { spawned = true; });
+      expect(spawned).toBe(false);
+      expect(messages).toEqual(['Recall omp curated extract failed']);
+    } finally {
+      if (previous === undefined) delete process.env.RECALL_HOME;
+      else process.env.RECALL_HOME = previous;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

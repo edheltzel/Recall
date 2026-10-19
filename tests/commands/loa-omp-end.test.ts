@@ -155,4 +155,38 @@ describe('recall loa omp-end', () => {
     expect(called).toBe(false);
     expect(curatedRows('missing')).toEqual([]);
   });
+
+  test('a row committed after load is extracted, not labeled covered unseen', async () => {
+    capture('ses-gap', 'first capture', 0);
+    const seen: string[] = [];
+    expect(await runLoaOmpEnd('ses-gap', {
+      afterLoad: () => capture('ses-gap', 'late capture', 1),
+      extract: (content) => {
+        seen.push(content);
+        return `extract ${seen.length}`;
+      },
+    })).toBe(0);
+    expect(seen.at(-1)).toContain('late capture');
+    const rows = curatedRows('ses-gap');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fabric_extract).toBe('extract 2');
+    const max = getDb().prepare(`
+      SELECT MAX(message_id) AS id FROM active_host_ingest_messages
+      WHERE source = 'omp' AND session_id = ?
+    `).get('ses-gap') as { id: number };
+    expect(rows[0].snapshot_max_message_id).toBe(max.id);
+  });
+
+  test('the write transaction refuses when high-water moved after the extract check', async () => {
+    capture('ses-commit', 'seen turn', 0);
+    expect(await runLoaOmpEnd('ses-commit', {
+      extract: () => 'would cover the old rows',
+      beforeWrite: () => capture('ses-commit', 'unseen turn', 1),
+    })).toBe(0);
+    expect(curatedRows('ses-commit')).toEqual([]);
+    const published = getDb().prepare(`
+      SELECT content FROM published_messages WHERE session_id = ?
+    `).all('ses-commit') as Array<{ content: string }>;
+    expect(published.map(row => row.content)).toContain('unseen turn');
+  });
 });

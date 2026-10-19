@@ -236,53 +236,74 @@ function writeOmpCurated(
   messages: Message[],
   text: string,
   highWater: number,
-): void {
+): boolean {
   const db = getDb();
-  const session = db.prepare('SELECT project FROM sessions WHERE session_id = ?')
-    .get(sessionId) as { project: string | null } | undefined;
-  const existing = db.prepare(`
-    SELECT id FROM loa_entries WHERE session_id = ? AND description = ?
-    ORDER BY id DESC LIMIT 1
-  `).get(sessionId, OMP_CURATED_DESCRIPTION) as { id: number } | undefined;
-  if (!existing) {
-    createLoaEntryFromMessages({
-      title: `Omp session ${sessionId}`,
-      description: OMP_CURATED_DESCRIPTION,
-      fabric_extract: text,
-      snapshot_max_message_id: highWater,
-      session_id: sessionId,
-      project: session?.project || undefined,
-      tags: 'curated,omp',
-      message_count: messages.length,
-      provenance: 'extracted',
-    }, messages);
-    return;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (ompLifecycleHighWater(sessionId) !== highWater) {
+      db.exec('ROLLBACK');
+      return false;
+    }
+    const session = db.prepare('SELECT project FROM sessions WHERE session_id = ?')
+      .get(sessionId) as { project: string | null } | undefined;
+    const existing = db.prepare(`
+      SELECT id FROM loa_entries WHERE session_id = ? AND description = ?
+      ORDER BY id DESC LIMIT 1
+    `).get(sessionId, OMP_CURATED_DESCRIPTION) as { id: number } | undefined;
+    if (!existing) {
+      createLoaEntryFromMessages({
+        title: `Omp session ${sessionId}`,
+        description: OMP_CURATED_DESCRIPTION,
+        fabric_extract: text,
+        snapshot_max_message_id: highWater,
+        session_id: sessionId,
+        project: session?.project || undefined,
+        tags: 'curated,omp',
+        message_count: messages.length,
+        provenance: 'extracted',
+      }, messages);
+    } else {
+      db.prepare(`
+        UPDATE loa_entries
+        SET fabric_extract = ?, message_count = ?, snapshot_max_message_id = ?
+        WHERE id = ?
+      `).run(text, messages.length, highWater, existing.id);
+      replaceLoaMessagePins(existing.id, messages, db);
+    }
+    db.exec('COMMIT');
+    return true;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch { /* already closed */ }
+    throw error;
   }
-  db.transaction(() => {
-    db.prepare(`
-      UPDATE loa_entries
-      SET fabric_extract = ?, message_count = ?, snapshot_max_message_id = ?
-      WHERE id = ?
-    `).run(text, messages.length, highWater, existing.id);
-    replaceLoaMessagePins(existing.id, messages, db);
-  })();
+}
+
+function loadedHighWater(messages: readonly Message[]): number | null {
+  const id = messages[messages.length - 1]?.id;
+  return Number.isSafeInteger(id) ? id! : null;
 }
 
 export async function runLoaOmpEnd(
   sessionId: string,
-  deps: { extract?: typeof runFabricExtract } = {},
+  deps: {
+    extract?: typeof runFabricExtract;
+    afterLoad?: () => void;
+    beforeWrite?: () => void;
+  } = {},
 ): Promise<number> {
   const extract = deps.extract ?? runFabricExtract;
   try {
     let messages = loadOmpLifecycleMessages(sessionId);
     if (messages.length === 0) return 0;
-    let highWater = ompLifecycleHighWater(sessionId);
+    deps.afterLoad?.();
+    let highWater = loadedHighWater(messages);
+    if (highWater == null) return 0;
     let text: string;
     try {
       text = extract(formatMessagesForExtraction(messages));
       if (ompLifecycleHighWater(sessionId) !== highWater) {
         messages = loadOmpLifecycleMessages(sessionId);
-        highWater = ompLifecycleHighWater(sessionId);
+        highWater = loadedHighWater(messages);
         if (messages.length === 0 || highWater == null) return 0;
         text = extract(formatMessagesForExtraction(messages));
         if (ompLifecycleHighWater(sessionId) !== highWater) return 0;
@@ -290,8 +311,8 @@ export async function runLoaOmpEnd(
     } catch {
       return 0;
     }
-    if (highWater == null) return 0;
-    writeOmpCurated(sessionId, messages, text, highWater);
+    deps.beforeWrite?.();
+    if (!writeOmpCurated(sessionId, messages, text, highWater)) return 0;
     return 0;
   } finally {
     releaseOmpLoaLock(sessionId);
