@@ -31,6 +31,18 @@
 
    Use your own paths. Run `/mcp` in Empryo to confirm the server connects.
 
+### Custom database
+
+The MCP `env` block applies only to the MCP server. Empryo [filters the environment passed to hooks](https://empryo.com/docs/tools/hooks#how-a-hook-talks-to-empryo), so a custom database also needs explicit forwarding. Before launching Empryo, set the same absolute path as the MCP server and append the variable name to `EMPRYO_HOOK_ENV`:
+
+```bash
+export RECALL_DB_PATH="/data/recall.db"
+export EMPRYO_HOOK_ENV="${EMPRYO_HOOK_ENV:+$EMPRYO_HOOK_ENV }RECALL_DB_PATH"
+empryo
+```
+
+Use your existing initialized database. If you use legacy `MEM_DB_PATH` instead, export it and append `MEM_DB_PATH` to `EMPRYO_HOOK_ENV`; `RECALL_DB_PATH` takes precedence when both are set. Whichever launcher starts Empryo, including a desktop host, must supply these variables to its process.
+
 ## How capture works
 
 Empryo passes its own session log to the Claude hooks as `transcript_path` (`<project>/.empryo/sessions/<id>/session.jsonl`). That log is not Claude JSONL. `RecallExtract.ts` recognizes the path and hands it to `hooks/lib/hosts/empryo/ambient-capture.ts`, which calls [`recall capture`](CAPTURE_ADAPTER.md) with harness `empryo`.
@@ -56,6 +68,8 @@ Several tabs can finish close together, and each `Stop` hook may read the log af
 ## Prove it
 
 1. In an Empryo session, send a prompt with a unique word made of letters and digits, for example `empryoproof42`, and let the turn finish.
-2. Run `recall search "empryoproof42" -t messages`.
+2. Run `recall search "empryoproof42" -t messages` from a shell with the same database setting as MCP and the hooks.
 
 The turn should appear. If it does not, confirm `recall` is on Empryo's hook `PATH` and that `~/.claude/settings.json` still lists `RecallExtract.ts` under `Stop`.
+
+If MCP connects but custom-database capture is missing, check the launch environment and forwarding in [Custom database](#custom-database). Without forwarding, hooks use `~/.agents/Recall/recall.db`, so capture can land in a different database or fail if that database is absent.
