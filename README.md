@@ -17,7 +17,7 @@
 Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected where a host supports session-start context, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
 
 
-> **A SQLite-backed persistent memory layer for coding agents.** Host lifecycle adapters capture sessions automatically, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills connect Claude Code, OpenCode, Pi, Codex, Grok, JCode, and omp to one local database where each host supports them; lifecycle automation is host-specific.
+> **A SQLite-backed persistent memory layer for coding agents.** Host lifecycle adapters capture sessions automatically, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills connect [supported hosts](#roadmap) to one local database where each host supports them; lifecycle automation is host-specific.
 
 Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
 
@@ -78,6 +78,7 @@ Do not install `recall-memory` from npm; that name belongs to an unrelated proje
 | **Pi** | [Pi Integration](docs/PI_INTEGRATION.md#install-preferred) | Native package owns extensions and skills; MCP adapter/config remains separate. |
 | **omp** | [omp Integration](docs/OMP_INTEGRATION.md#install-from-this-checkout) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. |
 | **Grok** | [Grok Integration](docs/GROK_INTEGRATION.md) | No working plugin hook surface in headless sessions; the installer owns the global hook. |
+| **Empryo** | [Empryo Integration](docs/EMPRYO_INTEGRATION.md) | Runs the Claude `Stop` hook for capture; skills only via installer links, not the Claude plugin; add the MCP server to `~/.empryo/config.json`. |
 | **Cursor** | [Installation](docs/installation.md#source-checkout) | Merge the repository's `templates/cursor/` snippets; there is no marketplace plugin. |
 
 ```bash
@@ -346,6 +347,7 @@ If you're an AI agent reading this repository:
 | **Installing omp capture**                                     | [`docs/OMP_INTEGRATION.md`](docs/OMP_INTEGRATION.md) |
 | **Using Recall from Grok**                                     | [`docs/GROK_INTEGRATION.md`](docs/GROK_INTEGRATION.md) |
 | **Using Recall from JCode**                                    | [`docs/JCODE_INTEGRATION.md`](docs/JCODE_INTEGRATION.md) |
+| **Using Recall from Empryo**                                   | [`docs/EMPRYO_INTEGRATION.md`](docs/EMPRYO_INTEGRATION.md) |
 | **Developing Recall** (build, test, conventions)               | [`CLAUDE.md`](CLAUDE.md)             |
 | **Extending Recall** (start/drop/capture/inject, no fork)      | [`docs/api.md`](docs/api.md)         |
 
@@ -362,6 +364,7 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
 | [**omp**](docs/OMP_INTEGRATION.md) | Skills via installer; MCP separate | Native main-session `session_stop` | Not installed | Verified with omp 18.2.0; unreleased |
 | [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
+| [**Empryo**](docs/EMPRYO_INTEGRATION.md) | Skills via installer links (not the Claude plugin); MCP manual | ✅ Claude Stop hook reads the Empryo session log | ❌ Not verified | Through the Claude install |
 | [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
 
@@ -392,6 +395,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 | [omp Integration](docs/OMP_INTEGRATION.md) | Native extension package: automatic turn-completion capture, separate skills/MCP |
 | [Grok Integration](docs/GROK_INTEGRATION.md) | Installer-script only: automatic capture; no plugin path |
 | [JCode Integration](docs/JCODE_INTEGRATION.md) | Live-probe evidence and current MCP/skills-only boundary |
+| [Empryo Integration](docs/EMPRYO_INTEGRATION.md) | Capture through the Claude hooks Empryo already runs; manual MCP |
 | [Upgrading](docs/upgrading.md)             | Update, backup, migration system                                          |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes                                                   |
 | [Changelog](CHANGELOG.md)                  | Release notes and breaking changes                                        |

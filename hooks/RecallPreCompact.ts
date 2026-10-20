@@ -34,6 +34,7 @@ import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
 import { encodeProjectDir } from './lib/hosts/claude/path-encoding';
+import { isEmpryoTranscript } from './lib/hosts/empryo/ambient-capture';
 import { resolveDbPath as getDbPath } from './lib/db-path';
 
 // ─── Path resolution (call-time, not load-time) ─────────────────────
@@ -445,6 +446,12 @@ async function main(): Promise<void> {
   }
 
   const cwd = parsed.cwd || process.cwd();
+  if (isEmpryoTranscript(parsed.transcript_path)) {
+    // Empryo's session log is not a Claude transcript; its Stop hook captures
+    // it. Do not flush an unrelated Claude session for this cwd.
+    log(`PRECOMPACT_SKIPPED_EMPRYO: ${parsed.transcript_path}`);
+    process.exit(0);
+  }
   const convPath = parsed.transcript_path || findCurrentConversation(cwd);
 
   if (!convPath) {

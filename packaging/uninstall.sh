@@ -122,10 +122,12 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/threat-detect.ts"
   "$CLAUDE_DIR/hooks/lib/write-safety.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/index.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/capture-door.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/ambient-capture.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/extraction-provider.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/lifecycle.ts"
   "$CLAUDE_DIR/hooks/lib/hosts/claude/path-encoding.ts"
+  "$CLAUDE_DIR/hooks/lib/hosts/empryo/ambient-capture.ts"
   # Legacy pre-host-boundary install path.
   "$CLAUDE_DIR/hooks/lib/path-encoding.ts"
   "$CLAUDE_DIR/hooks/lib/pick-previous-jsonl.ts"
@@ -351,7 +353,7 @@ remove_hook_files() {
   done
   log_success "Removed $removed Recall hook file(s)/symlink(s) (surgical — non-Recall hooks/lib untouched)"
 
-  for f in "$CLAUDE_DIR/hooks/lib/hosts/claude" "$CLAUDE_DIR/hooks/lib/hosts"; do
+  for f in "$CLAUDE_DIR/hooks/lib/hosts/claude" "$CLAUDE_DIR/hooks/lib/hosts/empryo" "$CLAUDE_DIR/hooks/lib/hosts"; do
     if [[ -d "$f" ]] && [[ -z "$(ls -A "$f" 2>/dev/null)" ]]; then
       run rmdir "$f"
     fi

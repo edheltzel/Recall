@@ -33,7 +33,9 @@ import { spawn } from 'child_process';
 import { shouldSkipExtraction } from './lib/extraction-quality';
 import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extract-model';
 import { encodeProjectDir } from './lib/hosts/claude/path-encoding';
-import { claudeHookPayload, runRecallCapture } from './lib/hosts/claude/ambient-capture';
+import { runRecallCapture } from './lib/hosts/capture-door';
+import { claudeHookPayload } from './lib/hosts/claude/ambient-capture';
+import { empryoHookPayloads, isEmpryoTranscript } from './lib/hosts/empryo/ambient-capture';
 import {
   wasAlreadyExtracted as trackerWasAlreadyExtracted,
   markAsExtracted as trackerMarkAsExtracted,
@@ -990,6 +992,21 @@ async function main() {
     }
 
     const cwd = hookInput.cwd || process.cwd();
+
+    // Empryo runs these Claude hooks with its own session log. Capture it as
+    // `empryo` and stop: the Claude JSONL fallback below would extract an
+    // unrelated Claude session for this cwd.
+    if (isEmpryoTranscript(hookInput.transcript_path)) {
+      const payloads = empryoHookPayloads(hookInput.transcript_path!, {
+        sessionId: hookInput.session_id,
+        cwd,
+        hookEvent: hookInput.hook_event_name ?? hookInput.hookEventName,
+      });
+      for (const payload of payloads) {
+        if (!runRecallCapture(payload)) logExtract(`CAPTURE_FAILED: ${hookInput.transcript_path}`);
+      }
+      process.exit(0);
+    }
 
     // Ambient door. Independent of LoA extraction dedup below: a session the
     // extractor skips still needs its latest turn stored through recall capture.

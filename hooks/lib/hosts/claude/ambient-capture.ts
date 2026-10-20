@@ -13,38 +13,24 @@
 // one event per turn so a single run covers the file.
 // ponytail: one project-dir level, Claude's layout; recurse if a host nests jsonl.
 
-import { spawnSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { basename, join } from 'path';
 import { homedir } from 'os';
+import {
+  CAPTURE_MAX_BYTES,
+  capturePayload,
+  cleanId,
+  isSessionEndHook,
+  runRecallCapture,
+  type CaptureHints,
+  type CapturePayload as DoorPayload,
+} from '../capture-door';
 
-export const CAPTURE_MAX_BYTES = 25 * 1024 * 1024;
-
-export interface CapturePayload {
-  contract: 1;
-  harness: 'claude';
-  event: 'turn_end' | 'session_end';
-  text: string;
-  session_id?: string;
-  cwd?: string;
-  project?: string;
-}
-
-export interface CaptureHints {
-  sessionId?: string;
-  cwd?: string;
-  hookEvent?: string;
-}
+export type CapturePayload = DoorPayload<'claude'>;
 
 interface TurnPart {
   role: string;
   text: string;
-}
-
-function cleanId(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
-  if (value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
-  return value;
 }
 
 function textFromContent(content: unknown): string {
@@ -61,21 +47,6 @@ function textFromContent(content: unknown): string {
     return content.text.trim();
   }
   return '';
-}
-
-function capturePayload(
-  event: 'turn_end' | 'session_end',
-  text: string,
-  sessionId: string | undefined,
-  cwd: string | undefined,
-): CapturePayload | null {
-  if (!text.trim() || Buffer.byteLength(text, 'utf-8') > CAPTURE_MAX_BYTES) return null;
-  const body: CapturePayload = { contract: 1, harness: 'claude', event, text };
-  if (sessionId) body.session_id = sessionId;
-  if (cwd) body.cwd = cwd;
-  const project = cwd ? basename(cwd) : '';
-  if (project && project !== '/' && project !== '.') body.project = project;
-  return body;
 }
 
 interface ParsedTranscript {
@@ -146,12 +117,12 @@ export function payloadsForTranscript(jsonlPath: string, hints?: CaptureHints): 
   const sessionId = parsed.sessionId ?? cleanId(hints?.sessionId) ?? cleanId(basename(jsonlPath, '.jsonl'));
   const cwd = hints?.cwd || parsed.cwd;
   if (parsed.turns.length === 0) {
-    const only = capturePayload('session_end', parsed.loose.map(part => `${part.role}: ${part.text}`).join('\n\n'), sessionId, cwd);
+    const only = capturePayload('claude', 'session_end', parsed.loose.map(part => `${part.role}: ${part.text}`).join('\n\n'), sessionId, cwd);
     return only ? [only] : [];
   }
   const payloads: CapturePayload[] = [];
   for (const turn of parsed.turns) {
-    const item = capturePayload('turn_end', turn.map(part => `${part.role}: ${part.text}`).join('\n\n'), sessionId, cwd);
+    const item = capturePayload('claude', 'turn_end', turn.map(part => `${part.role}: ${part.text}`).join('\n\n'), sessionId, cwd);
     if (item) payloads.push(item);
   }
   return payloads;
@@ -161,11 +132,10 @@ export function payloadsForTranscript(jsonlPath: string, hints?: CaptureHints): 
 export function claudeHookPayload(jsonlPath: string, hints?: CaptureHints): CapturePayload | null {
   const turns = payloadsForTranscript(jsonlPath, hints);
   if (turns.length === 0) return null;
-  const sessionEnd = (hints?.hookEvent ?? '').replace(/[_-]/g, '').toLowerCase() === 'sessionend';
+  const sessionEnd = isSessionEndHook(hints?.hookEvent);
   if (!sessionEnd) return turns[turns.length - 1];
   if (turns.length === 1 && turns[0].event === 'session_end') return turns[0];
-  return capturePayload(
-    'session_end',
+  return capturePayload('claude', 'session_end',
     turns.map(turn => turn.text).join('\n\n'),
     turns[0].session_id,
     turns[0].cwd,
@@ -208,24 +178,6 @@ export function discoverClaudePayloads(projectsDir: string, hints?: CaptureHints
     payloads.push(...payloadsForTranscript(path, hints));
   }
   return payloads;
-}
-
-/** Fail-soft. A missing `recall` or a rejected payload must not fail the hook. */
-export function runRecallCapture(body: CapturePayload): boolean {
-  try {
-    const input = JSON.stringify(body);
-    if (Buffer.byteLength(input, 'utf-8') > CAPTURE_MAX_BYTES) return false;
-    const result = spawnSync('recall', ['capture'], {
-      input,
-      encoding: 'utf-8',
-      timeout: 15_000,
-      // bun ignores a PATH change unless env is passed through.
-      env: process.env,
-    });
-    return result.status === 0;
-  } catch {
-    return false;
-  }
 }
 
 if (import.meta.main) {

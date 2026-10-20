@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
 import { Database } from 'bun:sqlite';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -12,7 +12,6 @@ import {
 
 const REPO = join(import.meta.dir, '..', '..');
 const CLI = join(REPO, 'src', 'index.ts');
-const HOOK = join(REPO, 'hooks', 'RecallExtract.ts');
 const WATCHER = join(REPO, 'hooks', 'lib', 'hosts', 'claude', 'ambient-capture.ts');
 const PRODUCTION_DB = join(homedir(), '.agents', 'Recall', 'recall.db');
 const TOKEN = 'capturequokka640';
@@ -141,21 +140,15 @@ describe('Claude ambient capture payloads', () => {
       else process.env.RECALL_INCLUDE_SUBAGENTS = previous;
     }
   });
-
-  test('capture helper and Stop hook do not import src', () => {
-    const helper = readFileSync(WATCHER, 'utf-8');
-    const hook = readFileSync(HOOK, 'utf-8');
-    expect(helper).not.toMatch(/from ['"][^'"]*\/src\//);
-    expect(hook).not.toMatch(/from ['"][^'"]*\/src\//);
-    expect(hook).toContain("spawn(bunPath, ['run', import.meta.path, '--extract'");
-    expect(hook).toContain('runRecallCapture');
-  });
 });
 
 describe('Claude Stop capture door', () => {
-  test('Stop with transcript_path stores a searchable ambient fact', () => {
+  test('Stop from a hooks tree without src stores a searchable ambient fact', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-claude-stop-'));
     roots.push(root);
+    // Installed hooks are a copy with no src/ beside them; run that shape.
+    const hooks = join(root, 'installed', 'hooks');
+    cpSync(join(REPO, 'hooks'), hooks, { recursive: true });
     const env = isolationEnv(root);
     const init = spawnSync('bun', [CLI, 'init'], { env, encoding: 'utf-8' });
     expect(init.status).toBe(0);
@@ -168,7 +161,7 @@ describe('Claude Stop capture door', () => {
     writeFileSync(recall, `#!/bin/sh\nexec bun ${JSON.stringify(CLI)} "$@"\n`);
     chmodSync(recall, 0o755);
 
-    const hook = spawnSync('bun', [HOOK], {
+    const hook = spawnSync('bun', [join(hooks, 'RecallExtract.ts')], {
       input: JSON.stringify({
         hook_event_name: 'Stop',
         session_id: 'ses-640',

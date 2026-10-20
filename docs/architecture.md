@@ -78,7 +78,7 @@ Codex's preferred attach is the native plugin in `hosts/plugins/recall/`, discov
 
 Grok lifecycle capture is installer-owned. A managed global hook runs `hooks/grok/capture.ts`, which exports the session and calls `recall capture`. Grok has no verified automatic injection surface. See [Grok Integration](GROK_INTEGRATION.md).
 
-Ambient text for Claude, Codex, Pi, Grok, omp, and supplied-text JCode enters through `recall capture` ([Capture adapter](CAPTURE_ADAPTER.md)). Core still scrubs and stores. JCode is not installed unattended: the live probe did not prove a public history watermark or additive hooks. See [JCode Integration](JCODE_INTEGRATION.md).
+Ambient text from [first-party capture adapters](CAPTURE_ADAPTER.md#harness-ids) enters through `recall capture`. Core still scrubs and stores. JCode is not installed unattended: the live probe did not prove a public history watermark or additive hooks. See [JCode Integration](JCODE_INTEGRATION.md).
 
 Claude Code's preferred attach is the native plugin in `hosts/plugins/recall-claude/` (skills + MCP). The lifecycle installer continues to own hooks. Stop shells `recall capture`; without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts`. See [Claude Integration](CLAUDE_INTEGRATION.md).
 
