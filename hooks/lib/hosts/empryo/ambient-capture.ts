@@ -4,8 +4,12 @@
 // not Claude JSONL, so RecallExtract routes it here instead of to the Claude
 // parser and never falls back to an unrelated Claude transcript.
 //
-// Stop: one turn_end payload, the latest completed turn with a visible prompt.
-// SessionEnd: one session_end payload with every such turn.
+// Stop: one turn_end payload per tab, that tab's latest completed turn with a
+// visible prompt, for tabs that finished within RECENT_TAB_MS of the newest
+// turn. Tabs that finish together each get their turn stored even when both
+// Stop hooks read the log after both turns landed; `recall capture` stores a
+// resent turn once.
+// SessionEnd (not installer-registered): one session_end payload with every turn.
 // Only log format v1 is read; any other version captures nothing.
 
 import { readFileSync, statSync } from 'fs';
@@ -25,6 +29,7 @@ export type EmpryoCapturePayload = CapturePayload<'empryo'>;
 const EMPRYO_SESSION_LOG = /[\\/]\.empryo[\\/]sessions[\\/][^\\/]+[\\/]session\.jsonl$/;
 const SUPPORTED_LOG_VERSION = 1;
 const TURN_SEPARATOR = '\n\n';
+const RECENT_TAB_MS = 10 * 60 * 1000;
 // The log also holds tool calls, so it can outgrow the capture text cap.
 const LOG_MAX_BYTES = 128 * 1024 * 1024;
 
@@ -41,15 +46,22 @@ interface EmpryoLine {
 }
 
 interface Turn {
+  tabId: string;
   prompt?: string;
   answer?: string;
   completedAt: number;
 }
 
+interface CompletedTurn {
+  tabId: string;
+  completedAt: number;
+  text: string;
+}
+
 interface ParsedLog {
   sessionId?: string;
   cwd?: string;
-  turns: string[];
+  turns: CompletedTurn[];
 }
 
 export function isEmpryoTranscript(path: string | undefined): boolean {
@@ -95,7 +107,7 @@ function parseLog(path: string): ParsedLog | null {
     const text = contentText(line);
     if (!text) continue;
     const key = `${line.tabId}\u0000${line.turnId}`;
-    const turn = turns.get(key) ?? { completedAt: Number.POSITIVE_INFINITY };
+    const turn = turns.get(key) ?? { tabId: line.tabId, completedAt: Number.POSITIVE_INFINITY };
     if (line.k === 'user') {
       if (line.ui?.hidden === true) continue;
       turn.prompt ??= text;
@@ -111,7 +123,11 @@ function parseLog(path: string): ParsedLog | null {
   const ordered = [...turns.values()]
     .filter((turn): turn is Required<Turn> => Boolean(turn.prompt && turn.answer))
     .sort((a, b) => a.completedAt - b.completedAt)
-    .map(turn => `user: ${turn.prompt}${TURN_SEPARATOR}assistant: ${turn.answer}`);
+    .map(turn => ({
+      tabId: turn.tabId,
+      completedAt: turn.completedAt,
+      text: `user: ${turn.prompt}${TURN_SEPARATOR}assistant: ${turn.answer}`,
+    }));
   return { sessionId, cwd, turns: ordered };
 }
 
@@ -144,14 +160,23 @@ function sessionEndPayload(
   return capturePayload('empryo', 'session_end', kept.join(TURN_SEPARATOR), sessionId, cwd);
 }
 
-/** Payload an Empryo Stop / SessionEnd hook sends for this session log. */
-export function empryoHookPayload(path: string, hints?: CaptureHints): EmpryoCapturePayload | null {
+/** Payloads an Empryo Stop / SessionEnd hook sends for this session log. */
+export function empryoHookPayloads(path: string, hints?: CaptureHints): EmpryoCapturePayload[] {
   const parsed = parseLog(path);
-  if (!parsed || parsed.turns.length === 0) return null;
+  if (!parsed || parsed.turns.length === 0) return [];
   const sessionId = parsed.sessionId ?? cleanId(hints?.sessionId) ?? cleanId(basename(dirname(path)));
   const cwd = hints?.cwd || parsed.cwd;
   if (isSessionEndHook(hints?.hookEvent)) {
-    return sessionEndPayload(parsed.turns, sessionId, cwd);
+    const ended = sessionEndPayload(parsed.turns.map(turn => turn.text), sessionId, cwd);
+    return ended ? [ended] : [];
   }
-  return capturePayload('empryo', 'turn_end', parsed.turns[parsed.turns.length - 1], sessionId, cwd);
+  const newest = parsed.turns[parsed.turns.length - 1].completedAt;
+  const latestPerTab = new Map<string, CompletedTurn>();
+  for (const turn of parsed.turns) {
+    if (newest - turn.completedAt <= RECENT_TAB_MS) latestPerTab.set(turn.tabId, turn);
+  }
+  return [...latestPerTab.values()]
+    .sort((a, b) => a.completedAt - b.completedAt)
+    .map(turn => capturePayload('empryo', 'turn_end', turn.text, sessionId, cwd))
+    .filter((payload): payload is EmpryoCapturePayload => payload !== null);
 }

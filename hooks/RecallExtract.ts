@@ -35,7 +35,7 @@ import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extrac
 import { encodeProjectDir } from './lib/hosts/claude/path-encoding';
 import { runRecallCapture } from './lib/hosts/capture-door';
 import { claudeHookPayload } from './lib/hosts/claude/ambient-capture';
-import { empryoHookPayload, isEmpryoTranscript } from './lib/hosts/empryo/ambient-capture';
+import { empryoHookPayloads, isEmpryoTranscript } from './lib/hosts/empryo/ambient-capture';
 import {
   wasAlreadyExtracted as trackerWasAlreadyExtracted,
   markAsExtracted as trackerMarkAsExtracted,
@@ -997,13 +997,13 @@ async function main() {
     // `empryo` and stop: the Claude JSONL fallback below would extract an
     // unrelated Claude session for this cwd.
     if (isEmpryoTranscript(hookInput.transcript_path)) {
-      const payload = empryoHookPayload(hookInput.transcript_path!, {
+      const payloads = empryoHookPayloads(hookInput.transcript_path!, {
         sessionId: hookInput.session_id,
         cwd,
         hookEvent: hookInput.hook_event_name ?? hookInput.hookEventName,
       });
-      if (payload && !runRecallCapture(payload)) {
-        logExtract(`CAPTURE_FAILED: ${hookInput.transcript_path}`);
+      for (const payload of payloads) {
+        if (!runRecallCapture(payload)) logExtract(`CAPTURE_FAILED: ${hookInput.transcript_path}`);
       }
       process.exit(0);
     }

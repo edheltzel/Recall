@@ -78,7 +78,7 @@ Do not install `recall-memory` from npm; that name belongs to an unrelated proje
 | **Pi** | [Pi Integration](docs/PI_INTEGRATION.md#install-preferred) | Native package owns extensions and skills; MCP adapter/config remains separate. |
 | **omp** | [omp Integration](docs/OMP_INTEGRATION.md#install-from-this-checkout) | Native `session_stop` capture; skills remain installer-owned and MCP stays separate. |
 | **Grok** | [Grok Integration](docs/GROK_INTEGRATION.md) | No working plugin hook surface in headless sessions; the installer owns the global hook. |
-| **Empryo** | [Empryo Integration](docs/EMPRYO_INTEGRATION.md) | Runs the Claude hooks and skills; add the MCP server to `~/.empryo/config.json`. |
+| **Empryo** | [Empryo Integration](docs/EMPRYO_INTEGRATION.md) | Runs the Claude `Stop` hook for capture; skills only via installer links, not the Claude plugin; add the MCP server to `~/.empryo/config.json`. |
 | **Cursor** | [Installation](docs/installation.md#source-checkout) | Merge the repository's `templates/cursor/` snippets; there is no marketplace plugin. |
 
 ```bash
@@ -364,7 +364,7 @@ Recall separates **MCP and skills**, **automatic capture**, and **automatic inje
 | [**Grok Build CLI**](docs/GROK_INTEGRATION.md) | ✅ | ✅ Export-based lifecycle hook | ❌ No prompt-mutation hook | Installer-managed capture; verified lifecycle contract |
 | [**omp**](docs/OMP_INTEGRATION.md) | Skills via installer; MCP separate | Native main-session `session_stop` | Not installed | Verified with omp 18.2.0; unreleased |
 | [**JCode**](docs/JCODE_INTEGRATION.md) | ✅ | ❌ Probe did not prove safe ordering/composition | ❌ Probe did not prove deterministic injection | MCP and skills only |
-| [**Empryo**](docs/EMPRYO_INTEGRATION.md) | Skills via Claude install; MCP manual | ✅ Claude Stop hook reads the Empryo session log | ❌ Not verified | Through the Claude install |
+| [**Empryo**](docs/EMPRYO_INTEGRATION.md) | Skills via installer links (not the Claude plugin); MCP manual | ✅ Claude Stop hook reads the Empryo session log | ❌ Not verified | Through the Claude install |
 | [**Cursor**](https://cursor.com) | ✅ snippets | ⚠ on-disk vscdb+jsonl catalog | ⚠ sessionStart `{ additional_context }` via `recall start` | **Beta** inject + catalog; no marketplace plugin |
 | [**Gemini CLI**](https://github.com/google-gemini/gemini-cli) | ❌ | ❌ | ❌ | Coming soon |
 

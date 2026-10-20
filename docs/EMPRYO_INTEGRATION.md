@@ -2,18 +2,18 @@
 
 [Back to README](../README.md)
 
-[Empryo](https://empryo.com) reads Claude Code configuration, so Recall reaches it through the Claude install. There is no separate Empryo installer step.
+[Empryo](https://empryo.com) runs the hooks in Claude Code's settings, so Recall's automatic capture reaches it through the Claude install. Skills and MCP need the steps below. There is no separate Empryo installer step.
 
 | Surface | How Empryo gets it | Status |
 | --- | --- | --- |
 | Lifecycle hooks | Empryo runs hooks from `~/.claude/settings.json` ([Empryo hooks](https://empryo.com/docs/tools/hooks#where-hooks-are-read-from)) | Automatic capture shipped |
-| `do-recall-*` skills | Empryo scans `~/.claude/skills/` and `~/.agents/skills/` ([Empryo skills](https://empryo.com/docs/tools/skills#scopes)) | Discovered after the Claude install |
+| `do-recall-*` skills | Empryo scans `~/.claude/skills/` and `~/.agents/skills/` ([Empryo skills](https://empryo.com/docs/tools/skills#scopes)), not Claude plugin folders | Discovered only when the installer links them into `~/.claude/skills/`. With the Claude plugin active, the installer removes those links, so Empryo does not see the skills |
 | `recall-memory` MCP | Add it to `mcpServers` in `~/.empryo/config.json` (below) | Manual |
 | SessionStart L0/L1 injection | `RecallStart.ts` runs, but Empryo documents `additionalContext` only for tool events | Not verified |
 
 ## Install
 
-1. Install Recall for Claude Code: [Installation](installation.md#install-recall). This writes the hooks and links the skills Empryo reads.
+1. Install Recall for Claude Code: [Installation](installation.md#install-recall). This registers the `Stop` hook Empryo runs. Without the Claude plugin, it also links the skills into `~/.claude/skills/`, where Empryo finds them.
 2. Register the MCP server. Empryo's `mcpServers` is an array:
 
    ```json
@@ -37,8 +37,8 @@ Empryo passes its own session log to the Claude hooks as `transcript_path` (`<pr
 
 | Hook event | Captured |
 | --- | --- |
-| `Stop` | The latest completed turn: the visible prompt and the final answer |
-| `SessionEnd` | Every completed turn in the session, once. When the JSON sent to `recall capture` would pass its 25 MiB cap, the newest turns that fit |
+| `Stop` | For each tab that finished a turn within 10 minutes of the newest one, that tab's latest completed turn: the visible prompt and the final answer. A turn resent by a later `Stop` is stored once |
+| `SessionEnd` | Not registered by the installer. If you add `RecallExtract.ts` under `SessionEnd` yourself: every completed turn, once. When the JSON sent to `recall capture` would pass its 25 MiB cap, the newest turns that fit |
 | `PreCompact` | Nothing. The Claude flush is skipped |
 | `PostToolUse`, `UserPromptSubmit` | In-session extraction skips the Empryo log. Correction capture still reads the prompt text |
 
@@ -51,7 +51,7 @@ What is left out:
 
 Rows are tagged `automatic-capture,empryo`. The Claude Stop hook never falls back to a Claude transcript for an Empryo session, so an Empryo turn cannot trigger extraction of an unrelated Claude session in the same directory.
 
-Several tabs can finish in the same second. A Stop hook then sends the newest turn in the log, which may belong to another tab. `SessionEnd` sends every turn, so a turn missed that way is stored when the session closes.
+Several tabs can finish close together, and each `Stop` hook may read the log after all of them landed. Sending every recent tab's latest turn covers that case. A tab with two turns between `Stop` hooks, or one idle more than 10 minutes behind the newest turn, still loses the older turn.
 
 ## Prove it
 
