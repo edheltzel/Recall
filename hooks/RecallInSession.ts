@@ -34,6 +34,7 @@ import {
   sessionIdFromArgs,
 } from './lib/insession';
 import { eventFromClaudeHookInput } from './lib/hosts/claude/lifecycle';
+import { isEmpryoTranscript } from './lib/hosts/empryo/ambient-capture';
 import { runExtractionCascade, extractTopics, deriveSummary } from './lib/extract-model';
 import { resolveDbPath } from './lib/db-path';
 
@@ -148,7 +149,8 @@ async function main(): Promise<void> {
   // #51 — mid-session extraction cadence. Only when the in-session loop is on.
   // Increment the counter + evaluate cadence inline (fast SQLite); spawn the heavy
   // extraction async (never blocks the turn) when at/above threshold.
-  if (config.enabled) {
+  // Empryo's session log is not a Claude transcript; its Stop hook captures it.
+  if (config.enabled && !isEmpryoTranscript(convPath)) {
     const { run } = decideInSession(dbPath, sessionId, convPath, event, config);
     if (run) spawnChild(convPath, sessionId, cwd);
   }

@@ -64,7 +64,7 @@ Pattern: `^[a-z][a-z0-9-]{0,63}$`.
 
 Rejected: empty, uppercase, underscores, spaces, path-like values (`OMP`, `bad_id`, `../x`).
 
-Built-in (first-party): `claude`, `codex`, `pi`, `grok`, `omp`, `jcode`.
+Built-in (first-party): `claude`, `codex`, `pi`, `grok`, `omp`, `jcode`, `empryo`.
 
 Reserved (do not squat): `opencode`, `cursor`, `mcp`. OpenCode is the next first-party adapter after this v1 door; it still uses its markdown drop. Do not send `opencode` until that adapter ships.
 
