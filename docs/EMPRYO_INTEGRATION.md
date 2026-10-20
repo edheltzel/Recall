@@ -60,6 +60,7 @@ What is left out:
 - Prompts Empryo marks hidden, such as agent-to-agent link messages, and the replies to them.
 - A turn that has not finished.
 - Any log whose `meta` line is not format version 1. A new Empryo log format captures nothing until the adapter learns it.
+- Session logs larger than 128 MiB. The adapter skips the whole log.
 
 Rows are tagged `automatic-capture,empryo`. The Claude Stop hook never falls back to a Claude transcript for an Empryo session, so an Empryo turn cannot trigger extraction of an unrelated Claude session in the same directory.
 

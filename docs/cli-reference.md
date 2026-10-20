@@ -67,7 +67,7 @@ recall capture --contract 1 --harness omp --event session_end --text-file turn.t
 printf '%s\n' '{"contract":1,"harness":"acme-agent","event":"turn_end","text":"raw turn"}' | recall capture
 ```
 
-`--contract` defaults to `1`. `--harness` is `^[a-z][a-z0-9-]{0,63}$` (built-ins: `claude`, `codex`, `pi`, `grok`, `omp`, `jcode`; reserved: `opencode`, `cursor`, `mcp`). `--event` is `turn_end` or `session_end`. Optional: `--session-id`, `--cwd`, `--project`. Text is `--text`, `--text-file`, or stdin when those flags are absent and another flag selected the flag form. With no flag fields, stdin is the JSON twin (`contract`, `harness`, `event`, `text`, `session_id`, `cwd`, `project`). Invalid input exits non-zero and writes nothing.
+`--contract` defaults to `1`. `--harness` is `^[a-z][a-z0-9-]{0,63}$`; see [built-in and reserved harness IDs](CAPTURE_ADAPTER.md#harness-ids). `--event` is `turn_end` or `session_end`. Optional: `--session-id`, `--cwd`, `--project`. Text is `--text`, `--text-file`, or stdin when those flags are absent and another flag selected the flag form. With no flag fields, stdin is the JSON twin (`contract`, `harness`, `event`, `text`, `session_id`, `cwd`, `project`). Invalid input exits non-zero and writes nothing.
 
 Prove a write with `recall search "<unique phrase>" -t messages`.
 

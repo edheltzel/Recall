@@ -17,7 +17,7 @@
 Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected where a host supports session-start context, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
 
 
-> **A SQLite-backed persistent memory layer for coding agents.** Host lifecycle adapters capture sessions automatically, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills connect Claude Code, OpenCode, Pi, Codex, Grok, JCode, and omp to one local database where each host supports them; lifecycle automation is host-specific.
+> **A SQLite-backed persistent memory layer for coding agents.** Host lifecycle adapters capture sessions automatically, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills connect [supported hosts](#roadmap) to one local database where each host supports them; lifecycle automation is host-specific.
 
 Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
 

@@ -4,13 +4,7 @@
 // not Claude JSONL, so RecallExtract routes it here instead of to the Claude
 // parser and never falls back to an unrelated Claude transcript.
 //
-// Stop: one turn_end payload per tab, that tab's latest completed turn with a
-// visible prompt, for tabs that finished within RECENT_TAB_MS of the newest
-// turn. Tabs that finish together each get their turn stored even when both
-// Stop hooks read the log after both turns landed; `recall capture` stores a
-// resent turn once.
-// SessionEnd (not installer-registered): one session_end payload with every turn.
-// Only log format v1 is read; any other version captures nothing.
+// Setup, supported events, and capture limits: docs/EMPRYO_INTEGRATION.md.
 
 import { readFileSync, statSync } from 'fs';
 import { basename, dirname } from 'path';
