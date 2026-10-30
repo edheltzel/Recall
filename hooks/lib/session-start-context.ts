@@ -27,6 +27,16 @@ export const GIT_TIMEOUT_MS = 3000;
 export const L1_TOTAL_SLOTS = 12;
 export const L1_RESERVED_LOA_SLOTS = 4;
 export const L1_LOA_FALLBACK_CAP = 6;
+/** Ph0c: reserved global (project IS NULL) slots, git-remote projects only, behind RECALL_L1_GLOBAL_SLOTS (default OFF). */
+export const L1_RESERVED_GLOBAL_SLOTS = 3;
+export const GLOBAL_SLOTS_FLAG = 'RECALL_L1_GLOBAL_SLOTS';
+/** Optional tie-break floor for global rows; unset = no floor. */
+export const GLOBAL_MIN_IMPORTANCE_ENV = 'RECALL_L1_GLOBAL_MIN_IMPORTANCE';
+
+export function globalSlotsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env[GLOBAL_SLOTS_FLAG]?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'on';
+}
 
 export const MEMORY_UNAVAILABLE =
   '## Recall — Memory unavailable this session\n_Use `memory_search` to query memory manually._';
@@ -61,6 +71,25 @@ export function detectProject(cwd: string = resolveSessionStartCwd()): string | 
     // Not a git repo or timeout — fall through to basename
   }
   return basename(cwd);
+}
+
+/**
+ * Separate "found from git remote?" signal. Does NOT change detectProject():
+ * folder-name fallback still names/filters the project, but never enables
+ * reserved global slots.
+ */
+export function hasGitRemote(cwd: string = resolveSessionStartCwd()): boolean {
+  try {
+    const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: GIT_TIMEOUT_MS,
+    }).trim();
+    return /\/([^/]+?)(\.git)?$/.test(remote);
+  } catch {
+    return false;
+  }
 }
 
 type SqlParam = string | number | bigint | boolean | null;
@@ -269,6 +298,90 @@ function fetchBreadcrumbs(project: string | undefined, limit: number): L1Row[] {
   }));
 }
 
+/** Ph0c: global pool = rows with project IS NULL, same filters/order as the project fetchers. */
+function fetchGlobals(limit: number, minImportance?: number): L1Row[] {
+  const q = (sql: string) => queryDb(sql, [limit]);
+  const decImp = tableColumns('decisions').has('importance');
+  const lrnImp = tableColumns('learnings').has('importance');
+  const loaCols = tableColumns('loa_entries');
+  const loaImp = loaCols.has('importance');
+  const loaTag = loaCols.has('tags') ? `AND (tags IS NULL OR tags NOT LIKE 'automatic-capture,%')` : '';
+  const rows: L1Row[] = [
+    ...q(`SELECT id, title, description, project, ${loaImp ? 'importance' : '8 AS importance'}, created_at
+          FROM loa_entries WHERE project IS NULL ${loaTag}
+          ORDER BY ${loaImp ? 'importance DESC, ' : ''}created_at DESC LIMIT ?`).map(r => ({
+      table: 'loa' as const, id: r.id as number,
+      content: `${r.title}${r.description ? ` — ${r.description}` : ''}`,
+      project: null, importance: (r.importance as number) ?? 8, created_at: (r.created_at as string) ?? '',
+    })),
+    ...q(`SELECT id, decision, reasoning, ${decImp ? 'importance' : '5 AS importance'}, created_at
+          FROM decisions WHERE status = 'active' AND (confidence IS NULL OR confidence != 'low')
+          AND project IS NULL ORDER BY ${decImp ? 'importance DESC, ' : ''}created_at DESC LIMIT ?`).map(r => ({
+      table: 'decisions' as const, id: r.id as number,
+      content: `${r.decision}${r.reasoning ? ` — ${r.reasoning}` : ''}`,
+      project: null, importance: (r.importance as number) ?? 5, created_at: (r.created_at as string) ?? '',
+    })),
+    ...q(`SELECT id, problem, solution, ${lrnImp ? 'importance' : '5 AS importance'}, created_at
+          FROM learnings WHERE project IS NULL
+          ORDER BY ${lrnImp ? 'importance DESC, ' : ''}created_at DESC LIMIT ?`).map(r => ({
+      table: 'learnings' as const, id: r.id as number,
+      content: `${r.problem}${r.solution ? ` → ${r.solution}` : ''}`,
+      project: null, importance: (r.importance as number) ?? 5, created_at: (r.created_at as string) ?? '',
+    })),
+    ...q(`SELECT id, content, importance, created_at FROM breadcrumbs WHERE project IS NULL
+          AND (expires_at IS NULL OR expires_at > datetime('now'))
+          ORDER BY importance DESC, created_at DESC LIMIT ?`).map(r => ({
+      table: 'breadcrumbs' as const, id: r.id as number, content: String(r.content ?? ''),
+      project: null, importance: (r.importance as number) ?? 5, created_at: (r.created_at as string) ?? '',
+    })),
+  ];
+  return rows.filter(r => minImportance === undefined || r.importance >= minImportance);
+}
+
+function compareL1(a: L1Row, b: L1Row): number {
+  if (b.importance !== a.importance) return b.importance - a.importance;
+  const prioDiff = TABLE_PRIORITY[a.table] - TABLE_PRIORITY[b.table];
+  if (prioDiff !== 0) return prioDiff;
+  return b.created_at.localeCompare(a.created_at);
+}
+
+export interface L1Blend {
+  rows: L1Row[];
+  /** Front rows the char-budget trim must never evict (reserved LoA + reserved globals). */
+  protectedCount: number;
+}
+
+/**
+ * Ph0c blend (flag ON + git-remote project only): reserved LoA, then up to
+ * N reserved globals, then project rows. Unused global slots backfill with
+ * project rows. Never more than L1_TOTAL_SLOTS. Project rows come from the
+ * unchanged strict `project = ?` fetchers, so no cross-project leakage.
+ */
+export function assembleL1Blend(
+  project: string,
+  globalSlots: number = L1_RESERVED_GLOBAL_SLOTS,
+  minImportance?: number,
+): L1Blend {
+  const loaPool = fetchLoa(project, L1_LOA_FALLBACK_CAP);
+  const reservedLoa = loaPool.slice(0, L1_RESERVED_LOA_SLOTS);
+  const seen = new Set(reservedLoa.map(r => `${r.table}:${r.id}`));
+  const fullRest = [
+    ...loaPool.slice(L1_RESERVED_LOA_SLOTS),
+    ...fetchDecisions(project, L1_TOTAL_SLOTS),
+    ...fetchLearnings(project, L1_TOTAL_SLOTS),
+    ...fetchBreadcrumbs(project, L1_TOTAL_SLOTS),
+  ].filter(r => !seen.has(`${r.table}:${r.id}`)).sort(compareL1);
+
+  const globals = fetchGlobals(L1_TOTAL_SLOTS, minImportance)
+    .sort(compareL1)
+    .slice(0, Math.max(0, Math.min(globalSlots, L1_TOTAL_SLOTS - reservedLoa.length)));
+  const remaining = Math.max(0, L1_TOTAL_SLOTS - reservedLoa.length - globals.length);
+  return {
+    rows: [...reservedLoa, ...globals, ...fullRest.slice(0, remaining)],
+    protectedCount: reservedLoa.length + globals.length,
+  };
+}
+
 export function assembleL1(project: string | undefined): L1Row[] {
   const loaPool = fetchLoa(project, L1_LOA_FALLBACK_CAP);
   const decPool = fetchDecisions(project, L1_TOTAL_SLOTS);
@@ -329,7 +442,17 @@ export function gatherContext(): string {
     const cwd = resolveSessionStartCwd();
     const project = detectProject(cwd);
     const l0 = buildL0(cwd);
-    const l1Rows = assembleL1(project);
+    let l1Rows: L1Row[];
+    let protectedCount = L1_RESERVED_LOA_SLOTS;
+    if (project && globalSlotsEnabled() && hasGitRemote(cwd)) {
+      const floorRaw = process.env[GLOBAL_MIN_IMPORTANCE_ENV]?.trim();
+      const floor = floorRaw && Number.isFinite(Number(floorRaw)) ? Number(floorRaw) : undefined;
+      const blend = assembleL1Blend(project, L1_RESERVED_GLOBAL_SLOTS, floor);
+      l1Rows = blend.rows;
+      protectedCount = Math.max(L1_RESERVED_LOA_SLOTS, blend.protectedCount);
+    } else {
+      l1Rows = assembleL1(project);
+    }
     const l1Text = renderL1(l1Rows);
 
     if (!l0 && l1Rows.length === 0) return MEMORY_UNAVAILABLE;
@@ -356,7 +479,7 @@ export function gatherContext(): string {
     let output = sections.join('\n');
 
     if (l1Text.length > MAX_L1_CHARS) {
-      const keepRows = Math.max(L1_RESERVED_LOA_SLOTS, Math.floor(l1Rows.length * (MAX_L1_CHARS / l1Text.length)));
+      const keepRows = l1KeepRows(l1Rows.length, l1Text.length, protectedCount, Math.floor(l1Rows.length * (MAX_L1_CHARS / l1Text.length)));
       const trimmedL1 = renderL1(l1Rows.slice(0, keepRows));
       output = output.replace(l1Text, trimmedL1);
     }
@@ -369,6 +492,11 @@ export function gatherContext(): string {
   } catch {
     return MEMORY_UNAVAILABLE;
   }
+}
+
+/** Char-budget row keep count; protected front rows are never evicted. Flag-off protectedCount = L1_RESERVED_LOA_SLOTS (unchanged). */
+export function l1KeepRows(_total: number, _textLen: number, protectedCount: number, proportional: number): number {
+  return Math.max(protectedCount, proportional);
 }
 
 export function renderSessionStart(format: SessionStartFormat = 'markdown'): string {
