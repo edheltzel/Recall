@@ -58,7 +58,7 @@ Both run the same canonical steps and are **idempotent** — re-running repairs 
 
 > **Exit Claude Code / OpenCode / Pi first.** Updating reloads hooks and the `recall-mcp` server; a running session can hold stale state. `update.sh` warns you before it proceeds.
 
-**Source / git checkout — `recall update`** (delegates to `./packaging/update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, force-re-registers the hooks, and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
+**Source / git checkout — `recall update`** (delegates to `./packaging/update.sh`). It version-checks against the latest GitHub release, backs up your config + DB, `git fetch --tags origin` + `git pull --ff-only origin main`, rebuilds, runs `recall init` (applies pending SQLite migrations), refreshes the runtime files, rewrites legacy hook names, registers any missing installer-owned hooks (registrations already present are skipped), and verifies. The full step list, the flag table, and the rollback recipe live in the [Upgrading guide](upgrading.md).
 
 If the installed release predates Claude MCP reconciliation, run `recall install` once after the first `recall update`. The already-running old updater cannot use lifecycle functions pulled during that same run; later updates reload changed lifecycle files automatically. See [First update from an older updater](upgrading.md#first-update-from-an-older-updater).
 

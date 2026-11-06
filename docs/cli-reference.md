@@ -2,7 +2,7 @@
 
 ← [Back to README](../README.md)
 
-The `recall` command is the primary interface for Recall. All subcommands operate on the SQLite database at `~/.agents/Recall/recall.db`.
+The `recall` command is the primary interface for Recall. Subcommands operate on the SQLite database at `~/.agents/Recall/recall.db`, except `recall jev`, which scores one candidate and does not open the database.
 
 New to Recall? Start with the [Getting Started](getting-started.md) first-run tutorial.
 
@@ -145,7 +145,7 @@ For learning-tag scrubbing and secret-handling requirements shared with `memory_
 recall add breadcrumb "User prefers dark mode in all UIs" -p myproject -i 8
 ```
 
-Stores a freeform observation or preference. The `-i` flag sets importance on a scale of 1–10 (default: 5). Higher importance surfaces the breadcrumb earlier in search results.
+Stores a freeform observation or preference. The `-i` flag sets importance on a scale of 1-10 (default: 5). Higher importance ranks the breadcrumb earlier in session-start L1, not in search.
 
 ---
 
@@ -189,16 +189,29 @@ recall docs import --yes                # Import standalone markdown documents
 recall telos import --dry-run           # Preview TELOS imports
 recall telos import --yes -u            # Import TELOS framework (update existing)
 recall telos list -t goal               # List TELOS entries of type: goal
-recall telos show G7                    # Show a specific TELOS entry by ID
+recall telos show GOALS                 # Show the GOALS entry by code
+recall telos search "purpose"           # Search TELOS entries
+recall telos search "purpose" -t goal   # Same search, one type
+recall docs list                        # List imported documents
+recall docs search "vpn"                # Search imported documents
+recall docs show 3                      # Show document #3
+recall import-conversations ./export.json --dry-run
+recall scrub-archive --dry-run          # Preview legacy archive redaction
 ```
 
 `recall import` scans `~/.claude/projects/` for JSONL session files and imports any not yet recorded. Use `--dry-run` first to confirm scope. The `-v` flag enables verbose output.
 
-`recall import-legacy` converts entries from `DISTILLED.md` files (the previous manual memory format) into LoA entries, preserving their content in the new structured format.
+`recall import-legacy` converts entries from `DISTILLED.md` and `HOT_RECALL.md` (the previous manual memory format) into LoA entries. `-s` / `--source` limits that to `distilled` or `hot_recall`; the default is `all`.
 
 `recall docs` manages standalone reference documents (markdown files) that should be searchable alongside session memory.
 
-`recall telos` manages TELOS framework entries (goals, principles, constraints). The `-u` flag updates existing entries rather than skipping them on reimport.
+`recall telos` manages TELOS framework entries (`problem`, `mission`, `goal`, `challenge`, `strategy`). The `-u` flag updates existing entries rather than skipping them on reimport. `recall telos search` takes a query, optional `-t` type, and `-l` (default 10).
+
+`recall docs list` lists imported documents. `recall docs search` searches them (`-l`, default 10). `recall docs show <id>` prints one document.
+
+`recall import-conversations <path>` imports a Claude.ai, ChatGPT, or Slack JSON export. `--format` is `auto` (default), `claude-ai`, `chatgpt`, or `slack`. `--dry-run` previews without writing. `--no-extract` stores raw messages and skips the curated Extractor. `-p` overrides the project name.
+
+`recall scrub-archive` rewrites secrets and invisible or bidi characters in `~/.claude/MEMORY` and per-session `transcript.md` files under `~/.claude/sessions`. It writes unless `--dry-run` is set, and backs up each changed file first. `-v` also lists clean and missing surfaces.
 
 ---
 
@@ -209,6 +222,7 @@ recall embed stats                      # Show stored embedding counts and stora
 recall embed backfill -t loa            # Generate missing embeddings for LoA entries
 recall embed backfill -t decisions      # Generate missing embeddings for decisions
 recall embed rebackfill                 # Regenerate existing embeddings with the current model
+recall embed reindex                    # Rebuild the sqlite-vec index from stored embeddings
 ```
 
 Embeddings are generated via Ollama and stored in the database for vector similarity search. `recall embed stats` groups stored embedding counts by source table and model and reports their total storage size. Run `recall embed backfill` after importing a large batch of records to generate missing embeddings.
@@ -216,6 +230,8 @@ Embeddings are generated via Ollama and stored in the database for vector simila
 Supported tables for backfill: `loa`, `decisions`, `learnings`, `messages` (assistant messages only). Each run processes up to `--limit` records (default: 100).
 
 `recall embed rebackfill` regenerates existing embeddings with the current model before replacing them in one transaction, then rebuilds the vector index when available. If embedding generation fails, the stored embeddings remain unchanged. Embeddings whose source is no longer available or whose text is too short are removed during replacement.
+
+`recall embed reindex` rebuilds the sqlite-vec index from stored embeddings. If sqlite-vec is unavailable, it prints that and leaves search on FTS5 plus brute-force cosine.
 
 ---
 
@@ -304,7 +320,7 @@ Phase 2 benchmark harness for measuring context efficiency.
 ```bash
 recall benchmark list                   # Show available suites + build status
 recall benchmark run                    # Run all available suites
-recall benchmark run B                  # Run a specific suite (A-E)
+recall benchmark run B                  # Run a specific suite (A-F)
 recall benchmark run B -p my-project    # Scope to a specific project
 recall benchmark report                 # Show the latest report
 ```
@@ -490,7 +506,7 @@ Safety model:
 ```bash
 recall init                             # Initialize the database (safe to re-run)
 recall doctor                           # Health check all subsystems
-recall doctor --fix                     # Repair install and Claude MCP configuration drift
+recall doctor --fix                     # Repair install and configuration drift
 recall stats                            # Database statistics
 recall path                             # Print resolved paths (DB, install root, symlinks)
 recall path --json                      # Same, as JSON
@@ -556,10 +572,11 @@ recall prune --execute --keep-decisions
 | Table | Strategy |
 |-------|----------|
 | messages | Consolidated sessions (with LoA) older than N days |
-| sessions | Orphaned (no messages, no LoA) older than N days |
+| sessions | Orphaned (no messages, no LoA, no host-ingest state) older than N days |
 | breadcrumbs | Expired (`expires_at` in the past) |
-| decisions | Superseded/reverted older than 90 days |
+| decisions | Superseded/reverted older than min(N, 90) days |
 | extraction_tracker | Older than N days |
+| extraction_sessions | Rows beyond the 500-row cap |
 
 **Never pruned:** loa_entries, learnings, extraction_errors
 
@@ -567,7 +584,7 @@ recall prune --execute --keep-decisions
 active `dedup_lineage` (status `marked`/`deleted`), even when it otherwise
 matches the retention rule above — deleting a survivor would orphan the
 duplicates marked under it. Withheld rows are counted and reported in the
-summary (`N kept as dedup survivors`). See the dedup [safety model](#dedup).
+summary (`N kept as dedup survivors`, or `N kept as dedup survivors/FK references` for messages). See the dedup [safety model](#dedup).
 
 Prune also fails closed before mutation when the lifecycle schema is not ready.
 If it reports `RETRYABLE`, run `recall init` and retry the same command.
@@ -584,3 +601,26 @@ recall age --execute
 With the defaults, aging expires old breadcrumbs, demotes old decisions and learnings below importance 5, and deletes messages older than 180 days only from sessions consolidated into LoA entries. Existing guards still apply: recorded dedup survivors, marked duplicates, and foreign-key references are withheld. LoA entries are not demoted at the default threshold, and pinned importance 10 is never touched.
 
 For managed cron scheduling, opt-out, paths, and lifecycle behavior, see [Quarterly aging](installation.md#quarterly-aging-cron).
+
+### Consolidate
+
+Dry-run by default. Clusters old low-importance decisions and learnings by project and time window, writes a derived LoA summary per cluster, and demotes the sources.
+
+```bash
+recall consolidate
+recall consolidate --execute
+recall consolidate -t decisions
+```
+
+Defaults: tables `all` (`decisions`, `learnings`), age cutoff `180d`, importance below 5, window 30 days, minimum cluster size 3. Pinned importance 10 is not a candidate.
+
+### Cluster
+
+Dry-run by default. Groups learnings that already have embeddings by cosine similarity and, with `--execute`, writes procedure records.
+
+```bash
+recall cluster
+recall cluster --execute --threshold 0.9
+```
+
+`--threshold` is 0.85 by default (0-1).

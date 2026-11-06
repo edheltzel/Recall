@@ -40,7 +40,7 @@ The global hook is intentional. Grok 1.0.4 discovers plugin hook metadata, but l
 
 The hook observes `Stop`, `PreCompact`, `PostCompact`, and `SessionEnd`.
 
-For each event, `grok/hooks/capture.ts` reads the hook session id, runs `grok export <session-id>`, and sends that text to `recall capture` (`turn_end`, or `session_end` on `SessionEnd`). Core ranks and stores. Guide: [Capture adapter](CAPTURE_ADAPTER.md).
+For each event, `hooks/grok/capture.ts` reads the hook session id, runs `grok export <session-id>`, and sends that text to `recall capture` (`turn_end`, or `session_end` on `SessionEnd`). Core ranks and stores. Guide: [Capture adapter](CAPTURE_ADAPTER.md).
 
 Capture does not depend on the optional `RecallBatchExtract` cron job. Subagent payloads are skipped by default. Set `RECALL_INCLUDE_SUBAGENTS=1` to opt in.
 

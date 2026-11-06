@@ -22,7 +22,7 @@ Use `table` when you need a **hard filter** to one record type. Use `bias_type` 
 | bias_type | string | no | — | Softly boost one table type in ranking without filtering other matches. Same allowed values as `table`; prefer `table` when you need only one type. |
 | limit | number | no | 10 | Maximum number of results to return |
 
-**Returns:** Array of matching records with table name, id, content, project, snippet highlighting, and Record Provenance (`verbatim`, `user_authored`, `extracted`, `derived`, or `unknown` for legacy rows that predate provenance).
+**Returns:** Matching records as text: table, id, project, created time, a content preview, and Record Provenance (`verbatim`, `user_authored`, `extracted`, `derived`, or `unknown` for legacy rows that predate provenance). A global query with zero keyword hits and no `table` filter retries hybrid search.
 
 ```js
 // Only decisions
@@ -38,7 +38,7 @@ memory_search({ query: "kubernetes auth", project: "my-app", bias_type: "decisio
 
 ## memory_hybrid_search
 
-Combined keyword + semantic search, unless `~/.agents/Recall/config.json` has a `query` key. A named or command win returns that text. A local win stays on the configured mode. `memory_search` stays keyword-only. See [architecture](architecture.md#harness-steps).
+Combined keyword + semantic search, unless `~/.agents/Recall/config.json` has a `query` key. A named or command win returns that text. A local win stays on the configured mode (semantic, keyword, or hybrid). See [architecture](architecture.md#harness-steps).
 
 **Parameters**
 
@@ -86,7 +86,7 @@ Call this before spawning any agent via the Task tool. Uses the configured query
 | agent_task | string | yes | — | The task or prompt you plan to give the agent |
 | project | string | no | — | Current project name for filtering |
 
-**Returns:** Formatted context block containing relevant decisions, learnings, and breadcrumbs matched to the task description.
+**Returns:** Formatted context block for the agent prompt. The configured local modes (`keyword`, `semantic`) return search hits for the task only. The hybrid path also adds recent LoA titles and active decisions, and says whether local memory looks sufficient or Brave search is recommended.
 
 ```js
 context_for_agent({ agent_task: "Refactor the auth middleware", project: "my-app" })
@@ -116,7 +116,7 @@ Never submit API keys, tokens, passwords, or credential-bearing snippets to memo
 
 **Returns:** Confirmation with the new record's id and table.
 
-Records created through `memory_add` are automatically stamped with Record Provenance `user_authored`. There is intentionally no provenance parameter — provenance is write-path metadata, not a caller claim (see `docs/adr/0001-record-provenance-automatic-write-path-metadata.md`).
+Records created through `memory_add` are automatically stamped with Record Provenance `user_authored`. There is intentionally no provenance parameter — provenance is write-path metadata, not a caller claim (see `adr/0001-record-provenance-automatic-write-path-metadata.md`).
 
 ```js
 memory_add({ type: "decision", content: "Use PostgreSQL over MySQL", detail: "Better JSON support and JSONB indexing" })
@@ -131,7 +131,7 @@ memory_add({ type: "decision", content: "Ship onboarding first", importance: 9 }
 
 Get database statistics including record counts per table and total database size. No parameters.
 
-**Returns:** Record counts for each table (`messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`, `docs`) and total database size on disk.
+**Returns:** Sessions, messages, LoA entries, decisions, learnings, breadcrumbs, and total database size on disk.
 
 ```js
 memory_stats()

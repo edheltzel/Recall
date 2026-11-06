@@ -43,7 +43,7 @@ The entire integration is **three thin adapter layers**:
   │                        │     │                             │
   │ Registration:          │     │ Registration:               │
   │  ~/.claude/settings.json│    │  ~/.config/opencode/        │
-  │  mcpServers.recall-recall │     │    opencode.json            │
+│  mcpServers.recall-memory │     │    opencode.json            │
   │                        │     │  mcp.recall-memory          │
   │ Extraction:            │     │                             │
   │  hooks/RecallExtract  │     │ Extraction:                 │
@@ -73,22 +73,22 @@ atlas-recall/
 ├── src/                          # UNCHANGED
 ├── hooks/
 │   └── RecallExtract.ts         # UNCHANGED (Claude Code adapter)
-│   └── RecallBatchExtract.ts           # MODIFIED — also scan opencode drop dir
-├── opencode/                     # NEW — OpenCode adapter
+│   └── RecallBatchExtract.ts           # scans MEMORY/*-sessions/
+├── hosts/opencode/           # OpenCode adapter
 │   ├── RecallExtract.ts         # Plugin: session extraction via CLI export
 │   ├── RecallPreCompact.ts      # Plugin: context injection during compaction
 │   ├── lib/session-export.ts     # Shared helpers — nested so OpenCode does not
 │   │                             #   glob them as plugin factories
 │   └── recall-memory.md          # Agent: memory-aware agent definition
 ├── docs/
-│   ├── FOR_CLAUDE.md             # EXISTING — guide for Claude Code agents
-│   ├── FOR_OPENCODE.md           # NEW — guide for OpenCode agents
+│   ├── hosts/FOR_CLAUDE.md       # guide for Claude Code agents
+│   ├── hosts/FOR_OPENCODE.md     # guide for OpenCode agents
 │   └── OPENCODE_INTEGRATION.md   # THIS FILE
 ├── scripts/
 │   ├── e2e-opencode.ts           # Pipeline e2e (export → drop → extract → search)
 │   ├── e2e-opencode-runtime.ts   # Live-server e2e (discovery, idle frequency)
 │   └── lib/opencode-runtime.ts   # Shared CLI pin, stub provider, event stream
-├── install.sh                    # MODIFIED — detect + register for both platforms
+├── packaging/install.sh      # detect + register for both platforms
 └── package.json                  # MODIFIED — adds the isolated OpenCode e2e scripts
 ```
 
@@ -103,7 +103,7 @@ The installer writes this to `~/.config/opencode/opencode.json`:
   "mcp": {
     "recall-memory": {
       "type": "local",
-      "command": ["bun", "run", "recall-mcp"],
+      "command": ["bun", "run", "/Users/username/.bun/bin/recall-mcp"],
       "enabled": true,
       "environment": {
         "RECALL_DB_PATH": "/Users/username/.agents/Recall/recall.db"
@@ -114,12 +114,12 @@ The installer writes this to `~/.config/opencode/opencode.json`:
 ```
 
 **Key decisions:**
-- Uses `recall-mcp` symlink (created via `bun link`) — consistent with Recall codebase and works across users
-- Uses `bun run` to execute the symlinked binary
+- Resolves `bun` and `recall-mcp` with `which`, falling back to `~/.bun/bin/`, and writes those absolute paths
+- Uses `bun run` to execute that binary
 - The installer pins `RECALL_DB_PATH` using the shared resolver; see [database environment variables](installation.md#environment-variables).
 - Same binary, same tools — zero platform-specific MCP code
 
-### 2. Session Extraction Plugin (`opencode/RecallExtract.ts`)
+### 2. Session Extraction Plugin (`hosts/opencode/RecallExtract.ts`)
 
 **Current strategy:** The plugin uses OpenCode's current `event` hook, filters
 `session.idle`, runs `opencode export <session-id>` for JSON, normalizes the
@@ -128,7 +128,7 @@ after the drop write succeeds. `RecallBatchExtract.ts` then owns extraction
 quality, SQLite dual-write, and searchable retrieval.
 
 Implementation details and regression coverage live in
-[`opencode/RecallExtract.ts`](../opencode/RecallExtract.ts) and
+[`hosts/opencode/RecallExtract.ts`](../hosts/opencode/RecallExtract.ts) and
 [`tests/opencode-integration.test.ts`](../tests/opencode-integration.test.ts).
 
 **Why this approach:**
@@ -170,7 +170,7 @@ Two consequences:
 
 **Plugin module contract.** OpenCode calls **every export** of a top-level
 `plugins/*.ts` as a plugin factory. A plugin entry point must therefore export
-nothing but its factory — shared helpers live in `opencode/lib/session-export.ts`,
+nothing but its factory — shared helpers live in `hosts/opencode/lib/session-export.ts`,
 which OpenCode does not glob. When the helpers sat beside the factory, OpenCode
 called `exportSession()` with its plugin context and logged
 `failed to load plugin ... "Object is not a function"` on every launch.
@@ -180,12 +180,12 @@ called `exportSession()` with its plugin context and logged
 If it is not, the export fails and the drop is never written; the failure is
 reported on stderr and retried on the next idle.
 
-### 3. Compaction Context Injection (`opencode/RecallPreCompact.ts`)
+### 3. Compaction Context Injection (`hosts/opencode/RecallPreCompact.ts`)
 
 **Fixed to use verified hook signature:** `(input, output)` where `output.context` is an array you push strings into.
 
 ```typescript
-// opencode/RecallPreCompact.ts
+// hosts/opencode/RecallPreCompact.ts
 // Injects Recall memory context into OpenCode session compaction summaries.
 //
 // When OpenCode compresses a long session, this hook ensures persistent
@@ -226,7 +226,7 @@ export const RecallCompaction: Plugin = async ({ project }) => {
 - Added 5s timeout to `execFileSync` — prevents blocking compaction if `recall` hangs
 - `project?.name || project?.id` — defensive project access
 
-### 4. Agent Definition (`opencode/recall-memory.md`)
+### 4. Agent Definition (`hosts/opencode/recall-memory.md`)
 
 ```markdown
 ---
@@ -268,7 +268,7 @@ detect_opencode() {
 }
 
 detect_claude_code() {
-  if [[ -d "$HOME/.claude" ]]; then
+  if [[ -d "$HOME/.claude" ]] || command -v claude &>/dev/null; then
     CLAUDE_CODE_DETECTED=true
   fi
 }
@@ -276,25 +276,10 @@ detect_claude_code() {
 # MCP registration and database-path selection use the shared installer helper.
 recall_configure_opencode_mcp
 
-# Plugin installation for OpenCode
-install_opencode_plugin() {
-  local plugin_dir="$OPENCODE_CONFIG_DIR/plugins"
-  mkdir -p "$plugin_dir"
-  cp opencode/RecallExtract.ts "$plugin_dir/"
-  cp opencode/RecallPreCompact.ts "$plugin_dir/"
-}
-
-# Agent installation for OpenCode
-install_opencode_agent() {
-  local agent_dir="$OPENCODE_CONFIG_DIR/agents"
-  mkdir -p "$agent_dir"
-  cp opencode/recall-memory.md "$agent_dir/"
-}
-
-# Guide installation for OpenCode
-install_opencode_guide() {
-  cp docs/FOR_OPENCODE.md "$OPENCODE_CONFIG_DIR/Recall_GUIDE.md"
-}
+# Plugin, agent, and guide installation
+recall_install_opencode_plugins   # hosts/opencode/*.ts -> canonicals, symlinked into plugins/
+recall_install_opencode_agent     # hosts/opencode/recall-memory.md -> agents/
+recall_install_opencode_guide     # docs/hosts/FOR_OPENCODE.md -> Recall_GUIDE.md
 ```
 
 The live installer delegates to `lib/install-lib.sh`'s shared
@@ -317,22 +302,9 @@ The extraction pipeline tags OpenCode sessions with `source: 'opencode'`. The hi
 
 **No changes to MCP tools** — they return results from all sources. The `source` field is metadata for provenance, not filtering.
 
-## RecallBatchExtract.ts Changes
+## RecallBatchExtract.ts
 
-The existing cron job needs one addition: scan the OpenCode drop directory alongside Claude Code's JSONL sessions.
-
-```typescript
-// In RecallBatchExtract.ts — add to the session discovery logic:
-const RECALL_HOME = process.env.RECALL_HOME || join(homedir(), ".agents", "Recall")
-const OPENCODE_DROP_DIR = join(RECALL_HOME, "MEMORY", "opencode-sessions")
-
-function findOpenCodeSessions(): string[] {
-  if (!existsSync(OPENCODE_DROP_DIR)) return []
-  return readdirSync(OPENCODE_DROP_DIR)
-    .filter(f => f.endsWith(".md") && !f.startsWith("."))
-    .map(f => join(OPENCODE_DROP_DIR, f))
-}
-```
+`RecallBatchExtract.ts` already scans `MEMORY/*-sessions/` through `hooks/lib/markdown-drop.ts`, so the OpenCode drop at `~/.agents/Recall/MEMORY/opencode-sessions/` is picked up with the other markdown drops. It does not have a separate OpenCode-only finder.
 
 The extraction prompt already handles markdown input — it processes conversation text regardless of format.
 
@@ -430,7 +402,7 @@ flakiness. The pinned version lives once, in
 
 ### Not yet verified at runtime
 
-`opencode/RecallPreCompact.ts` (compaction context injection) is covered only by
+`hosts/opencode/RecallPreCompact.ts` (compaction context injection) is covered only by
 unit tests of its `(input, output)` contract. No test drives a real OpenCode
 compaction, so its runtime behaviour is unproven — the README roadmap says so
 rather than implying otherwise.

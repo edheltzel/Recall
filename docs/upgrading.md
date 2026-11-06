@@ -110,6 +110,7 @@ not used.
 | `--force` | Run even if already at latest (repair path) |
 | `--no-migrate` | Skip `recall init` migration step |
 | `--no-confirm` | Non-interactive |
+| `--no-gum` | Skip optional gum setup and use the bash interface for this run |
 | `--help` | Show usage |
 
 ### Rollback
