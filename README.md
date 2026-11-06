@@ -376,6 +376,8 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 
 ## Documentation
 
+The same guides are published at [recall.edheltzel.codes/docs](https://recall.edheltzel.codes/docs/), built from this folder by [`site/`](site/).
+
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
 | [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |

@@ -37,6 +37,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `scripts/` — dev / CI helper scripts (version check, e2e)
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`) plus tiny host-wire snippets under `templates/cursor/`
 - `assets/` — README banner + VHS demo tapes / gifs
+- `site/` — public website (landing + docs from `docs/`), a static Nimbus/Astro build with its own npm tooling; deployed by Cloudflare Pages
 
 Key root files: `AGENTS.md` (canonical guide), `CLAUDE.md` (symlink to it), `CHANGELOG.md`, `CONTEXT.md`, `package.json`, `tsconfig.json`. Host guides live in `docs/hosts/`. Lifecycle scripts live in `packaging/`.
 
@@ -198,6 +199,7 @@ Child AGENTS.md files own domain-specific local rules. Read the applicable one b
 - [`hosts/plugins/AGENTS.md`](hosts/plugins/AGENTS.md) — per-host native plugin manifests, MCP registration, and generated skill payloads
 - [`hosts/opencode/AGENTS.md`](hosts/opencode/AGENTS.md) — OpenCode adapter plugins, their shared helpers, and the runtime contract they must satisfy
 - [`hosts/jcode/AGENTS.md`](hosts/jcode/AGENTS.md) — Jcode capture helper; supplied text only, no private history
+- [`site/AGENTS.md`](site/AGENTS.md) — public website: landing page, build-time docs from `docs/`, isolated npm tooling, Cloudflare Pages
 
 Owned at root (no child doc): `lib/install-lib.sh` and `lib/jsonc-mcp.ts`; `packaging/` lifecycle scripts; `scripts/` (dev/CI helpers + the per-host isolated e2e harnesses); `CONTEXT.md`; and `assets/` (banner + VHS demo tapes/gifs).
 
