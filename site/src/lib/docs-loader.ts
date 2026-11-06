@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,8 +20,20 @@ export function recallDocsLoader(): Loader {
       const root = fileURLToPath(context.config.root);
       const dir = path.resolve(root, docsDir);
       const repoRoot = path.dirname(dir);
+      const gitOutput = (...args: string[]) => {
+        try {
+          return execFileSync("git", args, {
+            cwd: repoRoot,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim();
+        } catch {
+          return undefined;
+        }
+      };
 
       const sync = async () => {
+        const fullHistory = gitOutput("rev-parse", "--is-shallow-repository") === "false";
         context.store.clear();
         for (const page of pages) {
           const abs = path.join(dir, page.file);
@@ -28,7 +41,10 @@ export function recallDocsLoader(): Loader {
           const { title, body } = splitTitle(source, page.file);
           const linked = rewriteLinks(body, (target) => resolveLink(target, dir, repoRoot));
           const filePath = path.relative(root, abs);
-          const data = await context.parseData({ id: page.id, data: { title }, filePath });
+          const lastUpdated = fullHistory
+            ? gitOutput("log", "-1", "--format=%aI", "--", abs) || undefined
+            : undefined;
+          const data = await context.parseData({ id: page.id, data: { title, lastUpdated }, filePath });
           context.store.set({
             id: page.id,
             data,

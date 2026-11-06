@@ -37,6 +37,7 @@ export default defineConfig({
   },
   integrations: [
     nimbus(nimbusConfig, {
+      validateMdx: false,
       rules: {
         "nimbus/frontmatter-shape": "error",
         "nimbus/internal-link": "error",

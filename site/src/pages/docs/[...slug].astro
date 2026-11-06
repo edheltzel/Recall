@@ -7,11 +7,9 @@ import {
   getSidebar,
   getPrevNext,
   getBreadcrumbs,
-  getLastUpdated,
   getTOC,
   stripBase,
 } from "@cloudflare/nimbus-docs/runtime";
-import { components } from "../../components";
 import { repoBranch, repoUrl } from "../../docs";
 
 export const getStaticPaths = getCollectionStaticPaths("recall");
@@ -38,9 +36,7 @@ const breadcrumbs = await getBreadcrumbs(currentSlug, { collection: entry.collec
 const editUrl = entry.filePath
   ? `${repoUrl}/edit/${repoBranch}/${entry.filePath.replace(/^\.\.\//, "")}`
   : undefined;
-// Frontmatter wins; git is the fallback.
-const lastUpdated = entry.data.lastUpdated ??
-  await getLastUpdated(entry);
+const lastUpdated = entry.data.lastUpdated;
 // `tocOn` already implies `tableOfContents !== false`, but TS can't carry
 // that boolean narrowing to the value here — re-check it so `getTOC` only
 // ever sees its options object (or undefined), never `false`.
@@ -70,5 +66,5 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
   collection={entry.collection}
   entryId={entry.id}
 >
-  <Content components={components} />
+  <Content />
 </DocsLayout>
