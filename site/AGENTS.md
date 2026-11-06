@@ -26,7 +26,7 @@ The public site at https://recall.edheltzel.codes: the landing page at `/` and t
 ## Work Guidance
 
 - Upgrade Nimbus with `npx nimbus-docs migrate --dry-run --diff`, then `migrate --yes`; take starter fixes with `npx nimbus-docs outdated` and `diff <file>`. Keep `nimbus.json` committed and never edit it by hand.
-- After approved cutover, Cloudflare Pages builds this folder: root directory `site`, build command `npm run build`, output `dist`.
+- Cloudflare Pages project `recall` (`recall-1z1.pages.dev`, custom domain `recall.edheltzel.codes`) builds this folder on pushes to `main` that touch `site/*` or `docs/*`: root directory `site`, build command `npm run build`, output `dist`, `NODE_VERSION` and `SITE_URL` set on the project. Previews are off. The old `recall-site` project only redirects its `pages.dev` hostname here.
 
 ## Verification
 
