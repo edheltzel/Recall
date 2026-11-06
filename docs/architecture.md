@@ -85,11 +85,9 @@ Ambient text from [first-party capture adapters](CAPTURE_ADAPTER.md#harness-ids)
 
 Claude Code's preferred attach is the native plugin in `hosts/plugins/recall-claude/` (skills + MCP). The lifecycle installer continues to own hooks. Stop shells `recall capture`; without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts`. See [Claude Integration](CLAUDE_INTEGRATION.md).
 
-Pi's preferred attach is the native package: Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`. Shutdown calls `recall capture` and still writes `MEMORY/pi-sessions/` for batch extract.
+Pi uses its native package for extensions and skills, with MCP configured separately by the installer. Package discovery and shutdown capture are documented in [Pi Integration](PI_INTEGRATION.md).
 
-Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
-
-omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. Awaited main-session `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
+omp uses its native package for main-session turn-completion capture. Setup and capture limits are documented in [omp Integration](OMP_INTEGRATION.md).
 
 OpenCode stays on its markdown drop. Moving it to `recall capture` is the next adapter after this v1 door. See [OpenCode Integration](OPENCODE_INTEGRATION.md).
 

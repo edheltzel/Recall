@@ -63,11 +63,9 @@ Run `recall install` once after that first `recall update`. Later updates reload
 
 1. Fetches the latest release tag from GitHub and compares to
    `package.json`. Exits 0 if already current (unless `--force`).
-2. Creates a timestamped backup of `settings.json`, `recall.db`,
-   `CLAUDE.md`, OpenCode/Pi configs, and `.mcp.json` at
-   `~/.agents/Recall/backups/<TIMESTAMP>/`. Records the git `PRE_SHA`
-   in the manifest.
-3. `git fetch --tags && git pull --ff-only origin main` (aborts on a
+2. Creates a timestamped [backup](installation.md#backup-and-restore)
+   and records the git `PRE_SHA` in its manifest.
+3. `git fetch --tags origin && git pull --ff-only origin main` (aborts on a
    dirty tree; resolve manually and re-run).
 4. `bun install && bun run build`.
 5. Re-links the global binaries.
@@ -76,7 +74,7 @@ Run `recall install` once after that first `recall update`. Later updates reload
 7. Copies refreshed hooks, shared lib files, agent skills, and
    `FOR_CLAUDE.md`; reconciles Claude MCP ownership under the
    [Claude integration rules](CLAUDE_INTEGRATION.md#migrating-an-existing-install);
-   refreshes detected OpenCode, Pi, and Grok integrations; and
+   refreshes detected hosts through the shared installer helpers; and
    runs the shared Claude/Pi `## MEMORY` ownership migration. Marked sections and normalized
    exact legacy-generated bodies become syntax-free `Recall_GUIDE.md` pointers;
    unmarked customized/external sections are preserved, while marked sections
@@ -87,10 +85,9 @@ Run `recall install` once after that first `recall update`. Later updates reload
    cross-host bundle.
    Canonical runtime files refresh in place; a foreign file at a managed host
    link is moved into the timestamped collision backup before replacement.
-8. Forces re-registration of every installer-owned Claude hook through
-   `recall_register_all_hooks` — this permanently
-   prevents the pre-0.7.1 bug class where a partial install could
-   leave hooks missing.
+8. Renames legacy Claude hook entries, registers missing installer-owned hooks
+   through `recall_register_all_hooks` (existing names are skipped), and removes
+   stale managed hook symlinks.
 9. Verifies via `recall --version` and `recall stats`.
 10. After verification succeeds, refreshes the managed quarterly aging cron
     according to [Quarterly aging](installation.md#quarterly-aging-cron).

@@ -376,7 +376,7 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 
 ## Documentation
 
-The same guides are published at [recall.edheltzel.codes/docs](https://recall.edheltzel.codes/docs/), built from this folder by [`site/`](site/).
+The website build in [`site/`](site/) reads its public guides directly from `docs/` for `/docs/`.
 
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |

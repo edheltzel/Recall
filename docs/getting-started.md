@@ -135,7 +135,7 @@ On Claude Code, the installer copies canonical hooks to `~/.agents/Recall/shared
 Other hosts:
 
 - **Codex** — `Stop`, `PreCompact`, `PostCompact`, and `SessionEnd` call `recall capture`. `SessionStart` stays hidden `recall host-hook codex` for L0/L1 injection only. See [Capture adapter](CAPTURE_ADAPTER.md).
-- **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` runs `grok/hooks/capture.ts`, which calls `recall capture`. Capture only; no session-start injection.
+- **Grok** — installer-owned lifecycle capture only; no session-start injection. See [Grok Integration](GROK_INTEGRATION.md).
 - **OpenCode** — markdown drop for `RecallBatchExtract.ts`. Not on `recall capture` yet (next after v1). See [optional batch extraction](installation.md#optional-batch-extraction-cron) for scheduling.
 - **Pi** — shutdown calls `recall capture` and still drops markdown under `MEMORY/pi-sessions/` for batch extract. See [Pi Integration](PI_INTEGRATION.md).
 - **omp** — awaited `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).

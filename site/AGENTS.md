@@ -26,7 +26,7 @@ The public site at https://recall.edheltzel.codes: the landing page at `/` and t
 ## Work Guidance
 
 - Upgrade Nimbus with `npx nimbus-docs migrate --dry-run --diff`, then `migrate --yes`; take starter fixes with `npx nimbus-docs outdated` and `diff <file>`. Keep `nimbus.json` committed and never edit it by hand.
-- Cloudflare Pages builds this folder: root directory `site`, build command `npm run build`, output `dist`.
+- After approved cutover, Cloudflare Pages builds this folder: root directory `site`, build command `npm run build`, output `dist`.
 
 ## Verification
 

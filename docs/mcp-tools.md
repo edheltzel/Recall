@@ -48,7 +48,7 @@ Combined keyword + semantic search, unless `~/.agents/Recall/config.json` has a 
 | project | string | no | — | Filter results to a specific project name |
 | limit | number | no | 10 | Maximum number of results to return |
 
-**Returns:** Array of matching records ranked by fused keyword and semantic relevance scores, each with its Record Provenance.
+**Returns:** Formatted text. The default hybrid path includes fused relevance scores and Record Provenance; configured query harnesses return their selected mode's output.
 
 ```js
 memory_hybrid_search({ query: "how did we handle rate limiting", project: "my-app" })

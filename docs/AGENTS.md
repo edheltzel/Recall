@@ -27,7 +27,7 @@ User-facing published documentation: installation, CLI / MCP / agent-skill refer
 
 ## Verification
 
-None automated — verify referenced commands run and links resolve.
+For published pages, see [`site/AGENTS.md` verification](../site/AGENTS.md#verification). Verify other referenced commands and links manually.
 
 ## Child DOX Index
 

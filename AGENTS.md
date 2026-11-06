@@ -37,7 +37,7 @@ Top-level directories, by purpose (one line each — not a file enumeration):
 - `scripts/` — dev / CI helper scripts (version check, e2e)
 - `templates/` — install templates (`CLAUDE.md.template`, `mcp.json.template`) plus tiny host-wire snippets under `templates/cursor/`
 - `assets/` — README banner + VHS demo tapes / gifs
-- `site/` — public website (landing + docs from `docs/`), a static Nimbus/Astro build with its own npm tooling; deployed by Cloudflare Pages
+- `site/` — public website (landing + docs from `docs/`), a static Nimbus/Astro build with its own npm tooling; prepared for Cloudflare Pages
 
 Key root files: `AGENTS.md` (canonical guide), `CLAUDE.md` (symlink to it), `CHANGELOG.md`, `CONTEXT.md`, `package.json`, `tsconfig.json`. Host guides live in `docs/hosts/`. Lifecycle scripts live in `packaging/`.
 

@@ -43,7 +43,7 @@ The entire integration is **three thin adapter layers**:
   │                        │     │                             │
   │ Registration:          │     │ Registration:               │
   │  ~/.claude/settings.json│    │  ~/.config/opencode/        │
-│  mcpServers.recall-memory │     │    opencode.json            │
+  │  mcpServers.recall-memory │   │    opencode.json            │
   │                        │     │  mcp.recall-memory          │
   │ Extraction:            │     │                             │
   │  hooks/RecallExtract  │     │ Extraction:                 │
@@ -61,7 +61,7 @@ The entire integration is **three thin adapter layers**:
   └────────────────────────┘     │  agents/recall-memory.md    │
                                  │                             │
                                  │ Context Injection:          │
-                                 │  hosts/plugins/recall-compaction  │
+                                 │  plugins/RecallPreCompact.ts │
                                  │  pushes to output.context[] │
                                  └─────────────────────────────┘
 ```
@@ -96,14 +96,14 @@ atlas-recall/
 
 ### 1. MCP Server Registration (opencode.json)
 
-The installer writes this to `~/.config/opencode/opencode.json`:
+Example installer registration in `~/.config/opencode/opencode.json` (paths resolve on the installing machine):
 
 ```jsonc
 {
   "mcp": {
     "recall-memory": {
       "type": "local",
-      "command": ["bun", "run", "/Users/username/.bun/bin/recall-mcp"],
+      "command": ["/Users/username/.bun/bin/bun", "run", "/Users/username/.bun/bin/recall-mcp"],
       "enabled": true,
       "environment": {
         "RECALL_DB_PATH": "/Users/username/.agents/Recall/recall.db"
@@ -182,49 +182,11 @@ reported on stderr and retried on the next idle.
 
 ### 3. Compaction Context Injection (`hosts/opencode/RecallPreCompact.ts`)
 
-**Fixed to use verified hook signature:** `(input, output)` where `output.context` is an array you push strings into.
-
-```typescript
-// hosts/opencode/RecallPreCompact.ts
-// Injects Recall memory context into OpenCode session compaction summaries.
-//
-// When OpenCode compresses a long session, this hook ensures persistent
-// memory context survives the compaction by injecting it into the summary.
-
-import type { Plugin } from "@opencode-ai/plugin"
-import { execFileSync } from "child_process"
-
-export const RecallCompaction: Plugin = async ({ project }) => {
-  return {
-    // Verified signature: (input, output) — NOT (event)
-    // output.context is an array to push additional context strings into
-    // output.prompt is a string that replaces the entire compaction prompt
-    "experimental.session.compacting": async (input: any, output: any) => {
-      try {
-        const projectName = project?.name || project?.id || ""
-        const context = execFileSync("recall", [
-          "search", projectName, "--limit", "5"
-        ], { encoding: "utf-8", timeout: 5000 })
-
-        if (context.trim()) {
-          output.context.push(
-            `## Persistent Memory (from Recall)\n` +
-            `The user has a persistent memory system. Key context:\n${context}`
-          )
-        }
-      } catch {
-        // recall CLI unavailable or timed out — skip silently
-      }
-    }
-  }
-}
-```
-
-**Changes from v1:**
-- Hook signature: `(input, output)` not `(event)` — verified from official docs
-- Pushes to `output.context[]` array — not `{ inject: "..." }` which was fabricated
-- Added 5s timeout to `execFileSync` — prevents blocking compaction if `recall` hangs
-- `project?.name || project?.id` — defensive project access
+The [compaction plugin](../hosts/opencode/RecallPreCompact.ts) handles
+`experimental.session.compacting(input, output)` by appending Recall search
+context to `output.context`. It leaves `output.prompt` unchanged, uses a
+five-second CLI timeout, and skips injection if the context array is missing
+or the CLI fails. Its real compaction behavior remains [unverified at runtime](#not-yet-verified-at-runtime).
 
 ### 4. Agent Definition (`hosts/opencode/recall-memory.md`)
 

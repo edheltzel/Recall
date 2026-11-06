@@ -189,7 +189,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
 | Step | What happens |
 |------|-------------|
-| 1. Backup | Backs up existing files from [`FILES_TO_BACKUP`](../lib/install-lib.sh): Claude `.mcp.json`, `~/.claude.json`, `CLAUDE.md`, `settings.json`, legacy `memory.db`, `recall.db`, OpenCode `opencode.json`, Pi `mcp.json` and `AGENTS.md`, and the Grok lifecycle hook, into `~/.agents/Recall/backups/` |
+| 1. Backup | Creates a snapshot under `~/.agents/Recall/backups/`; see [Backup and Restore](#backup-and-restore) for coverage and retention |
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
