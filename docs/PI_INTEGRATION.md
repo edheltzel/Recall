@@ -29,7 +29,7 @@ The official Pi 0.81.1 documentation independently defines [packages](https://gi
 
 | Surface | Pi can discover it | A Pi package can install it | Recall's Pi shape |
 |---|---:|---:|---|
-| Extension | Yes | Yes | The root `recall-memory` package declares `pi/*.ts` |
+| Extension | Yes | Yes | The root `recall-memory` package declares `hosts/pi/*.ts` |
 | Agent Skills | Yes | Yes | The same package declares all nine canonical `agent-skills/*/SKILL.md` files |
 | Lifecycle handlers | Yes, as extension code | Yes, inside an extension | Recall subscribes to `before_agent_start` and `session_shutdown` |
 | MCP server | Only through an MCP client extension | No | `pi-mcp-adapter` plus `~/.pi/agent/mcp.json` |

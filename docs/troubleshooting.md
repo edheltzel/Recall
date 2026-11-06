@@ -74,12 +74,7 @@ The MCP server is registered in `~/.claude/settings.json` under `mcpServers` (us
 
 ### "MCP worked yesterday but broke after I restarted Claude Code"
 
-The MCP entry in `settings.json` is an absolute path to
-`~/.claude/install/global/node_modules/recall/dist/mcp-server.js`
-(via a symlink at `~/.bun/bin/recall-mcp`). If the symlink is gone or
-stale, the running `recall-mcp` process keeps the deleted inode open —
-so the current session works, but the next Claude Code restart can't
-spawn a fresh MCP server and it silently fails.
+The installer-managed Claude MCP entry runs `bun` with args `run` and the `recall-mcp` path (`which recall-mcp`, usually `~/.bun/bin/recall-mcp`). That symlink points at this checkout's `dist/mcp-server.js`. If the symlink is gone or stale, the running `recall-mcp` process keeps the deleted inode open — so the current session works, but the next Claude Code restart can't spawn a fresh MCP server and it silently fails.
 
 Common causes:
 - `bun unlink`, `bun upgrade`, or `npm` clean-up removed the symlink
@@ -176,7 +171,7 @@ symlink is missing or stale:
 cd /path/to/Recall       # the MAIN checkout, not a worktree
 bun install && bun run build && bun link
 ls -la ~/.bun/bin/recall    # verify
-recall --version            # should print X.Y.Z (e.g. "0.7.22")
+recall --version            # full X.Y.Z
 ```
 
 If `recall --version` still fails, confirm `~/.bun/bin` is on your PATH:

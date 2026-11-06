@@ -1,0 +1,43 @@
+{
+  "name": "recall-site",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check",
+    "lint:docs": "node --experimental-strip-types scripts/lint-docs.mjs",
+    "check:nimbus": "nimbus-docs check",
+    "check:dist": "node scripts/check-dist.mjs",
+    "check:landing": "node scripts/contrast.mjs && node scripts/flash.mjs && node scripts/install-box.mjs"
+  },
+  "dependencies": {
+    "@cloudflare/nimbus-docs": "0.19.3",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@iconify-json/ph": "1.2.2",
+    "@resvg/resvg-js": "2.6.2",
+    "astro": "7.3.3",
+    "clsx": "2.1.1",
+    "satori": "0.26.0",
+    "sharp": "0.35.5",
+    "tailwind-merge": "3.7.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "@astrojs/language-server": "2.16.13",
+    "@tailwindcss/vite": "4.3.4",
+    "markdownlint": "0.42.0",
+    "pagefind": "1.6.0",
+    "playwright-core": "1.64.1",
+    "pngjs": "7.0.0",
+    "tailwindcss": "4.3.4",
+    "typescript": "5.9.3"
+  }
+}

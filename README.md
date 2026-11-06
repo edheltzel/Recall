@@ -376,6 +376,8 @@ Have an agent you'd like to see supported? [Open an issue](https://github.com/ed
 
 ## Documentation
 
+The website build in [`site/`](site/) reads its public guides directly from `docs/` for `/docs/`.
+
 | Guide                                      | Description                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
 | [Getting Started](docs/getting-started.md) | First-run tutorial: install, first commands, database path, session start, MCP/hooks |

@@ -113,7 +113,7 @@ Per-host registration:
 - **Claude Code** — preferred: plugin MCP (`plugin:recall:recall-memory`). Without the plugin, user-scope `mcpServers["recall-memory"]` in `~/.claude/settings.json` (and/or `~/.claude.json`). With the plugin active, the installer reconciles that entry under the [Claude ownership rules](CLAUDE_INTEGRATION.md#migrating-an-existing-install).
 - **Pi** — preferred: native package for extensions/skills; MCP is still `pi-mcp-adapter` + `~/.pi/agent/mcp.json` (installer can write the owned entry).
 - **omp** — no MCP registration. Native capture and installer-owned skills remain separate; see [omp Integration](OMP_INTEGRATION.md).
-- **OpenCode / Grok** — installer writes the host's MCP config when that CLI is detected.
+- **OpenCode** — installer writes `mcp.recall-memory` in `opencode.json` when that CLI is detected. **Grok** — the installer does not write MCP; it only installs the lifecycle hook. Configure `recall-memory` yourself if you want the tools. See [Grok Integration](GROK_INTEGRATION.md).
 - **Codex** — `.mcp.json` inside the native plugin (`command: recall-mcp`). `packaging/install.sh` does not duplicate it.
 - **Cursor** — snippets only. Copy/merge `templates/cursor/mcp.json` (`"command": "recall-mcp"`). No marketplace plugin.
 
@@ -127,6 +127,7 @@ On Claude Code, the installer copies canonical hooks to `~/.agents/Recall/shared
 |-------|------|----------------|
 | `SessionStart` | `RecallStart.ts` | Injects L0 identity + L1 top records (same assembler as `recall start`) |
 | `SessionStart` | `RecallTelosSync.ts` | PAI TELOS auto-import when that directory exists; otherwise exits immediately |
+| `SessionStart` (`clear`) | `RecallClearExtract.ts` | Extracts the previous session when `/clear` ends it without `Stop` |
 | `Stop` | `RecallExtract.ts` | Extracts the session, and shells ambient text to `recall capture`. Without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts` |
 | `PreCompact` | `RecallPreCompact.ts` | Flushes in-flight messages before compaction |
 | `PostToolUse` / `UserPromptSubmit` | `RecallInSession.ts` | Mid-session loop and correction capture; both default OFF |
@@ -134,7 +135,7 @@ On Claude Code, the installer copies canonical hooks to `~/.agents/Recall/shared
 Other hosts:
 
 - **Codex** — `Stop`, `PreCompact`, `PostCompact`, and `SessionEnd` call `recall capture`. `SessionStart` stays hidden `recall host-hook codex` for L0/L1 injection only. See [Capture adapter](CAPTURE_ADAPTER.md).
-- **Grok** — installer-owned `~/.grok/hooks/RecallLifecycle.json` runs `grok/hooks/capture.ts`, which calls `recall capture`. Capture only; no session-start injection.
+- **Grok** — installer-owned lifecycle capture only; no session-start injection. See [Grok Integration](GROK_INTEGRATION.md).
 - **OpenCode** — markdown drop for `RecallBatchExtract.ts`. Not on `recall capture` yet (next after v1). See [optional batch extraction](installation.md#optional-batch-extraction-cron) for scheduling.
 - **Pi** — shutdown calls `recall capture` and still drops markdown under `MEMORY/pi-sessions/` for batch extract. See [Pi Integration](PI_INTEGRATION.md).
 - **omp** — awaited `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).

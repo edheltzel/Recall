@@ -35,9 +35,9 @@ Verify: `bun --version` — [bun.sh](https://bun.sh)
 
 ---
 
-### Node.js and npm
+### Node.js
 
-Required for global linking so `recall` and `recall-mcp` are available on your PATH. Minimum version: **Node 18+**.
+Required for a source checkout. `bun run build` runs `node` after `tsup` to rewrite shebangs. Putting `recall` and `recall-mcp` on `PATH` is `bun link`; `npm link` is only the fallback when that link does not verify.
 
 ```bash
 # macOS (Homebrew)
@@ -75,7 +75,7 @@ If OpenCode is installed, Recall registers its MCP entry and native plugins.
 The integration requires the supported `opencode` CLI and Bun on `PATH`; the
 plugin uses `opencode export <session-id>` (JSON) and converts the result into a
 markdown drop for the shared batch extractor. Verify with `opencode --version`.
-Use `./packaging/install.sh --skip-opencode` when OpenCode should remain untouched.
+Use the interactive installer and leave OpenCode unselected when it should remain untouched. `./packaging/install.sh` has no `--skip-opencode` flag (`--yes` configures every detected agent). Uninstall can still skip it with `./packaging/uninstall.sh --skip-opencode`.
 
 ### Grok Build CLI (Optional)
 
@@ -189,7 +189,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 
 | Step | What happens |
 |------|-------------|
-| 1. Backup | Backs up any existing Claude Code config files (`.mcp.json`, `.claude.json`, `CLAUDE.md`, `settings.json`, `recall.db`) to `~/.agents/Recall/backups/` |
+| 1. Backup | Creates a snapshot under `~/.agents/Recall/backups/`; see [Backup and Restore](#backup-and-restore) for coverage and retention |
 | 2. Dependencies | Installs dependencies via `bun install` |
 | 3. Build | Compiles TypeScript source via `tsup` |
 | 4. Link | Links `recall` and `recall-mcp` globally via `bun link` (falls back to `npm link` on failure) |
@@ -198,7 +198,7 @@ The installer auto-detects your OS (macOS or Linux) and runs these steps:
 | 7. Setup hooks | Copies the installer-owned Claude hooks and shared hook libraries to their canonical runtime paths, links them into `~/.claude/hooks/`, and registers the current Claude lifecycle events through the shared hook installer |
 | 8. Copy guide and skills | Copies `FOR_CLAUDE.md` to `~/.claude/Recall_GUIDE.md`; the active Claude plugin owns skills, while a confirmed absent or disabled plugin makes the installer link them under `~/.claude/skills/do-recall-*/`. Removes legacy `~/.claude/commands/Recall/` symlinks |
 | 9. Configure Claude memory | If no Recall-specific `~/.claude/rules/memory.md` owns the contract, adds a marked, syntax-free `Recall_GUIDE.md` pointer when `CLAUDE.md` has no `## MEMORY`; refreshes marked sections and migrates normalized exact legacy-generated bodies; preserves unmarked customized/external sections. Remove the marker before taking external ownership. `update.sh` runs the same migration during runtime refresh |
-| 10. Configure detected hosts | Refreshes existing OpenCode and Pi integrations and installs Grok's managed automatic-capture hook when those CLIs are detected |
+| 10. Configure detected hosts | Refreshes OpenCode and Pi, installs Grok's managed automatic-capture hook, and links omp skills when those CLIs are detected |
 | 11. Schedule aging | Reconciles the [managed quarterly aging job](#quarterly-aging-cron) after the self-check succeeds |
 
 **After install:** Restart each configured host to load its integration.

@@ -29,7 +29,8 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   └── Recall_GUIDE.md                 # Canonical guide linked into Pi home
 ├── grok/
 │   └── hooks/
-│       └── RecallLifecycle.json        # Canonical Grok capture hook
+│       ├── RecallLifecycle.json        # Canonical Grok capture hook
+│       └── capture.ts                  # Exports the session and calls recall capture
 ├── MEMORY/                             # Migrated user-authored MEMORY files
 │   ├── identity.md                     # L0 identity (user-authored via recall onboard)
 │   └── DISTILLED.md                    # All extracted session summaries (full archive)
@@ -53,6 +54,8 @@ installed MCP adapter/configuration under `~/.pi/agent/`.
 │   ├── RecallPreCompact.ts            # → ~/.agents/Recall/shared/hooks/RecallPreCompact.ts
 │   ├── RecallExtract.ts               # → ~/.agents/Recall/shared/hooks/RecallExtract.ts
 │   ├── RecallBatchExtract.ts           # → ~/.agents/Recall/shared/hooks/RecallBatchExtract.ts
+│   ├── RecallTelosSync.ts             # → ~/.agents/Recall/shared/hooks/RecallTelosSync.ts
+│   ├── RecallClearExtract.ts          # → ~/.agents/Recall/shared/hooks/RecallClearExtract.ts
 │   ├── RecallInSession.ts             # → ~/.agents/Recall/shared/hooks/RecallInSession.ts
 │   └── lib/                            # → ~/.agents/Recall/shared/hooks/lib/
 └── settings.json                       # Hook registration + MCP server (recall-memory)
@@ -82,11 +85,9 @@ Ambient text from [first-party capture adapters](CAPTURE_ADAPTER.md#harness-ids)
 
 Claude Code's preferred attach is the native plugin in `hosts/plugins/recall-claude/` (skills + MCP). The lifecycle installer continues to own hooks. Stop shells `recall capture`; without hooks, run `bun hooks/lib/hosts/claude/ambient-capture.ts`. See [Claude Integration](CLAUDE_INTEGRATION.md).
 
-Pi's preferred attach is the native package: Pi discovers the root package's `pi/*.ts` extensions and canonical `agent-skills/*/SKILL.md` files through `package.json#pi`. Shutdown calls `recall capture` and still writes `MEMORY/pi-sessions/` for batch extract.
+Pi uses its native package for extensions and skills, with MCP configured separately by the installer. Package discovery and shutdown capture are documented in [Pi Integration](PI_INTEGRATION.md).
 
-Because Pi packages cannot declare MCP servers, `lib/install-lib.sh` separately installs `pi-mcp-adapter` and merges Recall's owned entry into Pi's `mcp.json`; see [Pi Integration](PI_INTEGRATION.md).
-
-omp's native package declares `omp/recall.ts` through `package.json#omp.extensions`. Awaited main-session `session_stop` sends branch text to package-local `dist/index.js capture`. See [omp Integration](OMP_INTEGRATION.md).
+omp uses its native package for main-session turn-completion capture. Setup and capture limits are documented in [omp Integration](OMP_INTEGRATION.md).
 
 OpenCode stays on its markdown drop. Moving it to `recall capture` is the next adapter after this v1 door. See [OpenCode Integration](OPENCODE_INTEGRATION.md).
 
@@ -122,6 +123,13 @@ MCP (`recall-mcp`) and `agent-skills/` remain the cross-host agent surfaces.
 | embeddings | Vector embeddings for semantic search (1024-dim, qwen3-embedding:0.6b) — canonical BLOB store | N/A |
 | vec_embeddings | sqlite-vec (`vec0`) native KNN index, derived from `embeddings`; created only when the extension loads, else search falls back to the brute-force cosine scan | N/A |
 | dedup_lineage | Duplicate lineage audit trail from `recall dedup` (survivor, duplicate, reason, similarity, status) | No |
+| procedures | Procedures synthesized from clustered learnings (`recall cluster`) | No |
+| session_progress | Per-session turn/tool counters and the incremental-extraction cursor | No |
+| extraction_tracker | Per-conversation extraction state (replaces `.extraction_tracker.json` after one-shot import) | No |
+| extraction_sessions | Extraction session index (replaces `SESSION_INDEX.json` as the query surface; markdown sidecars are still written) | No |
+| extraction_errors | Known error/fix pairs from extraction | No |
+| extraction_locks | Counting semaphore for concurrent extractors | No |
+| schema_meta | Schema version and internal markers | No |
 
 All FTS5-indexed tables have automatic sync triggers.
 
@@ -161,16 +169,16 @@ The `RecallStart` hook injects two tiers at the top of supported sessions:
 
 | Tier | Source | Cap | Purpose |
 |------|--------|-----|---------|
-| **L0 — Identity** | `identity.md` (user-authored) | 1200 chars | Who the user is, what projects they work on, working preferences. Always on, always first. Truncated silently beyond the cap. |
-| **L1 — Importance-ranked** | Top 12 records across messages, decisions, learnings, LoA, ranked by `importance` DESC | 12 records | Load-bearing recent context. 4 of the 12 slots are reserved for LoA entries — LoA is often richer than any single decision. |
+| **L0 — Identity** | `identity.md` (user-authored) | 1200 chars | Who the user is, what projects they work on, working preferences. Always on, always first. Over the cap, the tail is replaced with a truncation marker. |
+| **L1 — Importance-ranked** | Top records across LoA, decisions, learnings, and breadcrumbs (not messages), ranked by `importance` DESC, then table priority | 12 records, also trimmed at 6000 chars | Load-bearing recent context. 4 of the 12 slots are reserved for curated LoA entries. |
 
-Automatic terminal-capture LoA entries remain searchable but do not enter the
-reserved curated L1 pool, so host-generated summaries cannot displace curated
-knowledge at session start.
+Automatic terminal-capture LoA entries remain searchable but are excluded from
+the L1 LoA pool (`tags` not like `automatic-capture,%`), so host-generated
+summaries cannot displace curated knowledge at session start.
 
-L2 (full search results) and L3 (raw message history) are documented in the
-hook preamble but **not injected** — agents fetch them on demand via MCP
-tools (`memory_hybrid_search`, `memory_recall`).
+The preamble names L2/L3 as on-demand only. They are not injected. Fetch more
+with `memory_search`, `memory_hybrid_search`, or `memory_recall` (recent LoA,
+decisions, and breadcrumbs, not raw message history).
 
 Path resolution for `identity.md`:
 1. `RECALL_IDENTITY_PATH` env var (if set)
@@ -288,8 +296,8 @@ Terms: [CONTEXT.md](../CONTEXT.md). Extractor is the model backend that produces
 ### Lifecycle Management
 
 - **Decision status transitions** — decisions move from `active` → `superseded` (replaced by a newer decision) or `active` → `reverted` (rolled back). The `decision_update` MCP tool and `recall decision` CLI command handle these transitions. Superseded decisions are retained for historical context.
-- **Breadcrumb sweep** — at session start, the `RecallStart` hook ages out low-importance breadcrumbs (importance < 4) that are older than a configurable threshold. High-importance breadcrumbs persist until explicitly removed.
-- **Prune strategy** — `recall prune` removes stale records: superseded/reverted decisions older than a retention window and breadcrumbs below an importance threshold, with transactional embedding cleanup for deleted sources. Legacy orphan embeddings are handled by `recall repair --execute`. Prune is always dry-run by default; pass `--execute` to commit changes.
+- **Breadcrumb sweep** — at session start, the shared assembler deletes breadcrumbs whose `expires_at` is already past, and deletes their embeddings in the same transaction. It does not drop rows by importance. `recall age` sets `expires_at` on old breadcrumbs; high-importance breadcrumbs with no expiry persist until explicitly removed.
+- **Prune strategy** — `recall prune` removes consolidated messages and orphaned sessions older than the retention window, superseded/reverted decisions older than a retention window, breadcrumbs whose `expires_at` is past, old `extraction_tracker` rows, and `extraction_sessions` past a 500-row cap, with transactional embedding cleanup for deleted sources. It does not prune by importance. Legacy orphan embeddings are handled by `recall repair --execute`. Prune is always dry-run by default; pass `--execute` to commit changes.
 
 - **WAL mode** allows concurrent reads and writes, though recovery and exclusive locks can still block queries
 - **Lock waiting** — CLI/MCP connections and hook WAL connections set `busy_timeout = 5000` before WAL setup so transient recovery locks can clear; persistent contention can still fail
@@ -314,7 +322,7 @@ baseline. Methodology is locked in via 5 rules documented in
 
 ## Lifecycle scripts (v0.7.2+)
 
-Three shell scripts at the repo root manage the full install lifecycle.
+Three shell scripts in `packaging/` manage the full install lifecycle.
 They share behavior via `lib/install-lib.sh` so every path (fresh
 install, update, uninstall) handles settings.json, hooks, MCP
 registration, and global-link state identically.

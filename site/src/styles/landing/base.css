@@ -1,0 +1,92 @@
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+:root {
+  --sans: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  --mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'DejaVu Sans Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--acc);
+}
+
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 3px;
+}
+
+.skip {
+  position: absolute;
+  left: 16px;
+  top: 8px;
+  z-index: 30;
+  transform: translateY(-160%);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.skip:visited {
+  color: var(--btn-fg);
+}
+
+.skip:focus {
+  transform: none;
+}
+
+.theme-toggle {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--t2);
+  padding: 7px 11px;
+  border: 1px solid var(--b2);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--b4);
+}
+
+.theme-toggle-label::before {
+  content: 'Auto';
+}
+
+:root[data-pref='light'] .theme-toggle-label::before {
+  content: 'Light';
+}
+
+:root[data-pref='dark'] .theme-toggle-label::before {
+  content: 'Dark';
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

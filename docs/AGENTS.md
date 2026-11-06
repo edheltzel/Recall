@@ -19,6 +19,7 @@ User-facing published documentation: installation, CLI / MCP / agent-skill refer
 - Keep docs in sync with behavior — a command, MCP, or lifecycle change must update the matching reference (`cli-reference`, `mcp-tools`, `agent-skills`, `api`, `installation`, `upgrading`).
 - Host integration guides stay aligned with `hosts/FOR_OPENCODE.md` and `hosts/FOR_PI.md`. Ambient capture for Claude, Codex, Pi, Grok, omp, Empryo, and supplied-text JCode is `recall capture` ([CAPTURE_ADAPTER.md](CAPTURE_ADAPTER.md)). Hidden `host-hook` is not that door; Codex SessionStart injection still uses it. OpenCode stays on its markdown drop until the post-v1 adapter. Codex's canonical guide is `CODEX_INTEGRATION.md` because the preferred Codex attach is the native plugin rather than the lifecycle installer. Grok's guide must distinguish installer-owned automatic capture from unsupported automatic injection. JCode's guide records the supplied-text capture helper and the probe limit: no installed hook, no private-file watcher. `OMP_INTEGRATION.md` owns native extension setup and capture limits; skills and MCP remain separate.
 - `CLAUDE_INTEGRATION.md` covers preferred native plugin *install* (skills + MCP) and how it divides ownership with the lifecycle installer (installer: hooks). `hosts/FOR_CLAUDE.md` stays the agent-facing usage guide — keep the split, don't merge them.
+- The website (`site/`) publishes the files listed in `site/src/docs.ts` straight from this folder at build time. Each published file keeps exactly one `#` title and relative links to files that exist; renaming or deleting one also updates `site/src/docs.ts` (and `site/public/_redirects` when its URL changes). `cd site && npm run build && npm run check:dist` verifies both.
 
 ## Work Guidance
 
@@ -26,7 +27,7 @@ User-facing published documentation: installation, CLI / MCP / agent-skill refer
 
 ## Verification
 
-None automated — verify referenced commands run and links resolve.
+For published pages, see [`site/AGENTS.md` verification](../site/AGENTS.md#verification). Verify other referenced commands and links manually.
 
 ## Child DOX Index
 
