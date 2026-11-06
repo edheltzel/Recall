@@ -1,0 +1,111 @@
+---
+import Base from '../layouts/Landing.astro';
+import ThemeToggle from '../components/landing/ThemeToggle.astro';
+import Cmd from '../components/landing/Cmd.astro';
+import { docsHref, gapInstallCommand, installCommand, installHref, repoHref, siteName } from '../site';
+import '../styles/landing/landing.css';
+
+/** Placeholder copy until the Recall brief lands. */
+const steps = [
+  { name: 'Capture', text: 'Lifecycle hooks save session progress automatically.' },
+  { name: 'Distill', text: 'Decisions, learnings, and breadcrumbs go into one local SQLite + FTS5 file.' },
+  { name: 'Inject at session start', text: 'Your identity and top-ranked records load when the next session starts.' },
+];
+const starts = [
+  { title: 'Install guide', text: 'Source checkout, verify, and seed your identity.', href: installHref },
+  { title: 'Docs', text: 'Core loop, CLI, MCP tools, and supported hosts.', href: docsHref },
+];
+const pad = (n: number) => String(n).padStart(2, '0');
+---
+
+<Base>
+  <div class="cb">
+    <a class="skip" href="#content">Skip to content</a>
+    <main id="content">
+      <div class="stage" id="stage" data-cx="0.8" data-rh="0.44" data-rw="0.27" data-ncx="0.84" data-ncy="0.16" data-nr="0.4">
+        <canvas id="field" aria-hidden="true"></canvas>
+        <div class="shade"></div>
+        <p class="sr">Illustration: a large dithered disc of text glyphs, lit on its upper left rim.</p>
+        <header class="top">
+          <a class="word" href="/"><i></i>{siteName}</a>
+          <nav class="mono" aria-label="Primary">
+            <a href={docsHref}>Docs</a>
+            <a href={repoHref}>GitHub</a>
+            <ThemeToggle />
+          </nav>
+        </header>
+        <div class="copy" id="install">
+          <h1>Memory for your agents.<br /><span class="l2">Install</span> <span class="l3">once.</span></h1>
+          <p class="sub">Recall captures each session, distills it into one local SQLite file, and injects your identity plus top-ranked records when the next session starts, on hosts that support it.</p>
+          <div class="console">
+            <div class="crow"><span class="lab"><b>1</b> Install</span><Cmd command={installCommand} /></div>
+            <div class="crow"><span class="lab"><b>2</b> GAP-managed only</span><Cmd command={gapInstallCommand} /></div>
+          </div>
+          <p class="hint">Work in progress. Copy is a placeholder until the Recall brief lands.</p>
+          <div class="cta"><a class="btn" href={installHref}>Install guide</a><a class="ghost" href={repoHref}>GitHub</a></div>
+        </div>
+        <i class="spark" id="sp1" aria-hidden="true"></i><i class="spark v" id="sp2" aria-hidden="true"></i>
+      </div>
+      <div class="wrap">
+        <section id="how" aria-labelledby="how-title">
+          <div class="lhead">
+            <h2 id="how-title">How Recall works. <span>Three steps.</span></h2>
+            <p class="lead">Placeholder copy until the Recall brief lands.</p>
+          </div>
+          <div class="flow flow3">
+            <ol class="track">
+              {steps.map((s, i) => (
+                <li class="fs" style={`--i:${i}`}>
+                  <span class="node" aria-hidden="true">{pad(i + 1)}</span>
+                  <article class="fc">
+                    <span class="fic" aria-hidden="true">
+                      <img class="icd" src={`/loop/icon-${pad(i + 1)}-d.png`} alt="" width="26" height="26" />
+                      <img class="icl" src={`/loop/icon-${pad(i + 1)}-l.png`} alt="" width="26" height="26" />
+                    </span>
+                    <div class="fb">
+                      <h3>{s.name}</h3>
+                      <p>{s.text}</p>
+                    </div>
+                  </article>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+        <section aria-labelledby="start-title">
+          <h2 id="start-title">Docs and install</h2>
+          <div class="shs">
+            {starts.map((s, i) => (
+              <a class="sh" href={s.href}><span class="shn">{pad(i + 1)}</span><b>{s.title}</b><span class="shd">{s.text}</span><i aria-hidden="true">→</i></a>
+            ))}
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer class="base">
+      <span>Recall is built by Ed Heltzel. Work in progress.</span>
+      <nav aria-label="Footer"><a href={docsHref}>Docs</a><a href={repoHref}>GitHub</a></nav>
+    </footer>
+  </div>
+</Base>
+
+<script>
+  import '../scripts/hero.ts';
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.cmd .cp')) {
+    const command = button.dataset.command ?? '';
+    const shown = button.parentElement?.querySelector('.t')?.textContent ?? '';
+    if (shown !== command) throw new Error('install command mismatch');
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(command);
+        button.textContent = 'Copied';
+      } catch {
+        button.textContent = 'Failed';
+      }
+      window.setTimeout(() => {
+        button.textContent = 'Copy';
+      }, 1200);
+    });
+  }
+</script>

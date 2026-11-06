@@ -1,0 +1,14 @@
+---
+interface Props {
+  command: string;
+}
+const { command } = Astro.props;
+// Break opportunities after each slash so the command wraps instead of clipping.
+const parts = command.split(/(?<=\/)/);
+---
+
+<div class="cmd">
+  <span class="d" aria-hidden="true">$</span><code class="t"
+    >{parts.map((part, i) => (i === 0 ? part : <><wbr />{part}</>))}</code
+  ><button class="cp" type="button" data-command={command}>Copy</button>
+</div>

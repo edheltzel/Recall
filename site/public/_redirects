@@ -1,0 +1,12 @@
+# Docs URLs from the earlier site (edheltzel/recall-site), now served here.
+/docs /docs/ 301
+/docs/install /docs/installation/ 301
+/docs/install/ /docs/installation/ 301
+/docs/core-loop /docs/architecture/ 301
+/docs/core-loop/ /docs/architecture/ 301
+/docs/hosts /docs/integrations/claude-code/ 301
+/docs/hosts/ /docs/integrations/claude-code/ 301
+/docs/usage /docs/reference/cli/ 301
+/docs/usage/ /docs/reference/cli/ 301
+/docs/configuration /docs/ 301
+/docs/configuration/ /docs/ 301

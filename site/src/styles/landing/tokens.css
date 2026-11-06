@@ -1,0 +1,142 @@
+/*
+  TODO(recall-brief): accent is the DoSkills amber as a stand-in until the Recall brief lands.
+  One dark block, one light block. Near-black slate, amber accent.
+  Dark accent is #f5a524. Highlight is #ffd27a. Deep tint is #4a3310.
+  #9a6a14 is the mid line tint. It is under 4.5:1 on the paper surfaces,
+  so light text and links use #8a5a0c instead.
+  The light-nojs block repeats the light values so a page with JavaScript
+  off still follows the system. scripts/contrast.mjs fails if the two drift.
+*/
+
+/* @theme dark */
+:root {
+  color-scheme: dark;
+  --bg: #0b1113;
+  --s1: #111a1d;
+  --s2: #172327;
+  --text: #ededed;
+  --t2: #a1a1a1;
+  --t3: #8c8c8c;
+  --l2: #b4b4b4;
+  --callout: #d0d0d0;
+  --btn-bg: #ededed;
+  --btn-fg: #000000;
+  --btn-hv: #ffffff;
+  --acc: #f5a524;
+  --acc2: #ffd27a;
+  --mid: #9a6a14;
+  --bg-rgb: 11, 17, 19;
+  --s1-rgb: 17, 26, 29;
+  --ink-rgb: 237, 237, 237;
+  --acc-rgb: 245, 165, 36;
+  --acc2-rgb: 255, 210, 122;
+  --hot-rgb: 255, 210, 122;
+  --b1: rgba(245, 210, 150, 0.06);
+  --b2: rgba(245, 210, 150, 0.1);
+  --b3: rgba(245, 210, 150, 0.16);
+  --b4: rgba(245, 210, 150, 0.26);
+  --hi: rgba(245, 210, 150, 0.04);
+  --stripe: rgba(245, 210, 150, 0.02);
+  --glow: 0 0 6px rgba(245, 165, 36, 0.5);
+  --shade-edge: 0.5;
+}
+
+/* @theme light */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f5f1;
+  --s1: #fcfbf8;
+  --s2: #ecebe6;
+  --text: #111111;
+  --t2: #4a4a4a;
+  --t3: #5f5f5f;
+  --l2: #5a5a5a;
+  --callout: #2c2c2c;
+  --btn-bg: #111111;
+  --btn-fg: #f6f5f1;
+  --btn-hv: #000000;
+  --acc: #8a5a0c;
+  --acc2: #4a3310;
+  --mid: #9a6a14;
+  --bg-rgb: 246, 245, 241;
+  --s1-rgb: 252, 251, 248;
+  --ink-rgb: 17, 17, 17;
+  --acc-rgb: 138, 90, 12;
+  --acc2-rgb: 74, 51, 16;
+  --hot-rgb: 255, 210, 122;
+  --b1: rgba(0, 0, 0, 0.07);
+  --b2: rgba(0, 0, 0, 0.11);
+  --b3: rgba(0, 0, 0, 0.17);
+  --b4: rgba(0, 0, 0, 0.27);
+  --hi: rgba(255, 255, 255, 0.8);
+  --stripe: rgba(0, 0, 0, 0.03);
+  --glow: none;
+  --shade-edge: 0.35;
+}
+
+/* @theme light-nojs */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]),
+  :root[data-theme='dark']:not([data-pref]) {
+    color-scheme: light;
+    --bg: #f6f5f1;
+    --s1: #fcfbf8;
+    --s2: #ecebe6;
+    --text: #111111;
+    --t2: #4a4a4a;
+    --t3: #5f5f5f;
+    --l2: #5a5a5a;
+    --callout: #2c2c2c;
+    --btn-bg: #111111;
+    --btn-fg: #f6f5f1;
+    --btn-hv: #000000;
+    --acc: #8a5a0c;
+    --acc2: #4a3310;
+    --mid: #9a6a14;
+    --bg-rgb: 246, 245, 241;
+    --s1-rgb: 252, 251, 248;
+    --ink-rgb: 17, 17, 17;
+    --acc-rgb: 138, 90, 12;
+    --acc2-rgb: 74, 51, 16;
+    --hot-rgb: 255, 210, 122;
+    --b1: rgba(0, 0, 0, 0.07);
+    --b2: rgba(0, 0, 0, 0.11);
+    --b3: rgba(0, 0, 0, 0.17);
+    --b4: rgba(0, 0, 0, 0.27);
+    --hi: rgba(255, 255, 255, 0.8);
+    --stripe: rgba(0, 0, 0, 0.03);
+    --glow: none;
+    --shade-edge: 0.35;
+  }
+}
+
+/* @theme end */
+
+/* Starlight reads the same tokens. Unlayered, so these beat Starlight's defaults. */
+:root {
+  --sl-color-white: var(--text);
+  --sl-color-gray-1: var(--text);
+  --sl-color-gray-2: var(--t2);
+  --sl-color-gray-3: var(--t3);
+  --sl-color-gray-4: var(--t3);
+  --sl-color-gray-5: var(--s2);
+  --sl-color-gray-6: var(--s1);
+  --sl-color-gray-7: var(--bg);
+  --sl-color-black: var(--bg);
+  --sl-color-accent-low: var(--s1);
+  --sl-color-accent: var(--acc);
+  --sl-color-accent-high: var(--acc2);
+  --sl-color-text: var(--t2);
+  --sl-color-text-accent: var(--acc);
+  --sl-color-text-invert: var(--btn-fg);
+  --sl-color-bg: var(--bg);
+  --sl-color-bg-nav: var(--bg);
+  --sl-color-bg-sidebar: var(--bg);
+  --sl-color-bg-inline-code: var(--s2);
+  --sl-color-bg-accent: var(--acc);
+  --sl-color-hairline-light: var(--b3);
+  --sl-color-hairline: var(--b2);
+  --sl-color-hairline-shade: var(--b1);
+  --sl-font: var(--sans);
+  --sl-font-mono: var(--mono);
+}
