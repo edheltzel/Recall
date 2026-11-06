@@ -1,0 +1,48 @@
+name: Site
+
+# The public site (site/) builds from site/ and docs/; it shares nothing with
+# the Recall runtime CI. Cloudflare Pages builds production separately.
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/**"
+      - ".github/workflows/site.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "site/**"
+      - "docs/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+jobs:
+  site:
+    name: Build and check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          # Page "last updated" dates and the sitemap read git history.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.node-version
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run check:dist
+      - run: npm run check:nimbus
+      - run: npm run check:landing
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
