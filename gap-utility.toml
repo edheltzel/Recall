@@ -1,0 +1,8 @@
+schema = "1"
+name = "Recall"
+description = "Local memory for coding agents; installs its own do-recall skills"
+
+[hooks]
+install = "./packaging/install.sh"
+uninstall = "./packaging/uninstall.sh --no-confirm"
+doctor = "recall doctor"
