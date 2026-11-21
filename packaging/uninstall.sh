@@ -117,6 +117,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/markdown-drop.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
   "$CLAUDE_DIR/hooks/lib/jev.ts"
+  "$CLAUDE_DIR/hooks/lib/learned-tail.ts"
   "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
   "$CLAUDE_DIR/hooks/lib/session-progress.ts"
   "$CLAUDE_DIR/hooks/lib/threat-detect.ts"
@@ -153,6 +154,7 @@ RECALL_SKILL_NAMES=(
   do-recall-doctor
   do-recall-dump
   do-recall-loa
+  do-recall-promote
   do-recall-recent
   do-recall-scout
   do-recall-search
@@ -183,6 +185,7 @@ print_summary() {
   echo "  • ~/.claude/hooks/*.ts (Recall-managed symlinks only)"
   echo "  • ~/.claude/hooks/lib/*.ts (Recall-managed symlinks only)"
   echo "  • Recall-generated ## MEMORY section in ~/.claude/CLAUDE.md (external sections stay)"
+    echo "  • Recall learned-tail block (<!-- recall:begin --> ... <!-- recall:end -->) in destination files"
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
@@ -389,6 +392,119 @@ remove_extract_prompt_if_unmodified() {
   else
     log_warn "Preserved $installed (diverged from source — not auto-removing)"
   fi
+}
+
+# Every harness file the learned tail may ever have written: each GAP ledger
+# path under HOME (cleaned ones too, since GAP may have been installed or
+# removed after a write) plus every built-in file. Only the Recall pair is
+# removed from each, and a missing file is skipped by remove_recall_block.
+recall_learned_tail_files() {
+  RECALL_TAIL_HOME="$HOME" bun -e '
+    const fs = require("fs");
+    const path = require("path");
+    const home = process.env.RECALL_TAIL_HOME;
+    const builtin = [
+      ".claude/CLAUDE.md",
+      ".codex/AGENTS.md",
+      ".pi/agent/APPEND_SYSTEM.md",
+      ".omp/agent/APPEND_SYSTEM.md",
+      ".empryo/EMPRYO.md",
+    ];
+    let ledger = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(home, ".gap", "published.json"), "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ledger = parsed;
+    } catch { /* no GAP ledger — built-in files */ }
+    const out = new Set();
+    for (const file of Object.keys(ledger ?? {}).sort()) {
+      if (typeof ledger[file] !== "string" || !path.isAbsolute(file)) continue;
+      const rel = path.relative(home, file);
+      if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) out.add(file);
+    }
+    for (const rel of builtin) out.add(path.join(home, rel));
+    process.stdout.write([...out].join("\n"));
+  '
+}
+
+# Remove only the <!-- recall:begin --> ... <!-- recall:end --> pair.
+# Everything outside that pair, including a GAP block, stays byte for byte.
+# A file with no pair is left untouched. A malformed pair (nested, reversed,
+# or more than one) is left untouched and reported.
+remove_recall_block() {
+  local file="$1"
+  [[ -f "$file" && ! -L "$file" ]] || return 0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if grep -q '<!-- recall:begin -->' "$file" 2>/dev/null; then
+      echo "  [dry-run] would remove Recall learned-tail block from $file"
+    fi
+    return 0
+  fi
+  local status=0
+  RECALL_BLOCK_FILE="$file" bun -e '
+    const fs = require("fs");
+    const file = process.env.RECALL_BLOCK_FILE;
+    const BEGIN = "<!-- recall:begin -->";
+    const END = "<!-- recall:end -->";
+    const src = fs.readFileSync(file);
+    const text = src.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(src)) process.exit(0);
+    function markerLines(marker) {
+      const out = [];
+      let from = 0;
+      while (from < text.length) {
+        const i = text.indexOf(marker, from);
+        if (i < 0) break;
+        const after = i + marker.length;
+        const ownLine = (i === 0 || text[i - 1] === "\n") &&
+          (after === text.length || text[after] === "\n" ||
+            (text[after] === "\r" && text[after + 1] === "\n"));
+        if (ownLine) {
+          let end = after;
+          if (text[after] === "\n") end = after + 1;
+          else if (text[after] === "\r") end = after + 2;
+          out.push([i, end]);
+          from = end;
+        } else {
+          from = i + 1;
+        }
+      }
+      return out;
+    }
+    const begins = markerLines(BEGIN);
+    const ends = markerLines(END);
+    if (begins.length === 0 && ends.length === 0) process.exit(0);
+    if (begins.length !== 1 || ends.length !== 1 || ends[0][0] < begins[0][1]) {
+      process.stderr.write("malformed Recall block in " + file + "\n");
+      process.exit(2);
+    }
+    let cut = begins[0][0];
+    const end = ends[0][1];
+    const gapBegins = markerLines("<!-- gap:begin -->");
+    const gapEnds = markerLines("<!-- gap:end -->");
+    const wraps = [...gapBegins, ...gapEnds].some(([at]) => at >= cut && at < end);
+    const inside = gapBegins.some(([gb], i) => {
+      const ge = gapEnds.find(([at]) => at > gb);
+      return ge && ((cut > gb && cut < ge[0]) || (ends[0][0] > gb && ends[0][0] < ge[0]));
+    });
+    if (wraps || inside) {
+      process.stderr.write("Recall block overlaps the GAP block in " + file + "\n");
+      process.exit(2);
+    }
+    if (cut >= 2 && text[cut - 1] === "\n" && text[cut - 2] === "\n") {
+      cut -= end === text.length && !text.endsWith("\n") ? 2 : 1;
+    }
+    const next = text.slice(0, cut) + text.slice(end);
+    if (next !== text) fs.writeFileSync(file, next);
+  ' || status=$?
+  if [[ "$status" -eq 2 ]]; then
+    log_warn "Preserved $file (malformed Recall learned-tail block)"
+    return 0
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    log_error "Failed to remove Recall learned-tail block from $file"
+    return 1
+  fi
+  return 0
 }
 
 # Remove only Recall-generated "## MEMORY" sections through the shared
@@ -769,6 +885,24 @@ main() {
 
   log_info "Removing CLAUDE.md MEMORY section..."
   remove_memory_section "$CLAUDE_DIR/CLAUDE.md" claude
+  echo ""
+
+  log_info "Removing learned-tail blocks..."
+  local tail_file
+  local tail_files
+  if ! command -v bun &>/dev/null; then
+    log_warn "bun not found; learned-tail blocks left in place (remove the <!-- recall:begin --> ... <!-- recall:end --> lines by hand)"
+  elif ! tail_files="$(recall_learned_tail_files)"; then
+    log_warn "Could not list learned-tail files; blocks left in place"
+    lifecycle_failed=true
+  else
+    while IFS= read -r tail_file; do
+      [[ -n "$tail_file" ]] || continue
+      if ! remove_recall_block "$tail_file"; then
+        lifecycle_failed=true
+      fi
+    done <<< "$tail_files"
+  fi
   echo ""
 
   if [[ "$SKIP_OPENCODE" != "true" ]]; then

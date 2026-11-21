@@ -17,6 +17,7 @@ export const routes: Record<string, string> = {
   'do-recall-doctor': 'This remains a local CLI diagnostic. Run `recall doctor`; the Codex plugin does not rewrite Codex-owned configuration.',
   'do-recall-dump': 'Codex lifecycle hooks capture supported transcripts automatically. Use `memory_dump` only for an explicit supplemental snapshot of visible messages.',
   'do-recall-loa': 'Prefer `loa_show` for a known entry and `memory_recall` to browse recent entries. Use CLI-only quote/list variants when needed.',
+  'do-recall-promote': 'This opens a pull request on GAP and nothing else. Run `recall promote --json`, edit only GAP global/AGENTS.md in a worktree branch, and never write main or run `gap sync`.',
   'do-recall-recent': 'Prefer `memory_recall` for recent cross-table context. Use the CLI when an exact table-specific recent listing is required.',
   'do-recall-scout': 'Use the plugin MCP tools `memory_search`, `memory_hybrid_search`, and `context_for_agent` for the memory-first steps; keep the workflow sensitive-data boundary intact.',
   'do-recall-search': 'Prefer `memory_search`; use `memory_hybrid_search` for natural-language semantic retrieval. The CLI remains an explicit fallback.',

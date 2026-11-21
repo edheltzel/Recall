@@ -272,6 +272,7 @@ export default function (pi) {
     'skill:do-recall-doctor',
     'skill:do-recall-dump',
     'skill:do-recall-loa',
+    'skill:do-recall-promote',
     'skill:do-recall-recent',
     'skill:do-recall-scout',
     'skill:do-recall-search',

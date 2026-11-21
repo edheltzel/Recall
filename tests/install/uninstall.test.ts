@@ -997,3 +997,42 @@ Preserve this.
     expect(result.stdout).not.toContain('Recall uninstalled successfully');
   });
 });
+
+describe('learned-tail block removal', () => {
+  test('removes only the Recall pair from ledger and built-in files, skips paths outside HOME, and keeps a block that wraps GAP', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-uninstall-'));
+    const home = join(root, 'home');
+    const outside = join(root, 'outside', 'AGENTS.md');
+    const inside = join(home, '.claude', 'rules', 'policy.md');
+    const wrapped = join(home, '.pi', 'agent', 'APPEND_SYSTEM.md');
+    const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
+    const pair = '<!-- recall:begin -->\n- note\n<!-- recall:end -->\n';
+    for (const file of [outside, inside, wrapped]) mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(inside, `# Head\n\n${gap}\n${pair}`);
+    writeFileSync(outside, `${gap}\n${pair}`);
+    const wrappedText = `<!-- recall:begin -->\n- note\n${gap}<!-- recall:end -->\n`;
+    writeFileSync(wrapped, wrappedText);
+    const builtin = join(home, '.claude', 'CLAUDE.md');
+    const cleaned = join(home, '.cursor', 'rules', 'old.mdc');
+    for (const file of [builtin, cleaned]) mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(builtin, `# Mine\n\n${pair}`);
+    writeFileSync(cleaned, `# Old\n\n${pair}`);
+    const bare = join(home, '.codex', 'AGENTS.md');
+    mkdirSync(dirname(bare), { recursive: true });
+    writeFileSync(bare, `# Bare\n\n${pair.slice(0, -1)}`);
+    mkdirSync(join(home, '.gap'), { recursive: true });
+    writeFileSync(
+      join(home, '.gap', 'published.json'),
+      JSON.stringify({ [inside]: 'h1', [outside]: 'h2', [wrapped]: 'h3', [cleaned]: 'cleaned' }),
+    );
+    const result = runUninstall(home, join(root, 'backups'));
+    expect(result.status).toBe(0);
+    expect(readFileSync(inside, 'utf-8')).toBe(`# Head\n\n${gap}`);
+    expect(readFileSync(outside, 'utf-8')).toBe(`${gap}\n${pair}`);
+    expect(readFileSync(wrapped, 'utf-8')).toBe(wrappedText);
+    expect(readFileSync(builtin, 'utf-8')).toBe('# Mine\n');
+    expect(readFileSync(cleaned, 'utf-8')).toBe('# Old\n');
+    expect(readFileSync(bare, 'utf-8')).toBe('# Bare');
+    expect(result.stdout + result.stderr).toContain('Preserved');
+  });
+});

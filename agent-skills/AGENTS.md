@@ -8,7 +8,7 @@ Agent Skill definitions (one `SKILL.md` per skill directory, per the [agentskill
 
 ## Ownership
 
-`do-recall-add`, `do-recall-doctor`, `do-recall-dump`, `do-recall-loa`, `do-recall-recent`, `do-recall-scout`, `do-recall-search`, `do-recall-stats`, `do-recall-update` — each a directory containing `SKILL.md`.
+`do-recall-add`, `do-recall-doctor`, `do-recall-dump`, `do-recall-loa`, `do-recall-promote`, `do-recall-recent`, `do-recall-scout`, `do-recall-search`, `do-recall-stats`, `do-recall-update` — each a directory containing `SKILL.md`.
 
 ## Local Contracts
 

@@ -15,6 +15,7 @@ Flush the current session to the database and capture a Library of Alexandria en
 **Usage:** `/do-recall-dump Session Title Here`
 
 What it does:
+
 1. Imports the current session's messages into SQLite
 2. Creates a Curated LoA entry via the fabric Extractor (or a basic summary with `--skip-fabric`)
 3. Makes everything immediately searchable
@@ -35,11 +36,20 @@ Searches messages, LoA entries, decisions, learnings, and breadcrumbs. The skill
 
 Rule of thumb: use `-t` when you want only one table; use `--bias-type` when you want one table first without hiding other context.
 
+### do-recall-promote
+
+Promote learned-tail notes that hold across projects into the shared GAP policy, as a pull request.
+
+**Usage:** `/do-recall-promote`
+
+Runs `recall promote --json`, then edits `global/AGENTS.md` in the GAP checkout (`~/.gap/checkout`) on a new branch and opens a pull request. It never commits to `main` or `master`, never edits a published harness file, and never runs `gap sync`. The user reviews and merges the pull request, then runs `gap sync`.
+
 ### do-recall-recent
 
 Show recent memory records.
 
 **Usage:**
+
 - `/do-recall-recent` — all tables
 - `/do-recall-recent decisions` — specific table
 
@@ -48,6 +58,7 @@ Show recent memory records.
 Memory-first orientation for an unfamiliar codebase. Searches Recall before touching git history or source, then produces a structured scout report in chat.
 
 **Usage:**
+
 - `/do-recall-scout` — scout the whole repo
 - `/do-recall-scout auth` — narrow the scout to a subsystem, path, or question
 

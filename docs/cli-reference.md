@@ -169,12 +169,16 @@ recall recent                           # Recent records across all tables
 recall recent decisions                 # Recent decisions only
 recall show decisions 5                 # Full record for decision #5
 recall stats                            # Database statistics
+recall browse                           # Read-only terminal dashboard
+recall browse -p myproject              # Same dashboard, one project
 recall doctor                           # Health check all subsystems
 ```
 
-`recall recent` accepts any table name: `decisions`, `learnings`, `breadcrumbs`, `loa`, `sessions`, `docs`, `telos`.
+`recall recent` accepts any table name: `messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`, `sessions`, `docs`, `telos`.
 
 `recall show` displays the full record for a single row. The first argument is the table name, the second is the row ID.
+
+`recall browse` is a read-only dashboard: `1`–`5` switch table, typing filters the current table, `enter` opens a row, `q` quits. It never writes. Piped or non-terminal output prints the decision list instead of taking over the screen. The web dashboard stays tracked in [#221](https://github.com/edheltzel/Recall/issues/221).
 
 ---
 
@@ -624,3 +628,15 @@ recall cluster --execute --threshold 0.9
 ```
 
 `--threshold` is 0.85 by default (0-1).
+
+### Learned tail
+
+`recall learn` writes Recall's best notes (active, high confidence, importance 8+ or user-authored, at most 15 bullets and 600 tokens) into a `<!-- recall:begin -->` ... `<!-- recall:end -->` block in each global harness file. With GAP installed it writes to GAP's published policy files; otherwise to the built-in harness files that already exist. Only the Recall block changes, and a rerun with no change writes nothing. The Stop hook refreshes it on its own.
+
+`recall promote` is read-only. It lists notes seen in 3+ projects that have been in the written tail for 14+ days and are not already in the GAP block. The `do-recall-promote` skill turns the accepted ones into a GAP pull request.
+
+```bash
+recall learn --dry-run
+recall learn --json
+recall promote --json
+```

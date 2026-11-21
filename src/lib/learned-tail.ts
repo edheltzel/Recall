@@ -1,0 +1,46 @@
+// Single-source seam for the learned tail (#279) on the CLI + MCP (src/) side.
+// The canonical implementation lives in hooks/lib/learned-tail.ts so the Stop hook
+// can refresh the tail without importing src/. Import it from here on the src/ side;
+// never reach into hooks/ directly and never duplicate the selection or splice logic.
+export {
+  BUILTIN_TAIL_FILES,
+  GAP_BEGIN,
+  GAP_END,
+  MAX_BULLET_CHARS,
+  MAX_TAIL_BULLETS,
+  MAX_TAIL_TOKENS,
+  MIN_TAIL_IMPORTANCE,
+  RECALL_BEGIN,
+  RECALL_END,
+  TAIL_HEADER_PREFIX,
+  countRecordsSince,
+  findTailDestinations,
+  loadTailCandidates,
+  isCoveredByGap,
+  planLearnedTail,
+  readGapCoverageText,
+  readRecallBlock,
+  readTailState,
+  recordTailRefresh,
+  removeRecallBlock,
+  selectTail,
+  spliceRecallBlock,
+  tailNoteKey,
+  tailStatePath,
+  writeLearnedTail,
+} from "../../hooks/lib/learned-tail.js";
+export type {
+  DroppedTailNote,
+  PlanTailOptions,
+  RecallBlockInfo,
+  SpliceResult,
+  TailCandidate,
+  TailDestination,
+  TailDestinationPlan,
+  TailDestinationScan,
+  TailNote,
+  TailPlan,
+  TailSelection,
+  TailState,
+  TailWriteResult,
+} from "../../hooks/lib/learned-tail.js";

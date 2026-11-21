@@ -28,6 +28,8 @@ import { runAge } from './commands/age.js';
 import { runConsolidate } from './commands/consolidate.js';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_MIN_CLUSTER_SIZE } from './lib/consolidate.js';
 import { runCluster } from './commands/cluster.js';
+import { runLearn } from './commands/learn.js';
+import { runPromote } from './commands/promote.js';
 import { runEmbedBackfill, runRebackfill, runReindex, runSemanticSearch, runEmbedStats, runHybridSearch } from './commands/embed.js';
 import { resolveQueryHarness, unqualifiedQueryRoute } from './lib/query-harness.js';
 import { runDoctor } from './commands/doctor.js';
@@ -239,6 +241,27 @@ program
     closeDb();
   });
 
+// recall learn — write the learned tail into each global harness file (#279).
+// Dry-run prints the selection, destinations and diff and writes nothing.
+program
+  .command('learn')
+  .description('Write the learned tail into each global harness file (writes only when the content changes)')
+  .option('--dry-run', 'Print the selection, destinations and diff without writing')
+  .option('--json', 'JSON output for scripting')
+  .action((options) => {
+    runLearn({ dryRun: options.dryRun, json: options.json });
+    closeDb();
+  });
+
+// recall promote — read-only list of tail notes ready for a GAP pull request (#279).
+program
+  .command('promote')
+  .description('List learned-tail notes that hold across projects and are ready to promote into GAP (read-only)')
+  .option('--json', 'JSON output for scripting')
+  .action((options) => {
+    runPromote({ json: options.json });
+    closeDb();
+  });
 // recall search
 program
   .command('search <query>')
@@ -918,7 +941,7 @@ program
   .option('-v, --vector', 'Use vector search only (semantic)')
   .option('--show-provenance', 'Show provenance for every result (default: only unknown provenance is flagged)')
   .action(async (query, options) => {
-    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start', 'capture'].includes(query)) {
+    if (query && !['init', 'add', 'search', 'recent', 'show', 'stats', 'import', 'import-conversations', 'loa', 'telos', 'docs', 'dump', 'embed', 'semantic', 'hybrid', 'doctor', 'importance', 'provenance', 'pin', 'unpin', 'decision', 'prune', 'age', 'consolidate', 'cluster', 'learn', 'promote', 'import-legacy', 'scrub-archive', 'benchmark', 'onboard', 'migrate', 'path', 'export', 'dedup', 'repair', 'start', 'capture'].includes(query)) {
       const route = unqualifiedQueryRoute(options);
       if (route === 'keyword') {
         runSearch(query, {

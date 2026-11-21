@@ -48,6 +48,14 @@ import { getDbPath } from './lib/sqlite-writers';
 import type { DualWriteResult } from './lib/extraction-parsers';
 import { runExtractCore } from './lib/extract-core';
 import { scrub } from './lib/write-safety';
+import {
+  countRecordsSince,
+  planLearnedTail,
+  readTailState,
+  recordTailRefresh,
+  tailStatePath,
+  writeLearnedTail,
+} from './lib/learned-tail';
 
 const EXTRACT_LOG = join(process.env.HOME!, '.claude', 'MEMORY', 'EXTRACT_LOG.txt');
 
@@ -544,6 +552,42 @@ function appendErrors(fabricOutput: string, sessionLabel: string, timestamp: str
   console.error(`[FabricExtract] Appended ${added} new error patterns (${lines.length - added} skipped as duplicates)`);
 }
 
+// Stop-hook learned-tail refresh (#279). Refreshes on the first Stop, once 20
+// decision + learning rows landed since the last refresh (counted in the DB, so
+// concurrent Stops never lose a count), or once the last refresh is 24h old. A
+// refused write keeps the old refresh time so the next Stop retries. Runs on
+// every Stop (parent, before any early exit) and again after a successful
+// extraction lands new rows. Never runs from a session-start hook. Fail-soft: a refresh error is logged and never
+// fails the extraction that already landed.
+const TAIL_RECORD_INTERVAL = 20;
+const TAIL_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function maybeRefreshLearnedTail(): void {
+  try {
+    const dbPath = getDbPath();
+    if (!existsSync(dbPath)) return;
+    const statePath = tailStatePath(dbPath);
+    const state = readTailState(statePath);
+    const now = Date.now();
+    const due =
+      state.refreshedAt === 0 ||
+      now - state.refreshedAt >= TAIL_REFRESH_WINDOW_MS ||
+      countRecordsSince(state.refreshedAt, dbPath) >= TAIL_RECORD_INTERVAL;
+    if (!due) return;
+    const plan = planLearnedTail({ dbPath });
+    const writes = writeLearnedTail(plan);
+    const refused = writes.filter((w) => w.status === 'refused');
+    if (refused.length > 0) {
+      logExtract(`LEARNED_TAIL: refused ${refused.map((w) => `${w.path} (${w.reason})`).join(', ')}; retrying next Stop`);
+    }
+    if (recordTailRefresh(statePath, plan, writes, new Date(now))) {
+      logExtract('LEARNED_TAIL: refreshed');
+    }
+  } catch (error) {
+    logExtract(`LEARNED_TAIL: ${error}`);
+  }
+}
+
 /** Log the SQLite dual-write outcome (per-writer failures + per-table summary). */
 function logDualWrite(result: DualWriteResult): void {
   if (Object.keys(result.failures).length > 0) {
@@ -695,6 +739,7 @@ async function extractAndAppend(conversationPath: string, cwd: string): Promise<
       return;
     }
     markAsExtracted(convHash);
+    maybeRefreshLearnedTail();
 
     logExtract(`SUCCESS: All memory files updated for session=${sessionLabel}`);
 
@@ -837,6 +882,7 @@ async function extractAndAppendMarkdown(mdPath: string, cwd: string): Promise<vo
       return;
     }
     markAsExtracted(convHash);
+    maybeRefreshLearnedTail();
 
     logExtract(`SUCCESS (markdown): All memory files updated for ${sessionLabel} (${sessionId})`);
 
@@ -992,6 +1038,10 @@ async function main() {
     }
 
     const cwd = hookInput.cwd || process.cwd();
+
+    // Every Stop gets a chance to refresh the learned tail, including the
+    // Empryo, dedup and no-conversation exits below.
+    maybeRefreshLearnedTail();
 
     // Empryo runs these Claude hooks with its own session log. Capture it as
     // `empryo` and stop: the Claude JSONL fallback below would extract an

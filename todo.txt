@@ -3,7 +3,7 @@
 2026-10-09 Optional hook: Sentinel session capture and LOA score. Idea; optional Sentinel hook. +recall @outstanding issue:286
 2026-10-09 Recall Telos interview slash (copy PAI process, not the stack). Parked per spec; no wiring. +recall @outstanding issue:281
 2026-10-09 Slash-export windowed learnings to a user-chosen Obsidian folder. Parked; learnings-only export. +recall @outstanding issue:280
-2026-10-09 Learn prefs into global AGENTS.md (and CLAUDE.md) below a Recall marker. Not started. +recall @outstanding issue:279
+2026-10-09 Learn prefs into global AGENTS.md (#279): built and tested, uncommitted. Ship: commit Recall + GAP branch recall-block-rule, PR, then go install gap and recall update +recall @outstanding issue:279 note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-20-learned-tail-and-gap-promote-plan.md
 x 2026-10-17 2026-10-09 CREATE_TABLES lags migrations: decisions/learnings missing confidence. Confirmed on main: decisions/learnings CREATE TABLE lack confidence. +recall @outstanding issue:278 pr:https://github.com/edheltzel/Recall/pull/332
 x 2026-10-19 2026-10-09 templates/mcp.json.template still registers mem-mcp. Confirmed on main: templates/mcp.json.template still uses mem-mcp. +recall @outstanding issue:277 @waiting gate parked pr:https://github.com/edheltzel/Recall/pull/338
 2026-10-09 Collapse host identity lists toward SESSION_SOURCES. #282 added cursor to SESSION_SOURCES only; lists not collapsed. +recall @outstanding issue:269
@@ -72,3 +72,15 @@ x 2026-10-19 2026-10-19 Commit the omp Curated LoA convergence fix and push feat
 2026-10-19 Empryo: installer registers recall-memory MCP in ~/.empryo/config.json (array mcpServers) +recall branch:feat/empryo-adapter note:/Users/ed/Developer/Atlas/Recall/docs/EMPRYO_INTEGRATION.md
 2026-10-19 Empryo: verify whether SessionStart additionalContext from RecallStart reaches the model +recall note:/Users/ed/Developer/Atlas/Recall/docs/EMPRYO_INTEGRATION.md
 2026-10-19 recall search: hyphenated query (Atlas-Key) fails with FTS 'no such column: Key' +recall
+2026-10-19 Reproduce and fix archive-scrub test TZ mismatch (bun test UTC vs spawned hook local) +recall note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-10-19-archive-scrub-tz-repro-plan.md
+2026-10-19 Empryo Stop: replace the 10-minute recent-tab window with a per-session sent-turn watermark +recall note:/Users/ed/Developer/Atlas/Recall/docs/EMPRYO_INTEGRATION.md
+2026-10-24 Drive recall browse in a real terminal: arrow keys, filter, open a row. Web dashboard stays issue:221. +recall
+x 2026-11-06 2026-11-06 After site PR approval, create the recall Pages app building Recall site/ +recall @cloudflare note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-06-site-cloudflare-cutover.md
+x 2026-11-06 2026-11-06 Move recall.edheltzel.codes to the recall Pages app and verify HTTPS, docs, redirects +recall @cloudflare note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-06-site-cloudflare-cutover.md
+x 2026-11-06 2026-11-06 Redirect recall-site-0n5.pages.dev to recall.edheltzel.codes, then archive edheltzel/recall-site +recall note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-06-site-cloudflare-cutover.md
+2026-11-11 Commit and publish the gum input fix: Database path prompt was invisible (2>/dev/null hid gum UI) +recall
+2026-11-11 Install Recall via GAP once the GAP component API ships: gap.toml install --yes, guard recall update inside ~/.gap/store, re-pin to main +recall @waiting GAP component API (gap-component.toml) not built yet
+x 2026-11-20 2026-11-20 Confirm #279 decisions: begin/end pair, 600-token cap, Lane B bar, PR-only promote +recall id:recall-tail-decide issue:279 note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-20-learned-tail-and-gap-promote-plan.md
+x 2026-11-20 2026-11-20 Build learned tail core + recall learn (Phase 1) +recall id:recall-tail dep:recall-tail-decide issue:279 note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-20-learned-tail-and-gap-promote-plan.md
+x 2026-11-20 2026-11-20 Build recall promote + do-recall-promote skill (Phase 2) +recall id:recall-promote dep:recall-tail issue:279 note:/Users/ed/Developer/Atlas/Recall/.agents/atlas/plans/2026-11-20-learned-tail-and-gap-promote-plan.md
+x 2026-11-21 2026-11-21 Fix learned-tail embedding merges and false promotion evidence; CLI regression with identical vectors; 1836 Bun tests and lint pass +recall issue:279 id:recall-tail-dedup-fix GAP full go test ./... also passes (281s; earlier limits were too short)
