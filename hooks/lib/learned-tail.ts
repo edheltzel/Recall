@@ -337,13 +337,22 @@ export function sanitizeTailBullet(raw: string): BulletCheck {
 }
 
 function foldCase(text: string): string {
+      const runs = [...text.matchAll(/`+/g)].map((m) => ({
+        start: m.index,
+        length: m[0].length,
+      }));
       let out = "";
       let at = 0;
-      for (const span of text.matchAll(/(`+)[\s\S]*?[^`]\1(?!`)/g)) {
-    out += text.slice(at, span.index).toLowerCase() + span[0];
-    at = span.index + span[0].length;
-  }
-  return out + text.slice(at).toLowerCase();
+      for (let i = 0; i < runs.length; i++) {
+        const open = runs[i];
+        const close = runs.findIndex((r, j) => j > i && r.length === open.length);
+        if (close < 0) continue;
+        const end = runs[close].start + runs[close].length;
+        out += text.slice(at, open.start).toLowerCase() + text.slice(open.start, end);
+        at = end;
+        i = close;
+      }
+      return out + text.slice(at).toLowerCase();
 }
 
 function matchForm(text: string): string {
