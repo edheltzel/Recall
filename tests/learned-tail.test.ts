@@ -617,6 +617,21 @@ describe("learned tail end to end", () => {
       [wideLower, ["bravo", "charlie"]],
     ]);
     expect(tailNoteKey("Use \uFF21\uFF22 now")).toBe(tailNoteKey("use ab now"));
+    const graves = "Set \uFF40PATH\uFF40 before testing.";
+    const real = "Set `path` before testing.";
+    expect(tailNoteKey(graves)).not.toBe(tailNoteKey(real));
+    expect(isCoveredByGap(graves, `- ${real}`)).toBe(false);
+    expect(isCoveredByGap(real, `- ${graves}`)).toBe(false);
+    expect(tailNoteKey(graves)).toBe(tailNoteKey("set \uFF40path\uFF40 before testing."));
+    expect(
+      selectTail(
+        [row(10, graves, "alpha"), row(11, real, "bravo"), row(12, real, "charlie")],
+        { cap: false },
+      ).notes.map((n) => [n.text, n.projects]),
+    ).toEqual([
+      [graves, ["alpha"]],
+      [real, ["bravo", "charlie"]],
+    ]);
     expect(tailNoteKey("Use `\uFF21` now")).toBe(tailNoteKey("use `A` now"));
     expect(tailNoteKey("Run \\\\`PATH` now.")).not.toBe(
       tailNoteKey("Run \\\\`path` now."),

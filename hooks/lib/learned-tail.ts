@@ -336,8 +336,14 @@ export function sanitizeTailBullet(raw: string): BulletCheck {
   return { ok: true, text };
 }
 
+const CODE_MARK = "\u0001";
+
 function prose(text: string): string {
-  return text.normalize("NFKC").toLowerCase();
+  return text.normalize("NFKC").toLowerCase().replaceAll(CODE_MARK, "");
+}
+
+function code(text: string): string {
+  return `${CODE_MARK}${text.normalize("NFKC")}${CODE_MARK}`;
 }
 
 function foldCase(text: string): string {
@@ -360,7 +366,7 @@ function foldCase(text: string): string {
         const close = runs.findIndex((r, j) => j > i && r.length === length);
         if (close < 0) continue;
         const end = runs[close].start + runs[close].length;
-        out += prose(text.slice(at, start)) + text.slice(start, end).normalize("NFKC");
+        out += prose(text.slice(at, start)) + code(text.slice(start, end));
         at = end;
         i = close;
       }
