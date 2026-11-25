@@ -4,18 +4,29 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { closeDb, getDb } from "../src/db/connection.js";
 import {
   countRecordsSince,
+  findTailDestinations,
   isCoveredByGap,
+  planRecallBlockRemoval,
   readTailState,
   selectTail,
   recordTailRefresh,
   removeRecallBlock,
   spliceRecallBlock,
   tailNoteKey,
+  writeIfUnchanged,
 } from "../src/lib/learned-tail.js";
 import type { TailCandidate, TailPlan } from "../src/lib/learned-tail.js";
 import {
@@ -103,6 +114,19 @@ function publish(file: string): void {
   );
 }
 
+function policyPath(): string {
+  return join(home, ".claude", "rules", "global-agent-policy.md");
+}
+
+function promote(env: NodeJS.ProcessEnv = process.env): {
+  candidates: Array<{ text: string }>;
+  skipped: Array<{ text: string; reason: string }>;
+} {
+  const result = recall(["promote", "--json"], env);
+  expect(result.status).toBe(0);
+  return JSON.parse(result.stdout);
+}
+
 function existsFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -139,7 +163,7 @@ describe("learned tail end to end", () => {
   });
 
   test("(a)(b) learn writes the Recall pair, and a second learn with no change writes nothing", () => {
-    const policy = join(home, ".gap-policies", "global", "AGENTS.md");
+    const policy = policyPath();
     const original = writePolicy(policy);
     publish(policy);
 
@@ -216,7 +240,7 @@ describe("learned tail end to end", () => {
   });
 
   test("(d) promote needs 14 days in the written tail, and learn drops a note once the GAP block covers it", () => {
-    const policy = join(home, ".gap-policies", "global", "AGENTS.md");
+    const policy = policyPath();
     writePolicy(policy);
     publish(policy);
     const statePath = join(dirname(dbPath), "learned-tail-state.json");
@@ -290,7 +314,7 @@ describe("learned tail end to end", () => {
   });
 
   test("(f) a Recall block wrapped around the GAP block is refused and the file is untouched", () => {
-    const policy = join(home, ".gap-policies", "global", "AGENTS.md");
+    const policy = policyPath();
     mkdirSync(dirname(policy), { recursive: true });
     const wrapped =
       "<!-- recall:begin -->\n- old\n<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n<!-- recall:end -->\n";
@@ -467,7 +491,7 @@ describe("learned tail end to end", () => {
   });
 
   test("(e) uninstall block removal leaves the surrounding bytes byte for byte", () => {
-    const policy = join(home, ".gap-policies", "global", "AGENTS.md");
+    const policy = policyPath();
     const original = writePolicy(policy);
     publish(policy);
     expect(recall(["learn"]).status).toBe(0);
@@ -495,5 +519,138 @@ describe("learned tail end to end", () => {
     expect(out.equals(Buffer.concat([original.subarray(0, head), tail]))).toBe(
       true,
     );
+  });
+
+  test("(k) promote only offers a note in a tail written now, and a note written back starts a new age", () => {
+    const policy = policyPath();
+    writePolicy(policy);
+    publish(policy);
+    const statePath = join(dirname(dbPath), "learned-tail-state.json");
+    expect(recall(["learn"]).status).toBe(0);
+    const key = tailNoteKey(NOTE);
+    const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    writeFileSync(
+      statePath,
+      JSON.stringify({ ...readTailState(statePath), tailSince: { [key]: old } }),
+    );
+    expect(promote().candidates.map((c) => c.text)).toEqual([NOTE]);
+
+    const removed = removeRecallBlock(readFileSync(policy, "utf8"));
+    if (!removed.ok) throw new Error(removed.reason);
+    writeFileSync(policy, removed.text);
+    const gone = promote();
+    expect(gone.candidates).toEqual([]);
+    expect(gone.skipped).toEqual([
+      { text: NOTE, reason: "not in the written tail yet" },
+    ]);
+
+    expect(recall(["learn"]).status).toBe(0);
+    expect(readTailState(statePath).tailSince[key]).not.toBe(old);
+    expect(promote().skipped).toEqual([
+      { text: NOTE, reason: "0 days in the tail (need 14)" },
+    ]);
+  });
+
+  test("(l) identifiers in backticks keep their case for grouping, GAP coverage and tail age", () => {
+    const row = (id: number, text: string, project: string): TailCandidate => ({
+      table: "decisions",
+      id,
+      text,
+      project,
+      importance: 9,
+      provenance: "user_authored",
+      confidence: "high",
+      accessCount: 1,
+      sessionId: `s${id}`,
+      createdAt: FIRST_SEEN,
+    });
+    const upper = "Use `PATH` in the fixture.";
+    const lower = "Use `path` in the fixture.";
+    const { notes } = selectTail(
+      [row(1, upper, "alpha"), row(2, lower, "bravo"), row(3, lower, "charlie")],
+      { cap: false },
+    );
+    expect(notes.map((n) => [n.text, n.projects])).toEqual([
+      [upper, ["alpha"]],
+      [lower, ["bravo", "charlie"]],
+    ]);
+    expect(isCoveredByGap(upper, `- ${lower}`)).toBe(false);
+    expect(isCoveredByGap(lower, `- ${upper}`)).toBe(false);
+    expect(isCoveredByGap("USE `PATH` IN THE FIXTURE", `- ${upper}`)).toBe(true);
+    expect(tailNoteKey(upper)).not.toBe(tailNoteKey(lower));
+  });
+
+  test("(m) only GAP policy destinations get the tail: a ledgered command file is skipped, and an absolute CODEX_HOME or JCODE_HOME outside HOME is used", () => {
+    const outside = mkdtempSync(join(tmpdir(), "recall-tail-homes-"));
+    try {
+      const command = join(home, ".claude", "commands", "gap-example.md");
+      mkdirSync(dirname(command), { recursive: true });
+      const commandText =
+        "Example policy file:\n\n<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n";
+      writeFileSync(command, commandText);
+      const codexHome = join(outside, "codex");
+      const jcodeHome = join(outside, "jcode");
+      const codexPolicy = join(codexHome, "gap", "global-agent-policy.md");
+      const jcodePolicy = join(jcodeHome, "prompt-overlay.md");
+      const stray = join(outside, "AGENTS.md");
+      for (const file of [codexPolicy, jcodePolicy, stray]) writePolicy(file);
+      mkdirSync(join(home, ".gap"), { recursive: true });
+      writeFileSync(
+        join(home, ".gap", "published.json"),
+        JSON.stringify({
+          [command]: "c",
+          [codexPolicy]: "p",
+          [jcodePolicy]: "p",
+          [stray]: "p",
+        }),
+      );
+      const env = { ...process.env, CODEX_HOME: codexHome, JCODE_HOME: jcodeHome };
+      const result = recall(["learn", "--json"], env);
+      expect(result.status).toBe(0);
+      const report = JSON.parse(result.stdout) as {
+        destinations: Array<{ path: string; status: string | null }>;
+      };
+      expect(report.destinations.map((d) => [d.path, d.status])).toEqual([
+        [codexPolicy, "written"],
+        [jcodePolicy, "written"],
+      ]);
+      expect(readFileSync(command, "utf8")).toBe(commandText);
+      expect(readFileSync(stray, "utf8")).not.toContain("<!-- recall:begin -->");
+      expect(readFileSync(codexPolicy, "utf8")).toContain(`- ${NOTE}`);
+      const scan = findTailDestinations({
+        home,
+        path: process.env.PATH,
+        codexHome: "relative/codex",
+        jcodeHome: "",
+      });
+      expect(scan.destinations).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("(n) a Recall pair inside any GAP block is refused, and removal never overwrites a later edit", () => {
+    const policy = policyPath();
+    mkdirSync(dirname(policy), { recursive: true });
+    const nested =
+      "<!-- gap:begin -->\nA.\n<!-- recall:begin -->\n- old\n<!-- recall:end -->\n<!-- gap:end -->\n\n<!-- gap:begin -->\nB.\n<!-- gap:end -->\n";
+    writeFileSync(policy, nested);
+    publish(policy);
+    expect(removeRecallBlock(nested).ok).toBe(false);
+    expect(spliceRecallBlock(nested, [], "2026-01-01").ok).toBe(false);
+    const learned = recall(["learn", "--json"]);
+    expect(learned.status).toBe(1);
+    expect(readFileSync(policy, "utf8")).toBe(nested);
+    const removal = planRecallBlockRemoval(policy);
+    expect(removal).toEqual(expect.objectContaining({ refused: "Recall marker sits inside the GAP block" }));
+
+    const pair = "# Mine\n\n<!-- recall:begin -->\n- old\n<!-- recall:end -->\n";
+    writeFileSync(policy, pair);
+    const plan = planRecallBlockRemoval(policy);
+    if ("refused" in plan) throw new Error(plan.refused);
+    expect(plan.after).toBe("# Mine\n");
+    writeFileSync(policy, `${pair}edited\n`);
+    expect(writeIfUnchanged(policy, plan.beforeHash, plan.after).status).toBe("refused");
+    expect(readFileSync(policy, "utf8")).toBe(`${pair}edited\n`);
   });
 });

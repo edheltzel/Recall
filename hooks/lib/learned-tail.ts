@@ -27,7 +27,6 @@ import {
   dirname,
   isAbsolute,
   join,
-  relative,
 } from "node:path";
 import { resolveDbPath } from "./db-path";
 import { detectThreats } from "./threat-detect";
@@ -41,7 +40,15 @@ export const MAX_TAIL_TOKENS = 600;
 export const MAX_TAIL_BULLETS = 15;
 export const MAX_BULLET_CHARS = 200;
 export const MIN_TAIL_IMPORTANCE = 8;
+export const MIN_TAIL_SESSIONS = 2;
 export const TAIL_HEADER_PREFIX = "Written by Recall, last updated ";
+export const GAP_POLICY_FILES = [
+  ".claude/rules/global-agent-policy.md",
+  ".pi/agent/APPEND_SYSTEM.md",
+  ".omp/agent/APPEND_SYSTEM.md",
+  ".cursor/rules/global-agent-policy.mdc",
+  ".empryo/EMPRYO.md",
+];
 export const BUILTIN_TAIL_FILES = [
   ".claude/CLAUDE.md",
   ".codex/AGENTS.md",
@@ -85,7 +92,14 @@ export interface TailNote {
 }
 
 export type TailDropReason =
-  "secret" | "threat" | "unsafe" | "length" | "duplicate" | "covered" | "cap";
+  | "secret"
+  | "threat"
+  | "unsafe"
+  | "length"
+  | "duplicate"
+  | "unproven"
+  | "covered"
+  | "cap";
 
 export interface DroppedTailNote {
   key: string;
@@ -106,6 +120,8 @@ export type BulletCheck =
 export interface TailEnv {
   home?: string;
   path?: string;
+  codexHome?: string;
+  jcodeHome?: string;
 }
 
 export interface TailDestination {
@@ -231,10 +247,7 @@ export function loadTailCandidates(
       );
       if (![...REQUIRED_COLUMNS, ...spec.columns].every((c) => cols.has(c)))
         continue;
-      const where = [
-        "t.confidence = 'high'",
-        `(t.importance >= ${MIN_TAIL_IMPORTANCE} OR t.provenance = 'user_authored')`,
-      ];
+      const where = ["t.confidence IN ('high', 'medium')"];
       if (cols.has("status")) where.push("t.status = 'active'");
       if (tables.has("dedup_lineage")) {
         where.push(
@@ -320,10 +333,15 @@ export function sanitizeTailBullet(raw: string): BulletCheck {
   return { ok: true, text };
 }
 
-function matchForm(text: string): string {
+function foldCase(text: string): string {
   return text
-    .normalize("NFKC")
-    .toLowerCase()
+    .split(/(`[^`]*`)/)
+    .map((part, i) => (i % 2 === 1 ? part : part.toLowerCase()))
+    .join("");
+}
+
+function matchForm(text: string): string {
+  return foldCase(text.normalize("NFKC"))
     .trim()
     .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
     .replace(/[.!?;:,]+$/, "")
@@ -338,6 +356,13 @@ export function isCoveredByGap(note: string, gapText: string): boolean {
     .split(/\r?\n+/)
     .flatMap((line) => [line, ...line.split(/(?<=[.!?])\s+/)])
     .some((unit) => matchForm(unit) === n);
+}
+
+function provenRecord(c: TailCandidate): boolean {
+  return (
+    c.confidence === "high" &&
+    (c.importance >= MIN_TAIL_IMPORTANCE || c.provenance === "user_authored")
+  );
 }
 
 function candidateKey(c: { table: TailTable; id: number }): string {
@@ -410,7 +435,19 @@ export function selectTail(
     }
   }
 
-  const ranked: TailNote[] = clusters
+  const proven = clusters.filter(({ lead, members }) => {
+    const sessions = new Set(members.map((m) => m.sessionId ?? candidateKey(m)));
+    if (members.some(provenRecord) || sessions.size >= MIN_TAIL_SESSIONS)
+      return true;
+    dropped.push({
+      key: candidateKey(lead),
+      reason: "unproven",
+      detail: `1 session, needs ${MIN_TAIL_SESSIONS} or a high-confidence note at importance ${MIN_TAIL_IMPORTANCE}+`,
+    });
+    return false;
+  });
+
+  const ranked: TailNote[] = proven
     .map(({ lead, members }) => {
       const created = members.map((m) => m.createdAt).sort(compareText);
       return {
@@ -515,33 +552,37 @@ function allMarkerLines(text: string, marker: string): Array<[number, number]> {
   }
 }
 
-function gapSpan(
-  text: string,
-): { start: number; innerStart: number; innerEnd: number; end: number } | null {
-  let span: {
-    start: number;
-    innerStart: number;
-    innerEnd: number;
-    end: number;
-  } | null = null;
+interface GapSpan {
+  start: number;
+  innerStart: number;
+  innerEnd: number;
+  end: number;
+}
+
+function gapSpans(text: string): GapSpan[] {
+  const spans: GapSpan[] = [];
   for (let from = 0; ;) {
     let begin = findMarkerLine(text, GAP_BEGIN, from);
-    if (!begin) return span;
+    if (!begin) return spans;
     const end = findMarkerLine(text, GAP_END, begin[1]);
-    if (!end) return span;
+    if (!end) return spans;
     for (;;) {
       const next = findMarkerLine(text, GAP_BEGIN, begin[1]);
       if (!next || next[0] >= end[0]) break;
       begin = next;
     }
-    span = {
+    spans.push({
       start: begin[0],
       innerStart: begin[1],
       innerEnd: end[0],
       end: end[1],
-    };
+    });
     from = end[1];
   }
+}
+
+function gapSpan(text: string): GapSpan | null {
+  return gapSpans(text).at(-1) ?? null;
 }
 
 export function gapBlockText(text: string): string | null {
@@ -587,12 +628,9 @@ function recallSpan(text: string): RecallSpan {
       reason: "Recall block wraps a GAP marker",
     };
   }
-  const gap = gapSpan(text);
-  if (
-    gap &&
-    ((begin[0] >= gap.start && begin[0] < gap.end) ||
-      (end[0] >= gap.start && end[0] < gap.end))
-  ) {
+  const inside = (at: number) =>
+    gapSpans(text).some((gap) => at >= gap.start && at < gap.end);
+  if (inside(begin[0]) || inside(end[0])) {
     return {
       kind: "malformed",
       reason: "Recall marker sits inside the GAP block",
@@ -737,11 +775,6 @@ function regularFileProblem(path: string): string | null {
   }
 }
 
-function insideHome(home: string, path: string): boolean {
-  const rel = relative(home, path);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-}
-
 function resolveEnv(env: TailEnv): { home: string; pathEnv: string } {
   return {
     home:
@@ -750,24 +783,59 @@ function resolveEnv(env: TailEnv): { home: string; pathEnv: string } {
   };
 }
 
+function harnessHome(
+  value: string | undefined,
+  fallback: string,
+  refuseEmpty: boolean,
+): string | null {
+  if (value === undefined) return fallback;
+  if (value === "") return refuseEmpty ? null : fallback;
+  return isAbsolute(value) ? value : null;
+}
+
+export function gapPolicyDestinations(env: TailEnv = {}): string[] {
+  const { home } = resolveEnv(env);
+  const out = GAP_POLICY_FILES.map((rel) => join(home, rel));
+  const codex = harnessHome(
+    env.codexHome ?? process.env.CODEX_HOME,
+    join(home, ".codex"),
+    false,
+  );
+  if (codex) out.push(join(codex, "gap", "global-agent-policy.md"));
+  const jcode = harnessHome(
+    env.jcodeHome ?? process.env.JCODE_HOME,
+    join(home, ".jcode"),
+    true,
+  );
+  if (jcode) out.push(join(jcode, "prompt-overlay.md"));
+  return [...new Set(out)].sort(compareText);
+}
+
+export function learnedTailCleanupPaths(env: TailEnv = {}): string[] {
+  const { home } = resolveEnv(env);
+  return [
+    ...new Set([
+      ...gapPolicyDestinations(env),
+      ...BUILTIN_TAIL_FILES.map((rel) => join(home, rel)),
+    ]),
+  ].sort(compareText);
+}
+
 export function findTailDestinations(env: TailEnv = {}): TailDestinationScan {
   const { home, pathEnv } = resolveEnv(env);
   const ledger = gapOnPath(pathEnv) ? readGapLedger(home) : null;
   const destinations: TailDestination[] = [];
   const skipped: SkippedTailDestination[] = [];
   if (ledger) {
-    for (const path of Object.keys(ledger).sort(compareText)) {
+    for (const path of gapPolicyDestinations(env)) {
       const value = ledger[path];
+      if (value === undefined) continue;
       if (value === "cleaned") {
         skipped.push({ path, reason: "cleaned ledger entry" });
         continue;
       }
-      if (
-        typeof value !== "string" ||
-        !isAbsolute(path) ||
-        !insideHome(home, path)
-      ) {
-        skipped.push({ path, reason: "not a ledger path under HOME" });
+      if (typeof value !== "string") {
+        skipped.push({ path, reason: "unreadable ledger entry" });
         continue;
       }
       const problem = regularFileProblem(path);
@@ -783,7 +851,7 @@ export function findTailDestinations(env: TailEnv = {}): TailDestinationScan {
         continue;
       }
       if (gapSpan(text) === null) {
-        skipped.push({ path, reason: "no GAP block (command file)" });
+        skipped.push({ path, reason: "no GAP block" });
         continue;
       }
       destinations.push({ path, source: "gap" });
@@ -880,15 +948,39 @@ export function writeTailState(path: string, state: TailState): void {
   }
 }
 
+export function readWrittenTailKeys(texts: string[]): Set<string> {
+  const keys = new Set<string>();
+  for (const text of texts) {
+    const block = readRecallBlock(text);
+    if (block.malformed) continue;
+    for (const bullet of block.bullets) keys.add(tailNoteKey(bullet));
+  }
+  return keys;
+}
+
+export function readWrittenTailKeysFrom(paths: string[]): Set<string> {
+  const texts: string[] = [];
+  for (const path of paths) {
+    try {
+      texts.push(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+  }
+  return readWrittenTailKeys(texts);
+}
+
 export function nextTailState(
   state: TailState,
   notes: TailNote[],
   now: Date,
+  written: Set<string> = new Set(),
 ): TailState {
   const tailSince: Record<string, string> = {};
   for (const note of notes) {
     const key = tailNoteKey(note.text);
-    tailSince[key] = state.tailSince[key] ?? now.toISOString();
+    const since = written.has(key) ? state.tailSince[key] : undefined;
+    tailSince[key] = since ?? now.toISOString();
   }
   return { refreshedAt: now.getTime(), tailSince };
 }
@@ -903,9 +995,17 @@ export function recordTailRefresh(
   const landed = writes.some(
     (w) => w.status === "written" || w.status === "unchanged",
   );
+  const written = readWrittenTailKeys(
+    (plan.destinations ?? []).map((d) => d.before),
+  );
   writeTailState(
     path,
-    nextTailState(readTailState(path), landed ? plan.selection.notes : [], now),
+    nextTailState(
+      readTailState(path),
+      landed ? plan.selection.notes : [],
+      now,
+      written,
+    ),
   );
   return true;
 }
@@ -1037,6 +1137,37 @@ export function writeIfUnchanged(
       reason: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+
+export type RecallRemovalPlan =
+  | { path: string; beforeHash: string; after: string; changed: boolean }
+  | { path: string; refused: string };
+
+export function planRecallBlockRemoval(path: string): RecallRemovalPlan {
+  let read: { text: string; hash: string } | { error: string };
+  try {
+    read = readUtf8Exact(path);
+  } catch (err) {
+    read = { error: err instanceof Error ? err.message : String(err) };
+  }
+  if ("error" in read) return { path, refused: read.error };
+  const removed = removeRecallBlock(read.text);
+  if (!removed.ok) return { path, refused: removed.reason };
+  return {
+    path,
+    beforeHash: read.hash,
+    after: removed.text,
+    changed: removed.changed,
+  };
+}
+
+export function removeRecallBlockFromFile(path: string): TailWriteResult {
+  const plan = planRecallBlockRemoval(path);
+  if ("refused" in plan)
+    return { path, status: "refused", reason: plan.refused };
+  if (!plan.changed) return { path, status: "unchanged" };
+  return writeIfUnchanged(path, plan.beforeHash, plan.after);
 }
 
 export function writeLearnedTail(plan: TailPlan): TailWriteResult[] {

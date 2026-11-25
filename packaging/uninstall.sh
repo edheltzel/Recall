@@ -394,42 +394,25 @@ remove_extract_prompt_if_unmodified() {
   fi
 }
 
-# Every harness file the learned tail may ever have written: each GAP ledger
-# path under HOME (cleaned ones too, since GAP may have been installed or
-# removed after a write) plus every built-in file. Only the Recall pair is
-# removed from each, and a missing file is skipped by remove_recall_block.
+# Every harness file the learned tail may ever have written: each GAP policy
+# destination (CODEX_HOME and JCODE_HOME included, whatever the ledger says now,
+# since GAP may have been installed or removed after a write) plus every built-in
+# file. The list and the marker rules come from hooks/lib/learned-tail.ts, the
+# same code `recall learn` uses. A missing file is skipped by remove_recall_block.
+RECALL_TAIL_LIB="$SCRIPT_DIR/../hooks/lib/learned-tail.ts"
+
 recall_learned_tail_files() {
-  RECALL_TAIL_HOME="$HOME" bun -e '
-    const fs = require("fs");
-    const path = require("path");
-    const home = process.env.RECALL_TAIL_HOME;
-    const builtin = [
-      ".claude/CLAUDE.md",
-      ".codex/AGENTS.md",
-      ".pi/agent/APPEND_SYSTEM.md",
-      ".omp/agent/APPEND_SYSTEM.md",
-      ".empryo/EMPRYO.md",
-    ];
-    let ledger = null;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(path.join(home, ".gap", "published.json"), "utf8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ledger = parsed;
-    } catch { /* no GAP ledger — built-in files */ }
-    const out = new Set();
-    for (const file of Object.keys(ledger ?? {}).sort()) {
-      if (typeof ledger[file] !== "string" || !path.isAbsolute(file)) continue;
-      const rel = path.relative(home, file);
-      if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) out.add(file);
-    }
-    for (const rel of builtin) out.add(path.join(home, rel));
-    process.stdout.write([...out].join("\n"));
+  RECALL_TAIL_LIB="$RECALL_TAIL_LIB" RECALL_TAIL_HOME="$HOME" bun -e '
+    const { learnedTailCleanupPaths } = require(process.env.RECALL_TAIL_LIB);
+    process.stdout.write(learnedTailCleanupPaths({ home: process.env.RECALL_TAIL_HOME }).join("\n"));
   '
 }
 
-# Remove only the <!-- recall:begin --> ... <!-- recall:end --> pair.
-# Everything outside that pair, including a GAP block, stays byte for byte.
-# A file with no pair is left untouched. A malformed pair (nested, reversed,
-# or more than one) is left untouched and reported.
+# Remove only the <!-- recall:begin --> ... <!-- recall:end --> pair through the
+# learn parser and its checked write: a temp file renamed over the original, and
+# only when the file still matches what was read. A pair the parser refuses
+# (malformed, or overlapping any GAP block) or a file edited mid-write is left
+# untouched and reported.
 remove_recall_block() {
   local file="$1"
   [[ -f "$file" && ! -L "$file" ]] || return 0
@@ -440,64 +423,17 @@ remove_recall_block() {
     return 0
   fi
   local status=0
-  RECALL_BLOCK_FILE="$file" bun -e '
-    const fs = require("fs");
-    const file = process.env.RECALL_BLOCK_FILE;
-    const BEGIN = "<!-- recall:begin -->";
-    const END = "<!-- recall:end -->";
-    const src = fs.readFileSync(file);
-    const text = src.toString("utf8");
-    if (!Buffer.from(text, "utf8").equals(src)) process.exit(0);
-    function markerLines(marker) {
-      const out = [];
-      let from = 0;
-      while (from < text.length) {
-        const i = text.indexOf(marker, from);
-        if (i < 0) break;
-        const after = i + marker.length;
-        const ownLine = (i === 0 || text[i - 1] === "\n") &&
-          (after === text.length || text[after] === "\n" ||
-            (text[after] === "\r" && text[after + 1] === "\n"));
-        if (ownLine) {
-          let end = after;
-          if (text[after] === "\n") end = after + 1;
-          else if (text[after] === "\r") end = after + 2;
-          out.push([i, end]);
-          from = end;
-        } else {
-          from = i + 1;
-        }
-      }
-      return out;
-    }
-    const begins = markerLines(BEGIN);
-    const ends = markerLines(END);
-    if (begins.length === 0 && ends.length === 0) process.exit(0);
-    if (begins.length !== 1 || ends.length !== 1 || ends[0][0] < begins[0][1]) {
-      process.stderr.write("malformed Recall block in " + file + "\n");
+  local reason
+  reason="$(RECALL_TAIL_LIB="$RECALL_TAIL_LIB" RECALL_BLOCK_FILE="$file" bun -e '
+    const { removeRecallBlockFromFile } = require(process.env.RECALL_TAIL_LIB);
+    const result = removeRecallBlockFromFile(process.env.RECALL_BLOCK_FILE);
+    if (result.status === "refused") {
+      process.stdout.write(result.reason ?? "refused");
       process.exit(2);
     }
-    let cut = begins[0][0];
-    const end = ends[0][1];
-    const gapBegins = markerLines("<!-- gap:begin -->");
-    const gapEnds = markerLines("<!-- gap:end -->");
-    const wraps = [...gapBegins, ...gapEnds].some(([at]) => at >= cut && at < end);
-    const inside = gapBegins.some(([gb], i) => {
-      const ge = gapEnds.find(([at]) => at > gb);
-      return ge && ((cut > gb && cut < ge[0]) || (ends[0][0] > gb && ends[0][0] < ge[0]));
-    });
-    if (wraps || inside) {
-      process.stderr.write("Recall block overlaps the GAP block in " + file + "\n");
-      process.exit(2);
-    }
-    if (cut >= 2 && text[cut - 1] === "\n" && text[cut - 2] === "\n") {
-      cut -= end === text.length && !text.endsWith("\n") ? 2 : 1;
-    }
-    const next = text.slice(0, cut) + text.slice(end);
-    if (next !== text) fs.writeFileSync(file, next);
-  ' || status=$?
+  ')" || status=$?
   if [[ "$status" -eq 2 ]]; then
-    log_warn "Preserved $file (malformed Recall learned-tail block)"
+    log_warn "Preserved $file ($reason)"
     return 0
   fi
   if [[ "$status" -ne 0 ]]; then

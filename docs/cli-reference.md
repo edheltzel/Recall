@@ -631,9 +631,9 @@ recall cluster --execute --threshold 0.9
 
 ### Learned tail
 
-`recall learn` writes Recall's best notes (active, high confidence, importance 8+ or user-authored, at most 15 bullets and 600 tokens) into a `<!-- recall:begin -->` ... `<!-- recall:end -->` block in each global harness file. With GAP installed it writes to GAP's published policy files; otherwise to the built-in harness files that already exist. Only the Recall block changes, and a rerun with no change writes nothing. The Stop hook refreshes it on its own.
+`recall learn` writes Recall's best notes into a `<!-- recall:begin -->` ... `<!-- recall:end -->` block in each global harness file, at most 15 bullets and 600 tokens. A note qualifies when it is active, not low confidence, and either has a high-confidence record at importance 8+ (or user-authored) or recurs word for word in 2+ sessions, which is how notes saved at session end reach the tail. Text in backticks keeps its case when notes are compared. With GAP installed it writes to the policy files GAP publishes (`CODEX_HOME` and `JCODE_HOME` included), never to its command files; otherwise to the built-in harness files that already exist. Only the Recall block changes, and a rerun with no change writes nothing. The Stop hook refreshes it on its own.
 
-`recall promote` is read-only. It lists notes seen in 3+ projects that have been in the written tail for 14+ days and are not already in the GAP block. The `do-recall-promote` skill turns the accepted ones into a GAP pull request.
+`recall promote` is read-only. It lists notes seen in 3+ projects that are in a Recall block written now, have been there for 14+ days, and are not already in the GAP block. A note removed from every destination starts a new 14 days when it is written back. The `do-recall-promote` skill turns the accepted ones into a GAP pull request.
 
 ```bash
 recall learn --dry-run

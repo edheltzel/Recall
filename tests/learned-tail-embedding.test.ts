@@ -25,12 +25,13 @@ test("identical embeddings cannot merge contradictory rules or manufacture promo
     mkdirSync(bin);
     writeFileSync(join(bin, "gap"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     process.env.PATH = bin;
-    const policy = join(home, ".gap", "policy.md");
+    const policy = join(home, ".claude", "rules", "global-agent-policy.md");
     mkdirSync(dirname(policy), { recursive: true });
     writeFileSync(
       policy,
       "<!-- gap:begin -->\nKeep commands reliable.\n<!-- gap:end -->\n",
     );
+    mkdirSync(join(home, ".gap"), { recursive: true });
     writeFileSync(
       join(home, ".gap", "published.json"),
       JSON.stringify({ [policy]: "published" }),

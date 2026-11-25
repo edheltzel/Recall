@@ -93,6 +93,8 @@ function runUninstall(
         // the developer's live `recall` link.
         RECALL_SKIP_BUN_UNLINK: 'true',
         RECALL_CRONTAB_BIN: '',
+        CODEX_HOME: '',
+        JCODE_HOME: '',
         ...extraEnv,
       },
     },
@@ -122,6 +124,8 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
         RECALL_CRONTAB_BIN: '',
+        CODEX_HOME: '',
+        JCODE_HOME: '',
       },
     },
   );
@@ -999,21 +1003,30 @@ Preserve this.
 });
 
 describe('learned-tail block removal', () => {
-  test('removes only the Recall pair from ledger and built-in files, skips paths outside HOME, and keeps a block that wraps GAP', () => {
+  test('removes only the Recall pair from GAP policy and built-in files through a checked rename, and keeps any pair the learn parser refuses', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-tail-uninstall-'));
     const home = join(root, 'home');
     const outside = join(root, 'outside', 'AGENTS.md');
-    const inside = join(home, '.claude', 'rules', 'policy.md');
+    const inside = join(home, '.claude', 'rules', 'global-agent-policy.md');
+    const codexHome = join(root, 'codex-home');
+    const codexPolicy = join(codexHome, 'gap', 'global-agent-policy.md');
+    const command = join(home, '.claude', 'commands', 'example.md');
+    const nested = join(home, '.omp', 'agent', 'APPEND_SYSTEM.md');
     const wrapped = join(home, '.pi', 'agent', 'APPEND_SYSTEM.md');
     const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
     const pair = '<!-- recall:begin -->\n- note\n<!-- recall:end -->\n';
-    for (const file of [outside, inside, wrapped]) mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(inside, `# Head\n\n${gap}\n${pair}`);
+    for (const file of [outside, inside, wrapped, codexPolicy, command, nested]) mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(inside, `# Head\n\n${gap}\n${pair}`, { mode: 0o640 });
+    const insideInode = lstatSync(inside).ino;
     writeFileSync(outside, `${gap}\n${pair}`);
+    writeFileSync(codexPolicy, `${gap}\n${pair}`);
+    writeFileSync(command, `${gap}\n${pair}`);
+    const nestedText = `<!-- gap:begin -->\nA.\n${pair}<!-- gap:end -->\n\n${gap}`;
+    writeFileSync(nested, nestedText);
     const wrappedText = `<!-- recall:begin -->\n- note\n${gap}<!-- recall:end -->\n`;
     writeFileSync(wrapped, wrappedText);
     const builtin = join(home, '.claude', 'CLAUDE.md');
-    const cleaned = join(home, '.cursor', 'rules', 'old.mdc');
+    const cleaned = join(home, '.cursor', 'rules', 'global-agent-policy.mdc');
     for (const file of [builtin, cleaned]) mkdirSync(dirname(file), { recursive: true });
     writeFileSync(builtin, `# Mine\n\n${pair}`);
     writeFileSync(cleaned, `# Old\n\n${pair}`);
@@ -1023,11 +1036,16 @@ describe('learned-tail block removal', () => {
     mkdirSync(join(home, '.gap'), { recursive: true });
     writeFileSync(
       join(home, '.gap', 'published.json'),
-      JSON.stringify({ [inside]: 'h1', [outside]: 'h2', [wrapped]: 'h3', [cleaned]: 'cleaned' }),
+      JSON.stringify({ [inside]: 'h1', [outside]: 'h2', [wrapped]: 'h3', [cleaned]: 'cleaned', [codexPolicy]: 'h4', [command]: 'h5', [nested]: 'h6' }),
     );
-    const result = runUninstall(home, join(root, 'backups'));
+    const result = runUninstall(home, join(root, 'backups'), [], { CODEX_HOME: codexHome });
     expect(result.status).toBe(0);
     expect(readFileSync(inside, 'utf-8')).toBe(`# Head\n\n${gap}`);
+    expect(lstatSync(inside).ino).not.toBe(insideInode);
+    expect(lstatSync(inside).mode & 0o777).toBe(0o640);
+    expect(readFileSync(codexPolicy, 'utf-8')).toBe(gap);
+    expect(readFileSync(command, 'utf-8')).toBe(`${gap}\n${pair}`);
+    expect(readFileSync(nested, 'utf-8')).toBe(nestedText);
     expect(readFileSync(outside, 'utf-8')).toBe(`${gap}\n${pair}`);
     expect(readFileSync(wrapped, 'utf-8')).toBe(wrappedText);
     expect(readFileSync(builtin, 'utf-8')).toBe('# Mine\n');

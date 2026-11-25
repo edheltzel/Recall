@@ -1,7 +1,8 @@
 // recall promote — read-only list of learned-tail notes that meet the Lane B bar (#279).
-// A note qualifies when it has been in the written tail for 14+ days (tracked in
-// learned-tail-state.json) and has been seen in 3+ distinct projects,
-// and the published GAP policy text does not already cover it. This command writes nothing.
+// A note qualifies when it is in the Recall block of a GAP destination now, has been
+// in the written tail for 14+ days (tracked in learned-tail-state.json), has been seen
+// in 3+ distinct projects, and the published GAP policy text does not already cover it.
+// This command writes nothing.
 
 import {
   findTailDestinations,
@@ -9,6 +10,7 @@ import {
   loadTailCandidates,
   readGapCoverageText,
   readTailState,
+  readWrittenTailKeysFrom,
   selectTail,
   tailNoteKey,
   tailStatePath,
@@ -92,8 +94,8 @@ export function promotionCandidates(
   return { kept, skipped };
 }
 
-// Every qualifying note is listed so `skipped` explains each one; tail membership
-// itself comes from the state file that each successful write records.
+// Every qualifying note is listed so `skipped` explains each one. A note's age comes
+// from the state file, and only counts while the note is in a Recall block written now.
 export function tailNotes(candidates: TailCandidate[]): TailNote[] {
   return selectTail(candidates, { gapText: "", cap: false }).notes;
 }
@@ -102,9 +104,15 @@ export function planPromotion(options: PromoteOptions = {}): PromoteReport {
   const now = options.now ?? new Date();
   const scan = findTailDestinations(options);
   if (!scan.gap) return { gap: false, candidates: [], skipped: [] };
-  const gapText = readGapCoverageText(scan.destinations.map((d) => d.path));
+  const paths = scan.destinations.map((d) => d.path);
+  const gapText = readGapCoverageText(paths);
   const notes = tailNotes(loadTailCandidates(options.dbPath));
-  const { tailSince } = readTailState(tailStatePath(options.dbPath));
+  const written = readWrittenTailKeysFrom(paths);
+  const tailSince = Object.fromEntries(
+    Object.entries(readTailState(tailStatePath(options.dbPath)).tailSince).filter(
+      ([key]) => written.has(key),
+    ),
+  );
   const { kept, skipped } = promotionCandidates(notes, gapText, now, tailSince);
   return { gap: true, candidates: kept, skipped };
 }

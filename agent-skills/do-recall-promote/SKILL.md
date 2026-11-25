@@ -7,7 +7,7 @@ Turn Recall notes that hold across projects into a reviewed change to the shared
 
 ## What this does
 
-1. Runs `recall promote --json`. That command is read-only: it lists tail notes that are active, high confidence, seen in 3 or more distinct projects, in the tail for 14 or more days, and not already covered by a published GAP policy file.
+1. Runs `recall promote --json`. That command is read-only: it lists tail notes that are active, seen in 3 or more distinct projects, in a Recall block written now and for 14 or more days, and not already covered by a published GAP policy file.
 2. On a new branch of the GAP checkout, adds the accepted notes to `global/AGENTS.md`.
 3. Opens a pull request and stops.
 
