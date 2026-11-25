@@ -753,5 +753,41 @@ test("(o) rows with no session ID are not separate sessions, so two CLI adds of 
     });
     expect(known.notes.map((n) => [n.text, n.sessions])).toEqual([[rule, 2]]);
   });
+test("(p) a partly refused refresh still restarts the age of a note it writes back", () => {
+    const policy = policyPath();
+    const other = join(home, ".pi", "agent", "APPEND_SYSTEM.md");
+    writePolicy(policy);
+    writePolicy(other);
+    mkdirSync(join(home, ".gap"), { recursive: true });
+    writeFileSync(
+      join(home, ".gap", "published.json"),
+      JSON.stringify({ [policy]: "p", [other]: "p" }),
+    );
+    const statePath = join(dirname(dbPath), "learned-tail-state.json");
+    expect(recall(["learn"]).status).toBe(0);
+    const key = tailNoteKey(NOTE);
+    const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    const before = readTailState(statePath);
+    writeFileSync(
+      statePath,
+      JSON.stringify({ ...before, tailSince: { [key]: old } }),
+    );
+    const removed = removeRecallBlock(readFileSync(policy, "utf8"));
+    if (!removed.ok) throw new Error(removed.reason);
+    writeFileSync(policy, removed.text);
+    writeFileSync(
+      other,
+      `${readFileSync(other, "utf8")}<!-- recall:begin -->\n`,
+    );
+
+    expect(recall(["learn"]).status).toBe(1);
+    expect(readFileSync(policy, "utf8")).toContain(`- ${NOTE}`);
+    const after = readTailState(statePath);
+    expect(after.refreshedAt).toBe(before.refreshedAt);
+    expect(after.tailSince[key]).not.toBe(old);
+    expect(promote().skipped).toEqual([
+      { text: NOTE, reason: "0 days in the tail (need 14)" },
+    ]);
+  });
 });
 

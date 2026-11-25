@@ -1070,23 +1070,31 @@ export function recordTailRefresh(
   writes: TailWriteResult[],
   now: Date = new Date(),
 ): boolean {
-  if (writes.some((w) => w.status === "refused")) return false;
-  const landed = writes.some(
-    (w) => w.status === "written" || w.status === "unchanged",
-  );
-  const written = readWrittenTailKeys(
-    (plan.destinations ?? []).map((d) => d.before),
-  );
-  writeJsonFile(
-    path,
-    nextTailState(
-      readTailState(path),
-      landed ? plan.selection.notes : [],
-      now,
-      written,
-    ),
-  );
-  return true;
+      const landed = writes.some(
+        (w) => w.status === "written" || w.status === "unchanged",
+      );
+      const written = readWrittenTailKeys(
+        (plan.destinations ?? []).map((d) => d.before),
+      );
+      const state = readTailState(path);
+      if (writes.some((w) => w.status === "refused")) {
+        if (!landed) return false;
+        const tailSince = { ...state.tailSince };
+        let restarted = false;
+        for (const note of plan.selection.notes) {
+          const key = tailNoteKey(note.text);
+          if (written.has(key) || !(key in tailSince)) continue;
+          tailSince[key] = now.toISOString();
+          restarted = true;
+        }
+        if (restarted) writeJsonFile(path, { ...state, tailSince });
+        return false;
+      }
+      writeJsonFile(
+        path,
+        nextTailState(state, landed ? plan.selection.notes : [], now, written),
+      );
+      return true;
 }
 
 export function countRecordsSince(
