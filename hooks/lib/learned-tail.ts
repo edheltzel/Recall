@@ -942,7 +942,9 @@ export function registerTailDestination(inventory: string, path: string): void {
   if (/[\r\n]/.test(path)) throw new Error("path contains a line break");
   if (readTailInventory(inventory).includes(path)) return;
   mkdirSync(dirname(inventory), { recursive: true });
-  appendFileSync(inventory, `${path}\n`, { mode: 0o600 });
+  appendFileSync(inventory, `\n${path}\n`, { mode: 0o600 });
+  if (!readTailInventory(inventory).includes(path))
+    throw new Error("registration did not land");
 }
 
 export function tailNoteKey(text: string): string {
