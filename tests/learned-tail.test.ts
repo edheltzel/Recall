@@ -653,4 +653,41 @@ describe("learned tail end to end", () => {
     expect(writeIfUnchanged(policy, plan.beforeHash, plan.after).status).toBe("refused");
     expect(readFileSync(policy, "utf8")).toBe(`${pair}edited\n`);
   });
+test("(o) rows with no session ID are not separate sessions, so two CLI adds of one rule stay out of the tail", () => {
+    const rule = "Rebuild the plugin bundles after editing a skill.";
+    for (const project of ["alpha", "bravo"]) {
+      expect(
+        recall(["add", "learning", "Stale plugin bundle", rule, "-p", project]).status,
+      ).toBe(0);
+    }
+    const plan = JSON.parse(recall(["learn", "--dry-run", "--json"]).stdout) as {
+      selection: {
+        notes: Array<{ text: string; sessions: number }>;
+        dropped: Array<{ reason: string }>;
+      };
+    };
+    expect(plan.selection.notes.map((n) => n.text)).toEqual([NOTE]);
+    expect(plan.selection.notes[0]?.sessions).toBe(0);
+    expect(plan.selection.dropped.some((d) => d.reason === "unproven")).toBe(
+      true,
+    );
+
+    const row = (id: number, sessionId: string | null): TailCandidate => ({
+      table: "learnings",
+      id,
+      text: rule,
+      project: "alpha",
+      importance: 5,
+      provenance: "extracted",
+      confidence: "medium",
+      accessCount: 0,
+      sessionId,
+      createdAt: FIRST_SEEN,
+    });
+    const known = selectTail([row(1, "s1"), row(2, "s2"), row(3, null)], {
+      cap: false,
+    });
+    expect(known.notes.map((n) => [n.text, n.sessions])).toEqual([[rule, 2]]);
+  });
 });
+

@@ -5,7 +5,7 @@
 // extraction actually writes.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 
@@ -37,13 +37,15 @@ function setup() {
   roots.push(root);
   const hooks = join(root, 'installed', 'hooks');
   cpSync(HOOKS, hooks, { recursive: true });
-  const bin = join(root, 'empty-bin');
+  const bin = join(root, 'bin');
   mkdirSync(bin, { recursive: true });
+  // npm installs Bun as `bun.exe`, so the running binary is exposed as `bun`.
+  symlinkSync(process.execPath, join(bin, 'bun'));
   // A minimal env: other suites leave Recall/Claude variables set in this process.
   const env: NodeJS.ProcessEnv = {
     TMPDIR: tmpdir(),
     HOME: root,
-    PATH: `${bin}:${join(process.execPath, '..')}:/usr/bin:/bin`,
+    PATH: `${bin}:/usr/bin:/bin`,
     RECALL_DB_PATH: join(root, 'recall.db'),
     RECALL_HOME: join(root, 'recall-home'),
     RECALL_SKIP_LEGACY_DATA_MIGRATIONS: '1',

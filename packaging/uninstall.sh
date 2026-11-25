@@ -396,8 +396,9 @@ remove_extract_prompt_if_unmodified() {
 
 # Every harness file the learned tail may ever have written: each GAP policy
 # destination (CODEX_HOME and JCODE_HOME included, whatever the ledger says now,
-# since GAP may have been installed or removed after a write) plus every built-in
-# file. The list and the marker rules come from hooks/lib/learned-tail.ts, the
+# since GAP may have been installed or removed after a write), every built-in
+# file, and each destination learned-tail-state.json recorded a write to (so a
+# block written under a since-changed CODEX_HOME or JCODE_HOME is still found). The list and the marker rules come from hooks/lib/learned-tail.ts, the
 # same code `recall learn` uses. A missing file is skipped by remove_recall_block.
 RECALL_TAIL_LIB="$SCRIPT_DIR/../hooks/lib/learned-tail.ts"
 

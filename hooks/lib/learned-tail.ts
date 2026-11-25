@@ -365,6 +365,12 @@ function provenRecord(c: TailCandidate): boolean {
   );
 }
 
+function knownSessions(members: TailCandidate[]): number {
+  return new Set(
+    members.map((m) => m.sessionId).filter((s): s is string => !!s),
+  ).size;
+}
+
 function candidateKey(c: { table: TailTable; id: number }): string {
   return `${c.table}:${c.id}`;
 }
@@ -436,8 +442,7 @@ export function selectTail(
   }
 
   const proven = clusters.filter(({ lead, members }) => {
-    const sessions = new Set(members.map((m) => m.sessionId ?? candidateKey(m)));
-    if (members.some(provenRecord) || sessions.size >= MIN_TAIL_SESSIONS)
+    if (members.some(provenRecord) || knownSessions(members) >= MIN_TAIL_SESSIONS)
       return true;
     dropped.push({
       key: candidateKey(lead),
@@ -454,8 +459,7 @@ export function selectTail(
         key: candidateKey(lead),
         text: lead.clean,
         importance: Math.max(...members.map((m) => m.importance)),
-        sessions: new Set(members.map((m) => m.sessionId ?? candidateKey(m)))
-          .size,
+        sessions: knownSessions(members),
         accessCount: members.reduce((sum, m) => sum + m.accessCount, 0),
         records: members.map((m) => ({ table: m.table, id: m.id })),
         projects: [
@@ -811,12 +815,16 @@ export function gapPolicyDestinations(env: TailEnv = {}): string[] {
   return [...new Set(out)].sort(compareText);
 }
 
-export function learnedTailCleanupPaths(env: TailEnv = {}): string[] {
+export function learnedTailCleanupPaths(
+  env: TailEnv & { dbPath?: string } = {},
+): string[] {
   const { home } = resolveEnv(env);
+  const written = readTailState(tailStatePath(env.dbPath)).destinations;
   return [
     ...new Set([
       ...gapPolicyDestinations(env),
       ...BUILTIN_TAIL_FILES.map((rel) => join(home, rel)),
+      ...written,
     ]),
   ].sort(compareText);
 }
@@ -897,6 +905,7 @@ export const TAIL_STATE_FILE = "learned-tail-state.json";
 export interface TailState {
   refreshedAt: number;
   tailSince: Record<string, string>;
+  destinations: string[];
 }
 
 export function tailNoteKey(text: string): string {
@@ -916,15 +925,21 @@ export function readTailState(path: string): TailState {
         if (typeof v === "string" && !Number.isNaN(Date.parse(v))) since[k] = v;
       }
     }
+    const destinations = Array.isArray(parsed?.destinations)
+      ? parsed.destinations.filter(
+          (p: unknown): p is string => typeof p === "string" && isAbsolute(p),
+        )
+      : [];
     return {
       refreshedAt:
         Number.isFinite(parsed?.refreshedAt) && parsed.refreshedAt > 0
           ? parsed.refreshedAt
           : 0,
       tailSince: since,
+      destinations,
     };
   } catch {
-    return { refreshedAt: 0, tailSince: {} };
+    return { refreshedAt: 0, tailSince: {}, destinations: [] };
   }
 }
 
@@ -982,7 +997,26 @@ export function nextTailState(
     const since = written.has(key) ? state.tailSince[key] : undefined;
     tailSince[key] = since ?? now.toISOString();
   }
-  return { refreshedAt: now.getTime(), tailSince };
+  return {
+    refreshedAt: now.getTime(),
+    tailSince,
+    destinations: state.destinations,
+  };
+}
+
+function landedDestinations(
+  previous: string[],
+  plan: TailPlan,
+  writes: TailWriteResult[],
+): string[] {
+  const out = new Set(previous);
+  for (const w of writes) {
+    if (w.status !== "written" && w.status !== "unchanged") continue;
+    const after = plan.destinations?.find((d) => d.path === w.path)?.after;
+    if (after !== undefined && readRecallBlock(after).present) out.add(w.path);
+    else out.delete(w.path);
+  }
+  return [...out].sort(compareText);
 }
 
 export function recordTailRefresh(
@@ -991,7 +1025,13 @@ export function recordTailRefresh(
   writes: TailWriteResult[],
   now: Date = new Date(),
 ): boolean {
-  if (writes.some((w) => w.status === "refused")) return false;
+  const state = readTailState(path);
+  const destinations = landedDestinations(state.destinations, plan, writes);
+  const moved = destinations.join("\n") !== state.destinations.join("\n");
+  if (writes.some((w) => w.status === "refused")) {
+    if (moved) writeTailState(path, { ...state, destinations });
+    return false;
+  }
   const landed = writes.some(
     (w) => w.status === "written" || w.status === "unchanged",
   );
@@ -1001,7 +1041,7 @@ export function recordTailRefresh(
   writeTailState(
     path,
     nextTailState(
-      readTailState(path),
+      { ...state, destinations },
       landed ? plan.selection.notes : [],
       now,
       written,

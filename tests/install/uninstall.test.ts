@@ -1053,4 +1053,48 @@ describe('learned-tail block removal', () => {
     expect(readFileSync(bare, 'utf-8')).toBe('# Bare');
     expect(result.stdout + result.stderr).toContain('Preserved');
   });
+test('removes a block written under a CODEX_HOME override after the override is unset', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-moved-'));
+    const home = join(root, 'home');
+    const bin = join(root, 'bin');
+    const dbPath = join(root, 'recall.db');
+    const codexHome = join(root, 'codex-home');
+    const codexPolicy = join(codexHome, 'gap', 'global-agent-policy.md');
+    const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
+    for (const dir of [home, bin, dirname(codexPolicy), join(home, '.gap')]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(bin, 'gap'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(codexPolicy, gap);
+    writeFileSync(join(home, '.gap', 'published.json'), JSON.stringify({ [codexPolicy]: 'h1' }));
+    const env: NodeJS.ProcessEnv = {
+      TMPDIR: tmpdir(),
+      HOME: home,
+      PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+      RECALL_DB_PATH: dbPath,
+      RECALL_HOME: join(home, '.agents', 'Recall'),
+      RECALL_SKIP_LEGACY_DATA_MIGRATIONS: '1',
+      CODEX_HOME: codexHome,
+    };
+    const cli = join(REPO, 'src', 'index.ts');
+    expect(spawnSync(process.execPath, [cli, 'init'], { env, encoding: 'utf-8' }).status).toBe(0);
+    const seed = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        `const { Database } = require('bun:sqlite');
+         const db = new Database(process.argv[1]);
+         db.query("INSERT INTO decisions (project, decision, status, importance, provenance, confidence) VALUES ('alpha', 'Keep the release notes short.', 'active', 9, 'user_authored', 'high')").run();
+         db.close();`,
+        dbPath,
+      ],
+      { env, encoding: 'utf-8' },
+    );
+    expect(seed.status).toBe(0);
+    expect(spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' }).status).toBe(0);
+    expect(readFileSync(codexPolicy, 'utf-8')).toContain('- Keep the release notes short.');
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: dbPath, CODEX_HOME: '' });
+    expect(result.status).toBe(0);
+    expect(readFileSync(codexPolicy, 'utf-8')).toBe(gap);
+  });
 });
+
