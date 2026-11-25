@@ -603,6 +603,21 @@ describe("learned tail end to end", () => {
       [escaped, ["alpha"]],
       [escapedLower, ["bravo", "charlie"]],
     ]);
+    const wide = "Use \uFF3C`PATH` in the fixture.";
+    const wideLower = "Use \uFF3C`path` in the fixture.";
+    expect(tailNoteKey(wide)).not.toBe(tailNoteKey(wideLower));
+    expect(isCoveredByGap(wide, `- ${wideLower}`)).toBe(false);
+    expect(
+      selectTail(
+        [row(7, wide, "alpha"), row(8, wideLower, "bravo"), row(9, wideLower, "charlie")],
+        { cap: false },
+      ).notes.map((n) => [n.text, n.projects]),
+    ).toEqual([
+      [wide, ["alpha"]],
+      [wideLower, ["bravo", "charlie"]],
+    ]);
+    expect(tailNoteKey("Use \uFF21\uFF22 now")).toBe(tailNoteKey("use ab now"));
+    expect(tailNoteKey("Use `\uFF21` now")).toBe(tailNoteKey("use `A` now"));
     expect(tailNoteKey("Run \\\\`PATH` now.")).not.toBe(
       tailNoteKey("Run \\\\`path` now."),
     );

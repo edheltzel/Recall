@@ -336,6 +336,10 @@ export function sanitizeTailBullet(raw: string): BulletCheck {
   return { ok: true, text };
 }
 
+function prose(text: string): string {
+  return text.normalize("NFKC").toLowerCase();
+}
+
 function foldCase(text: string): string {
       const runs = [...text.matchAll(/`+/g)].map((m) => ({
         start: m.index,
@@ -356,15 +360,15 @@ function foldCase(text: string): string {
         const close = runs.findIndex((r, j) => j > i && r.length === length);
         if (close < 0) continue;
         const end = runs[close].start + runs[close].length;
-        out += text.slice(at, start).toLowerCase() + text.slice(start, end);
+        out += prose(text.slice(at, start)) + text.slice(start, end).normalize("NFKC");
         at = end;
         i = close;
       }
-      return out + text.slice(at).toLowerCase();
+      return out + prose(text.slice(at));
 }
 
 function matchForm(text: string): string {
-  return foldCase(text.normalize("NFKC"))
+  return foldCase(text)
     .trim()
     .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
     .replace(/[.!?;:,]+$/, "")
