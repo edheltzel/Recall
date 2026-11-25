@@ -123,7 +123,7 @@ export function runLearn(options: LearnOptions = {}): void {
   const dryRun = options.dryRun === true;
   const writes = dryRun ? null : writeLearnedTail(plan);
   if (writes?.some((w) => w.status === "refused")) process.exitCode = 1;
-  else if (writes) {
+  if (writes) {
     try {
       recordTailRefresh(tailStatePath(), plan, writes);
     } catch (err) {

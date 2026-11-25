@@ -1053,7 +1053,8 @@ describe('learned-tail block removal', () => {
     expect(readFileSync(bare, 'utf-8')).toBe('# Bare');
     expect(result.stdout + result.stderr).toContain('Preserved');
   });
-test('removes a block written under a CODEX_HOME override after the override is unset', () => {
+
+  test('removes blocks a partly refused learn wrote under CODEX_HOME and RECALL_DB_PATH overrides after both are unset', () => {
     const root = mkdtempSync(join(tmpdir(), 'recall-tail-moved-'));
     const home = join(root, 'home');
     const bin = join(root, 'bin');
@@ -1061,10 +1062,13 @@ test('removes a block written under a CODEX_HOME override after the override is 
     const codexHome = join(root, 'codex-home');
     const codexPolicy = join(codexHome, 'gap', 'global-agent-policy.md');
     const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
-    for (const dir of [home, bin, dirname(codexPolicy), join(home, '.gap')]) mkdirSync(dir, { recursive: true });
+    const claudePolicy = join(home, '.claude', 'rules', 'global-agent-policy.md');
+    const malformed = `${gap}<!-- recall:begin -->\n<!-- recall:begin -->\n<!-- recall:end -->\n`;
+    for (const dir of [home, bin, dirname(codexPolicy), dirname(claudePolicy), join(home, '.gap')]) mkdirSync(dir, { recursive: true });
     writeFileSync(join(bin, 'gap'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     writeFileSync(codexPolicy, gap);
-    writeFileSync(join(home, '.gap', 'published.json'), JSON.stringify({ [codexPolicy]: 'h1' }));
+    writeFileSync(claudePolicy, malformed);
+    writeFileSync(join(home, '.gap', 'published.json'), JSON.stringify({ [codexPolicy]: 'h1', [claudePolicy]: 'h2' }));
     const env: NodeJS.ProcessEnv = {
       TMPDIR: tmpdir(),
       HOME: home,
@@ -1089,12 +1093,15 @@ test('removes a block written under a CODEX_HOME override after the override is 
       { env, encoding: 'utf-8' },
     );
     expect(seed.status).toBe(0);
-    expect(spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' }).status).toBe(0);
+    expect(spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' }).status).toBe(1);
     expect(readFileSync(codexPolicy, 'utf-8')).toContain('- Keep the release notes short.');
+    expect(readFileSync(claudePolicy, 'utf-8')).toBe(malformed);
+    expect(existsSync(join(root, 'learned-tail-state.json'))).toBe(false);
 
-    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: dbPath, CODEX_HOME: '' });
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
     expect(result.status).toBe(0);
     expect(readFileSync(codexPolicy, 'utf-8')).toBe(gap);
+    expect(readFileSync(claudePolicy, 'utf-8')).toBe(malformed);
   });
 });
 

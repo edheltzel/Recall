@@ -13,6 +13,7 @@ import {
   existsSync,
   fsyncSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readFileSync,
   renameSync,
@@ -163,6 +164,7 @@ export interface TailDestinationPlan {
 
 export interface TailPlan {
   date: string;
+  inventory?: string;
   gap: boolean;
   selection: TailSelection;
   block: string | null;
@@ -815,11 +817,9 @@ export function gapPolicyDestinations(env: TailEnv = {}): string[] {
   return [...new Set(out)].sort(compareText);
 }
 
-export function learnedTailCleanupPaths(
-  env: TailEnv & { dbPath?: string } = {},
-): string[] {
+export function learnedTailCleanupPaths(env: TailEnv = {}): string[] {
   const { home } = resolveEnv(env);
-  const written = readTailState(tailStatePath(env.dbPath)).destinations;
+  const written = readTailInventory(tailInventoryPath(env));
   return [
     ...new Set([
       ...gapPolicyDestinations(env),
@@ -905,7 +905,23 @@ export const TAIL_STATE_FILE = "learned-tail-state.json";
 export interface TailState {
   refreshedAt: number;
   tailSince: Record<string, string>;
-  destinations: string[];
+}
+
+export const TAIL_INVENTORY_FILE = "learned-tail-destinations.json";
+
+export function tailInventoryPath(env: TailEnv = {}): string {
+  return join(resolveEnv(env).home, ".agents", "Recall", TAIL_INVENTORY_FILE);
+}
+
+export function readTailInventory(path: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return Array.isArray(parsed)
+      ? parsed.filter((p): p is string => typeof p === "string" && isAbsolute(p))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export function tailNoteKey(text: string): string {
@@ -925,32 +941,27 @@ export function readTailState(path: string): TailState {
         if (typeof v === "string" && !Number.isNaN(Date.parse(v))) since[k] = v;
       }
     }
-    const destinations = Array.isArray(parsed?.destinations)
-      ? parsed.destinations.filter(
-          (p: unknown): p is string => typeof p === "string" && isAbsolute(p),
-        )
-      : [];
     return {
       refreshedAt:
         Number.isFinite(parsed?.refreshedAt) && parsed.refreshedAt > 0
           ? parsed.refreshedAt
           : 0,
       tailSince: since,
-      destinations,
     };
   } catch {
-    return { refreshedAt: 0, tailSince: {}, destinations: [] };
+    return { refreshedAt: 0, tailSince: {} };
   }
 }
 
-export function writeTailState(path: string, state: TailState): void {
+function writeJsonFile(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
   const tmp = join(
     dirname(path),
     `.${basename(path)}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`,
   );
   const fd = openSync(tmp, "wx", 0o600);
   try {
-    writeSync(fd, JSON.stringify(state));
+    writeSync(fd, JSON.stringify(value));
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -997,18 +1008,15 @@ export function nextTailState(
     const since = written.has(key) ? state.tailSince[key] : undefined;
     tailSince[key] = since ?? now.toISOString();
   }
-  return {
-    refreshedAt: now.getTime(),
-    tailSince,
-    destinations: state.destinations,
-  };
+  return { refreshedAt: now.getTime(), tailSince };
 }
 
-function landedDestinations(
-  previous: string[],
-  plan: TailPlan,
+export function recordTailDestinations(
+  path: string,
+  plan: Pick<TailPlan, "destinations">,
   writes: TailWriteResult[],
-): string[] {
+): void {
+  const previous = readTailInventory(path);
   const out = new Set(previous);
   for (const w of writes) {
     if (w.status !== "written" && w.status !== "unchanged") continue;
@@ -1016,7 +1024,8 @@ function landedDestinations(
     if (after !== undefined && readRecallBlock(after).present) out.add(w.path);
     else out.delete(w.path);
   }
-  return [...out].sort(compareText);
+  const next = [...out].sort(compareText);
+  if (next.join("\n") !== previous.join("\n")) writeJsonFile(path, next);
 }
 
 export function recordTailRefresh(
@@ -1025,23 +1034,18 @@ export function recordTailRefresh(
   writes: TailWriteResult[],
   now: Date = new Date(),
 ): boolean {
-  const state = readTailState(path);
-  const destinations = landedDestinations(state.destinations, plan, writes);
-  const moved = destinations.join("\n") !== state.destinations.join("\n");
-  if (writes.some((w) => w.status === "refused")) {
-    if (moved) writeTailState(path, { ...state, destinations });
-    return false;
-  }
+  if (plan.inventory) recordTailDestinations(plan.inventory, plan, writes);
+  if (writes.some((w) => w.status === "refused")) return false;
   const landed = writes.some(
     (w) => w.status === "written" || w.status === "unchanged",
   );
   const written = readWrittenTailKeys(
     (plan.destinations ?? []).map((d) => d.before),
   );
-  writeTailState(
+  writeJsonFile(
     path,
     nextTailState(
-      { ...state, destinations },
+      readTailState(path),
       landed ? plan.selection.notes : [],
       now,
       written,
@@ -1125,6 +1129,7 @@ export function planLearnedTail(options: PlanTailOptions = {}): TailPlan {
   });
   return {
     date,
+    inventory: tailInventoryPath(options),
     gap: scan.gap,
     selection,
     block: selection.notes.length
