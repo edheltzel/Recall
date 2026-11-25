@@ -337,10 +337,13 @@ export function sanitizeTailBullet(raw: string): BulletCheck {
 }
 
 function foldCase(text: string): string {
-  return text
-    .split(/(`[^`]*`)/)
-    .map((part, i) => (i % 2 === 1 ? part : part.toLowerCase()))
-    .join("");
+      let out = "";
+      let at = 0;
+      for (const span of text.matchAll(/(`+)[\s\S]*?[^`]\1(?!`)/g)) {
+    out += text.slice(at, span.index).toLowerCase() + span[0];
+    at = span.index + span[0].length;
+  }
+  return out + text.slice(at).toLowerCase();
 }
 
 function matchForm(text: string): string {

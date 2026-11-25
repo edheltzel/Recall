@@ -578,6 +578,12 @@ describe("learned tail end to end", () => {
     expect(isCoveredByGap(lower, `- ${upper}`)).toBe(false);
     expect(isCoveredByGap("USE `PATH` IN THE FIXTURE", `- ${upper}`)).toBe(true);
     expect(tailNoteKey(upper)).not.toBe(tailNoteKey(lower));
+    expect(tailNoteKey("Run ``A`b`` first.")).not.toBe(
+      tailNoteKey("Run ``a`b`` first."),
+    );
+    expect(tailNoteKey("RUN ``A`b`` FIRST.")).toBe(
+      tailNoteKey("run ``A`b`` first."),
+    );
   });
 
   test("(m) only GAP policy destinations get the tail: a ledgered command file is skipped, and an absolute CODEX_HOME or JCODE_HOME outside HOME is used", () => {
