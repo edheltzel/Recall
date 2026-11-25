@@ -26,6 +26,7 @@ export {
   readGapCoverageText,
   readRecallBlock,
   readTailInventory,
+  registerTailDestination,
   readTailState,
   readWrittenTailKeysFrom,
   recordTailRefresh,

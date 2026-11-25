@@ -397,16 +397,23 @@ remove_extract_prompt_if_unmodified() {
 # Every harness file the learned tail may ever have written: each GAP policy
 # destination (CODEX_HOME and JCODE_HOME included, whatever the ledger says now,
 # since GAP may have been installed or removed after a write), every built-in
-# file, and each destination recorded in ~/.agents/Recall/learned-tail-destinations.json
-# (so a block written under a since-changed CODEX_HOME, JCODE_HOME or RECALL_DB_PATH
-# is still found). The list and the marker rules come from hooks/lib/learned-tail.ts, the
-# same code `recall learn` uses. A missing file is skipped by remove_recall_block.
+# file, and each destination recorded in ~/.agents/Recall/learned-tail-destinations.txt
+# before a block was written there (so a block written under a since-changed
+# CODEX_HOME, JCODE_HOME or RECALL_DB_PATH is still found). The list and the marker
+# rules come from hooks/lib/learned-tail.ts, the same code `recall learn` uses. A
+# missing file is skipped by remove_recall_block. Exit 3 means the inventory could
+# not be read: the listed files are still cleaned, but cleanup is incomplete.
 RECALL_TAIL_LIB="$SCRIPT_DIR/../hooks/lib/learned-tail.ts"
 
 recall_learned_tail_files() {
   RECALL_TAIL_LIB="$RECALL_TAIL_LIB" RECALL_TAIL_HOME="$HOME" bun -e '
     const { learnedTailCleanupPaths } = require(process.env.RECALL_TAIL_LIB);
-    process.stdout.write(learnedTailCleanupPaths({ home: process.env.RECALL_TAIL_HOME }).join("\n"));
+    const { paths, inventoryError } = learnedTailCleanupPaths({ home: process.env.RECALL_TAIL_HOME });
+    process.stdout.write(paths.join("\n"));
+    if (inventoryError) {
+      process.stderr.write(inventoryError + "\n");
+      process.exit(3);
+    }
   '
 }
 
@@ -828,12 +835,20 @@ main() {
   log_info "Removing learned-tail blocks..."
   local tail_file
   local tail_files
+  local tail_status=0
+  if command -v bun &>/dev/null; then
+    tail_files="$(recall_learned_tail_files)" || tail_status=$?
+  fi
   if ! command -v bun &>/dev/null; then
     log_warn "bun not found; learned-tail blocks left in place (remove the <!-- recall:begin --> ... <!-- recall:end --> lines by hand)"
-  elif ! tail_files="$(recall_learned_tail_files)"; then
+  elif [[ "$tail_status" -ne 0 && "$tail_status" -ne 3 ]]; then
     log_warn "Could not list learned-tail files; blocks left in place"
     lifecycle_failed=true
   else
+    if [[ "$tail_status" -eq 3 ]]; then
+      log_warn "Could not read the learned-tail inventory; blocks written under a changed CODEX_HOME, JCODE_HOME or RECALL_DB_PATH may remain"
+      lifecycle_failed=true
+    fi
     while IFS= read -r tail_file; do
       [[ -n "$tail_file" ]] || continue
       if ! remove_recall_block "$tail_file"; then

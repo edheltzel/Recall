@@ -1103,5 +1103,78 @@ describe('learned-tail block removal', () => {
     expect(readFileSync(codexPolicy, 'utf-8')).toBe(gap);
     expect(readFileSync(claudePolicy, 'utf-8')).toBe(malformed);
   });
+function tailHome(root: string) {
+    const home = join(root, 'home');
+    const bin = join(root, 'bin');
+    for (const dir of [home, bin, join(home, '.gap')]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(bin, 'gap'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
+    const cli = join(REPO, 'src', 'index.ts');
+    const policies: string[] = [];
+    const learnEnv = (name: string): { env: NodeJS.ProcessEnv; policy: string } => {
+      const codexHome = join(root, `codex-${name}`);
+      const policy = join(codexHome, 'gap', 'global-agent-policy.md');
+      mkdirSync(dirname(policy), { recursive: true });
+      writeFileSync(policy, gap);
+      policies.push(policy);
+      writeFileSync(join(home, '.gap', 'published.json'), JSON.stringify(Object.fromEntries(policies.map((p) => [p, 'h']))));
+      const dbPath = join(root, `${name}.db`);
+      const env: NodeJS.ProcessEnv = {
+        TMPDIR: tmpdir(),
+        HOME: home,
+        PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+        RECALL_DB_PATH: dbPath,
+        RECALL_HOME: join(home, '.agents', 'Recall'),
+        RECALL_SKIP_LEGACY_DATA_MIGRATIONS: '1',
+        CODEX_HOME: codexHome,
+      };
+      expect(spawnSync(process.execPath, [cli, 'init'], { env, encoding: 'utf-8' }).status).toBe(0);
+      const seed = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          `const { Database } = require('bun:sqlite');
+           const db = new Database(process.argv[1]);
+           db.query("INSERT INTO decisions (project, decision, status, importance, provenance, confidence) VALUES ('alpha', 'Keep the release notes short.', 'active', 9, 'user_authored', 'high')").run();
+           db.close();`,
+          dbPath,
+        ],
+        { env, encoding: 'utf-8' },
+      );
+      expect(seed.status).toBe(0);
+      return { env, policy };
+    };
+    return { home, gap, cli, learnEnv };
+  }
+
+  test('keeps every destination recorded when refreshes for different harness homes run at once', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-race-'));
+    const { home, gap, cli, learnEnv } = tailHome(root);
+    const runs = ['a', 'b', 'c', 'd', 'e', 'f'].map(learnEnv);
+    const exits = await Promise.all(
+      runs.map(({ env }) => Bun.spawn([process.execPath, cli, 'learn'], { env, stdout: 'ignore', stderr: 'ignore' }).exited),
+    );
+    expect(exits).toEqual(runs.map(() => 0));
+    for (const { policy } of runs) expect(readFileSync(policy, 'utf-8')).toContain('- Keep the release notes short.');
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
+    expect(result.status).toBe(0);
+    for (const { policy } of runs) expect(readFileSync(policy, 'utf-8')).toBe(gap);
+  });
+
+  test('refuses a write it cannot record for cleanup, and uninstall reports an unreadable inventory as incomplete', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-inventory-'));
+    const { home, gap, cli, learnEnv } = tailHome(root);
+    mkdirSync(join(home, '.agents', 'Recall', 'learned-tail-destinations.txt'), { recursive: true });
+    const { env, policy } = learnEnv('a');
+    const learn = spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' });
+    expect(learn.status).toBe(1);
+    expect(readFileSync(policy, 'utf-8')).toBe(gap);
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain('learned-tail inventory');
+    expect(result.stdout).toContain('Uninstall Incomplete');
+  });
 });
 

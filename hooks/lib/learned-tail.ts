@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import {
   accessSync,
+  appendFileSync,
   chmodSync,
   closeSync,
   constants,
@@ -817,16 +818,27 @@ export function gapPolicyDestinations(env: TailEnv = {}): string[] {
   return [...new Set(out)].sort(compareText);
 }
 
-export function learnedTailCleanupPaths(env: TailEnv = {}): string[] {
+export function learnedTailCleanupPaths(env: TailEnv = {}): {
+  paths: string[];
+  inventoryError: string | null;
+} {
   const { home } = resolveEnv(env);
-  const written = readTailInventory(tailInventoryPath(env));
-  return [
+  const inventory = tailInventoryPath(env);
+  let written: string[] = [];
+  let inventoryError: string | null = null;
+  try {
+    written = readTailInventory(inventory);
+  } catch (err) {
+    inventoryError = `${inventory}: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  const paths = [
     ...new Set([
       ...gapPolicyDestinations(env),
       ...BUILTIN_TAIL_FILES.map((rel) => join(home, rel)),
       ...written,
     ]),
   ].sort(compareText);
+  return { paths, inventoryError };
 }
 
 export function findTailDestinations(env: TailEnv = {}): TailDestinationScan {
@@ -907,21 +919,30 @@ export interface TailState {
   tailSince: Record<string, string>;
 }
 
-export const TAIL_INVENTORY_FILE = "learned-tail-destinations.json";
+export const TAIL_INVENTORY_FILE = "learned-tail-destinations.txt";
 
 export function tailInventoryPath(env: TailEnv = {}): string {
   return join(resolveEnv(env).home, ".agents", "Recall", TAIL_INVENTORY_FILE);
 }
 
 export function readTailInventory(path: string): string[] {
+  let text: string;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return Array.isArray(parsed)
-      ? parsed.filter((p): p is string => typeof p === "string" && isAbsolute(p))
-      : [];
-  } catch {
-    return [];
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw err;
   }
+  return [
+    ...new Set(text.split("\n").filter((p) => p !== "" && isAbsolute(p))),
+  ].sort(compareText);
+}
+
+export function registerTailDestination(inventory: string, path: string): void {
+  if (/[\r\n]/.test(path)) throw new Error("path contains a line break");
+  if (readTailInventory(inventory).includes(path)) return;
+  mkdirSync(dirname(inventory), { recursive: true });
+  appendFileSync(inventory, `${path}\n`, { mode: 0o600 });
 }
 
 export function tailNoteKey(text: string): string {
@@ -1011,30 +1032,12 @@ export function nextTailState(
   return { refreshedAt: now.getTime(), tailSince };
 }
 
-export function recordTailDestinations(
-  path: string,
-  plan: Pick<TailPlan, "destinations">,
-  writes: TailWriteResult[],
-): void {
-  const previous = readTailInventory(path);
-  const out = new Set(previous);
-  for (const w of writes) {
-    if (w.status !== "written" && w.status !== "unchanged") continue;
-    const after = plan.destinations?.find((d) => d.path === w.path)?.after;
-    if (after !== undefined && readRecallBlock(after).present) out.add(w.path);
-    else out.delete(w.path);
-  }
-  const next = [...out].sort(compareText);
-  if (next.join("\n") !== previous.join("\n")) writeJsonFile(path, next);
-}
-
 export function recordTailRefresh(
   path: string,
   plan: TailPlan,
   writes: TailWriteResult[],
   now: Date = new Date(),
 ): boolean {
-  if (plan.inventory) recordTailDestinations(plan.inventory, plan, writes);
   if (writes.some((w) => w.status === "refused")) return false;
   const landed = writes.some(
     (w) => w.status === "written" || w.status === "unchanged",
@@ -1219,6 +1222,17 @@ export function writeLearnedTail(plan: TailPlan): TailWriteResult[] {
   return plan.destinations.map((d) => {
     if (d.refused)
       return { path: d.path, status: "refused", reason: d.refused };
+    if (plan.inventory && readRecallBlock(d.after).present) {
+      try {
+        registerTailDestination(plan.inventory, d.path);
+      } catch (err) {
+        return {
+          path: d.path,
+          status: "refused",
+          reason: `cannot record it for uninstall: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
     if (!d.changed) return { path: d.path, status: "unchanged" };
     return writeIfUnchanged(d.path, d.beforeHash, d.after);
   });
