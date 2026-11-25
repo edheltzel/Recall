@@ -44,7 +44,7 @@ describe('Claude native plugin package', () => {
   test('checked-in skills are byte-verbatim copies of the canonical sources', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'recall-claude-skills-'));
     const names = generateClaudePluginSkills(tempDir);
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(10);
     for (const name of names) {
       const canonical = readFileSync(join(repoRoot, 'agent-skills', name, 'SKILL.md'), 'utf-8');
       const generated = readFileSync(join(tempDir, name, 'SKILL.md'), 'utf-8');

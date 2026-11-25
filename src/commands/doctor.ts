@@ -20,6 +20,7 @@ import {
   validateClaudeMcpConfigShape,
   writeJsonAtomic,
 } from '../../lib/jsonc-mcp.js';
+import { findTailDestinations, readRecallBlock, type RecallBlockInfo, type TailDestinationScan } from '../lib/learned-tail.js';
 export interface DoctorOptions {
   fix?: boolean;
 }
@@ -253,6 +254,43 @@ function checkExtractLog(): CheckResult {
     const msg = err instanceof Error ? err.message : String(err);
     return { label, status: 'WARN', message: `Could not read log: ${msg}` };
   }
+}
+
+// ─────────────────────────────────────────
+// Check: learned tail (#279)
+// ─────────────────────────────────────────
+// For each harness file the learned tail writes, report whether the Recall pair
+// is present, when it was last updated, and how many tokens it occupies. A
+// missing block is INFO (recall learn has not run); a malformed pair is WARN.
+// Exported and path-injected so tests never touch the real HOME.
+export function probeLearnedTail(scan: TailDestinationScan, read: (path: string) => string | null): CheckResult[] {
+  if (scan.destinations.length === 0) {
+    return [{ label: 'Learned tail', status: 'INFO', message: 'No learned-tail destinations' }];
+  }
+  return scan.destinations.map((dest) => {
+    const label = `Learned tail (${basename(dest.path)})`;
+    let text: string | null;
+    try {
+      text = read(dest.path);
+    } catch {
+      text = null;
+    }
+    if (text === null) return { label, status: 'WARN', message: `unreadable ${dest.path}` };
+    const info = readRecallBlock(text);
+    return { label, status: learnedTailStatus(info), message: formatLearnedTail(info, dest.path) };
+  });
+}
+
+function learnedTailStatus(info: RecallBlockInfo): Status {
+  if (info.malformed) return 'WARN';
+  if (info.present) return 'PASS';
+  return 'INFO';
+}
+
+function formatLearnedTail(info: RecallBlockInfo, path: string): string {
+  if (info.malformed) return `malformed Recall block in ${path}`;
+  if (!info.present) return `block absent in ${path}`;
+  return `block present, last updated ${info.updated ?? 'unknown'}, ${info.tokens} tokens`;
 }
 
 // ─────────────────────────────────────────
@@ -1078,6 +1116,16 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // prior install/update was interrupted before its self-check ran. Warn-only —
   // re-running ./packaging/install.sh converges; doctor does not auto-repair it.
   results.push(probeInstallSentinel(join(getRecallHome(), '.install-incomplete')));
+
+  results.push(
+    ...probeLearnedTail(findTailDestinations(), (path) => {
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        return null;
+      }
+    }),
+  );
 
   // Print all results
   for (const r of results) {

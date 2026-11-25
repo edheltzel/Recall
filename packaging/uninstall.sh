@@ -117,6 +117,7 @@ RECALL_HOOK_LIB_FILES=(
   "$CLAUDE_DIR/hooks/lib/markdown-drop.ts"
   "$CLAUDE_DIR/hooks/lib/extraction-parsers.ts"
   "$CLAUDE_DIR/hooks/lib/jev.ts"
+  "$CLAUDE_DIR/hooks/lib/learned-tail.ts"
   "$CLAUDE_DIR/hooks/lib/sqlite-writers.ts"
   "$CLAUDE_DIR/hooks/lib/session-progress.ts"
   "$CLAUDE_DIR/hooks/lib/threat-detect.ts"
@@ -153,6 +154,7 @@ RECALL_SKILL_NAMES=(
   do-recall-doctor
   do-recall-dump
   do-recall-loa
+  do-recall-promote
   do-recall-recent
   do-recall-scout
   do-recall-search
@@ -183,6 +185,7 @@ print_summary() {
   echo "  • ~/.claude/hooks/*.ts (Recall-managed symlinks only)"
   echo "  • ~/.claude/hooks/lib/*.ts (Recall-managed symlinks only)"
   echo "  • Recall-generated ## MEMORY section in ~/.claude/CLAUDE.md (external sections stay)"
+    echo "  • Recall learned-tail block (<!-- recall:begin --> ... <!-- recall:end -->) in destination files"
   echo "  • ~/.claude/MEMORY/extract_prompt.md (symlink → ~/.agents/Recall/shared/)"
   [[ "$SKIP_OPENCODE" != "true" ]] && echo "  • OpenCode MCP entry + plugin symlinks"
   [[ "$SKIP_PI" != "true" ]] && echo "  • Pi MCP entry + Recall package + Recall-generated AGENTS.md MEMORY section"
@@ -389,6 +392,64 @@ remove_extract_prompt_if_unmodified() {
   else
     log_warn "Preserved $installed (diverged from source — not auto-removing)"
   fi
+}
+
+# Every harness file the learned tail may ever have written: each GAP policy
+# destination (CODEX_HOME and JCODE_HOME included, whatever the ledger says now,
+# since GAP may have been installed or removed after a write), every built-in
+# file, and each destination recorded in ~/.agents/Recall/learned-tail-destinations.txt
+# before a block was written there (so a block written under a since-changed
+# CODEX_HOME, JCODE_HOME or RECALL_DB_PATH is still found). The list and the marker
+# rules come from hooks/lib/learned-tail.ts, the same code `recall learn` uses. A
+# missing file is skipped by remove_recall_block. Exit 3 means the inventory could
+# not be read: the listed files are still cleaned, but cleanup is incomplete.
+RECALL_TAIL_LIB="$SCRIPT_DIR/../hooks/lib/learned-tail.ts"
+
+recall_learned_tail_files() {
+  RECALL_TAIL_LIB="$RECALL_TAIL_LIB" RECALL_TAIL_HOME="$HOME" bun -e '
+    const { learnedTailCleanupPaths } = require(process.env.RECALL_TAIL_LIB);
+    const { paths, inventoryError } = learnedTailCleanupPaths({ home: process.env.RECALL_TAIL_HOME });
+    process.stdout.write(paths.join("\n"));
+    if (inventoryError) {
+      process.stderr.write(inventoryError + "\n");
+      process.exit(3);
+    }
+  '
+}
+
+# Remove only the <!-- recall:begin --> ... <!-- recall:end --> pair through the
+# learn parser and its checked write: a temp file renamed over the original, and
+# only when the file still matches what was read. A pair the parser refuses
+# (malformed, or overlapping any GAP block) or a file edited mid-write is left
+# untouched and reported.
+remove_recall_block() {
+  local file="$1"
+  [[ -f "$file" && ! -L "$file" ]] || return 0
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if grep -q '<!-- recall:begin -->' "$file" 2>/dev/null; then
+      echo "  [dry-run] would remove Recall learned-tail block from $file"
+    fi
+    return 0
+  fi
+  local status=0
+  local reason
+  reason="$(RECALL_TAIL_LIB="$RECALL_TAIL_LIB" RECALL_BLOCK_FILE="$file" bun -e '
+    const { removeRecallBlockFromFile } = require(process.env.RECALL_TAIL_LIB);
+    const result = removeRecallBlockFromFile(process.env.RECALL_BLOCK_FILE);
+    if (result.status === "refused") {
+      process.stdout.write(result.reason ?? "refused");
+      process.exit(2);
+    }
+  ')" || status=$?
+  if [[ "$status" -eq 2 ]]; then
+    log_warn "Preserved $file ($reason)"
+    return 0
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    log_error "Failed to remove Recall learned-tail block from $file"
+    return 1
+  fi
+  return 0
 }
 
 # Remove only Recall-generated "## MEMORY" sections through the shared
@@ -769,6 +830,32 @@ main() {
 
   log_info "Removing CLAUDE.md MEMORY section..."
   remove_memory_section "$CLAUDE_DIR/CLAUDE.md" claude
+  echo ""
+
+  log_info "Removing learned-tail blocks..."
+  local tail_file
+  local tail_files
+  local tail_status=0
+  if command -v bun &>/dev/null; then
+    tail_files="$(recall_learned_tail_files)" || tail_status=$?
+  fi
+  if ! command -v bun &>/dev/null; then
+    log_warn "bun not found; learned-tail blocks left in place (remove the <!-- recall:begin --> ... <!-- recall:end --> lines by hand)"
+  elif [[ "$tail_status" -ne 0 && "$tail_status" -ne 3 ]]; then
+    log_warn "Could not list learned-tail files; blocks left in place"
+    lifecycle_failed=true
+  else
+    if [[ "$tail_status" -eq 3 ]]; then
+      log_warn "Could not read the learned-tail inventory; blocks written under a changed CODEX_HOME, JCODE_HOME or RECALL_DB_PATH may remain"
+      lifecycle_failed=true
+    fi
+    while IFS= read -r tail_file; do
+      [[ -n "$tail_file" ]] || continue
+      if ! remove_recall_block "$tail_file"; then
+        lifecycle_failed=true
+      fi
+    done <<< "$tail_files"
+  fi
   echo ""
 
   if [[ "$SKIP_OPENCODE" != "true" ]]; then

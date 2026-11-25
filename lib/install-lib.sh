@@ -810,7 +810,7 @@ recall_prompt_db_path() {
 
   if [[ -n "${HAS_GUM:-}" ]] && [[ "$HAS_GUM" == "true" ]]; then
     # gum input doesn't honor an empty default, so we pre-seed the field.
-    chosen="$(gum input --value "$default_path" --prompt "Database path: " 2>/dev/null || echo "")"
+    chosen="$(gum input --value "$default_path" --prompt "Database path: " || echo "")"
   else
     printf "Database path [%s]: " "$default_short"
     read -r chosen

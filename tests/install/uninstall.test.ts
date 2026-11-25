@@ -93,6 +93,8 @@ function runUninstall(
         // the developer's live `recall` link.
         RECALL_SKIP_BUN_UNLINK: 'true',
         RECALL_CRONTAB_BIN: '',
+        CODEX_HOME: '',
+        JCODE_HOME: '',
         ...extraEnv,
       },
     },
@@ -122,6 +124,8 @@ function runPurge(claudeDir: string, backupBase: string): RunResult {
         PATH: `${stubBin}:${process.env.PATH ?? ''}`,
         RECALL_SKIP_BUN_UNLINK: 'true',
         RECALL_CRONTAB_BIN: '',
+        CODEX_HOME: '',
+        JCODE_HOME: '',
       },
     },
   );
@@ -995,5 +999,167 @@ Preserve this.
     expect(existsSync(unlinkMarker)).toBe(true);
     expect(result.stdout).toContain('Uninstall Incomplete');
     expect(result.stdout).not.toContain('Recall uninstalled successfully');
+  });
+});
+
+describe('learned-tail block removal', () => {
+  test('removes only the Recall pair from GAP policy and built-in files through a checked rename, and keeps any pair the learn parser refuses', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-uninstall-'));
+    const home = join(root, 'home');
+    const outside = join(root, 'outside', 'AGENTS.md');
+    const inside = join(home, '.claude', 'rules', 'global-agent-policy.md');
+    const codexHome = join(root, 'codex-home');
+    const codexPolicy = join(codexHome, 'gap', 'global-agent-policy.md');
+    const command = join(home, '.claude', 'commands', 'example.md');
+    const nested = join(home, '.omp', 'agent', 'APPEND_SYSTEM.md');
+    const wrapped = join(home, '.pi', 'agent', 'APPEND_SYSTEM.md');
+    const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
+    const pair = '<!-- recall:begin -->\n- note\n<!-- recall:end -->\n';
+    for (const file of [outside, inside, wrapped, codexPolicy, command, nested]) mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(inside, `# Head\n\n${gap}\n${pair}`, { mode: 0o640 });
+    const insideInode = lstatSync(inside).ino;
+    writeFileSync(outside, `${gap}\n${pair}`);
+    writeFileSync(codexPolicy, `${gap}\n${pair}`);
+    writeFileSync(command, `${gap}\n${pair}`);
+    const nestedText = `<!-- gap:begin -->\nA.\n${pair}<!-- gap:end -->\n\n${gap}`;
+    writeFileSync(nested, nestedText);
+    const wrappedText = `<!-- recall:begin -->\n- note\n${gap}<!-- recall:end -->\n`;
+    writeFileSync(wrapped, wrappedText);
+    const builtin = join(home, '.claude', 'CLAUDE.md');
+    const cleaned = join(home, '.cursor', 'rules', 'global-agent-policy.mdc');
+    for (const file of [builtin, cleaned]) mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(builtin, `# Mine\n\n${pair}`);
+    writeFileSync(cleaned, `# Old\n\n${pair}`);
+    const bare = join(home, '.codex', 'AGENTS.md');
+    mkdirSync(dirname(bare), { recursive: true });
+    writeFileSync(bare, `# Bare\n\n${pair.slice(0, -1)}`);
+    mkdirSync(join(home, '.gap'), { recursive: true });
+    writeFileSync(
+      join(home, '.gap', 'published.json'),
+      JSON.stringify({ [inside]: 'h1', [outside]: 'h2', [wrapped]: 'h3', [cleaned]: 'cleaned', [codexPolicy]: 'h4', [command]: 'h5', [nested]: 'h6' }),
+    );
+    const result = runUninstall(home, join(root, 'backups'), [], { CODEX_HOME: codexHome });
+    expect(result.status).toBe(0);
+    expect(readFileSync(inside, 'utf-8')).toBe(`# Head\n\n${gap}`);
+    expect(lstatSync(inside).ino).not.toBe(insideInode);
+    expect(lstatSync(inside).mode & 0o777).toBe(0o640);
+    expect(readFileSync(codexPolicy, 'utf-8')).toBe(gap);
+    expect(readFileSync(command, 'utf-8')).toBe(`${gap}\n${pair}`);
+    expect(readFileSync(nested, 'utf-8')).toBe(nestedText);
+    expect(readFileSync(outside, 'utf-8')).toBe(`${gap}\n${pair}`);
+    expect(readFileSync(wrapped, 'utf-8')).toBe(wrappedText);
+    expect(readFileSync(builtin, 'utf-8')).toBe('# Mine\n');
+    expect(readFileSync(cleaned, 'utf-8')).toBe('# Old\n');
+    expect(readFileSync(bare, 'utf-8')).toBe('# Bare');
+    expect(result.stdout + result.stderr).toContain('Preserved');
+  });
+
+  function tailHome(root: string) {
+    const home = join(root, 'home');
+    const bin = join(root, 'bin');
+    for (const dir of [home, bin, join(home, '.gap')]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(bin, 'gap'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const gap = '<!-- gap:begin -->\nPolicy.\n<!-- gap:end -->\n';
+    const cli = join(REPO, 'src', 'index.ts');
+    const ledger: string[] = [];
+    const learnEnv = (name: string): { env: NodeJS.ProcessEnv; policy: string } => {
+      const codexHome = join(root, `codex-${name}`);
+      const policy = join(codexHome, 'gap', 'global-agent-policy.md');
+      mkdirSync(dirname(policy), { recursive: true });
+      writeFileSync(policy, gap);
+      ledger.push(policy);
+      writeFileSync(join(home, '.gap', 'published.json'), JSON.stringify(Object.fromEntries(ledger.map((p) => [p, 'h']))));
+      const dbPath = join(root, `${name}.db`);
+      const env: NodeJS.ProcessEnv = {
+        TMPDIR: tmpdir(),
+        HOME: home,
+        PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+        RECALL_DB_PATH: dbPath,
+        RECALL_HOME: join(home, '.agents', 'Recall'),
+        RECALL_SKIP_LEGACY_DATA_MIGRATIONS: '1',
+        CODEX_HOME: codexHome,
+      };
+      expect(spawnSync(process.execPath, [cli, 'init'], { env, encoding: 'utf-8' }).status).toBe(0);
+      const seed = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          `const { Database } = require('bun:sqlite');
+           const db = new Database(process.argv[1]);
+           db.query("INSERT INTO decisions (project, decision, status, importance, provenance, confidence) VALUES ('alpha', 'Keep the release notes short.', 'active', 9, 'user_authored', 'high')").run();
+           db.close();`,
+          dbPath,
+        ],
+        { env, encoding: 'utf-8' },
+      );
+      expect(seed.status).toBe(0);
+      return { env, policy };
+    };
+    return { home, gap, cli, ledger, learnEnv };
+  }
+
+  test('removes blocks a partly refused learn wrote under CODEX_HOME and RECALL_DB_PATH overrides after both are unset', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-moved-'));
+    const { home, gap, cli, ledger, learnEnv } = tailHome(root);
+    const claudePolicy = join(home, '.claude', 'rules', 'global-agent-policy.md');
+    const malformed = `${gap}<!-- recall:begin -->\n<!-- recall:begin -->\n<!-- recall:end -->\n`;
+    mkdirSync(dirname(claudePolicy), { recursive: true });
+    writeFileSync(claudePolicy, malformed);
+    ledger.push(claudePolicy);
+    const { env, policy } = learnEnv('a');
+    expect(spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' }).status).toBe(1);
+    expect(readFileSync(policy, 'utf-8')).toContain('- Keep the release notes short.');
+    expect(readFileSync(claudePolicy, 'utf-8')).toBe(malformed);
+    expect(existsSync(join(root, 'learned-tail-state.json'))).toBe(false);
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
+    expect(result.status).toBe(0);
+    expect(readFileSync(policy, 'utf-8')).toBe(gap);
+    expect(readFileSync(claudePolicy, 'utf-8')).toBe(malformed);
+  });
+
+  test('keeps every destination recorded when refreshes for different harness homes run at once', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-race-'));
+    const { home, gap, cli, learnEnv } = tailHome(root);
+    const runs = ['a', 'b', 'c', 'd', 'e', 'f'].map(learnEnv);
+    const exits = await Promise.all(
+      runs.map(({ env }) => Bun.spawn([process.execPath, cli, 'learn'], { env, stdout: 'ignore', stderr: 'ignore' }).exited),
+    );
+    expect(exits).toEqual(runs.map(() => 0));
+    for (const { policy } of runs) expect(readFileSync(policy, 'utf-8')).toContain('- Keep the release notes short.');
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
+    expect(result.status).toBe(0);
+    for (const { policy } of runs) expect(readFileSync(policy, 'utf-8')).toBe(gap);
+  });
+
+  test('refuses a write it cannot record for cleanup, and uninstall reports an unreadable inventory as incomplete', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-inventory-'));
+    const { home, gap, cli, learnEnv } = tailHome(root);
+    mkdirSync(join(home, '.agents', 'Recall', 'learned-tail-destinations.txt'), { recursive: true });
+    const { env, policy } = learnEnv('a');
+    const learn = spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' });
+    expect(learn.status).toBe(1);
+    expect(readFileSync(policy, 'utf-8')).toBe(gap);
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain('learned-tail inventory');
+    expect(result.stdout).toContain('Uninstall Incomplete');
+  });
+
+  test('a registration left unterminated by a failed append does not swallow the next one', () => {
+    const root = mkdtempSync(join(tmpdir(), 'recall-tail-short-'));
+    const { home, gap, cli, learnEnv } = tailHome(root);
+    const inventory = join(home, '.agents', 'Recall', 'learned-tail-destinations.txt');
+    mkdirSync(dirname(inventory), { recursive: true });
+    writeFileSync(inventory, join(root, 'codex-old', 'gap', 'global-agent'));
+    const { env, policy } = learnEnv('b');
+    expect(spawnSync(process.execPath, [cli, 'learn'], { env, encoding: 'utf-8' }).status).toBe(0);
+    expect(readFileSync(policy, 'utf-8')).toContain('- Keep the release notes short.');
+
+    const result = runUninstall(home, join(root, 'backups'), [], { RECALL_DB_PATH: '', CODEX_HOME: '' });
+    expect(result.status).toBe(0);
+    expect(readFileSync(policy, 'utf-8')).toBe(gap);
   });
 });

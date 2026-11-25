@@ -57,7 +57,7 @@ describe('Codex native plugin package', () => {
   test('checked-in Codex skill adapters exactly match generated output', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'recall-codex-skills-'));
     const names = generateCodexPluginSkills(tempDir);
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(10);
     for (const name of names) {
       const expected = readFileSync(join(tempDir, name, 'SKILL.md'), 'utf-8');
       const actual = readFileSync(

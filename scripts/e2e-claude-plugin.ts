@@ -97,8 +97,8 @@ async function main(): Promise<void> {
   // ── A legacy lifecycle install, exactly as today's users have it ───────────
   const installRoot = join(testRecallHome, 'install-root');
   const canonicalSkills = join(installRoot, 'shared', 'skills');
-  const skillNames = ['do-recall-add', 'do-recall-doctor', 'do-recall-dump', 'do-recall-loa', 'do-recall-recent',
-    'do-recall-scout', 'do-recall-search', 'do-recall-stats', 'do-recall-update'];
+  const skillNames = ['do-recall-add', 'do-recall-doctor', 'do-recall-dump', 'do-recall-loa', 'do-recall-promote',
+    'do-recall-recent', 'do-recall-scout', 'do-recall-search', 'do-recall-stats', 'do-recall-update'];
   // Seeded by the installer's own linker rather than hand-rolled symlinks, so the
   // migration is tested against whatever format recall_link actually produces and
   // this test cannot drift from production.
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
 
   const details = runClaude(['plugin', 'details', 'recall'], env);
   const skillCount = Number(details.match(/Skills \((\d+)\)/)?.[1]);
-  if (skillCount !== 9) throw new Error(`expected 9 plugin skills, got ${skillCount}\n${details}`);
+  if (skillCount !== 10) throw new Error(`expected 10 plugin skills, got ${skillCount}\n${details}`);
   if (!/MCP servers \(1\)\s+recall-memory/.test(details)) {
     throw new Error(`plugin did not contribute the recall-memory MCP server\n${details}`);
   }

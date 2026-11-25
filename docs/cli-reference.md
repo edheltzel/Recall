@@ -169,12 +169,16 @@ recall recent                           # Recent records across all tables
 recall recent decisions                 # Recent decisions only
 recall show decisions 5                 # Full record for decision #5
 recall stats                            # Database statistics
+recall browse                           # Read-only terminal dashboard
+recall browse -p myproject              # Same dashboard, one project
 recall doctor                           # Health check all subsystems
 ```
 
-`recall recent` accepts any table name: `decisions`, `learnings`, `breadcrumbs`, `loa`, `sessions`, `docs`, `telos`.
+`recall recent` accepts any table name: `messages`, `decisions`, `learnings`, `breadcrumbs`, `loa`, `sessions`, `docs`, `telos`.
 
 `recall show` displays the full record for a single row. The first argument is the table name, the second is the row ID.
+
+`recall browse` is a read-only dashboard: `1`–`5` switch table, typing filters the current table, `enter` opens a row, `q` quits. It never writes. Piped or non-terminal output prints the decision list instead of taking over the screen. The web dashboard stays tracked in [#221](https://github.com/edheltzel/Recall/issues/221).
 
 ---
 
@@ -624,3 +628,15 @@ recall cluster --execute --threshold 0.9
 ```
 
 `--threshold` is 0.85 by default (0-1).
+
+### Learned tail
+
+`recall learn` writes Recall's best notes into a `<!-- recall:begin -->` ... `<!-- recall:end -->` block in each global harness file, at most 15 bullets and 600 tokens. A note qualifies when it is active, not low confidence, and either has a high-confidence record at importance 8+ (or user-authored) or recurs word for word in 2+ sessions, which is how notes saved at session end reach the tail. Text in backticks keeps its case when notes are compared. With GAP installed it writes to the policy files GAP publishes (`CODEX_HOME` and `JCODE_HOME` included), never to its command files; otherwise to the built-in harness files that already exist. Only the Recall block changes, and a rerun with no change writes nothing. The Stop hook refreshes it on its own.
+
+`recall promote` is read-only. It lists notes seen in 3+ projects that are in a Recall block written now, have been there for 14+ days, and are not already in the GAP block. A note removed from every destination starts a new 14 days when it is written back. The `do-recall-promote` skill turns the accepted ones into a GAP pull request.
+
+```bash
+recall learn --dry-run
+recall learn --json
+recall promote --json
+```

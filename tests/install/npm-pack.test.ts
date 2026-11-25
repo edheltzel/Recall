@@ -74,12 +74,12 @@ describe('npm package: files whitelist', () => {
 
   // #235: the agent skills are the sole command surface since #228, so the pack
   // must ship every one — a partial pack (the pre-#230 failure mode) silently
-  // blanks the surface. Enumerate all 9 explicitly rather than trusting the
-  // agent-skills/ prefix alone (which passes with just 1 of 9 present).
-  test('bundles all 9 agent-skills/<name>/SKILL.md', () => {
+  // blanks the surface. Enumerate all 10 explicitly rather than trusting the
+  // agent-skills/ prefix alone (which passes with just 1 of 10 present).
+  test('bundles all 10 agent-skills/<name>/SKILL.md', () => {
     const skills = [
-      'do-recall-add', 'do-recall-doctor', 'do-recall-dump', 'do-recall-loa', 'do-recall-recent',
-      'do-recall-scout', 'do-recall-search', 'do-recall-stats', 'do-recall-update',
+      'do-recall-add', 'do-recall-doctor', 'do-recall-dump', 'do-recall-loa', 'do-recall-promote',
+      'do-recall-recent', 'do-recall-scout', 'do-recall-search', 'do-recall-stats', 'do-recall-update',
     ];
     for (const name of skills) {
       expect(has(`agent-skills/${name}/SKILL.md`)).toBe(true);
