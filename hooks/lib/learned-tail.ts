@@ -344,11 +344,19 @@ function foldCase(text: string): string {
       let out = "";
       let at = 0;
       for (let i = 0; i < runs.length; i++) {
-        const open = runs[i];
-        const close = runs.findIndex((r, j) => j > i && r.length === open.length);
+        let { start, length } = runs[i];
+        let slashes = 0;
+        while (start - slashes - 1 >= at && text[start - slashes - 1] === "\\")
+          slashes++;
+        if (slashes % 2 === 1) {
+          start++;
+          length--;
+        }
+        if (length === 0) continue;
+        const close = runs.findIndex((r, j) => j > i && r.length === length);
         if (close < 0) continue;
         const end = runs[close].start + runs[close].length;
-        out += text.slice(at, open.start).toLowerCase() + text.slice(open.start, end);
+        out += text.slice(at, start).toLowerCase() + text.slice(start, end);
         at = end;
         i = close;
       }

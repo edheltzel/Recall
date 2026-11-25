@@ -590,6 +590,25 @@ describe("learned tail end to end", () => {
     expect(tailNoteKey("LOG `` BEFORE checking `PATH`.")).toBe(
       tailNoteKey("log `` before checking `PATH`."),
     );
+    const escaped = "Use \\``PATH` in the fixture.";
+    const escapedLower = "Use \\``path` in the fixture.";
+    expect(tailNoteKey(escaped)).not.toBe(tailNoteKey(escapedLower));
+    expect(isCoveredByGap(escaped, `- ${escapedLower}`)).toBe(false);
+    expect(
+      selectTail(
+        [row(4, escaped, "alpha"), row(5, escapedLower, "bravo"), row(6, escapedLower, "charlie")],
+        { cap: false },
+      ).notes.map((n) => [n.text, n.projects]),
+    ).toEqual([
+      [escaped, ["alpha"]],
+      [escapedLower, ["bravo", "charlie"]],
+    ]);
+    expect(tailNoteKey("Run \\\\`PATH` now.")).not.toBe(
+      tailNoteKey("Run \\\\`path` now."),
+    );
+    expect(tailNoteKey("Run `a\\` THEN `B`.")).toBe(
+      tailNoteKey("Run `a\\` then `B`."),
+    );
     expect(tailNoteKey("Use ```A`` and `B`.")).not.toBe(
       tailNoteKey("Use ```A`` and `b`."),
     );
