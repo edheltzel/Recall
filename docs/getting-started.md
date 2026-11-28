@@ -6,6 +6,38 @@ This is the first-run tutorial for Recall: install it, find the database, start 
 
 Recall ships two binaries: `recall` (CLI) and `recall-mcp` (MCP server). The MCP server name is `recall-memory`. Do not rename them.
 
+Unfamiliar word? See the [Glossary](glossary.md).
+
+## The short path
+
+1. **Install** following the [Installation guide](installation.md#quick-install).
+   You should see the installer finish and `recall` resolve on your `PATH`.
+2. **Check health:** `recall doctor`.
+   You should see a list of checks. On a machine with no database it says `Run 'recall init' first.`
+3. **Set up your identity:** `recall onboard`.
+   You should see a short interview, then the path of the `identity.md` it wrote.
+4. **Restart your agent** and open a new session.
+   You should see the agent load Recall, if your host supports [session-start injection](#4-seed-your-identity-then-start-a-session).
+5. **Save and find a record:** `recall add decision "Use SQLite" -w "Zero-config, local-first"`, then `recall search sqlite`.
+   You should see the decision in the results. On an empty database `recall search` prints `No results found.`
+
+Run `recall stats` any time: it prints `Recall <version>  ·  memory`, then the database path, its size, and a `records` table of counts.
+
+### I use ...
+
+Pick your [host](glossary.md) and open its guide. Details of each row are in [section 4](#4-seed-your-identity-then-start-a-session).
+
+| I use | Session-start injection | Guide |
+|-------|-------------------------|-------|
+| Claude Code | Yes | [Claude Integration](CLAUDE_INTEGRATION.md) |
+| Codex CLI | Yes | [Codex Integration](CODEX_INTEGRATION.md) |
+| Cursor | Beta | [Section 4](#4-seed-your-identity-then-start-a-session) and `templates/cursor/` |
+| Pi | Beta | [Pi Integration](PI_INTEGRATION.md) |
+| omp | No | [omp Integration](OMP_INTEGRATION.md) |
+| OpenCode | No | [OpenCode Integration](OPENCODE_INTEGRATION.md) |
+| Grok | No | [Grok Integration](GROK_INTEGRATION.md) |
+| JCode | No | [JCode Integration](JCODE_INTEGRATION.md) |
+
 ---
 
 ## 1. Install
@@ -60,7 +92,7 @@ recall doctor               # health check: database, MCP, hooks, embeddings
 
 ## 4. Seed your identity, then start a session
 
-Supported session-start hosts inject two tiers: **L0 identity** (who you are) and **L1 top records** (importance-ranked memory). Without an identity file, L0 is empty and every new session has to re-learn the basics.
+Supported session-start hosts inject two tiers: **[L0 identity](glossary.md)** (who you are) and **[L1 top records](glossary.md)** (importance-ranked memory). Without an identity file, L0 is empty and every new session has to re-learn the basics.
 
 ```bash
 recall onboard                 # 7-question interview; writes identity.md

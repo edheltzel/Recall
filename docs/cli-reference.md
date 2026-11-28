@@ -8,6 +8,20 @@ New to Recall? Start with the [Getting Started](getting-started.md) first-run tu
 
 ---
 
+## Start with these five commands
+
+```bash
+recall doctor                                   # Check database, MCP, hooks, embeddings
+recall onboard                                  # Write your L0 identity (7 questions)
+recall add decision "Use SQLite" -w "Zero-config, local-first"   # Save a record
+recall search "sqlite"                          # Find it (or bare: recall "sqlite")
+recall stats                                    # Database path, size, record counts
+```
+
+Terms are in the [Glossary](glossary.md). The full reference follows.
+
+---
+
 ## Search
 
 ```bash

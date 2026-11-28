@@ -81,12 +81,11 @@ Codebase scout reports (`do-recall-scout`, see `agent-skills/do-recall-scout/SKI
 
 ### Version control and GitHub
 
-- Use GitButler (`but`) for all version-control operations; load the `but` skill before using it. Do not run raw `git` commands or bypass GitButler's workspace state.
-- `no-mistakes` runs through GitButler, never `git worktree` or a plain-git checkout: GitButler's push remote is `no-mistakes`, so `but push <branch>` starts the gate for that branch. `no-mistakes axi run` cannot select a branch from `gitbutler/workspace`; follow the run with `no-mistakes axi status --run <id>`.
-- Use `gh` for GitHub issues, pull requests, reviews, and Actions. Use `but` for the underlying branches, commits, and pushes.
+- Use plain `git` for branches, commits, and pushes. Do all work on a feature branch (`type/short-name`), never directly on `main`; stage explicit paths, never the whole tree, because other tabs and agents may share the checkout.
+- Use `gh` for GitHub issues, pull requests, reviews, and Actions.
 - Create every GitHub PR as **`Atlas-Key`**. Before publishing, verify the authenticated API login is `Atlas-Key`; use account-scoped credentials for this repository rather than changing another project's active account. If that identity is unavailable, stop instead of creating the PR as another user.
 - The required reviewer is defined in [`.github/CODEOWNERS`](.github/CODEOWNERS). Request that reviewer on every PR, including automated publishing and drafts; after creation, verify author and reviewer through `gh`. Existing PR authors cannot be changed; do not close/recreate a PR without explicit permission.
-- Maintainer release exception: `npm run release:{major,minor,patch}` runs the documented one-command release from clean, synchronized `main` after GitButler teardown. It owns the version commit, annotated tag, atomic push, and GitHub release. Do not use it to publish feature work around the normal PR gate. See [`docs/releasing.md`](docs/releasing.md).
+- Maintainer release exception: `npm run release:{major,minor,patch}` runs the documented one-command release from clean, synchronized `main`. It owns the version commit, annotated tag, atomic push, and GitHub release. Do not use it to publish feature work around the normal PR gate. See [`docs/releasing.md`](docs/releasing.md).
 ### Issue tracker
 
 Issues and PRDs are tracked in GitHub Issues for `edheltzel/Recall`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
@@ -105,7 +104,7 @@ This is a single-context repo: use root `CONTEXT.md` when present and root `docs
 
 ### Worker flow
 
-Workers use coordinator-assigned GitButler branches and exclusive file ownership; load the `but` skill before branch or workspace operations. See [`docs/agents/worker-flow.md`](docs/agents/worker-flow.md) for shared-workspace and isolation rules.
+Workers use coordinator-assigned feature branches and exclusive file ownership. See [`docs/agents/worker-flow.md`](docs/agents/worker-flow.md) for shared-workspace and isolation rules.
 
 ## DRY — Single Source of Truth (MANDATORY)
 

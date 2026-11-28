@@ -10,6 +10,23 @@ This guide covers everything needed to install Recall: prerequisites, what the i
 
 ---
 
+## Quick install
+
+```bash
+git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
+recall doctor
+```
+
+Prerequisites:
+
+- [ ] [Bun](#bun-javascript-runtime) installed (required)
+- [ ] [Node.js](#nodejs) for a source checkout (required)
+- [ ] [Claude CLI](#claude-code) or [Ollama](#ollama-optional--enables-semantic-search) (optional)
+
+Then restart your agent. Choices and details are in [Prerequisites](#prerequisites) and [Install Recall](#install-recall) below; problems go to [First-run problems](troubleshooting.md#first-run-problems).
+
+---
+
 ## Prerequisites
 
 Install these before the [source checkout](#source-checkout) or a local tarball link, and before `recall install`. Items marked **Optional** enhance Recall but are not required for core functionality.

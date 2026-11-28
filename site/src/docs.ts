@@ -29,6 +29,7 @@ export const groups: { label: string; pages: Page[] }[] = [
     pages: [
       { file: "getting-started.md", id: "index", label: "Getting started" },
       { file: "installation.md", id: "installation", label: "Installation" },
+      { file: "glossary.md", id: "glossary", label: "Glossary" },
       { file: "lifecycle.md", id: "lifecycle", label: "Managing Recall" },
       { file: "upgrading.md", id: "upgrading", label: "Upgrading" },
       { file: "troubleshooting.md", id: "troubleshooting", label: "Troubleshooting" },

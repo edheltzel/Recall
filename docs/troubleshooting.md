@@ -12,6 +12,32 @@ recall doctor
 
 This checks all subsystems: database, MCP registration, hooks, extraction tracker, CLI paths, and Ollama. **Start here before debugging individual issues.**
 
+## First-run problems
+
+### `recall: command not found`
+
+Cause: the link step did not put `recall` on `PATH`, or the shell has not reloaded. Fix: open a new shell, then `which recall`. If it is still missing, re-run `./packaging/install.sh` from the permanent checkout, or `bun link` inside it. The checkout must not be a temporary directory; see [Installation](installation.md#install-flags).
+
+### `bun not found`
+
+Cause: Bun is not installed or not on `PATH`. Fix: install it per [Installation → Bun](installation.md#bun-javascript-runtime), reload your shell, check `bun --version`, then re-run the installer.
+
+### Database not found / run `recall init`
+
+Cause: no database exists yet at the path `recall path` prints. Fix: `recall init` (safe to re-run), then `recall doctor`. If you set `RECALL_DB_PATH`, confirm it points where you expect. See [Database not found](#database-not-found).
+
+### Nothing injected at session start
+
+Cause: you did not restart the agent, the host has no session-start injection, or L0 is empty. Fix: restart the agent, check `recall start` prints content, and run `recall onboard` if L0 is empty. Which hosts inject is in the [Getting Started table](getting-started.md#4-seed-your-identity-then-start-a-session). See also [L0 identity tier is empty](#l0-identity-tier-is-empty-at-session-start).
+
+### Search returns nothing
+
+Cause: the database is empty or the keywords do not match (`No results found.`). Fix: `recall stats` to see record counts, `recall add decision "Use SQLite" -w "Zero-config, local-first"` to seed one, then `recall search sqlite`. Check `recall "query" -k` for keyword-only matching.
+
+### Ollama not reachable (semantic degraded, keyword still works)
+
+Cause: Ollama is not running or `OLLAMA_URL` points elsewhere. Keyword search is unaffected. Fix: start Ollama, check `curl http://localhost:11434/api/tags`, then `recall embed backfill` to generate missing embeddings. Setup is in [Installation → Ollama](installation.md#ollama-optional--enables-semantic-search).
+
 ## Common Issues
 
 ### "Database not found"

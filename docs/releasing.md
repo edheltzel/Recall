@@ -68,8 +68,8 @@ Preview the same preflight without changing files, commits, tags, or releases:
 npm run release:patch -- --dry-run
 ```
 
-Dry runs still require clean, synchronized `main` and GitHub access. Feature branches,
-detached checkouts, and `gitbutler/workspace` are not release targets.
+Dry runs still require clean, synchronized `main` and GitHub access. Feature branches
+and detached checkouts are not release targets.
 
 The command:
 
