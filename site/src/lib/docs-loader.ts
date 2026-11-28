@@ -39,12 +39,13 @@ export function recallDocsLoader(): Loader {
           const abs = path.join(dir, page.file);
           const source = await fs.readFile(abs, "utf8");
           const { title, body } = splitTitle(source, page.file);
+          const description = describe(body);
           const linked = rewriteLinks(body, (target) => resolveLink(target, dir, repoRoot));
           const filePath = path.relative(root, abs);
           const lastUpdated = fullHistory
             ? gitOutput("log", "-1", "--format=%aI", "--", abs) || undefined
             : undefined;
-          const data = await context.parseData({ id: page.id, data: { title, lastUpdated }, filePath });
+          const data = await context.parseData({ id: page.id, data: { title, description, lastUpdated }, filePath });
           context.store.set({
             id: page.id,
             data,
@@ -85,6 +86,33 @@ function splitTitle(source: string, file: string) {
     }
   }
   throw new Error(`docs/${file} has no level-one heading to use as its title`);
+}
+
+/** The first prose paragraph of a page as plain text, cut at a word boundary near 155 characters. */
+export function describe(body: string): string | undefined {
+  const lines = body.split("\n");
+  const code = fencedLines(lines);
+  const paragraphs: string[][] = [[]];
+  for (const [i, raw] of lines.entries()) {
+    const line = raw.trim();
+    const prose = !code[i] && line !== "" && !/^(?:#|>|\||[-*+] |\d+[.)] |<)/.test(line);
+    if (prose) paragraphs[paragraphs.length - 1].push(line);
+    else if (paragraphs[paragraphs.length - 1].length) paragraphs.push([]);
+  }
+  const text = paragraphs
+    .map((p) =>
+      p
+        .join(" ")
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/[`*_]/g, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .find((p) => p.length >= 60);
+  if (!text) return undefined;
+  if (text.length <= 155) return text;
+  const cut = text.slice(0, 155);
+  return cut.slice(0, cut.lastIndexOf(" ")).replace(/[,;:.\s]+$/, "") + "…";
 }
 
 /** Scheme (`https:`, `mailto:`), site path, or fragment: left as written. */

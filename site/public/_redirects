@@ -1,5 +1,7 @@
 # Docs URLs from the earlier site (edheltzel/recall-site), now served here.
 /docs /docs/ 301
+/docs/getting-started /docs/ 301
+/docs/getting-started/ /docs/ 301
 /docs/install /docs/installation/ 301
 /docs/install/ /docs/installation/ 301
 /docs/core-loop /docs/architecture/ 301

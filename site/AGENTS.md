@@ -10,9 +10,11 @@ The public site at https://recall.edheltzel.codes: the landing page at `/` and t
 
 - `src/pages/index.astro`, `src/layouts/Landing.astro`, `src/components/landing/`, `src/styles/landing/`, `src/scripts/`, `src/site.ts`, `public/loop/`, `public/og.png` — the landing page, its design and artwork. `scripts/og.py` regenerates `public/og.png`.
 - `src/docs.ts` — the only list of published docs: file, URL, sidebar group and label.
-- `src/lib/docs-loader.ts` — reads those files from `../docs` at build time (title from the first `#` heading, GitHub-relative links rewritten to site or GitHub URLs).
+- `src/lib/docs-loader.ts` — reads those files from `../docs` at build time (title from the first `#` heading, meta description from the first prose paragraph, GitHub-relative links rewritten to site or GitHub URLs).
 - `src/pages/docs/[...slug].astro` — the docs route; the rest of `src/` (layouts, `components/ui/`, `pages/`, `styles/globals.css`) is the Nimbus starter, branded.
 - `public/_redirects` — Cloudflare Pages redirects for URLs from the earlier site.
+- `public/_headers` — Cloudflare Pages response headers (HSTS, Permissions-Policy, immutable cache for `/_astro/*`).
+- `scripts/unshallow.mjs` — runs before every build (`prebuild`) and fetches full git history when the clone is shallow, so pages get sitemap `lastmod` and "Last updated"; it keeps going without dates when the fetch fails.
 - `scripts/check-dist.mjs` and `scripts/{contrast,flash,install-box}.mjs` — post-build checks.
 
 ## Local Contracts
