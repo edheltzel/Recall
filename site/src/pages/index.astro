@@ -2,14 +2,13 @@
 import Base from '../layouts/Landing.astro';
 import ThemeToggle from '../components/landing/ThemeToggle.astro';
 import Cmd from '../components/landing/Cmd.astro';
-import { docsHref, gapInstallCommand, installCommand, installHref, repoHref, siteName } from '../site';
+import { docsHref, installCommand, installHref, repoHref, siteName, supportedHosts } from '../site';
 import '../styles/landing/landing.css';
 
-/** Placeholder copy until the Recall brief lands. */
 const steps = [
-  { name: 'Capture', text: 'Lifecycle hooks save session progress automatically.' },
-  { name: 'Distill', text: 'Decisions, learnings, and breadcrumbs go into one local SQLite + FTS5 file.' },
-  { name: 'Inject at session start', text: 'Your identity and top-ranked records load when the next session starts.' },
+  { name: 'Capture', text: 'Hooks save each session as it happens, no commands needed.' },
+  { name: 'Distill', text: 'Decisions, learnings, and breadcrumbs are extracted into one local SQLite file with full-text search.' },
+  { name: 'Inject at session start', text: 'Your identity and the top-ranked records load into the next session, so the agent starts informed.' },
 ];
 const starts = [
   { title: 'Install guide', text: 'Source checkout, verify, and seed your identity.', href: installHref },
@@ -39,9 +38,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
           <p class="sub">Recall captures each session, distills it into one local SQLite file, and injects your identity plus top-ranked records when the next session starts, on hosts that support it.</p>
           <div class="console">
             <div class="crow"><span class="lab"><b>1</b> Install</span><Cmd command={installCommand} /></div>
-            <div class="crow"><span class="lab"><b>2</b> GAP-managed only</span><Cmd command={gapInstallCommand} /></div>
-          </div>
-          <p class="hint">Work in progress. Copy is a placeholder until the Recall brief lands.</p>
+            </div>
+          <p class="hint">Needs Bun. Then run <code>recall doctor</code> to verify.</p>
           <div class="cta"><a class="btn" href={installHref}>Install guide</a><a class="ghost" href={repoHref}>GitHub</a></div>
         </div>
         <i class="spark" id="sp1" aria-hidden="true"></i><i class="spark v" id="sp2" aria-hidden="true"></i>
@@ -50,7 +48,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
         <section id="how" aria-labelledby="how-title">
           <div class="lhead">
             <h2 id="how-title">How Recall works. <span>Three steps.</span></h2>
-            <p class="lead">Placeholder copy until the Recall brief lands.</p>
+            <p class="lead">Memory that lives in one local file and follows you from session to session.</p>
           </div>
           <div class="flow flow3">
             <ol class="track">
@@ -72,6 +70,27 @@ const pad = (n: number) => String(n).padStart(2, '0');
             </ol>
           </div>
         </section>
+        <section aria-labelledby="see-title">
+          <h2 id="see-title">See it work</h2>
+          <figure class="term">
+            <figcaption class="term-bar mono">terminal</figcaption>
+            <pre class="term-body" tabindex="0" aria-label="Example output of recall search auth"><code><span class="tp">$</span> recall search "auth"
+
+<span class="th">decision #142</span>  <span class="tm">recall</span>
+  Use session cookies, not JWTs, for the admin API
+  <span class="tm">why: revocation must be instant; one server, no token refresh</span>
+
+<span class="th">learning #87</span>  <span class="tm">recall</span>
+  Auth middleware must run before the rate limiter
+  <span class="tm">2 results</span></code></pre>
+          </figure>
+        </section>
+        <section aria-labelledby="hosts-title">
+          <h2 id="hosts-title">Works with</h2>
+          <ul class="hosts">
+            {supportedHosts.map((h) => <li>{h}</li>)}
+          </ul>
+        </section>
         <section aria-labelledby="start-title">
           <h2 id="start-title">Docs and install</h2>
           <div class="shs">
@@ -83,7 +102,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
       </div>
     </main>
     <footer class="base">
-      <span>Recall is built by Ed Heltzel. Work in progress.</span>
+      <span>Recall is built by Ed Heltzel. Open source on GitHub.</span>
       <nav aria-label="Footer"><a href={docsHref}>Docs</a><a href={repoHref}>GitHub</a></nav>
     </footer>
   </div>

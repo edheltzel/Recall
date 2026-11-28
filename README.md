@@ -9,67 +9,43 @@
 
 # Recall
 
-> [!NOTE]
-> EdHeltzel's Persistent Memory for Agents
+Recall gives your coding agent a memory that survives between sessions.
 
-## TL;DR
+- **Nothing to remember to do.** Supported hosts capture sessions automatically.
+- **One local file.** Everything lives in a SQLite database on your machine; search needs no API key.
+- **Shared across agents.** Every connected agent reads and writes the same memory.
 
-Recall is a retrieval-first memory layer: everything lands in one searchable database, the best of it is ranked and injected where a host supports session-start context, and decisions carry confidence, importance, and a lifecycle across any coding agent/harness.
+**Works with:** [Claude Code](https://claude.com/claude-code), [Codex](docs/CODEX_INTEGRATION.md), [Pi](https://pi.dev/), [OpenCode](https://opencode.ai/), [omp](docs/OMP_INTEGRATION.md), [Grok](docs/GROK_INTEGRATION.md), [Cursor](https://cursor.com), [JCode](docs/JCODE_INTEGRATION.md), [Empryo](docs/EMPRYO_INTEGRATION.md). Capability per host: [Roadmap](#roadmap).
 
-
-> **A SQLite-backed persistent memory layer for coding agents.** Host lifecycle adapters capture sessions automatically, MCP tools expose them mid-session, hybrid search (FTS5 + embeddings) retrieves them, and a tiered L0/L1 recall block injects identity + top-ranked records on supported hosts. MCP and skills connect [supported hosts](#roadmap) to one local database where each host supports them; lifecycle automation is host-specific.
-
-Got questions about the project? I'd suggest using [DeepWiki](https://deepwiki.com/edheltzel/Recall) from Devin/Cognition to ask questions about the project.
-
-
-All coding agents forget when a session ends. Recall doesn't — it extracts, indexes, and recalls what matters across every session, across every agent you use.
-
-Built on the [Model Context Protocol](https://modelcontextprotocol.io). One SQLite file. Retrieval does not phone home. Optional Jev is off unless `JEV_RECALL_KEY` is set in the process environment or in `~/.env`. A non-blank environment value wins. When the key is present, Jev sends scrubbed extracted candidates to TypeSafe. No vendor lock-in. Optional `~/.agents/Recall/config.json` can point query, extraction, or cluster at a harness. Recall starts Claude, Pi, and Codex. OpenCode, Grok, JCode, omp, and Cursor fail that step until a stdin contract is proven. Anything else is a command you write. A missing file keeps today's local search and extractors. Install never writes the file.
-
-> Stable on [Claude Code](https://claude.com/claude-code). Beta on [Pi](https://pi.dev/) and [OpenCode](https://opencode.ai/). [Codex CLI](https://github.com/openai/codex) has native MCP, skills, automatic capture, and session-start injection. [Grok Build CLI](docs/GROK_INTEGRATION.md) has automatic capture but no automatic injection. [omp](docs/OMP_INTEGRATION.md) has native main-session capture with skills and MCP kept separate. [JCode](docs/JCODE_INTEGRATION.md) remains MCP and skills only after a bounded live probe. See [Roadmap](#roadmap).
-
----
+**Terms:** L0 and L1 are the session-start context tiers, and LoA is the Library of Alexandria. See the [glossary](docs/glossary.md).
 
 [Jump to the Docs](#documentation)
 
-## The Problem
-
-AI agents have no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today. Every new session re-learns the basics.
-
-## How Recall Fixes It
-
-Install once, then forget about it. Recall runs silently in the background:
-
-```
-┌──────────┐    ┌────────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
-│ You Work │───▶│ Stop hook fires│───▶│ Auto-Extract │───▶│ SQLite + FTS5 │───▶│ Next Session │
-└─────▲────┘    │ (end of turn)  │    └──────────────┘    └───────────────┘    └──────┬───────┘
-      │         └────────────────┘                                                    │
-      └───────────────────────────── Memory Available ───────────────────────────────┘
-```
-
-- **Automatic capture** — supported lifecycle adapters preserve session progress without manual dumps; each host's exact capture and extraction behavior follows its verified lifecycle surface
-- **Full-text + semantic search** — find anything from any past session
-- **Tiered session-start context** — L0 identity (who you are) + L1 importance-ranked top records load automatically on supported hosts
-- **Zero friction** — no workflow changes, no manual steps
-- **MCP integration** — your agent searches memory automatically through standard MCP tools
-
-## Why Recall
-
-Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
-
-- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server. Keyword and hybrid retrieval need no API key and do not phone home. Optional Ollama for embeddings stays local. Optional Jev is the exception: with `JEV_RECALL_KEY` in the environment or `~/.env`, scrubbed extracted candidates go to TypeSafe. A non-blank environment value wins. Missing from both, Jev is off and those rows are written unchanged.
-- **Multi-agent native.** One memory layer across the agents you actually use. Claude Code, Pi, OpenCode, Codex, Grok, JCode, and omp share the same database through their supported MCP, skill, and lifecycle surfaces. Automatic capture and injection depend on each host's supported lifecycle surfaces; see the capability matrix below.
-- **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and **Library of Alexandria** entries (Automatic-capture LoA and Curated LoA) — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
-- **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
-
 ## Quick Start
 
-First-run walkthrough (install, first commands, where the database lives, how a session starts, how MCP/hooks get wired): **[Getting Started](docs/getting-started.md)**.
+### Install in 2 minutes
 
-Recall requires [Bun](https://bun.sh) (it uses `bun:sqlite` and Bun-native hooks).
+Prerequisites: [Bun](https://bun.sh) (Recall uses `bun:sqlite` and Bun-native hooks), plus Node for a source checkout.
 
-Do not install `recall-memory` from npm; that name belongs to an unrelated project (#312). Follow the canonical [Installation guide](docs/installation.md#install-recall) for the current source-checkout or local-tarball bootstrap, then use the matching host guide below.
+```bash
+git clone https://github.com/edheltzel/Recall.git && cd Recall && ./packaging/install.sh
+recall doctor     # health check
+recall onboard    # one-time identity interview
+```
+
+Then restart your agent so it loads the plugin, extension, or snippets.
+
+Do not install `recall-memory` from npm; that name belongs to an unrelated project (#312). The canonical bootstrap, including the local-tarball route, is the [Installation guide](docs/installation.md#install-recall). For a longer walkthrough see [Getting Started](docs/getting-started.md).
+
+### Your first 5 minutes
+
+```bash
+recall add decision "Use SQLite" -w "Zero-config, local-first"
+recall search sqlite
+recall stats
+```
+
+### Pick your agent
 
 | Harness | Attach guide | Notes |
 | --- | --- | --- |
@@ -80,11 +56,6 @@ Do not install `recall-memory` from npm; that name belongs to an unrelated proje
 | **Grok** | [Grok Integration](docs/GROK_INTEGRATION.md) | No working plugin hook surface in headless sessions; the installer owns the global hook. |
 | **Empryo** | [Empryo Integration](docs/EMPRYO_INTEGRATION.md) | Runs the Claude `Stop` hook for capture; skills only via installer links, not the Claude plugin; add the MCP server to `~/.empryo/config.json`. |
 | **Cursor** | [Installation](docs/installation.md#source-checkout) | Merge the repository's `templates/cursor/` snippets; there is no marketplace plugin. |
-
-```bash
-recall stats        # Database overview
-recall doctor       # Health check
-```
 
 Restart each attached agent so it loads the plugin, extension, or snippets.
 
@@ -133,6 +104,37 @@ Installed from a local tarball? Follow the [tarball cleanup procedure](docs/inst
 
 > [Full installation guide](docs/installation.md) — prerequisites, platform support, session extraction setup, uninstalling
 
+## The Problem
+
+AI agents have no memory between sessions. Context is lost. You repeat yourself. Decisions made last week are forgotten today. Every new session re-learns the basics.
+
+## How Recall Fixes It
+
+Install once, then forget about it. Recall runs silently in the background:
+
+```
+┌──────────┐    ┌────────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
+│ You Work │───▶│ Stop hook fires│───▶│ Auto-Extract │───▶│ SQLite + FTS5 │───▶│ Next Session │
+└─────▲────┘    │ (end of turn)  │    └──────────────┘    └───────────────┘    └──────┬───────┘
+      │         └────────────────┘                                                    │
+      └───────────────────────────── Memory Available ───────────────────────────────┘
+```
+
+- **Automatic capture** — supported lifecycle adapters preserve session progress without manual dumps; each host's exact capture and extraction behavior follows its verified lifecycle surface
+- **Full-text + semantic search** — find anything from any past session
+- **Tiered session-start context** — [L0](docs/glossary.md) identity (who you are) + L1 importance-ranked top records load automatically on supported hosts
+- **Zero friction** — no workflow changes, no manual steps
+- **MCP integration** — your agent searches memory automatically through standard MCP tools
+
+## Why Recall
+
+Four things that set Recall apart from cloud-hosted memory layers and from agent-specific scratch files:
+
+- **Local-first, zero infrastructure.** One SQLite file at `~/.agents/Recall/recall.db` (override via `RECALL_DB_PATH`). WAL mode, `0600` perms. No vector database, no graph database, no agent server. Keyword and hybrid retrieval need no API key and do not phone home. Optional Ollama for embeddings stays local. Optional Jev is the exception: with `JEV_RECALL_KEY` in the environment or `~/.env`, scrubbed extracted candidates go to TypeSafe. A non-blank environment value wins. Missing from both, Jev is off and those rows are written unchanged.
+- **Multi-agent native.** One memory layer across the agents you actually use. Claude Code, Pi, OpenCode, Codex, Grok, JCode, and omp share the same database through their supported MCP, skill, and lifecycle surfaces. Automatic capture and injection depend on each host's supported lifecycle surfaces; see the capability matrix below.
+- **Structured taxonomy, not a flat blob.** Decisions (with supersede/revert lifecycle and confidence scoring), learnings, breadcrumbs, and **[Library of Alexandria](docs/glossary.md)** entries (Automatic-capture LoA and Curated LoA) — each has a purpose and a query path. Importance scoring (1–10) surfaces what matters first.
+- **Hybrid search that works offline.** FTS5 keyword search ships with SQLite — no embedding infrastructure required to find anything. Optional Ollama embeddings layer on top for semantic queries. Both are merged via Reciprocal Rank Fusion. Lose Ollama, lose nothing — the keyword path keeps working.
+
 ## How Recall Works
 
 Recall sits between your agent and a single SQLite database. A **WRITE path** captures sessions where a host exposes a supported lifecycle surface; a **READ path** injects memory where a host supports session-start context. The diagram below shows the shared flows side-by-side, with the line styles in the legend distinguishing capture (solid), recall (dashed purple), and the write-only markdown mirror (dashed gray).
@@ -141,74 +143,7 @@ Recall sits between your agent and a single SQLite database. A **WRITE path** ca
   <img src="assets/how-recall-works.png" alt="How Recall Works — supported write paths capture sessions into SQLite, and supported read paths inject them on a later session" width="100%">
 </p>
 
-<details>
-<summary>Text-only architecture diagram (for terminal viewers)</summary>
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        DATA ENTRY POINTS                             │
-│                                                                      │
-│  ┌────────────┐  ┌────────────┐  ┌──────────────┐  ┌────────────┐    │
-│  │ CLI Direct │  │ MCP Server │  │  Stop Hook   │  │   Batch    │    │
-│  │  recall add   │  │ (Claude    │  │ SessionExt-  │  │  Extract   │    │
-│  │  recall dump  │  │  Code)     │  │  ract.ts     │  │  (cron)    │    │
-│  └─────┬──────┘  └─────┬──────┘  └──────┬───────┘  └─────┬──────┘    │
-└────────┼────────────────┼────────────────┼────────────────┼──────────┘
-         │                │                │                │
-         ▼                ▼                ▼                ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│                      PROCESSING LAYER                                 │
-│                                                                       │
-│  Direct Inserts:              Session Extraction Pipeline:            │
-│  recall add breadcrumb ──┐       Read JSONL                              │
-│  recall add decision  ───┤         → Filter noise (tool results)         │
-│  recall add learning  ───┤         → Dedup check (.extraction_tracker)   │
-│  memory_add (MCP)  ───┤         → Acquire lock                        │
-│                       │         → Automatic-capture Extractor         │
-│                       │           (claude-cli, then ollama)           │
-│                       │           (>120K? chunk → meta-extract)       │
-│                       │         → Quality gate                        │
-│                       │           (requires SUMMARY + MAIN IDEAS)     │
-│                       │              │                                │
-└───────────────────────┼──────────────┼────────────────────────────────┘
-                        │              │
-                        ▼              ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                    STORAGE LAYER (Dual-Write)                        │
-│                                                                      │
-│  SQLite (~/.agents/Recall/recall.db)  Memory Files (~/.agents/Recall/MEMORY/) │
-│  ┌────────────────────────────┐     ┌──────────────────────────────┐ │
-│  │ sessions ←── messages      │     │ DISTILLED.md    (archive)    │ │
-│  │ decisions    learnings     │     │ HOT_RECALL.md   (last 10)    │ │
-│  │ breadcrumbs  loa_entries   │     │ SESSION_INDEX.json           │ │
-│  │ embeddings (1024-dim vecs) │     │ DECISIONS.log                │ │
-│  │                            │     │ REJECTIONS.log               │ │
-│  │ FTS5 indexes (auto-sync)   │     │ ERROR_PATTERNS.json          │ │
-│  │ WAL mode · 0600 perms      │     └──────────────────────────────┘ │
-│  └────────────────────────────┘                                      │
-└──────────────────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                      RETRIEVAL LAYER                                 │
-│                                                                      │
-│  ┌───────────────┐  ┌────────────────┐  ┌─────────────────────────┐  │
-│  │Keyword (FTS5) │  │Semantic (Embed)│  │  Hybrid (RRF Fusion)    │  │
-│  │recall search     │  │recall semantic    │  │  recall hybrid (DEFAULT)   │  │
-│  │memory_search  │  │embed → Ollama  │  │  FTS5 rank ─┐           │  │
-│  │               │  │cosine sim      │  │  Embed rank ─┤→ merged  │  │
-│  └───────────────┘  └────────────────┘  │  RRF(k=60) ◄┘           │  │
-│                                         └─────────────────────────┘  │
-│  Direct: recall recent · recall show · memory_recall · context_for_agent   │
-└──────────────────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  CONSUMERS:  Coding agents (MCP)  ·  CLI user (recall)  ·  Sub-agents   │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-</details>
+Database tables, FTS5 indexes, and the extraction pipeline are covered in [architecture](docs/architecture.md).
 
 The source `.excalidraw` file lives at [`assets/how-recall-works.excalidraw`](assets/how-recall-works.excalidraw) — drop it onto [excalidraw.com](https://excalidraw.com) to edit.
 
@@ -242,8 +177,7 @@ flowchart TD
   end
 ```
 
-Set `JEV_RECALL_KEY` in the environment or in `~/.env`. A non-blank environment value wins. Walk through that once in [Score one memory item with Jev](docs/score-a-memory-with-jev.md).
-
+Jev is optional; see [Optional: Jev and harness config](#optional-jev-and-harness-config).
 
 ### Claude Code Session Lifecycle
 
@@ -305,16 +239,16 @@ v2 is **51% smaller than v1** on this corpus. CLAUDE.md is hand-written static c
 ## CLI at a Glance
 
 ```bash
-recall "kubernetes auth"          # Search your memory
+recall doctor                     # Health check
 recall onboard                    # Seed your L0 identity tier (one-time)
-recall dump "Session Title"       # Save this session
 recall add decision "Use X" ...   # Record a decision
+recall "kubernetes auth"          # Search your memory
+recall stats                      # See what's stored
+recall dump "Session Title"       # Save this session
 recall decision list              # List decisions with status and confidence
 recall pin decisions 42           # Pin a record to high importance
 recall benchmark run B            # Measure wake-up context efficiency
 recall prune                      # Preview stale records for removal
-recall stats                      # See what's stored
-recall doctor                     # Health check
 ```
 
 <details>
@@ -373,6 +307,13 @@ Cursor sessionStart uses unqualified `recall start --format cursor` (`templates/
 Unattended lifecycle writes pass the scrub gate from [#50](https://github.com/edheltzel/Recall/issues/50). Agent Skill bodies remain canonical under [#228](https://github.com/edheltzel/Recall/issues/228). Installer-owned files follow surgical ownership from [#236](https://github.com/edheltzel/Recall/issues/236).
 
 Have an agent you'd like to see supported? [Open an issue](https://github.com/edheltzel/Recall/issues) — Recall is designed to be agent-agnostic, and any host that speaks MCP is a candidate.
+
+## Optional: Jev and harness config
+
+Core Recall needs neither.
+
+- **Jev** scores extracted candidates before they are stored. It is off unless `JEV_RECALL_KEY` is set in the process environment or in `~/.env`; a non-blank environment value wins. When on, scrubbed extracted candidates go to TypeSafe. Setup: [Score one memory item with Jev](docs/score-a-memory-with-jev.md).
+- **`~/.agents/Recall/config.json`** can point query, extraction, or cluster at a harness. Recall starts Claude, Pi, and Codex; OpenCode, Grok, JCode, omp, and Cursor fail that step until a stdin contract is proven; anything else is a command you write. A missing file keeps the local search and extractors, and install never writes it. Schema: [architecture](docs/architecture.md#extractor-config).
 
 ## Documentation
 

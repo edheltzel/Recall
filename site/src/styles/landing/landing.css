@@ -467,3 +467,14 @@ h1,.wrap h2{text-wrap:balance}.sub,.lead{text-wrap:pretty}
 .fic img{display:block;width:26px;height:26px}
 .flow .fic img.icd{display:block}.flow .fic img.icl{display:none}
 :root[data-theme='light'] .flow .fic img.icd{display:none}:root[data-theme='light'] .flow .fic img.icl{display:block}
+
+.term{margin:18px 0 0;border:1px solid var(--b3);border-radius:10px;background:var(--s1);overflow:hidden;max-width:720px}
+.term-bar{padding:8px 14px;border-bottom:1px solid var(--b3);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--t2)}
+.term-body{margin:0;padding:14px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text);background:var(--bg);white-space:pre}
+.term-body code{font:inherit}
+.term-body .tp{color:var(--acc)}
+.term-body .th{color:var(--acc);font-weight:600}
+.term-body .tm{color:var(--t2)}
+.hosts{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.hosts li{font-family:var(--mono);font-size:12px;padding:6px 10px;border:1px solid var(--b3);border-radius:6px;color:var(--t2);background:var(--s1)}
+@media (max-width:420px){.term-body{font-size:11.5px;padding:12px}}
